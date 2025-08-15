@@ -2272,7 +2272,7 @@ impl DHT {
         let word2 = words[(hash >> 8) as usize % words.len()];
         let word3 = words[(hash >> 16) as usize % words.len()];
 
-        format!("{word1}.{word2}.{word3}").into()
+        format!("{word1}.{word2}.{word3}")
     }
 
     /// Add a node to the DHT routing table

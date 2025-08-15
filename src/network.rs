@@ -509,7 +509,7 @@ impl P2PNode {
         let (event_tx, _) = broadcast::channel(1000);
 
         // Initialize DHT if needed
-        let dht = if config.enable_mcp_server || true {
+        let dht = if true {
             // Always enable DHT for now
             let dht_config = crate::dht::DHTConfig {
                 replication_factor: config.dht_config.k_value,
@@ -533,7 +533,7 @@ impl P2PNode {
                 .mcp_server_config
                 .clone()
                 .unwrap_or_else(|| MCPServerConfig {
-                    server_name: format!("P2P-MCP-{peer_id}").into(),
+                    server_name: format!("P2P-MCP-{peer_id}"),
                     server_version: crate::VERSION.to_string(),
                     enable_dht_discovery: dht.is_some(),
                     ..MCPServerConfig::default()
@@ -1287,7 +1287,7 @@ impl P2PNode {
                                 .as_secs(),
                             payload: crate::mcp::MCPMessage::CallToolResult {
                                 content: vec![crate::mcp::MCPContent::Text {
-                                    text: format!("Error: {e}").into(),
+                                    text: format!("Error: {e}"),
                                 }],
                                 is_error: true,
                             },
@@ -1560,15 +1560,14 @@ impl P2PNode {
         );
 
         // Check rate limits if resource manager is enabled
-        if let Some(ref resource_manager) = self.resource_manager {
-            if !resource_manager
+        if let Some(ref resource_manager) = self.resource_manager
+            && !resource_manager
                 .check_rate_limit(peer_id, "message")
                 .await?
-            {
-                return Err(P2PError::ResourceExhausted(
-                    format!("Rate limit exceeded for peer {}", peer_id).into(),
-                ));
-            }
+        {
+            return Err(P2PError::ResourceExhausted(
+                format!("Rate limit exceeded for peer {}", peer_id).into(),
+            ));
         }
 
         // Check if peer is connected
@@ -1723,15 +1722,14 @@ impl P2PNode {
     pub async fn call_mcp_tool(&self, tool_name: &str, arguments: Value) -> Result<Value> {
         if let Some(ref _mcp_server) = self.mcp_server {
             // Check rate limits if resource manager is enabled
-            if let Some(ref resource_manager) = self.resource_manager {
-                if !resource_manager
+            if let Some(ref resource_manager) = self.resource_manager
+                && !resource_manager
                     .check_rate_limit(&self.peer_id, "mcp")
                     .await?
-                {
-                    return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                        "MCP rate limit exceeded".to_string().into(),
-                    )));
-                }
+            {
+                return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
+                    "MCP rate limit exceeded".to_string().into(),
+                )));
             }
 
             let context = MCPCallContext {
@@ -2097,12 +2095,10 @@ impl P2PNode {
 
     /// Get the number of cached bootstrap peers
     pub async fn cached_peer_count(&self) -> usize {
-        if let Some(ref _bootstrap_manager) = self.bootstrap_manager {
-            if let Ok(stats) = self.get_bootstrap_cache_stats().await {
-                if let Some(stats) = stats {
-                    return stats.total_contacts;
-                }
-            }
+        if let Some(ref _bootstrap_manager) = self.bootstrap_manager
+            && let Ok(Some(stats)) = self.get_bootstrap_cache_stats().await
+        {
+            return stats.total_contacts;
         }
         0
     }
@@ -2190,19 +2186,19 @@ impl P2PNode {
                         warn!("Failed to connect to bootstrap peer {}: {}", addr, e);
 
                         // Update bootstrap cache with failed connection
-                        if used_cache {
-                            if let Some(ref bootstrap_manager) = self.bootstrap_manager {
-                                let mut manager = bootstrap_manager.write().await;
-                                let mut updated_contact = contact.clone();
-                                updated_contact.update_connection_result(
-                                    false,
-                                    None,
-                                    Some(e.to_string()),
-                                );
+                        if used_cache
+                            && let Some(ref bootstrap_manager) = self.bootstrap_manager
+                        {
+                            let mut manager = bootstrap_manager.write().await;
+                            let mut updated_contact = contact.clone();
+                            updated_contact.update_connection_result(
+                                false,
+                                None,
+                                Some(e.to_string()),
+                            );
 
-                                if let Err(e) = manager.add_contact(updated_contact).await {
-                                    warn!("Failed to update bootstrap cache: {}", e);
-                                }
+                            if let Err(e) = manager.add_contact(updated_contact).await {
+                                warn!("Failed to update bootstrap cache: {}", e);
                             }
                         }
                     }
@@ -2215,7 +2211,7 @@ impl P2PNode {
                 warn!("Failed to connect to any bootstrap peers");
             }
             return Err(P2PError::Network(NetworkError::ConnectionFailed {
-                addr: "0.0.0.0:0".parse().unwrap(), // Placeholder for bootstrap ensemble
+                addr: std::net::SocketAddr::from(([0, 0, 0, 0], 0)), // Placeholder for bootstrap ensemble
                 reason: "Failed to connect to any bootstrap peers".into(),
             }));
         } else {

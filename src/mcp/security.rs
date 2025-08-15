@@ -368,7 +368,7 @@ impl MCPSecurityManager {
         let signature = self.sign_data(signing_input.as_bytes());
         let signature_b64 = base64::prelude::BASE64_URL_SAFE_NO_PAD.encode(signature);
 
-        Ok(format!("{header_b64}.{payload_b64}.{signature_b64}").into())
+        Ok(format!("{header_b64}.{payload_b64}.{signature_b64}"))
     }
 
     /// Verify authentication token

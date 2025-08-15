@@ -21,9 +21,7 @@
 //!
 //! Use `ant_quic_adapter::P2PNetworkNode` directly for all networking needs.
 
-// Legacy QUIC module (deprecated - use ant-quic instead)
-#[allow(dead_code)] // Deprecated during ant-quic migration
-pub mod quic;
+// ant-quic is used directly via ant_quic_adapter module
 
 // Native ant-quic integration with advanced NAT traversal and PQC support
 pub mod ant_quic_adapter;

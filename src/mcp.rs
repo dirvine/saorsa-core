@@ -1219,7 +1219,7 @@ impl MCPServer {
         details.insert("tool_name".to_string(), tool_name.to_string());
         details.insert(
             "security_level".to_string(),
-            format!("{tool_security_level:?}").into(),
+            format!("{tool_security_level:?}"),
         );
 
         self.audit_logger
@@ -2455,7 +2455,7 @@ impl MCPServer {
             let mut details = HashMap::new();
             details.insert("action".to_string(), "tool_policy_set".to_string());
             details.insert("tool_name".to_string(), tool_name);
-            details.insert("security_level".to_string(), format!("{level:?}").into());
+            details.insert("security_level".to_string(), format!("{level:?}"));
 
             self.audit_logger
                 .log_event(
@@ -2563,7 +2563,7 @@ impl MCPServer {
         let tool_names: Vec<String> = tools.keys().cloned().collect();
 
         let service = MCPService {
-            service_id: format!("mcp-{}", self.config.server_name).into(),
+            service_id: format!("mcp-{}", self.config.server_name),
             node_id: "local".to_string(), // TODO: Get actual peer ID from network layer
             tools: tool_names,
             capabilities: MCPCapabilities {
@@ -2685,7 +2685,7 @@ impl MCPServer {
                     .iter()
                     .map(|tool_name| MCPTool {
                         name: tool_name.clone(),
-                        description: format!("Tool from {}", service.metadata.name).into(),
+                        description: format!("Tool from {}", service.metadata.name),
                         input_schema: json!({"type": "object"}),
                     })
                     .collect(),

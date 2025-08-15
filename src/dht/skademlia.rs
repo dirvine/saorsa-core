@@ -882,7 +882,7 @@ impl SKademlia {
         // TODO: Select actual witness nodes from routing table
         // For now, create placeholder witnesses
         for i in 0..witness_count {
-            witness_nodes.push(format!("witness_{i}").into());
+            witness_nodes.push(format!("witness_{i}"));
         }
 
         // Create enhanced challenge with proper configuration
@@ -911,11 +911,11 @@ impl SKademlia {
 
         for node in nodes {
             // Check reputation
-            if let Some(reputation) = self.reputation_manager.get_reputation(&node.peer_id) {
-                if reputation.response_rate < self.config.min_routing_reputation {
-                    inconsistencies += 1;
-                    suspicious_nodes.push(node.peer_id.clone());
-                }
+            if let Some(reputation) = self.reputation_manager.get_reputation(&node.peer_id)
+                && reputation.response_rate < self.config.min_routing_reputation
+            {
+                inconsistencies += 1;
+                suspicious_nodes.push(node.peer_id.clone());
             }
 
             // TODO: Implement cross-validation with other nodes

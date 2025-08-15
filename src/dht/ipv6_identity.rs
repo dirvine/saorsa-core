@@ -286,18 +286,16 @@ impl IPv6DHTIdentityManager {
         // Check cache first
         if let Some((cached_identity, cached_at)) =
             self.identity_cache.get(&identity.ipv6_addr.to_string())
+            && cached_at.elapsed().unwrap_or(Duration::MAX) < self.config.identity_refresh_interval
+            && cached_identity.node_id == identity.node_id
         {
-            if cached_at.elapsed().unwrap_or(Duration::MAX) < self.config.identity_refresh_interval
-                && cached_identity.node_id == identity.node_id
-            {
-                return Ok(IPv6VerificationResult {
+            return Ok(IPv6VerificationResult {
                     is_valid: true,
                     confidence: 0.9, // High confidence for cached valid identity
                     error_message: None,
                     ip_diversity_ok: true,
-                    identity_age_secs: cached_at.elapsed().unwrap_or_default().as_secs(),
-                });
-            }
+                identity_age_secs: cached_at.elapsed().unwrap_or_default().as_secs(),
+            });
         }
 
         // Verify cryptographic signature
@@ -308,7 +306,7 @@ impl IPv6DHTIdentityManager {
                 return Ok(IPv6VerificationResult {
                     is_valid: false,
                     confidence: 0.0,
-                    error_message: Some(format!("Signature verification failed: {e}").into()),
+                    error_message: Some(format!("Signature verification failed: {e}")),
                     ip_diversity_ok: false,
                     identity_age_secs: 0,
                 });
@@ -393,10 +391,10 @@ impl IPv6DHTIdentityManager {
         ipv6_addr: Ipv6Addr,
     ) -> Result<crate::security::IPAnalysis> {
         // Check cache first
-        if let Some((cached_analysis, cached_at)) = self.ip_analysis_cache.get(&ipv6_addr) {
-            if cached_at.elapsed().unwrap_or(Duration::MAX) < self.config.ip_analysis_cache_ttl {
-                return Ok(cached_analysis.clone());
-            }
+        if let Some((cached_analysis, cached_at)) = self.ip_analysis_cache.get(&ipv6_addr)
+            && cached_at.elapsed().unwrap_or(Duration::MAX) < self.config.ip_analysis_cache_ttl
+        {
+            return Ok(cached_analysis.clone());
         }
 
         // Perform IP analysis
