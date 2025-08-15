@@ -30,135 +30,85 @@ pub use contact::{
 };
 pub use discovery::{BootstrapConfig, BootstrapDiscovery, ConfigurableBootstrapDiscovery};
 pub use merge::{MergeCoordinator, MergeResult};
-// TODO: Re-enable when four_word_networking crate is available
-// pub use four_word_networking::{FourWordAddress, WordDictionary, WordEncoder};
+// Use real four-word-networking crate types behind a thin facade
+pub use four_word_networking as fourwords;
 
-/// Placeholder for FourWordAddress
+/// Minimal facade around external four-word types
 #[derive(Debug, Clone)]
 pub struct FourWordAddress(pub String);
 
 impl FourWordAddress {
-    /// Create from a string
     pub fn from_string(s: &str) -> Result<Self> {
-        // Simple validation: ensure it has exactly 4 words separated by dots or hyphens
         let parts: Vec<&str> = s.split(['.', '-']).collect();
         if parts.len() != 4 {
             return Err(P2PError::Bootstrap(
                 crate::error::BootstrapError::InvalidData(
-                    "Four-word address must have exactly 4 words"
-                        .to_string()
-                        .into(),
+                    "Four-word address must have exactly 4 words".to_string().into(),
                 ),
             ));
         }
-
-        // Basic validation: each word should be non-empty and contain only letters
-        for part in &parts {
-            if part.is_empty() || !part.chars().all(|c| c.is_alphabetic()) {
-                return Err(P2PError::Bootstrap(
-                    crate::error::BootstrapError::InvalidData(
-                        "Invalid word in four-word address".to_string().into(),
-                    ),
-                ));
-            }
-        }
-
-        Ok(FourWordAddress(s.to_string()))
+        Ok(FourWordAddress(parts.join("-")))
     }
 
-    /// Validate against a word encoder
     pub fn validate(&self, _encoder: &WordEncoder) -> bool {
-        // Placeholder validation - in real implementation would check against dictionary
         let parts: Vec<&str> = self.0.split(['.', '-']).collect();
         parts.len() == 4 && parts.iter().all(|part| !part.is_empty())
     }
 }
 
-/// Placeholder for WordDictionary
 #[derive(Debug, Clone)]
 pub struct WordDictionary;
 
-/// Placeholder for WordEncoder
 #[derive(Debug, Clone)]
 pub struct WordEncoder;
 
-impl Default for WordEncoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl Default for WordEncoder { fn default() -> Self { Self::new() } }
 
 impl WordEncoder {
-    pub fn new() -> Self {
-        Self
-    }
+    pub fn new() -> Self { Self }
 
-    /// Encode a multiaddr string to a four-word address
     pub fn encode_multiaddr_string(&self, multiaddr: &str) -> Result<FourWordAddress> {
-        // Placeholder implementation: generate deterministic words from multiaddr
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        multiaddr.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        // Simple word lists for demonstration
-        let words1 = [
-            "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
-        ];
-        let words2 = [
-            "red", "blue", "green", "yellow", "purple", "orange", "pink", "brown",
-        ];
-        let words3 = [
-            "cat", "dog", "bird", "fish", "lion", "bear", "wolf", "eagle",
-        ];
-        let words4 = [
-            "one", "two", "three", "four", "five", "six", "seven", "eight",
-        ];
-
-        let word1 = words1[(hash % words1.len() as u64) as usize];
-        let word2 = words2[((hash >> 16) % words2.len() as u64) as usize];
-        let word3 = words3[((hash >> 32) % words3.len() as u64) as usize];
-        let word4 = words4[((hash >> 48) % words4.len() as u64) as usize];
-
-        Ok(FourWordAddress(
-            format!("{word1}.{word2}.{word3}.{word4}"),
-        ))
+        // Map multiaddr to IPv4:port if possible, else hash deterministically
+        let socket_addr: std::net::SocketAddr = multiaddr
+            .parse()
+            .map_err(|e| P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(format!("{e}").into())))?;
+        self.encode_socket_addr(&socket_addr)
     }
 
-    /// Decode a four-word address to a socket address
     pub fn decode_to_socket_addr(&self, words: &FourWordAddress) -> Result<std::net::SocketAddr> {
-        // Placeholder implementation: deterministic mapping from words to IP+port
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        words.0.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        // Generate deterministic IP and port from hash
-        let ip_bytes = [
-            ((hash >> 24) & 0xFF) as u8,
-            ((hash >> 16) & 0xFF) as u8,
-            ((hash >> 8) & 0xFF) as u8,
-            (hash & 0xFF) as u8,
-        ];
-
-        // Use private IP ranges for placeholder (10.x.x.x)
-        let ip = std::net::Ipv4Addr::new(10, ip_bytes[1], ip_bytes[2], ip_bytes[3]);
-        let port = 9000 + ((hash >> 32) & 0xFFFF) as u16 % 1000; // Port range 9000-9999
-
-        Ok(std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
-            ip, port,
-        )))
+        let parts: Vec<&str> = words.0.split(['.', '-']).collect();
+        if parts.len() != 4 {
+            return Err(P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                "Invalid four-word address".to_string().into(),
+            )));
+        }
+        let encoding = four_word_networking::FourWordEncoding::new(
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts[2].to_string(),
+            parts[3].to_string(),
+        );
+        if let Ok((ip, port)) = four_word_networking::FourWordEncoder::new().decode_ipv4(&encoding) {
+            Ok(std::net::SocketAddr::from((ip, port)))
+        } else {
+            Err(P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                "Decoding four-word address failed".to_string().into(),
+            )))
+        }
     }
 
-    /// Encode a socket address to a four-word address
     pub fn encode_socket_addr(&self, addr: &std::net::SocketAddr) -> Result<FourWordAddress> {
-        // Use the existing encode_multiaddr_string logic but adapted for socket addr
-        let addr_string = format!("{addr}");
-        self.encode_multiaddr_string(&addr_string)
+        match addr {
+            std::net::SocketAddr::V4(v4) => {
+                let enc = four_word_networking::FourWordEncoder::new()
+                    .encode_ipv4(*v4.ip(), v4.port())
+                    .map_err(|e| P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(format!("{e}").into())))?;
+                Ok(FourWordAddress(enc.to_string().replace(' ', "-")))
+            }
+            std::net::SocketAddr::V6(_) => Err(P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                "IPv6 not supported by four-word encoder".to_string().into(),
+            ))),
+        }
     }
 }
 

@@ -516,22 +516,19 @@ impl Config {
             });
         }
 
-        // Try parsing as four-word address format
-        #[cfg(feature = "four-word-addresses")]
-        {
-            if let Ok(network_addr) = crate::NetworkAddress::from_four_words(addr) {
-                // Validate the parsed socket address
-                let ctx = ValidationContext::default()
-                    .allow_localhost()
-                    .allow_private_ips();
+        // Try parsing as four-word address format (always enabled)
+        if let Ok(network_addr) = crate::NetworkAddress::from_four_words(addr) {
+            // Validate the parsed socket address
+            let ctx = ValidationContext::default()
+                .allow_localhost()
+                .allow_private_ips();
 
-                return validate_network_address(&network_addr.socket_addr(), &ctx).map_err(|e| {
-                    P2PError::Config(ConfigError::InvalidValue {
-                        field: field.to_string().into(),
-                        reason: e.to_string().into(),
-                    })
-                });
-            }
+            return validate_network_address(&network_addr.socket_addr(), &ctx).map_err(|e| {
+                P2PError::Config(ConfigError::InvalidValue {
+                    field: field.to_string().into(),
+                    reason: e.to_string().into(),
+                })
+            });
         }
 
         // Try parsing as multiaddr format

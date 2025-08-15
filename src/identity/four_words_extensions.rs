@@ -33,7 +33,7 @@ impl FourWordAddress {
         Self::from_str(s)
     }
 
-    /// Convert to string (implement Display)
+    /// Convert to string (compat helper)
     pub fn to_string(&self) -> String {
         self.as_str().to_string()
     }

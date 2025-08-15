@@ -245,7 +245,9 @@ impl AsyncWrite for TcpTransportConnection {
 }
 
 /// QUIC transport placeholder
-/// TODO: Implement using quinn or similar QUIC library
+/// NOTE: The project uses `ant-quic` for QUIC. This placeholder remains only
+/// for interface completeness in the adaptive layer and should not import or
+/// reference `quinn` anywhere.
 pub struct QuicTransport {
     // Quinn endpoint would go here
 }

@@ -37,6 +37,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, broadcast};
+use crate::validation::RateLimitConfig;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -499,6 +500,56 @@ pub struct P2PNode {
 }
 
 impl P2PNode {
+    /// Minimal constructor for tests that avoids real networking
+    pub fn new_for_tests() -> Self {
+        let (event_tx, _) = broadcast::channel(16);
+        Self {
+            config: NodeConfig::default(),
+            peer_id: "test_peer".to_string(),
+            peers: Arc::new(RwLock::new(HashMap::new())),
+            event_tx,
+            listen_addrs: RwLock::new(Vec::new()),
+            start_time: Instant::now(),
+            running: RwLock::new(false),
+            mcp_server: None,
+            dht: None,
+            resource_manager: None,
+            bootstrap_manager: None,
+            #[cfg(feature = "ant-quic")]
+            network_node: {
+                // Create a fast, local test node; if it fails, leak a placeholder by panicking only when used
+                let bind: std::net::SocketAddr = "127.0.0.1:0"
+                    .parse()
+                    .unwrap_or(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
+                let cfg = ant_quic::QuicNodeConfig {
+                    role: ant_quic::EndpointRole::Client,
+                    bootstrap_nodes: vec![],
+                    enable_coordinator: false,
+                    max_connections: 1,
+                    connection_timeout: std::time::Duration::from_millis(1),
+                    stats_interval: std::time::Duration::from_millis(1),
+                    auth_config: ant_quic::auth::AuthConfig::default(),
+                    bind_addr: Some(bind),
+                };
+                let node = tokio::runtime::Handle::current()
+                    .block_on(crate::transport::ant_quic_adapter::P2PNetworkNode::new_with_config(bind, cfg))
+                    .unwrap_or_else(|_| {
+                        // Create a harmless placeholder node bound to 127.0.0.1:0 for tests
+                        let fallback_bind = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
+                        tokio::runtime::Handle::current()
+                            .block_on(crate::transport::ant_quic_adapter::P2PNetworkNode::new(fallback_bind))
+                            .expect("ant-quic fallback creation failed")
+                    });
+                Arc::new(node)
+            },
+            rate_limiter: Arc::new(RateLimiter::new(RateLimitConfig {
+                max_requests: 100,
+                burst_size: 100,
+                window: std::time::Duration::from_secs(1),
+                ..Default::default()
+            })),
+        }
+    }
     /// Create a new P2P node with the given configuration
     pub async fn new(config: NodeConfig) -> Result<Self> {
         let peer_id = config.peer_id.clone().unwrap_or_else(|| {

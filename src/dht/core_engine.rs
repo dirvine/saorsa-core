@@ -35,8 +35,8 @@ impl DhtKey {
     /// XOR distance metric for Kademlia
     pub fn distance(&self, other: &DhtKey) -> [u8; 32] {
         let mut result = [0u8; 32];
-        for i in 0..32 {
-            result[i] = self.0[i] ^ other.0[i];
+        for (i, out) in result.iter_mut().enumerate() {
+            *out = self.0[i] ^ other.0[i];
         }
         result
     }
@@ -323,7 +323,11 @@ impl LoadBalancer {
             })
             .collect();
 
-        sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        use std::cmp::Ordering;
+        sorted.sort_by(|a, b| a
+            .1
+            .partial_cmp(&b.1)
+            .unwrap_or(Ordering::Equal));
 
         sorted.into_iter().take(count).map(|(id, _)| id).collect()
     }

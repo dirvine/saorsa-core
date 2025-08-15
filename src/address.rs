@@ -23,7 +23,6 @@ use std::str::FromStr;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "four-word-addresses")]
 use four_word_networking::FourWordEncoder;
 
 /// Network address that can be represented as IP:port or four-word format
@@ -87,7 +86,6 @@ impl NetworkAddress {
     }
 
     /// Encode a SocketAddr to four-word format using four-word-networking
-    #[cfg(feature = "four-word-addresses")]
     fn encode_four_words(addr: &SocketAddr) -> Option<String> {
         let encoder = FourWordEncoder::new();
         match encoder.encode(*addr) {
@@ -98,21 +96,12 @@ impl NetworkAddress {
             }
         }
     }
-    #[cfg(not(feature = "four-word-addresses"))]
-    fn encode_four_words(_addr: &SocketAddr) -> Option<String> {
-        None
-    }
 
     /// Decode four-word format to NetworkAddress using four-word-networking
-    #[cfg(feature = "four-word-addresses")]
     pub fn from_four_words(words: &str) -> Result<Self> {
         let encoder = FourWordEncoder::new();
         let socket_addr = encoder.decode(words)?;
         Ok(Self::new(socket_addr))
-    }
-    #[cfg(not(feature = "four-word-addresses"))]
-    pub fn from_four_words(_words: &str) -> Result<Self> {
-        Err(anyhow!("four-word addresses disabled"))
     }
 
     /// Check if this is an IPv4 address
@@ -163,11 +152,8 @@ impl FromStr for NetworkAddress {
         }
 
         // Then try to parse as four-word format
-        #[cfg(feature = "four-word-addresses")]
-        {
-            if let Ok(addr) = Self::from_four_words(s) {
-                return Ok(addr);
-            }
+        if let Ok(addr) = Self::from_four_words(s) {
+            return Ok(addr);
         }
 
         Err(anyhow!("Invalid address format: {}", s))

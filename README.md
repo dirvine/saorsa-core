@@ -138,10 +138,9 @@ let config = NetworkConfig {
 
 ## Feature Flags
 
-- `default` - DHT, MCP, ant-quic, four-word-addresses
+- `default` - DHT, MCP, ant-quic (four-word addresses always enabled)
 - `dht` - DHT functionality
 - `mcp` - MCP server support
-- `four-word-addresses` - Human-readable addresses
 - `ant-quic` - QUIC transport
 - `quantum-resistant` - Post-quantum cryptography
 - `threshold` - Threshold cryptography

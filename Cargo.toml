@@ -126,11 +126,10 @@ quickcheck_macros = "1.0"
 approx = "0.5"
 
 [features]
-default = ["dht", "mcp", "ant-quic", "four-word-addresses"]
+default = ["dht", "mcp", "ant-quic"]
 # Feature flags for different capabilities
 dht = []
 mcp = []
-four-word-addresses = []
 ant-quic = []
 quantum-resistant = []
 threshold = []
