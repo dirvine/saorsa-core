@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
 
     // Initialize logging
     let filter = if args.debug {
-        "debug,quinn=info"
+        "debug,ant_quic=info"
     } else {
         "info"
     };

@@ -1,9 +1,0 @@
-[
-  {
-    "session_id": "1d4d240a-fcdc-48d2-9f11-01885cdc7d50",
-    "transcript_path": "/Users/davidirvine/.claude/projects/-Users-davidirvine-Desktop-Devel-projects-p2p/1d4d240a-fcdc-48d2-9f11-01885cdc7d50.jsonl",
-    "cwd": "/Users/davidirvine/Desktop/Devel/projects/p2p/crates/saorsa-core",
-    "hook_event_name": "Notification",
-    "message": "Claude is waiting for your input"
-  }
-]
