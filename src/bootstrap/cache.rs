@@ -727,6 +727,7 @@ impl FileLock {
 
         let file = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(lock_file)
             .map_err(|e| {

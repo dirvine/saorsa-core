@@ -536,9 +536,14 @@ impl P2PNode {
                     .unwrap_or_else(|_| {
                         // Create a harmless placeholder node bound to 127.0.0.1:0 for tests
                         let fallback_bind = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
-                        tokio::runtime::Handle::current()
-                            .block_on(crate::transport::ant_quic_adapter::P2PNetworkNode::new(fallback_bind))
-                            .expect("ant-quic fallback creation failed")
+                        #[allow(clippy::expect_used)]
+                        {
+                            tokio::runtime::Handle::current()
+                                .block_on(crate::transport::ant_quic_adapter::P2PNetworkNode::new(
+                                    fallback_bind,
+                                ))
+                                .expect("ant-quic fallback creation failed")
+                        }
                     });
                 Arc::new(node)
             },

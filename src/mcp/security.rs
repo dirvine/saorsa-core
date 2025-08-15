@@ -125,7 +125,7 @@ impl MCPPermission {
     }
 
     /// Parse permission from string
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_str_name(s: &str) -> Option<Self> {
         match s {
             "read:tools" => Some(MCPPermission::ReadTools),
             "execute:tools" => Some(MCPPermission::ExecuteTools),
@@ -341,7 +341,7 @@ impl MCPSecurityManager {
                     serde_json::to_value(
                         permissions.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
                     )
-                    .expect("valid security operation"),
+                    .map_err(|e| P2PError::Serialization(e.to_string().into()))?,
                 );
                 claims
             },
@@ -547,7 +547,7 @@ impl MCPSecurityManager {
     pub async fn update_reputation(&self, peer_id: &PeerId, delta: f64) -> Result<()> {
         let mut acls = self.acls.write().await;
         if let Some(acl) = acls.get_mut(peer_id) {
-            acl.reputation = (acl.reputation + delta).max(0.0).min(1.0);
+            acl.reputation = (acl.reputation + delta).clamp(0.0, 1.0);
         }
         Ok(())
     }
@@ -694,16 +694,16 @@ mod tests {
 
         for (permission, expected_str) in permissions {
             assert_eq!(permission.as_str(), expected_str);
-            assert_eq!(MCPPermission::from_str(expected_str), Some(permission));
+            assert_eq!(MCPPermission::from_str_name(expected_str), Some(permission));
         }
 
         // Test custom permission
         let custom = MCPPermission::Custom("custom:action".to_string());
         assert_eq!(custom.as_str(), "custom:action");
-        assert_eq!(MCPPermission::from_str("custom:action"), Some(custom));
+        assert_eq!(MCPPermission::from_str_name("custom:action"), Some(custom));
 
         // Test unknown permission defaults to custom
-        let unknown = MCPPermission::from_str("unknown:permission");
+        let unknown = MCPPermission::from_str_name("unknown:permission");
         match unknown {
             Some(MCPPermission::Custom(s)) => assert_eq!(s, "unknown:permission"),
             _ => panic!("Expected custom permission"),

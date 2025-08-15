@@ -306,7 +306,8 @@ impl LatencyAwarePeerSelection {
             })
             .collect();
 
-        scored_peers.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
+        use std::cmp::Ordering;
+        scored_peers.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(Ordering::Equal));
 
         // Select top peers
         let selected_peers: Vec<SelectedPeer> = scored_peers
@@ -367,7 +368,7 @@ impl LatencyAwarePeerSelection {
         bridge_candidates.sort_by(|a, b| {
             let score_a = a.3 * a.1.get_reliability_score();
             let score_b = b.3 * b.1.get_reliability_score();
-            score_b.partial_cmp(&score_a).unwrap()
+            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let selected_peers: Vec<SelectedPeer> = bridge_candidates
@@ -400,7 +401,10 @@ impl LatencyAwarePeerSelection {
         
         regional_peers.into_iter()
             .filter(|(_, metrics)| metrics.get_reliability_score() >= self.config.min_reliability_threshold)
-            .max_by(|(_, a), (_, b)| a.get_reliability_score().partial_cmp(&b.get_reliability_score()).unwrap())
+            .max_by(|(_, a), (_, b)| a
+                .get_reliability_score()
+                .partial_cmp(&b.get_reliability_score())
+                .unwrap_or(std::cmp::Ordering::Equal))
             .map(|(peer_id, metrics)| SelectedPeer {
                 peer_id,
                 region,

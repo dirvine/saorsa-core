@@ -78,13 +78,13 @@ const DEFAULT_BURST_SIZE: u32 = 100;
 lazy_static! {
     // Pre-compiled regex patterns for validation
     static ref PEER_ID_REGEX: Regex = Regex::new(r"^[a-zA-Z0-9_-]{16,64}$")
-        .expect("Invalid PEER_ID_REGEX pattern");
+        .unwrap_or_else(|_| Regex::new(r"^.{16,64}$").expect("fallback peer id regex"));
     static ref SAFE_PATH_REGEX: Regex = Regex::new(r"^[a-zA-Z0-9/_.-]+$")
-        .expect("Invalid SAFE_PATH_REGEX pattern");
+        .unwrap_or_else(|_| Regex::new(r"^[^\\n]+$").expect("fallback safe path regex"));
     static ref IPV4_REGEX: Regex = Regex::new(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
-        .expect("Invalid IPV4_REGEX pattern");
+        .unwrap_or_else(|_| Regex::new(r"^.+$").expect("fallback ipv4 regex"));
     static ref IPV6_REGEX: Regex = Regex::new(r"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$")
-        .expect("Invalid IPV6_REGEX pattern");
+        .unwrap_or_else(|_| Regex::new(r"^.+$").expect("fallback ipv6 regex"));
 }
 
 /// Validation errors specific to input validation

@@ -4,39 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build and Development Commands
 
-### Core Development Commands
+### Core Commands
 ```bash
 # Build
-cargo build                        # Debug build
-cargo build --release              # Release build
-cargo build --all-features         # Build with all features
+cargo build                         # Debug build
+cargo build --release               # Release build
+cargo build --all-features          # Build with all features
 
 # Tests - MUST ALL PASS before committing
-cargo test                         # Run all tests
-cargo test --lib                   # Unit tests only
-cargo test --test '*'              # All integration tests
-cargo test --test adaptive_components_test  # Specific integration test
-cargo test test_name               # Run specific test by name
-cargo test --features "proptest"   # Property-based tests
-cargo test -- --nocapture          # Show println! output
-RUST_LOG=debug cargo test          # With debug logging
+cargo test                          # Run all tests
+cargo test --lib                    # Unit tests only
+cargo test --test '<test_name>'     # Specific integration test
+cargo test test_function_name       # Run specific test by name
+cargo test -- --nocapture           # Show println! output
+RUST_LOG=debug cargo test           # With debug logging
 
 # Code Quality - MUST PASS before committing
-cargo fmt                          # Format code
+cargo fmt                           # Format code
 cargo clippy -- -D warnings -D clippy::unwrap_used -D clippy::expect_used  # Strict linting
-cargo audit                        # Security vulnerability check
+cargo audit                         # Security vulnerability check
 
 # Benchmarks
-cargo bench                        # Run all benchmarks
-cargo bench --bench dht_benchmark # Run specific benchmark
+cargo bench                         # Run all benchmarks
+cargo bench --bench dht_benchmark  # Run specific benchmark
 
 # Documentation
-cargo doc --open                   # Build and open documentation
+cargo doc --open                    # Build and open documentation
 ```
 
-### Adaptive Network Testing
+### Adaptive Network Testing Suite
 ```bash
-./scripts/test_adaptive_network.sh  # Run adaptive component tests suite
+./scripts/test_adaptive_network.sh  # Run adaptive component tests
+
+# Individual adaptive component tests
+cargo test --test adaptive_components_test test_thompson_sampling_basic --release
+cargo test --test adaptive_components_test test_multi_armed_bandit_basic --release
+cargo test --test adaptive_components_test test_q_learning_cache_basic --release
 ```
 
 ## Critical Code Standards
@@ -54,7 +57,7 @@ Production code **MUST NOT** contain:
 ### Error Handling Pattern
 ```rust
 // ✅ CORRECT
-let value = some_option.ok_or(Error::MissingValue)?;
+let value = some_option.ok_or(P2PError::MissingValue)?;
 let result = some_result.context("operation failed")?;
 
 // ❌ WRONG - Will fail CI/CD
@@ -64,124 +67,58 @@ let result = some_result.expect("failed");
 
 ## Architecture Overview
 
-### Core Layer Structure
+### Multi-Layer P2P Architecture with ML-Driven Adaptive Routing
 
-The codebase follows a multi-layer P2P architecture with machine learning-driven adaptive routing:
+The system combines distributed hash table (DHT) storage with machine learning for optimal routing decisions based on network conditions.
 
-1. **Transport Layer** (`src/transport/`)
-   - Uses `ant-quic` (NOT quinn) for QUIC transport with NAT traversal
-   - `ant_quic_adapter.rs` provides `P2PNetworkNode` integration
-   - Post-quantum cryptography support
+#### 1. Transport Layer (`src/transport/`)
+- **Primary**: `ant-quic` (0.6+) for QUIC transport with NAT traversal
+- **Adapter**: `ant_quic_adapter.rs` provides `P2PNetworkNode` integration
+- **Security**: Post-quantum cryptography support via feature flag
 
-2. **Adaptive Network Layer** (`src/adaptive/`)
-   - **Coordinator** (`coordinator.rs`): Central orchestration for adaptive components
-   - **Multi-Armed Bandit** (`multi_armed_bandit.rs`): Thompson Sampling for strategy selection
-   - **Routing Strategies**:
-     - Kademlia DHT (`routing.rs`)
-     - Hyperbolic routing (`hyperbolic.rs`, `hyperbolic_enhanced.rs`)
-     - Trust-based with EigenTrust++ (`trust.rs`)
-     - Self-Organizing Maps (`som.rs`)
-   - **Machine Learning Components**:
-     - Q-Learning cache optimization (`q_learning_cache.rs`)
-     - Churn prediction (`churn_prediction.rs`)
-     - Beta distribution for bandit (`beta_distribution.rs`)
+#### 2. Adaptive Network Layer (`src/adaptive/`)
+Central to the system's intelligence, using ML for dynamic strategy selection:
 
-3. **DHT Layer** (`src/dht/`)
-   - Kademlia-based with K=8 replication factor
-   - `core_engine.rs` - Main DHT implementation
-   - Geographic routing extensions
-   - Content-addressed storage with BLAKE3
-   - Reed-Solomon encoding (prefer `saorsa-fec` crate)
+- **Coordinator** (`coordinator.rs`): Orchestrates all adaptive components
+- **Multi-Armed Bandit** (`multi_armed_bandit.rs`): Thompson Sampling for strategy selection
+- **Beta Distribution** (`beta_distribution.rs`): Statistical modeling for bandit
+- **Routing Strategies**:
+  - Kademlia DHT routing
+  - Hyperbolic routing for low-latency paths
+  - Trust-based routing with EigenTrust++
+  - Self-Organizing Maps (SOM) for topology
+- **ML Components**:
+  - Q-Learning cache optimization
+  - Churn prediction for node stability
+  - Performance tracking and metrics
 
-4. **Identity System** (`src/identity/`)
-   - Ed25519 cryptographic identities
-   - Four-word human-readable addresses (`four_words.rs`, `four_words_extensions.rs`)
-   - Enhanced identity with ML-DSA quantum resistance
+#### 3. DHT Layer (`src/dht/`)
+Distributed storage with geographic awareness:
 
-5. **Storage Layer** (`src/storage/`)
-   - SQLite persistence via SQLx
-   - DHT-based encrypted storage
-   - Multi-device synchronization
+- **Core Engine** (`core_engine.rs`): Kademlia-based with K=8 replication
+- **Geographic Routing** (`geographic_routing.rs`): Region-aware peer selection
+- **Latency-Aware Selection** (`latency_aware_selection.rs`): Smart peer choice
+- **Network Integration** (`network_integration.rs`): Protocol handling
+- **Witness System** (`witness.rs`): Byzantine fault tolerance
+- **Optimizations**: RSPS (Root-Scoped Provider Summaries) via `saorsa-rsps`
 
-6. **Application Features**
-   - Chat system (`src/chat/`) - Slack-like messaging
-   - Discuss system (`src/discuss/`) - Discourse-like forums
-   - Projects (`src/projects/`) - Hierarchical organization
-   - MCP server (`src/mcp/`) - Model Context Protocol for AI integration
+#### 4. Identity System (`src/identity/`)
+- **Cryptography**: Ed25519 for signatures, X25519 for key exchange
+- **Four-Word Addresses**: Human-readable via `four-word-networking` crate
+- **Quantum Resistance**: ML-DSA support (feature flag)
 
-7. **Bootstrap** (`src/bootstrap/`)
-   - Network discovery and initialization
+#### 5. Storage & Persistence (`src/storage/`)
+- SQLite via SQLx for message persistence
+- Encrypted DHT storage
+- Multi-device synchronization
 
-### Key Architectural Decisions
+#### 6. Application Features
+- **Chat** (`src/chat/`): Slack-like messaging
+- **Discuss** (`src/discuss/`): Forum system
+- **Projects** (`src/projects/`): Hierarchical organization
+- **MCP Server** (`src/mcp/`): AI integration via Model Context Protocol
 
-1. **ant-quic over quinn**: Uses `ant-quic` for QUIC transport. Remove any quinn references.
-
-2. **Adaptive Routing**: ML-driven strategy selection based on:
-   - Network conditions (stable, high-churn, adversarial)
-   - Content type (small messages, large files, real-time streams)
-   - Latency requirements
-
-3. **Four-Word Addressing**: Human-readable addresses using `four-word-networking` crate.
-
-4. **Dual Licensing**: AGPL-3.0 for open source, commercial license available.
-
-## External Crate Dependencies
-
-### Saorsa Ecosystem Crates
-- `saorsa-rsps` (0.1.0) - Root-Scoped Provider Summaries for DHT optimization
-- `saorsa-fec` - Forward error correction (preferred over `reed-solomon-erasure`)
-- `four-word-networking` (2.3+) - Human-readable network addresses
-- `ant-quic` (0.6+) - QUIC transport with NAT traversal
-
-### Feature Flags
-```toml
-default = ["dht", "mcp", "ant-quic"]
-dht = []                    # Distributed Hash Table
-mcp = []                    # Model Context Protocol
-four-word addresses are always enabled via dependency
-ant-quic = []              # QUIC transport
-quantum-resistant = []      # Post-quantum cryptography
-threshold = []             # Threshold cryptography
-cli = []                   # CLI tools
-metrics = []               # Prometheus metrics
-commercial = []            # Commercial license features
-agpl-compliance = []       # AGPL compliance notices
-```
-
-## Testing Strategy
-
-### Test Categories
-1. **Unit Tests**: In-module `#[cfg(test)]` blocks
-2. **Integration Tests**: `tests/` directory
-3. **Property-Based Tests**: Using `proptest` and `quickcheck`
-4. **Benchmarks**: `benches/` directory using Criterion
-
-### Running Specific Test Types
-```bash
-# Unit tests only
-cargo test --lib
-
-# Specific integration test file
-cargo test --test ant_quic_integration_test
-cargo test --test eigentrust_integration_test
-cargo test --test gossipsub_integration_test
-
-# Specific test function
-cargo test --test adaptive_components_test test_thompson_sampling_basic
-
-# With output
-cargo test -- --nocapture
-RUST_LOG=debug cargo test
-```
-
-## Common Development Patterns
-
-### Adding New Adaptive Strategy
-1. Implement strategy in `src/adaptive/`
-2. Add to `RoutingStrategy` enum in `routing.rs`
-3. Update multi-armed bandit in `multi_armed_bandit.rs`
-4. Add performance metrics in `performance.rs`
-5. Write integration tests in `tests/adaptive_components_test.rs`
+## Key Architectural Patterns
 
 ### Network Node Creation
 ```rust
@@ -191,48 +128,108 @@ let bind_addr = "127.0.0.1:0".parse()?;
 let node = P2PNetworkNode::new(bind_addr).await?;
 ```
 
-### DHT Operations
+### DHT Operations with Consistency Levels
 ```rust
-use saorsa_core::Network;
+use saorsa_core::dht::core_engine::{DhtCoreEngine, ConsistencyLevel};
 
-// Store data
-network.store(key, value.to_vec()).await?;
+// Store with quorum consistency
+engine.store_with_consistency(
+    key,
+    value,
+    ConsistencyLevel::Quorum,
+    Duration::from_secs(3600)
+).await?;
 
-// Retrieve data
-if let Some(data) = network.retrieve(key).await? {
-    // Process data
-}
+// Retrieve with eventual consistency
+let data = engine.retrieve_with_consistency(
+    key,
+    ConsistencyLevel::Eventual
+).await?;
+```
+
+### Adaptive Strategy Selection
+```rust
+use saorsa_core::adaptive::coordinator::AdaptiveCoordinator;
+
+// Coordinator automatically selects best strategy
+let strategy = coordinator.select_strategy(
+    &network_conditions,
+    &content_type
+).await?;
 ```
 
 ### Four-Word Address Usage
 ```rust
 use saorsa_core::NetworkAddress;
 
-// Create from IP
-let addr = NetworkAddress::from_ipv4("192.168.1.1".parse()?, 9000);
+// Parse from four-word format
+let addr = NetworkAddress::from_four_words("alpha-beta-gamma-delta")?;
 
-// Get four-word representation
+// Convert IP to four-words
+let addr = NetworkAddress::from_ipv4("192.168.1.1".parse()?, 9000);
 if let Some(words) = addr.four_words() {
     println!("Address: {}", words);
 }
+```
 
-// Parse from four-word format
-let addr = NetworkAddress::from_four_words("alpha-beta-gamma-delta")?;
+## External Crate Dependencies
+
+### Saorsa Ecosystem
+- `saorsa-rsps` (0.1.0): DHT optimization with provider summaries
+- `saorsa-fec`: Forward error correction (prefer over `reed-solomon-erasure`)
+- `four-word-networking` (2.3+): Human-readable addresses
+- `ant-quic` (0.6+): QUIC transport with NAT traversal
+
+### Feature Flags
+```toml
+default = ["dht", "mcp", "ant-quic"]
+dht = []                    # Distributed Hash Table
+mcp = []                    # Model Context Protocol  
+ant-quic = []               # QUIC transport (recommended)
+quantum-resistant = []      # Post-quantum cryptography
+threshold = []              # Threshold cryptography
+metrics = []                # Prometheus metrics
+```
+
+## Testing Infrastructure
+
+### Test Organization
+- **Unit Tests**: In-module `#[cfg(test)]` blocks
+- **Integration Tests**: `tests/` directory (38 test files)
+- **Disabled Tests**: Files with `.disabled` extension (API compatibility issues)
+- **Property Tests**: Using `proptest` for randomized testing
+
+### Key Integration Tests
+```bash
+# Core functionality
+cargo test --test ant_quic_integration_test      # QUIC transport
+cargo test --test dht_core_operations_test        # DHT operations
+cargo test --test adaptive_components_test        # Adaptive networking
+cargo test --test four_word_integration_test      # Address system
+
+# Security & trust
+cargo test --test eigentrust_integration_test     # Trust system
+cargo test --test security_comprehensive_test     # Security validation
+
+# Network simulation
+cargo test --test full_network_simulation         # End-to-end simulation
+cargo test --test gossipsub_integration_test      # Gossip protocol
 ```
 
 ## CI/CD Pipeline
 
-GitHub Actions workflow (`.github/workflows/rust.yml`) enforces:
-1. **Formatting**: `cargo fmt --all -- --check`
-2. **Linting**: `cargo clippy --all-features -- -D warnings`
-3. **Tests**: All tests must pass on stable and nightly
-4. **Security**: `cargo audit` for vulnerability scanning
-5. **Coverage**: Code coverage via `cargo-llvm-cov`
-6. **Benchmarks**: Run on main branch pushes
+GitHub Actions enforces quality standards on every commit:
+
+1. **Format Check**: `cargo fmt --all -- --check`
+2. **Clippy Linting**: `cargo clippy --all-features -- -D warnings`
+3. **Security Audit**: `cargo audit`
+4. **Test Matrix**: Stable and nightly Rust
+5. **Code Coverage**: via `cargo-llvm-cov`
+6. **System Dependencies**: Audio/video libraries for WebRTC
 
 ## System Dependencies
 
-For local development, install:
+Required for local development:
 ```bash
 # Ubuntu/Debian
 sudo apt-get install -y \
@@ -245,40 +242,60 @@ sudo apt-get install -y \
   build-essential
 ```
 
-## Important Files and Modules
+## Common Development Workflows
 
-### Documentation
-- `docs/NETWORK_ARCHITECTURE.md` - Complete system architecture
-- `docs/CODE_QUALITY_STANDARDS.md` - Quality enforcement details
+### Adding New Adaptive Strategy
+1. Implement in `src/adaptive/`
+2. Add to `RoutingStrategy` enum
+3. Update multi-armed bandit
+4. Add performance metrics
+5. Write tests in `tests/adaptive_components_test.rs`
 
-### Core Implementation
-- `src/network.rs` - Main P2P network implementation
-- `src/adaptive/coordinator.rs` - Central coordination for adaptive networking
-- `src/transport/ant_quic_adapter.rs` - QUIC transport integration
-- `src/dht/core_engine.rs` - DHT engine implementation
-- `src/identity/four_words.rs` - Four-word addressing system
+### DHT Operation with Witnesses
+```rust
+// Store with witness validation
+let witnesses = engine.select_witnesses(&key, 3)?;
+let receipt = engine.store_with_witnesses(
+    key,
+    value,
+    &witnesses,
+    Duration::from_secs(3600)
+).await?;
+```
 
-### Configuration
-- `.github/workflows/rust.yml` - CI/CD pipeline configuration
-- `Cargo.toml` - Dependencies and feature flags
+### Network Monitoring
+```rust
+use saorsa_core::adaptive::performance::PerformanceMonitor;
 
-## WebRTC and Media Support
+let monitor = PerformanceMonitor::new();
+monitor.record_latency(peer_id, Duration::from_millis(50));
+let metrics = monitor.get_metrics(peer_id)?;
+```
 
-The codebase includes full WebRTC stack for voice/video:
-- WebRTC components in dependencies
-- Media processing with `image`, `blurhash`, `symphonia`
-- Audio playback with `rodio`
+## Important Implementation Details
 
-## Database and Persistence
+### DHT Configuration
+- **Replication Factor**: K=8 (8 replicas per key)
+- **Consistency Levels**: Eventual, Quorum, All
+- **Geographic Awareness**: Regional peer preference
+- **Witness System**: Byzantine fault tolerance
 
-Uses SQLx with SQLite for message persistence:
-- Async database operations
-- Migration support
-- UUID and chrono integration
+### Adaptive Network Behavior
+- **Thompson Sampling**: Balances exploration vs exploitation
+- **Q-Learning**: Optimizes cache decisions
+- **Churn Prediction**: Anticipates node departures
+- **Strategy Selection**: Based on network conditions and content type
 
-## Performance Optimization
+### Performance Optimizations
+- **Connection Pooling**: Max 100 connections with LRU eviction
+- **Message Batching**: 10ms window, 64KB max batch
+- **Caching**: LRU caches throughout with configurable TTL
+- **Hashing**: BLAKE3 for speed, SHA2 for compatibility
 
-- Parking lot for faster mutexes
-- LRU caching throughout
-- BLAKE3 for fast hashing
-- Criterion for benchmarking
+## Licensing
+
+Dual-licensed:
+- **AGPL-3.0**: For open source use
+- **Commercial**: Contact saorsalabs@gmail.com
+
+All files must include the copyright header with dual-licensing notice.

@@ -296,8 +296,14 @@ impl RegionalBucket {
     /// Try to replace a poor-performing peer with a new one
     fn try_replace_peer(&mut self, new_peer_id: String, new_metrics: PeerQualityMetrics) -> bool {
         // Find the peer with the lowest reliability score
-        let worst_peer = self.peers.iter()
-            .min_by(|(_, a), (_, b)| a.get_reliability_score().partial_cmp(&b.get_reliability_score()).unwrap())
+        let worst_peer = self
+            .peers
+            .iter()
+            .min_by(|(_, a), (_, b)| {
+                a.get_reliability_score()
+                    .partial_cmp(&b.get_reliability_score())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(id, metrics)| (id.clone(), metrics.get_reliability_score()));
 
         if let Some((worst_peer_id, worst_score)) = worst_peer
@@ -322,8 +328,11 @@ impl RegionalBucket {
             .collect();
         
         // Sort by reliability score (descending)
-        peer_list.sort_by(|(_, a), (_, b)| 
-            b.get_reliability_score().partial_cmp(&a.get_reliability_score()).unwrap());
+        peer_list.sort_by(|(_, a), (_, b)| {
+            b.get_reliability_score()
+                .partial_cmp(&a.get_reliability_score())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         
         peer_list.into_iter().take(count).collect()
     }

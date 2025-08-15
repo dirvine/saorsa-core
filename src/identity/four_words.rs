@@ -26,7 +26,7 @@ impl FourWordAddress {
         Ok(Self(enc.to_string().replace(' ', "-")))
     }
 
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn parse_str(s: &str) -> Result<Self> {
         // Accept hyphen or space separated four words
         let canonical = s.replace('-', " ");
         // Basic validation: Four words required

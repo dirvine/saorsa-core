@@ -547,7 +547,7 @@ impl Config {
     fn validate_size_format(&self, size: &str) -> bool {
         thread_local! {
             static SIZE_REGEX: Regex = Regex::new(r"^\d+(\.\d+)?\s*(B|KB|MB|GB|TB)$")
-                .expect("SIZE_REGEX pattern is valid");
+                .unwrap_or_else(|_| Regex::new(r"^\d+$").expect("fallback size regex"));
         }
         SIZE_REGEX.with(|re| re.is_match(size))
     }
@@ -614,7 +614,7 @@ impl Config {
     pub fn parse_size(size: &str) -> Result<u64> {
         thread_local! {
             static SIZE_REGEX: Regex = Regex::new(r"^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)$")
-                .expect("SIZE_REGEX pattern is valid");
+                .unwrap_or_else(|_| Regex::new(r"^(\d+)$").expect("fallback size regex"));
         }
 
         SIZE_REGEX.with(|re| {

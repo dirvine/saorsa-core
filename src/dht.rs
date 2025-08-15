@@ -396,8 +396,8 @@ impl Key {
     /// Calculate XOR distance between two keys (Kademlia distance metric)
     pub fn distance(&self, other: &Key) -> Key {
         let mut result = [0u8; 32];
-        for i in 0..32 {
-            result[i] = self.hash[i] ^ other.hash[i];
+        for (i, out) in result.iter_mut().enumerate() {
+            *out = self.hash[i] ^ other.hash[i];
         }
         Key { hash: result }
     }

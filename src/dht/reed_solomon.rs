@@ -77,7 +77,7 @@ impl ReedSolomonEncoder {
         let mut shards = Vec::with_capacity(self.config.n());
 
         // Create data shards
-        for i in 0..self.config.k {
+        for (i, _) in (0..self.config.k).enumerate() {
             let start = i * chunk_size;
             let end = std::cmp::min(start + chunk_size, data.len());
             let mut shard = data[start..end].to_vec();
@@ -127,8 +127,8 @@ impl ReedSolomonEncoder {
 
         // Combine data chunks
         let mut result = Vec::new();
-        for i in 0..self.config.k {
-            if let Some(chunk) = &chunks[i] {
+        for (i, maybe_chunk) in chunks.iter().take(self.config.k).enumerate() {
+            if let Some(chunk) = maybe_chunk {
                 result.extend_from_slice(chunk);
             }
         }

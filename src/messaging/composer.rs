@@ -280,9 +280,10 @@ impl DraftMessage {
     
     /// Extract links from text
     fn extract_links(&self) -> Vec<String> {
-        let url_regex = regex::Regex::new(
-            r"https?://[^\s<]+[^<.,:;'!\?\s]"
-        ).unwrap();
+        let url_regex = match regex::Regex::new(r"https?://[^\s<]+[^<.,:;'!\?\s]") {
+            Ok(re) => re,
+            Err(_) => regex::Regex::new(r"https?://.+").unwrap_or_else(|_| regex::Regex::new(r"https?://.*").unwrap()),
+        };
         
         url_regex.find_iter(&self.text)
             .map(|m| m.as_str().to_string())

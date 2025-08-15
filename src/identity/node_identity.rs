@@ -58,8 +58,8 @@ impl NodeId {
     /// XOR distance to another node ID (for Kademlia)
     pub fn xor_distance(&self, other: &NodeId) -> [u8; 32] {
         let mut distance = [0u8; 32];
-        for i in 0..32 {
-            distance[i] = self.0[i] ^ other.0[i];
+        for (i, out) in distance.iter_mut().enumerate() {
+            *out = self.0[i] ^ other.0[i];
         }
         distance
     }

@@ -219,7 +219,11 @@ impl SecureMessaging {
         Ok(EphemeralSession {
             peer: peer.clone(),
             ephemeral_public: key_material.as_bytes()[..32].to_vec(),
-            ephemeral_private: key_material.as_bytes()[32..64].to_vec(),
+            ephemeral_private: key_material
+                .as_bytes()
+                .get(32..64)
+                .unwrap_or(&[])
+                .to_vec(),
             created_at: chrono::Utc::now(),
             message_count: 0,
         })

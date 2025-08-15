@@ -91,7 +91,7 @@ pub enum DhtMessage {
 pub enum DhtResponse {
     // Data Responses
     StoreAck {
-        receipt: WitnessReceipt,
+        receipt: Box<WitnessReceipt>,
         replicas: Vec<NodeId>,
     },
     RetrieveReply {
@@ -211,9 +211,11 @@ impl ConnectionPool {
     pub fn new(max_connections: usize) -> Self {
         Self {
             active_connections: Arc::new(RwLock::new(HashMap::new())),
-            connection_cache: Arc::new(RwLock::new(LruCache::new(
-                std::num::NonZeroUsize::new(max_connections * 2).unwrap(),
-            ))),
+            connection_cache: Arc::new(RwLock::new(LruCache::new({
+                let capacity = max_connections.saturating_mul(2).max(1);
+                // SAFETY: capacity is guaranteed to be >= 1
+                unsafe { std::num::NonZeroUsize::new_unchecked(capacity) }
+            }))),
             max_connections,
         }
     }
@@ -425,7 +427,12 @@ impl PeerManager {
             .filter(|p| p.reputation > 0.5 && p.failure_count < 5)
             .collect();
 
-        sorted.sort_by(|a, b| b.reputation.partial_cmp(&a.reputation).unwrap());
+        use std::cmp::Ordering;
+        sorted.sort_by(|a, b| {
+            b.reputation
+                .partial_cmp(&a.reputation)
+                .unwrap_or(Ordering::Equal)
+        });
 
         sorted
             .into_iter()
@@ -459,7 +466,7 @@ impl DhtProtocolHandler {
                 let receipt = engine.store(&key, value).await?;
 
                 Ok(DhtResponse::StoreAck {
-                    receipt: WitnessReceipt {
+                    receipt: Box::new(WitnessReceipt {
                         operation_id: OperationId::new(),
                         operation_type: crate::dht::witness::OperationType::Store,
                         content_hash: crate::dht::content_addressing::ContentAddress::from_bytes(
@@ -475,7 +482,7 @@ impl DhtProtocolHandler {
                         },
                         signature: crate::dht::witness::MlKemSignature::placeholder(),
                         witness_proofs: vec![],
-                    },
+                    }),
                     replicas: receipt.stored_at,
                 })
             }
@@ -607,9 +614,8 @@ impl NetworkIntegrationLayer {
 
         let mut responses = Vec::new();
         for task in tasks {
-            match task.await? {
-                Ok(response) => responses.push(response),
-                Err(_) => {} // Ignore individual failures in broadcast
+            if let Ok(response) = task.await? {
+                responses.push(response);
             }
         }
 
@@ -697,7 +703,7 @@ impl NetworkIntegrationLayer {
                 let message = DhtMessage::Ping {
                     timestamp: SystemTime::now()
                         .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_secs(),
                     sender_info: peer.clone(),
                 };

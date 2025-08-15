@@ -434,7 +434,7 @@ impl MergeCoordinator {
     }
 
     /// Extract process ID from cache file name
-    fn extract_process_id(&self, cache_file: &PathBuf) -> Option<u32> {
+    fn extract_process_id(&self, cache_file: &std::path::Path) -> Option<u32> {
         cache_file
             .file_stem()
             .and_then(|name| name.to_str())

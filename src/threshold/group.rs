@@ -227,13 +227,12 @@ impl ThresholdGroup {
     pub fn get_participants_by_role(&self, role_filter: RoleFilter) -> Vec<&ParticipantInfo> {
         self.active_participants
             .iter()
-            .filter(|p| match (&p.role, &role_filter) {
-                (ParticipantRole::Leader { .. }, RoleFilter::Leaders) => true,
-                (ParticipantRole::Member { .. }, RoleFilter::Members) => true,
-                (ParticipantRole::Observer, RoleFilter::Observers) => true,
-                (_, RoleFilter::All) => true,
-                _ => false,
-            })
+            .filter(|p| matches!((&p.role, &role_filter),
+                (ParticipantRole::Leader { .. }, RoleFilter::Leaders)
+                | (ParticipantRole::Member { .. }, RoleFilter::Members)
+                | (ParticipantRole::Observer, RoleFilter::Observers)
+                | (_, RoleFilter::All)
+            ))
             .collect()
     }
 

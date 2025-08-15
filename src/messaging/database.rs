@@ -575,9 +575,9 @@ impl DatabaseMessageStore {
             sender_device: DeviceId("primary".to_string()),
             content,
             thread_id: row.try_get::<Option<String>, _>(4)?
-                .map(|s| ThreadId(Uuid::parse_str(&s).unwrap())),
+                .and_then(|s| Uuid::parse_str(&s).ok().map(ThreadId)),
             reply_to: row.try_get::<Option<String>, _>(5)?
-                .map(|s| MessageId(Uuid::parse_str(&s).unwrap())),
+                .and_then(|s| Uuid::parse_str(&s).ok().map(MessageId)),
             created_at: DateTime::from_timestamp_millis(row.try_get(6)?).unwrap_or_else(Utc::now),
             edited_at: row.try_get::<Option<i64>, _>(7)?
                 .and_then(DateTime::from_timestamp_millis),
