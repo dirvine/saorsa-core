@@ -104,7 +104,7 @@ impl PeerMetricsCache {
 
         // Update regional index
         self.regional_peers.entry(metrics.region)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(peer_id.clone());
 
         // Evict if over capacity
@@ -141,7 +141,7 @@ impl PeerMetricsCache {
                     .map(|entry| (entry.peer_id.clone(), entry.metrics.clone()))
                     .collect()
             })
-            .unwrap_or_else(Vec::new)
+            .unwrap_or_default()
     }
 
     /// Remove a peer from the cache
@@ -184,11 +184,10 @@ impl PeerMetricsCache {
 
     /// Evict least recently used entry
     fn evict_lru(&mut self) {
-        if let Some(peer_id) = self.access_order.pop_front() {
-            if let Some(entry) = self.entries.remove(&peer_id) {
+        if let Some(peer_id) = self.access_order.pop_front()
+            && let Some(entry) = self.entries.remove(&peer_id) {
                 self.remove_from_regional_index(&entry.peer_id);
             }
-        }
     }
 
     /// Remove peer from access order tracking

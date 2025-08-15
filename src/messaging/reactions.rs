@@ -218,7 +218,7 @@ impl MessageReactions {
     
     /// Add a reaction
     pub fn add_reaction(&mut self, emoji: String, user: FourWordAddress) {
-        let users = self.reactions.entry(emoji).or_insert_with(Vec::new);
+        let users = self.reactions.entry(emoji).or_default();
         if !users.contains(&user) {
             users.push(user);
             self.total_count += 1;
@@ -227,8 +227,8 @@ impl MessageReactions {
     
     /// Remove a reaction
     pub fn remove_reaction(&mut self, emoji: &str, user: &FourWordAddress) {
-        if let Some(users) = self.reactions.get_mut(emoji) {
-            if let Some(pos) = users.iter().position(|u| u == user) {
+        if let Some(users) = self.reactions.get_mut(emoji)
+            && let Some(pos) = users.iter().position(|u| u == user) {
                 users.remove(pos);
                 self.total_count = self.total_count.saturating_sub(1);
                 
@@ -237,7 +237,6 @@ impl MessageReactions {
                     self.reactions.remove(emoji);
                 }
             }
-        }
     }
     
     /// Check if user has reacted with emoji

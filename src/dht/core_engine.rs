@@ -156,8 +156,8 @@ impl KademliaRoutingTable {
 
         // Sort by XOR distance
         all_nodes.sort_by_key(|node| {
-            let distance = node.id.0.distance(key);
-            distance
+            
+            node.id.0.distance(key)
         });
 
         all_nodes.truncate(count);
@@ -280,7 +280,7 @@ impl ReplicationManager {
     fn required_replicas(&self) -> usize {
         match self.consistency_level {
             ConsistencyLevel::One => 1,
-            ConsistencyLevel::Quorum => (self.replication_factor + 1) / 2,
+            ConsistencyLevel::Quorum => self.replication_factor.div_ceil(2),
             ConsistencyLevel::All => self.replication_factor,
         }
     }

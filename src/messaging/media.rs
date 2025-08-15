@@ -23,15 +23,9 @@ impl MediaProcessor {
     pub fn new() -> Result<Self> {
         Ok(Self {
             max_file_size: 100 * 1024 * 1024, // 100MB
-            _image_formats: vec![
-                "jpg", "jpeg", "png", "gif", "webp", "avif", "svg"
-            ].iter().map(|s| s.to_string()).collect(),
-            _video_formats: vec![
-                "mp4", "webm", "mov", "avi", "mkv"
-            ].iter().map(|s| s.to_string()).collect(),
-            _audio_formats: vec![
-                "mp3", "m4a", "ogg", "wav", "aac", "opus"
-            ].iter().map(|s| s.to_string()).collect(),
+            _image_formats: ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].iter().map(|s| s.to_string()).collect(),
+            _video_formats: ["mp4", "webm", "mov", "avi", "mkv"].iter().map(|s| s.to_string()).collect(),
+            _audio_formats: ["mp3", "m4a", "ogg", "wav", "aac", "opus"].iter().map(|s| s.to_string()).collect(),
         })
     }
     

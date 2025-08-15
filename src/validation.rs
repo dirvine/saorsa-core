@@ -652,9 +652,7 @@ impl Validate for ApiRequest {
 
             for pattern in &sql_patterns {
                 if lower_value.contains(pattern) {
-                    return Err(ValidationError::InvalidFormat(format!(
-                        "Suspicious parameter value: potential SQL injection"
-                    ))
+                    return Err(ValidationError::InvalidFormat("Suspicious parameter value: potential SQL injection".to_string())
                     .into());
                 }
             }
@@ -682,25 +680,23 @@ where
         .parse::<T>()
         .map_err(|_| ValidationError::InvalidFormat(format!("Failed to parse value: {}", value)))?;
 
-    if let Some(min_val) = min {
-        if parsed < min_val {
+    if let Some(min_val) = min
+        && parsed < min_val {
             return Err(ValidationError::InvalidFormat(format!(
                 "Value {} is less than minimum {}",
                 parsed, min_val
             ))
             .into());
         }
-    }
 
-    if let Some(max_val) = max {
-        if parsed > max_val {
+    if let Some(max_val) = max
+        && parsed > max_val {
             return Err(ValidationError::InvalidFormat(format!(
                 "Value {} is greater than maximum {}",
                 parsed, max_val
             ))
             .into());
         }
-    }
 
     Ok(parsed)
 }
@@ -709,8 +705,7 @@ where
 pub fn sanitize_string(input: &str, max_length: usize) -> String {
     // First remove any HTML tags and dangerous patterns
     let mut cleaned = input
-        .replace('<', "")
-        .replace('>', "")
+        .replace(['<', '>'], "")
         .replace("script", "")
         .replace("javascript:", "")
         .replace("onerror", "")

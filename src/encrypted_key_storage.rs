@@ -335,7 +335,7 @@ impl EncryptedKeyStorageManager {
 
         // Ensure parent directory exists
         if let Some(parent) = storage_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| P2PError::Io(e))?;
+            std::fs::create_dir_all(parent).map_err(P2PError::Io)?;
         }
 
         Ok(Self {
@@ -846,16 +846,16 @@ impl EncryptedKeyStorageManager {
                 .write(true)
                 .truncate(true)
                 .open(&temp_path)
-                .map_err(|e| P2PError::Io(e))?;
+                .map_err(P2PError::Io)?;
 
             file.write_all(&serialized_storage)
-                .map_err(|e| P2PError::Io(e))?;
+                .map_err(P2PError::Io)?;
 
-            file.flush().map_err(|e| P2PError::Io(e))?;
+            file.flush().map_err(P2PError::Io)?;
         }
 
         // Atomic rename
-        std::fs::rename(&temp_path, &self.storage_path).map_err(|e| P2PError::Io(e))?;
+        std::fs::rename(&temp_path, &self.storage_path).map_err(P2PError::Io)?;
 
         Ok(())
     }
@@ -863,10 +863,10 @@ impl EncryptedKeyStorageManager {
     /// Load and decrypt key data
     async fn load_and_decrypt(&self, password: &SecureString) -> Result<KeyStorageData> {
         // Read storage file
-        let mut file = File::open(&self.storage_path).map_err(|e| P2PError::Io(e))?;
+        let mut file = File::open(&self.storage_path).map_err(P2PError::Io)?;
 
         let mut data = Vec::new();
-        file.read_to_end(&mut data).map_err(|e| P2PError::Io(e))?;
+        file.read_to_end(&mut data).map_err(P2PError::Io)?;
 
         // Deserialize storage
         let storage: EncryptedKeyStorage = bincode::deserialize(&data).map_err(|e| {
@@ -915,10 +915,10 @@ impl EncryptedKeyStorageManager {
 
     /// Get current salt from storage
     async fn get_current_salt(&self) -> Result<[u8; SALT_SIZE]> {
-        let mut file = File::open(&self.storage_path).map_err(|e| P2PError::Io(e))?;
+        let mut file = File::open(&self.storage_path).map_err(P2PError::Io)?;
 
         let mut data = Vec::new();
-        file.read_to_end(&mut data).map_err(|e| P2PError::Io(e))?;
+        file.read_to_end(&mut data).map_err(P2PError::Io)?;
 
         let storage: EncryptedKeyStorage = bincode::deserialize(&data).map_err(|e| {
             P2PError::Storage(crate::error::StorageError::CorruptionDetected(

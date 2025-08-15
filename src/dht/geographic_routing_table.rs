@@ -216,7 +216,7 @@ impl GeographicRoutingTable {
                     .map(|(peer_id, metrics)| (peer_id.clone(), metrics.clone()))
                     .collect()
             })
-            .unwrap_or_else(Vec::new)
+            .unwrap_or_default()
     }
 
     /// Find closest peers to a DHT key across all regions

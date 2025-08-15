@@ -673,7 +673,7 @@ impl ProjectsManager {
         let encrypted_content =
             self.encrypt_content(content, &document.current_version.encryption_key.ciphertext)?;
         let file_metadata = FileMetadata {
-            file_id: format!("{}_v{}", document_id.0, new_version.version_number).into(),
+            file_id: format!("{}_v{}", document_id.0, new_version.version_number),
             name: document.name.clone(),
             size: content.len() as u64,
             mime_type: "application/octet-stream".to_string(),
@@ -842,7 +842,7 @@ impl ProjectsManager {
         let tag = cipher
             .encrypt_in_place_detached(nonce, b"", &mut ciphertext)
             .map_err(|e| {
-                ProjectsError::InvalidOperation(format!("Encryption failed: {e}").into())
+                ProjectsError::InvalidOperation(format!("Encryption failed: {e}"))
             })?;
 
         // Combine nonce + ciphertext + tag
@@ -890,7 +890,7 @@ impl ProjectsManager {
         cipher
             .decrypt_in_place_detached(nonce, b"", &mut plaintext, tag.into())
             .map_err(|e| {
-                ProjectsError::InvalidOperation(format!("Decryption failed: {e}").into())
+                ProjectsError::InvalidOperation(format!("Decryption failed: {e}"))
             })?;
 
         Ok(plaintext)

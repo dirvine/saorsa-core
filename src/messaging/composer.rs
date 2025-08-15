@@ -17,6 +17,12 @@ pub struct MessageComposer {
     emoji_shortcuts: HashMap<String, String>,
 }
 
+impl Default for MessageComposer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageComposer {
     /// Create new message composer
     pub fn new() -> Self {
@@ -62,7 +68,7 @@ impl MessageComposer {
         draft.mentions.push(user.clone());
         
         // Add to text
-        let mention_text = format!("@{} ", user.to_string());
+        let mention_text = format!("@{} ", user);
         draft.text.push_str(&mention_text);
         draft.update_formatted();
     }
@@ -75,11 +81,10 @@ impl MessageComposer {
     
     /// Remove attachment from draft
     pub fn remove_attachment(&mut self, channel_id: ChannelId, index: usize) {
-        if let Some(draft) = self.drafts.get_mut(&channel_id) {
-            if index < draft.attachments.len() {
+        if let Some(draft) = self.drafts.get_mut(&channel_id)
+            && index < draft.attachments.len() {
                 draft.attachments.remove(index);
             }
-        }
     }
     
     /// Set reply target

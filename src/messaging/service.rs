@@ -178,11 +178,10 @@ impl MessagingService {
                     let _ = store.store_message(&decrypted).await;
                     
                     // Apply channel filter if specified
-                    if let Some(filter) = channel_filter {
-                        if decrypted.channel_id != filter {
+                    if let Some(filter) = channel_filter
+                        && decrypted.channel_id != filter {
                             continue;
                         }
-                    }
                     
                     // Broadcast to subscribers
                     let _ = event_tx.send(ReceivedMessage {

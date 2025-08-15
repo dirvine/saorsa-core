@@ -45,11 +45,10 @@ impl MessageSearch {
         // Fetch full messages
         let mut messages = Vec::new();
         for id in message_ids {
-            if let Ok(msg) = self.store.get_message(id).await {
-                if self.matches_query(&msg, &query, &filters) {
+            if let Ok(msg) = self.store.get_message(id).await
+                && self.matches_query(&msg, &query, &filters) {
                     messages.push(msg);
                 }
-            }
         }
         
         // Sort by relevance and date
@@ -179,15 +178,14 @@ impl MessageSearch {
         // Suggest recent searches
         let recent = self.recent_searches.read().await;
         for query in recent.iter() {
-            if let Some(text) = &query.text {
-                if text.starts_with(partial) {
+            if let Some(text) = &query.text
+                && text.starts_with(partial) {
                     suggestions.push(SearchSuggestion {
                         text: text.clone(),
                         category: SuggestionCategory::Recent,
                         icon: "🕐".to_string(),
                     });
                 }
-            }
         }
         
         // Suggest users (from index)
@@ -277,11 +275,10 @@ impl MessageSearch {
         let mut results = Vec::new();
         
         // Text search in index
-        if let Some(text) = &query.text {
-            if let Some(msg_ids) = index.text_index.get(&text.to_lowercase()) {
+        if let Some(text) = &query.text
+            && let Some(msg_ids) = index.text_index.get(&text.to_lowercase()) {
                 results.extend(msg_ids.iter().copied());
             }
-        }
         
         // If no text query, get all messages for filtering
         if results.is_empty() && query.text.is_none() {
@@ -324,32 +321,28 @@ impl MessageSearch {
         }
         
         // Check attachments
-        if let Some(has_attach) = filters.has_attachments {
-            if has_attach != !message.attachments.is_empty() {
+        if let Some(has_attach) = filters.has_attachments
+            && has_attach == message.attachments.is_empty() {
                 return false;
             }
-        }
         
         // Check reactions
-        if let Some(has_react) = filters.has_reactions {
-            if has_react != !message.reactions.is_empty() {
+        if let Some(has_react) = filters.has_reactions
+            && has_react == message.reactions.is_empty() {
                 return false;
             }
-        }
         
         // Check thread
-        if let Some(is_thread) = filters.is_thread {
-            if is_thread != message.thread_id.is_some() {
+        if let Some(is_thread) = filters.is_thread
+            && is_thread != message.thread_id.is_some() {
                 return false;
             }
-        }
         
         // Check date range
-        if let Some(range) = &filters.date_range {
-            if message.created_at < range.start || message.created_at > range.end {
+        if let Some(range) = &filters.date_range
+            && (message.created_at < range.start || message.created_at > range.end) {
                 return false;
             }
-        }
         
         true
     }
@@ -401,7 +394,7 @@ impl SearchIndex {
             let token = word.to_lowercase();
             self.text_index
                 .entry(token)
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .insert(message.id);
         }
         

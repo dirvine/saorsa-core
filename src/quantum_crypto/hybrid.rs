@@ -91,7 +91,7 @@ impl HybridKeyExchange {
         let hkdf = Hkdf::<Sha256>::new(None, &combined);
         let mut output = [0u8; 32];
         hkdf.expand(b"hybrid-key-exchange-v1", &mut output)
-            .map_err(|e| QuantumCryptoError::MlKemError(format!("HKDF failed: {e}").into()))?;
+            .map_err(|e| QuantumCryptoError::MlKemError(format!("HKDF failed: {e}")))?;
 
         self.hybrid_secret = Some(output);
         Ok(output)
@@ -197,12 +197,12 @@ impl HybridSigner {
         // Verify Ed25519 signature
         if let Some(ed25519_key) = &public_keys.ed25519 {
             let verifying_key = VerifyingKey::from_bytes(&ed25519_key.0)
-                .map_err(|e| QuantumCryptoError::InvalidKeyError(e.to_string().into()))?;
+                .map_err(|e| QuantumCryptoError::InvalidKeyError(e.to_string()))?;
 
             let signature_bytes: [u8; 64] =
                 signature.classical.0.as_slice().try_into().map_err(|_| {
                     QuantumCryptoError::InvalidKeyError(
-                        "Invalid signature length".to_string().into(),
+                        "Invalid signature length".to_string(),
                     )
                 })?;
             let signature = Signature::from_bytes(&signature_bytes);
@@ -238,12 +238,12 @@ pub mod migration {
         // Convert slices to arrays
         let ed25519_pub_array: [u8; 32] = ed25519_public.try_into().map_err(|_| {
             QuantumCryptoError::InvalidKeyError(
-                "Ed25519 public key must be 32 bytes".to_string().into(),
+                "Ed25519 public key must be 32 bytes".to_string(),
             )
         })?;
         let ed25519_priv_array: [u8; 64] = ed25519_private.try_into().map_err(|_| {
             QuantumCryptoError::InvalidKeyError(
-                "Ed25519 private key must be 64 bytes".to_string().into(),
+                "Ed25519 private key must be 64 bytes".to_string(),
             )
         })?;
 

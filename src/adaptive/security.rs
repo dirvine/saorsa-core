@@ -535,19 +535,18 @@ impl SecurityManager {
         }
 
         // Check IP rate limit if provided
-        if let Some(ip_addr) = ip {
-            if !self.rate_limiter.check_ip_rate(&ip_addr).await {
+        if let Some(ip_addr) = ip
+            && !self.rate_limiter.check_ip_rate(&ip_addr).await {
                 self.auditor
                     .log_event(
                         SecurityEvent::RateLimitExceeded,
                         None,
-                        format!("IP {ip_addr} rate limit exceeded").into(),
+                        format!("IP {ip_addr} rate limit exceeded"),
                         Severity::Warning,
                     )
                     .await;
                 return Err(SecurityError::RateLimitExceeded);
             }
-        }
 
         Ok(())
     }
@@ -567,7 +566,7 @@ impl SecurityManager {
                 .log_event(
                     SecurityEvent::EclipseAttackDetected,
                     None,
-                    format!("Low routing table diversity: {diversity_score:.2}").into(),
+                    format!("Low routing table diversity: {diversity_score:.2}"),
                     Severity::Critical,
                 )
                 .await;
@@ -652,7 +651,7 @@ impl SecurityManager {
             .log_event(
                 SecurityEvent::NodeBlacklisted,
                 Some(node_id),
-                format!("Node blacklisted: {reason:?}").into(),
+                format!("Node blacklisted: {reason:?}"),
                 Severity::Warning,
             )
             .await;
@@ -919,7 +918,7 @@ impl EclipseDetector {
         patterns.subnet_distribution.clear();
 
         for node_id in routing_table {
-            let subnet = format!("{:02x}{:02x}", node_id.hash[0], node_id.hash[1]).into();
+            let subnet = format!("{:02x}{:02x}", node_id.hash[0], node_id.hash[1]);
             *patterns.subnet_distribution.entry(subnet).or_insert(0) += 1;
         }
 
@@ -1042,7 +1041,7 @@ impl SecurityAuditor {
         }
 
         // Update event counts
-        let event_name = format!("{event_type:?}").into();
+        let event_name = format!("{event_type:?}");
         let mut counts = self.event_counts.write().await;
         *counts.entry(event_name).or_insert(0) += 1;
     }
@@ -1057,16 +1056,14 @@ impl SecurityAuditor {
 
         log.iter()
             .filter(|entry| {
-                if let Some(min_time) = since {
-                    if entry.timestamp < min_time {
+                if let Some(min_time) = since
+                    && entry.timestamp < min_time {
                         return false;
                     }
-                }
-                if let Some(min_severity) = severity_filter {
-                    if (entry.severity as u8) < (min_severity as u8) {
+                if let Some(min_severity) = severity_filter
+                    && (entry.severity as u8) < (min_severity as u8) {
                         return false;
                     }
-                }
                 true
             })
             .cloned()

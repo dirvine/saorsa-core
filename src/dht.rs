@@ -155,11 +155,10 @@ impl Validate for Record {
         }
 
         // Validate signature if present
-        if let Some(sig) = &self.signature {
-            if sig.is_empty() || sig.len() > 512 {
+        if let Some(sig) = &self.signature
+            && (sig.is_empty() || sig.len() > 512) {
                 return Err(P2PError::validation("Invalid signature size"));
             }
-        }
 
         Ok(())
     }
@@ -1018,11 +1017,10 @@ impl DHT {
     /// Retrieve a record from the DHT with consistency checks
     pub async fn get(&self, key: &Key) -> Option<Record> {
         // Check local storage first
-        if let Some(record) = self.storage.get(key).await {
-            if !record.is_expired() {
+        if let Some(record) = self.storage.get(key).await
+            && !record.is_expired() {
                 return Some(record);
             }
-        }
 
         // Perform iterative lookup to find the record
         if let Some(record) = self.iterative_find_value(key).await {
@@ -1054,11 +1052,10 @@ impl DHT {
                 }
             }
             DHTQuery::FindValue { key, requester: _ } => {
-                if let Some(record) = self.storage.get(&key).await {
-                    if !record.is_expired() {
+                if let Some(record) = self.storage.get(&key).await
+                    && !record.is_expired() {
                         return DHTResponse::Value { record };
                     }
-                }
                 let nodes = self.find_node(&key).await;
                 let serializable_nodes = nodes.into_iter().map(|n| n.to_serializable()).collect();
                 DHTResponse::Nodes {
@@ -1114,11 +1111,10 @@ impl DHT {
     /// Perform secure lookup using S/Kademlia disjoint paths with distance verification
     pub async fn secure_get(&mut self, key: &Key) -> Result<Option<Record>> {
         // Check local storage first
-        if let Some(record) = self.storage.get(key).await {
-            if !record.is_expired() {
+        if let Some(record) = self.storage.get(key).await
+            && !record.is_expired() {
                 return Ok(Some(record));
             }
-        }
 
         // Check if S/Kademlia is enabled and extract configuration
         let (enable_distance_verification, disjoint_path_count, min_reputation) =
@@ -1406,11 +1402,10 @@ impl DHT {
         }
 
         // Check local storage first
-        if let Some(record) = self.storage.get(key).await {
-            if !record.is_expired() {
+        if let Some(record) = self.storage.get(key).await
+            && !record.is_expired() {
                 return Ok(Some(record));
             }
-        }
 
         // Get IPv6-verified nodes for secure lookup
         let verified_nodes = self.get_ipv6_verified_nodes_for_key(key).await?;
@@ -2189,11 +2184,10 @@ impl DHT {
 
         for message_ref in message_refs {
             let message_key = Key::from_inbox_message(inbox_id, &message_ref.message_id);
-            if let Some(message_record) = self.get(&message_key).await {
-                if let Ok(message) = serde_json::from_slice::<InboxMessage>(&message_record.value) {
+            if let Some(message_record) = self.get(&message_key).await
+                && let Ok(message) = serde_json::from_slice::<InboxMessage>(&message_record.value) {
                     messages.push(message);
                 }
-            }
         }
 
         // Sort messages by timestamp (newest first)

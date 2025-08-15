@@ -445,7 +445,7 @@ impl BootstrapCache {
             if let Some(ref quic) = contact.quic_contact {
                 for conn_type in &quic.successful_connection_types {
                     *connection_type_counts
-                        .entry(format!("{conn_type:?}").into())
+                        .entry(format!("{conn_type:?}"))
                         .or_insert(0) += 1;
                 }
             }

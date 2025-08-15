@@ -104,7 +104,7 @@ impl NodeIdentity {
     pub fn solve_pow_puzzle(node_id: &NodeId, difficulty: u8) -> Result<ProofOfWork> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| AdaptiveNetworkError::Other(e.to_string().into()))?
+            .map_err(|e| AdaptiveNetworkError::Other(e.to_string()))?
             .as_secs();
 
         let mut nonce = 0u64;
@@ -193,7 +193,7 @@ impl NodeIdentity {
     pub fn sign_message<T: Serialize + Clone>(&self, message: &T) -> Result<SignedMessage<T>> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| AdaptiveNetworkError::Other(e.to_string().into()))?
+            .map_err(|e| AdaptiveNetworkError::Other(e.to_string()))?
             .as_secs();
 
         let payload_bytes =
@@ -244,7 +244,7 @@ impl<T: Serialize + for<'de> Deserialize<'de>> SignedMessage<T> {
         bytes_to_verify.extend_from_slice(&self.timestamp.to_le_bytes());
 
         let signature_bytes: [u8; 64] = self.signature.as_slice().try_into().map_err(|_| {
-            AdaptiveNetworkError::Other("Invalid signature length".to_string().into())
+            AdaptiveNetworkError::Other("Invalid signature length".to_string())
         })?;
         let signature = Signature::from_bytes(&signature_bytes);
 
@@ -255,7 +255,7 @@ impl<T: Serialize + for<'de> Deserialize<'de>> SignedMessage<T> {
     pub fn age(&self) -> Result<u64> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| AdaptiveNetworkError::Other(e.to_string().into()))?
+            .map_err(|e| AdaptiveNetworkError::Other(e.to_string()))?
             .as_secs();
 
         Ok(now.saturating_sub(self.timestamp))
@@ -289,15 +289,15 @@ impl StoredIdentity {
     /// Restore to NodeIdentity
     pub fn to_identity(&self) -> Result<NodeIdentity> {
         let secret_key_bytes: [u8; 32] = self.secret_key.as_slice().try_into().map_err(|_| {
-            AdaptiveNetworkError::Other("Invalid secret key length".to_string().into())
+            AdaptiveNetworkError::Other("Invalid secret key length".to_string())
         })?;
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
 
         let public_key_bytes: [u8; 32] = self.public_key.as_slice().try_into().map_err(|_| {
-            AdaptiveNetworkError::Other("Invalid public key length".to_string().into())
+            AdaptiveNetworkError::Other("Invalid public key length".to_string())
         })?;
         let public_key = VerifyingKey::from_bytes(&public_key_bytes)
-            .map_err(|e| AdaptiveNetworkError::Other(format!("Invalid public key: {e}").into()))?;
+            .map_err(|e| AdaptiveNetworkError::Other(format!("Invalid public key: {e}")))?;
 
         // Verify the stored public key matches the signing key
         if signing_key.verifying_key().to_bytes() != public_key.to_bytes() {

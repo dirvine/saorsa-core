@@ -211,6 +211,12 @@ pub struct ContentStore {
     storage: HashMap<ContentAddress, Vec<u8>>,
 }
 
+impl Default for ContentStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContentStore {
     pub fn new() -> Self {
         Self {
@@ -235,6 +241,12 @@ impl ContentStore {
 pub struct DedupIndex {
     chunk_refs: Arc<RwLock<HashMap<[u8; 32], ChunkRef>>>,
     total_dedup_savings: Arc<RwLock<u64>>,
+}
+
+impl Default for DedupIndex {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DedupIndex {
@@ -297,6 +309,12 @@ pub struct ChunkStorage {
     chunks: Arc<RwLock<HashMap<[u8; 32], Bytes>>>,
 }
 
+impl Default for ChunkStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChunkStorage {
     pub fn new() -> Self {
         Self {
@@ -338,6 +356,12 @@ pub struct ContentAddressingSystem {
     dedup_index: DedupIndex,
     chunk_store: ChunkStorage,
     metadata: Arc<RwLock<HashMap<[u8; 32], ChunkMetadata>>>,
+}
+
+impl Default for ContentAddressingSystem {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ContentAddressingSystem {

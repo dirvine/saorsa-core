@@ -172,7 +172,7 @@ impl RetrievalManager {
                 // Cache the content based on Q-learning decision
                 self.cache_manager
                     .decide_caching(
-                        content_hash.clone(),
+                        *content_hash,
                         retrieval_result.content.clone(),
                         ContentType::DataRetrieval,
                     )
@@ -202,7 +202,7 @@ impl RetrievalManager {
 
         // Launch all strategies in parallel
         let kademlia_handle = {
-            let hash = content_hash.clone();
+            let hash = *content_hash;
             let tx = tx.clone();
             let manager = self.clone_for_task();
             tokio::spawn(async move {
@@ -213,7 +213,7 @@ impl RetrievalManager {
         };
 
         let hyperbolic_handle = {
-            let hash = content_hash.clone();
+            let hash = *content_hash;
             let tx = tx.clone();
             let manager = self.clone_for_task();
             tokio::spawn(async move {
@@ -224,7 +224,7 @@ impl RetrievalManager {
         };
 
         let som_handle = {
-            let hash = content_hash.clone();
+            let hash = *content_hash;
             let tx = tx.clone();
             let manager = self.clone_for_task();
             tokio::spawn(async move {
@@ -270,7 +270,7 @@ impl RetrievalManager {
         // Query nodes in parallel
         let mut futures = Vec::new();
         for node in nodes {
-            let future = Box::pin(self.query_node_for_content(node, content_hash.clone()));
+            let future = Box::pin(self.query_node_for_content(node, *content_hash));
             futures.push(future);
         }
 
@@ -310,7 +310,7 @@ impl RetrievalManager {
         // Query nodes along the path
         for node in path {
             if let Ok((content, source_node)) = self
-                .query_node_for_content(node.clone(), content_hash.clone())
+                .query_node_for_content(node.clone(), *content_hash)
                 .await
             {
                 return Ok(RetrievalResult {
@@ -341,7 +341,7 @@ impl RetrievalManager {
         // Broadcast to all nodes in parallel
         let mut futures = Vec::new();
         for node in nodes {
-            let future = Box::pin(self.query_node_for_content(node, content_hash.clone()));
+            let future = Box::pin(self.query_node_for_content(node, *content_hash));
             futures.push(future);
         }
 

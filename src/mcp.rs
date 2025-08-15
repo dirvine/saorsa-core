@@ -1327,24 +1327,22 @@ impl MCPServer {
     /// Check if resource requirements can be met
     async fn check_resource_requirements(&self, requirements: &ToolRequirements) -> Result<()> {
         // Check memory limit
-        if let Some(max_memory) = requirements.max_memory {
-            if max_memory > self.config.tool_memory_limit {
+        if let Some(max_memory) = requirements.max_memory
+            && max_memory > self.config.tool_memory_limit {
                 return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
                     "Tool memory requirement exceeds limit".to_string().into(),
                 )));
             }
-        }
 
         // Check execution time limit
-        if let Some(max_execution_time) = requirements.max_execution_time {
-            if max_execution_time > self.config.max_tool_execution_time {
+        if let Some(max_execution_time) = requirements.max_execution_time
+            && max_execution_time > self.config.max_tool_execution_time {
                 return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
                     "Tool execution time requirement exceeds limit"
                         .to_string()
                         .into(),
                 )));
             }
-        }
 
         // TODO: Check other requirements (capabilities, network, filesystem)
 
@@ -1775,9 +1773,9 @@ impl MCPServer {
         let mut health_guard = service_health.write().await;
 
         for (service_id, health) in health_guard.iter_mut() {
-            if let Some(last_heartbeat) = health.last_heartbeat {
-                if let Ok(duration) = now.duration_since(last_heartbeat) {
-                    if duration > config.heartbeat_timeout {
+            if let Some(last_heartbeat) = health.last_heartbeat
+                && let Ok(duration) = now.duration_since(last_heartbeat)
+                    && duration > config.heartbeat_timeout {
                         let previous_status = health.status;
                         health.status = ServiceHealthStatus::Unhealthy;
                         health.error_message = Some("Heartbeat timeout".to_string());
@@ -1794,8 +1792,6 @@ impl MCPServer {
                             }
                         }
                     }
-                }
-            }
         }
     }
 
@@ -2820,7 +2816,7 @@ impl MCPServer {
         if let MCPMessage::ListToolsResult { tools, .. } = message.payload {
             // Create a service record from the advertisement
             let service = MCPService {
-                service_id: format!("mcp-{}", message.source_peer).into(),
+                service_id: format!("mcp-{}", message.source_peer),
                 node_id: message.source_peer.clone(),
                 tools: tools.iter().map(|t| t.name.clone()).collect(),
                 capabilities: MCPCapabilities {
@@ -2834,7 +2830,7 @@ impl MCPServer {
                     logging: None,
                 },
                 metadata: MCPServiceMetadata {
-                    name: format!("Remote MCP Service - {}", message.source_peer).into(),
+                    name: format!("Remote MCP Service - {}", message.source_peer),
                     version: "unknown".to_string(),
                     description: Some("Remote P2P MCP Service".to_string()),
                     tags: vec!["p2p".to_string(), "remote".to_string()],
@@ -2865,11 +2861,10 @@ impl MCPServer {
             }
 
             // Store in DHT if available
-            if let Some(dht) = &self.dht {
-                if let Err(e) = self.store_service_in_dht(&service, dht).await {
+            if let Some(dht) = &self.dht
+                && let Err(e) = self.store_service_in_dht(&service, dht).await {
                     warn!("Failed to store remote service in DHT: {}", e);
                 }
-            }
 
             info!(
                 "Registered remote MCP service from {} with {} tools",

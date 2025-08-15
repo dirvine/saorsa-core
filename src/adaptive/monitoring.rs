@@ -685,8 +685,8 @@ impl MonitoringSystem {
                     // Create alert if severe
                     if anomaly.severity > 0.7 {
                         let alert = Alert {
-                            id: format!("anomaly_{}", anomaly.metric).into(),
-                            name: format!("{} Anomaly", anomaly.metric).into(),
+                            id: format!("anomaly_{}", anomaly.metric),
+                            name: format!("{} Anomaly", anomaly.metric),
                             severity: AlertSeverity::Warning,
                             message: format!(
                                 "Anomaly detected in {}: value {} outside expected range {:?}",
@@ -965,11 +965,10 @@ impl AlertManager {
     pub async fn trigger_alert(&self, alert: Alert) -> Result<()> {
         // Check cooldown
         let mut cooldowns = self.cooldowns.write().await;
-        if let Some(last_trigger) = cooldowns.get(&alert.id) {
-            if last_trigger.elapsed() < self.cooldown_period {
+        if let Some(last_trigger) = cooldowns.get(&alert.id)
+            && last_trigger.elapsed() < self.cooldown_period {
                 return Ok(()); // Skip due to cooldown
             }
-        }
 
         // Record alert
         let mut active_alerts = self.active_alerts.write().await;

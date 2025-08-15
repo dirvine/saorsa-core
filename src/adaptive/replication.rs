@@ -294,7 +294,7 @@ impl ReplicationManager {
                 metadata,
             };
 
-            replica_map.insert(_content_hash.clone(), replica_info.clone());
+            replica_map.insert(*_content_hash, replica_info.clone());
             Ok(replica_info)
         } else {
             // Already have enough replicas
@@ -321,7 +321,7 @@ impl ReplicationManager {
                 // Check content that hasn't been checked recently
                 info.last_check.elapsed() > Duration::from_secs(300) // 5 minutes
             })
-            .map(|(hash, info)| (hash.clone(), info.clone()))
+            .map(|(hash, info)| (*hash, info.clone()))
             .collect();
         drop(replica_map);
 
@@ -373,7 +373,7 @@ impl ReplicationManager {
         let affected_content: Vec<_> = replica_map
             .iter()
             .filter(|(_, info)| info.storing_nodes.contains(departed_node))
-            .map(|(hash, info)| (hash.clone(), info.clone()))
+            .map(|(hash, info)| (*hash, info.clone()))
             .collect();
         drop(replica_map);
 

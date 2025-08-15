@@ -172,11 +172,10 @@ impl MultiArmedBandit {
         };
 
         // Load persisted statistics if available
-        if let Some(path) = mab.config.storage_path.clone() {
-            if let Err(e) = mab.load_statistics(&path).await {
+        if let Some(path) = mab.config.storage_path.clone()
+            && let Err(e) = mab.load_statistics(&path).await {
                 tracing::warn!("Failed to load MAB statistics: {}", e);
             }
-        }
 
         Ok(mab)
     }
@@ -331,8 +330,8 @@ impl MultiArmedBandit {
 
         // Check if we should persist
         let last_persist = *self.last_persist.read().await;
-        if last_persist.elapsed() > self.config.persist_interval {
-            if let Some(ref path) = self.config.storage_path {
+        if last_persist.elapsed() > self.config.persist_interval
+            && let Some(ref path) = self.config.storage_path {
                 let statistics_clone = statistics.clone();
                 let metrics_clone = metrics.clone();
                 let path_clone = path.clone();
@@ -352,7 +351,6 @@ impl MultiArmedBandit {
 
                 *self.last_persist.write().await = Instant::now();
             }
-        }
 
         Ok(())
     }
@@ -418,7 +416,7 @@ impl MultiArmedBandit {
 
         let data = fs::read_to_string(&stats_path)
             .await
-            .map_err(|e| P2PError::Io(e))?;
+            .map_err(P2PError::Io)?;
 
         let (statistics, metrics): (HashMap<(RouteId, ContentType), RouteStatistics>, MABMetrics) =
             serde_json::from_str(&data).map_err(|e| {
@@ -461,7 +459,7 @@ impl MultiArmedBandit {
         if let Some(parent) = stats_path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| P2PError::Io(e))?;
+                .map_err(P2PError::Io)?;
         }
 
         let data = serde_json::to_string_pretty(&(statistics, metrics)).map_err(|e| {
@@ -472,7 +470,7 @@ impl MultiArmedBandit {
 
         fs::write(&stats_path, data)
             .await
-            .map_err(|e| P2PError::Io(e))?;
+            .map_err(P2PError::Io)?;
 
         Ok(())
     }

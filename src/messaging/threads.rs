@@ -112,7 +112,7 @@ impl ThreadManager {
         let threads: Vec<ThreadSummary> = cache
             .values()
             .filter(|t| t.parent_message.channel_id == channel_id)
-            .map(|t| ThreadSummary::from(t))
+            .map(ThreadSummary::from)
             .collect();
         
         Ok(threads)
@@ -200,7 +200,7 @@ impl From<&ThreadView> for ThreadSummary {
         };
         
         Self {
-            thread_id: thread.parent_message.thread_id.unwrap_or(ThreadId::new()),
+            thread_id: thread.parent_message.thread_id.unwrap_or_default(),
             parent_preview,
             reply_count: thread.replies.len() as u32,
             participant_count: thread.participants.len() as u32,

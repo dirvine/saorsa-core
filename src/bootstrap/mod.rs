@@ -123,7 +123,7 @@ impl WordEncoder {
         let word4 = words4[((hash >> 48) % words4.len() as u64) as usize];
 
         Ok(FourWordAddress(
-            format!("{word1}.{word2}.{word3}.{word4}").into(),
+            format!("{word1}.{word2}.{word3}.{word4}"),
         ))
     }
 

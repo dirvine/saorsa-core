@@ -710,7 +710,7 @@ impl IdentityManager {
 
         // Check state
         if identity.state != IdentityState::Active {
-            issues.push(format!("Identity is not active: {:?}", identity.state).into());
+            issues.push(format!("Identity is not active: {:?}", identity.state));
             trust_level = 0;
         }
 
@@ -724,7 +724,7 @@ impl IdentityManager {
         match Ed25519VerifyingKey::from_bytes(identity.id.as_bytes()) {
             Ok(_) => {}
             Err(e) => {
-                issues.push(format!("Invalid public key in ID: {e}").into());
+                issues.push(format!("Invalid public key in ID: {e}"));
                 trust_level = 0;
             }
         }

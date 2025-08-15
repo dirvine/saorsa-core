@@ -154,7 +154,7 @@ impl RspsDhtStorage {
 
         // Store in provider summaries
         let mut summaries = self.provider_summaries.write().await;
-        summaries.insert(root_cid.clone(), record.clone());
+        summaries.insert(root_cid, record.clone());
 
         // Create DHT record for provider announcement
         let key = self.provider_key(&root_cid, &provider);
@@ -190,7 +190,7 @@ impl RspsDhtStorage {
         let pattern = self.provider_key_pattern(root_cid);
         let records = self.base_storage.get_records_by_publisher(&pattern, None).await.iter()
             .filter_map(|record| {
-                let key_str = std::str::from_utf8(&record.key.as_bytes()).ok()?;
+                let key_str = std::str::from_utf8(record.key.as_bytes()).ok()?;
                 if key_str.starts_with(&pattern) {
                     Some(record.clone())
                 } else {
@@ -220,10 +220,10 @@ impl RspsDhtStorage {
         // Check if we have RSPS for this root
         let summaries = self.provider_summaries.read().await;
         let _provider_record = summaries.get(&root_cid)
-            .ok_or_else(|| P2PError::Storage(StorageError::Database(std::borrow::Cow::Borrowed("No RSPS for root"))))?;
+            .ok_or(P2PError::Storage(StorageError::Database(std::borrow::Cow::Borrowed("No RSPS for root"))))?;
 
         // Use cache admission control
-        let admitted = self.cache.admit(root_cid.clone(), cid.clone(), data.clone())
+        let admitted = self.cache.admit(root_cid, cid, data.clone())
             .map_err(|e| P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!("Cache admission failed: {}", e)))))?;
 
         if admitted {
@@ -256,7 +256,7 @@ impl RspsDhtStorage {
         };
         
         // Create receipt using proper API
-        let receipt = self.witness_key.create_receipt(cid.clone(), epoch, metadata);
+        let receipt = self.witness_key.create_receipt(*cid, epoch, metadata);
         
         // Record receipt in TTL manager for extension logic
         let witness_id = self.witness_key.public_key();
@@ -308,7 +308,7 @@ impl RspsDhtStorage {
 
             // Create updated RSPS
             let cid_vec: Vec<Cid> = all_cids.into_iter().collect();
-            let new_rsps = Rsps::new(root_cid.clone(), 1, &cid_vec, &RspsConfig::default())
+            let new_rsps = Rsps::new(*root_cid, 1, &cid_vec, &RspsConfig::default())
                 .map_err(|e| P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!("RSPS creation failed: {}", e)))))?;
             
             // Update record
@@ -342,7 +342,7 @@ impl RspsDhtStorage {
                 now.duration_since(record.last_updated)
                     .unwrap_or(Duration::ZERO) > self.config.summary_update_interval * 2
             })
-            .map(|(root, _)| root.clone())
+            .map(|(root, _)| *root)
             .collect();
 
         for root in expired_roots {
@@ -372,12 +372,12 @@ impl RspsDhtStorage {
     // Helper methods
 
     fn provider_key(&self, root_cid: &RootCid, provider: &PeerId) -> Key {
-        let key_str = format!("/rsps/provider/{}/{}", hex::encode(&root_cid), provider.to_string());
+        let key_str = format!("/rsps/provider/{}/{}", hex::encode(root_cid), provider);
         Key::new(key_str.as_bytes())
     }
 
     fn provider_key_pattern(&self, root_cid: &RootCid) -> String {
-        format!("/rsps/provider/{}/", hex::encode(&root_cid))
+        format!("/rsps/provider/{}/", hex::encode(root_cid))
     }
 
     fn serialize_provider_record(&self, record: &ProviderRecord) -> Result<Vec<u8>> {

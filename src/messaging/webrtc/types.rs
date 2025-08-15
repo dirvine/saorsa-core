@@ -319,11 +319,7 @@ impl CallSession {
     pub fn duration(&self) -> Option<chrono::Duration> {
         if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
             Some(end - start)
-        } else if let Some(start) = self.start_time {
-            Some(Utc::now() - start)
-        } else {
-            None
-        }
+        } else { self.start_time.map(|start| Utc::now() - start) }
     }
     
     pub fn add_participant(&mut self, participant: FourWordAddress) {

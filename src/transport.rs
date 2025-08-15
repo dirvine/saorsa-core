@@ -429,17 +429,15 @@ impl TransportManager {
     #[allow(dead_code)]
     async fn auto_select_transport(&self, addr: &NetworkAddress) -> Result<TransportType> {
         // Always use QUIC as it's the only transport protocol
-        if self.transports.contains_key(&TransportType::QUIC) {
-            if let Some(transport) = self.transports.get(&TransportType::QUIC) {
-                if transport.supports_address(addr) {
+        if self.transports.contains_key(&TransportType::QUIC)
+            && let Some(transport) = self.transports.get(&TransportType::QUIC)
+                && transport.supports_address(addr) {
                     debug!(
                         "Using QUIC transport for {} (only available transport)",
                         addr
                     );
                     return Ok(TransportType::QUIC);
                 }
-            }
-        }
 
         Err(P2PError::Transport(
             crate::error::TransportError::SetupFailed(

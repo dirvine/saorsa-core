@@ -15,6 +15,12 @@ use tokio::sync::RwLock;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OperationId(String);
 
+impl Default for OperationId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OperationId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
@@ -173,7 +179,7 @@ impl ReceiptStorage {
 
         self.by_content
             .entry(content_hash)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(operation_id.clone());
 
         self.receipts.insert(operation_id, receipt);

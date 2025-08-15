@@ -301,34 +301,29 @@ impl IPDiversityEnforcer {
             };
 
         // Check /64 subnet limit
-        if let Some(&count) = self.subnet_64_counts.get(&ip_analysis.subnet_64) {
-            if count >= limit_64 {
+        if let Some(&count) = self.subnet_64_counts.get(&ip_analysis.subnet_64)
+            && count >= limit_64 {
                 return false;
             }
-        }
 
         // Check /48 subnet limit
-        if let Some(&count) = self.subnet_48_counts.get(&ip_analysis.subnet_48) {
-            if count >= limit_48 {
+        if let Some(&count) = self.subnet_48_counts.get(&ip_analysis.subnet_48)
+            && count >= limit_48 {
                 return false;
             }
-        }
 
         // Check /32 subnet limit
-        if let Some(&count) = self.subnet_32_counts.get(&ip_analysis.subnet_32) {
-            if count >= limit_32 {
+        if let Some(&count) = self.subnet_32_counts.get(&ip_analysis.subnet_32)
+            && count >= limit_32 {
                 return false;
             }
-        }
 
         // Check ASN limit
-        if let Some(asn) = ip_analysis.asn {
-            if let Some(&count) = self.asn_counts.get(&asn) {
-                if count >= limit_asn {
+        if let Some(asn) = ip_analysis.asn
+            && let Some(&count) = self.asn_counts.get(&asn)
+                && count >= limit_asn {
                     return false;
                 }
-            }
-        }
 
         true
     }
@@ -387,23 +382,21 @@ impl IPDiversityEnforcer {
             }
         }
 
-        if let Some(asn) = ip_analysis.asn {
-            if let Some(count) = self.asn_counts.get_mut(&asn) {
+        if let Some(asn) = ip_analysis.asn
+            && let Some(count) = self.asn_counts.get_mut(&asn) {
                 *count = count.saturating_sub(1);
                 if *count == 0 {
                     self.asn_counts.remove(&asn);
                 }
             }
-        }
 
-        if let Some(ref country) = ip_analysis.country {
-            if let Some(count) = self.country_counts.get_mut(country) {
+        if let Some(ref country) = ip_analysis.country
+            && let Some(count) = self.country_counts.get_mut(country) {
                 *count = count.saturating_sub(1);
                 if *count == 0 {
                     self.country_counts.remove(country);
                 }
             }
-        }
     }
 
     /// Extract network prefix of specified length from IPv6 address

@@ -169,7 +169,7 @@ impl EnhancedSignatureVerifier {
                 success: result.is_ok(),
                 error: result
                     .err()
-                    .map(|e| format!("Verification failed: {e}").into()),
+                    .map(|e| format!("Verification failed: {e}")),
             });
         }
 

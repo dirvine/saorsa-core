@@ -539,7 +539,7 @@ impl AdaptiveP2PClient for Client {
             .replication
             .replicate_content(&hash, &data, metadata)
             .await
-            .map_err(|e| ClientError::Storage(format!("Replication failed: {e}").into()))?;
+            .map_err(|e| ClientError::Storage(format!("Replication failed: {e}")))?;
 
         Ok(hash)
     }

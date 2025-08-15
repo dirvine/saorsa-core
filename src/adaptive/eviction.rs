@@ -70,6 +70,12 @@ pub struct LRUStrategy {
     position_map: HashMap<ContentHash, usize>,
 }
 
+impl Default for LRUStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LRUStrategy {
     pub fn new() -> Self {
         Self {
@@ -98,14 +104,14 @@ impl EvictionStrategy for LRUStrategy {
             self.access_order.remove(pos);
             // Update positions for items after removed one
             for (i, hash) in self.access_order.iter().enumerate().skip(pos) {
-                self.position_map.insert(hash.clone(), i);
+                self.position_map.insert(*hash, i);
             }
         }
 
         // Add to end (most recently used)
-        self.access_order.push_back(content_hash.clone());
+        self.access_order.push_back(*content_hash);
         self.position_map
-            .insert(content_hash.clone(), self.access_order.len() - 1);
+            .insert(*content_hash, self.access_order.len() - 1);
     }
 
     fn on_insert(&mut self, content_hash: &ContentHash) {
@@ -122,6 +128,12 @@ impl EvictionStrategy for LRUStrategy {
 pub struct LFUStrategy {
     /// Frequency counts
     frequency_map: HashMap<ContentHash, u64>,
+}
+
+impl Default for LFUStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LFUStrategy {
@@ -146,11 +158,11 @@ impl EvictionStrategy for LFUStrategy {
     }
 
     fn on_access(&mut self, content_hash: &ContentHash) {
-        *self.frequency_map.entry(content_hash.clone()).or_insert(0) += 1;
+        *self.frequency_map.entry(*content_hash).or_insert(0) += 1;
     }
 
     fn on_insert(&mut self, content_hash: &ContentHash) {
-        self.frequency_map.insert(content_hash.clone(), 1);
+        self.frequency_map.insert(*content_hash, 1);
     }
 
     fn name(&self) -> &str {
@@ -163,6 +175,12 @@ impl EvictionStrategy for LFUStrategy {
 pub struct FIFOStrategy {
     /// Insertion order
     insertion_order: VecDeque<ContentHash>,
+}
+
+impl Default for FIFOStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FIFOStrategy {
@@ -191,7 +209,7 @@ impl EvictionStrategy for FIFOStrategy {
     }
 
     fn on_insert(&mut self, content_hash: &ContentHash) {
-        self.insertion_order.push_back(content_hash.clone());
+        self.insertion_order.push_back(*content_hash);
     }
 
     fn name(&self) -> &str {
@@ -258,7 +276,7 @@ impl AdaptiveStrategy {
             .map(|qv| qv.value)
             .unwrap_or(0.0);
         let evict_value = q_table
-            .get(&(state, CacheAction::Evict(content_hash.clone())))
+            .get(&(state, CacheAction::Evict(*content_hash)))
             .map(|qv| qv.value)
             .unwrap_or(0.0);
 

@@ -69,7 +69,7 @@ impl ReedSolomonEncoder {
         }
 
         // Split data into k chunks
-        let chunk_size = (data.len() + self.config.k - 1) / self.config.k;
+        let chunk_size = data.len().div_ceil(self.config.k);
         if chunk_size > self.config.max_chunk_size {
             return Err(anyhow!("Chunk size exceeds maximum"));
         }

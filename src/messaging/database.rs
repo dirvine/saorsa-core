@@ -497,7 +497,7 @@ impl DatabaseMessageStore {
         for row in rows {
             let emoji: String = row.try_get(0)?;
             let user = FourWordAddress::from(row.try_get::<String, _>(1)?);
-            result.entry(emoji).or_insert_with(Vec::new).push(user);
+            result.entry(emoji).or_default().push(user);
         }
         
         Ok(result)

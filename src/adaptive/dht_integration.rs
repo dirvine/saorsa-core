@@ -108,7 +108,7 @@ impl AdaptiveDHT {
         let dht = self.base_dht.read().await;
         dht.put(dht_key, value.clone())
             .await
-            .map_err(|e| AdaptiveNetworkError::Other(e.to_string().into()))?;
+            .map_err(|e| AdaptiveNetworkError::Other(e.to_string()))?;
 
         metrics.stores_successful += 1;
 
@@ -146,7 +146,7 @@ impl AdaptiveDHT {
                 Ok(record.value)
             }
             None => Err(AdaptiveNetworkError::Other(
-                "Record not found".to_string().into(),
+                "Record not found".to_string(),
             )),
         }
     }
@@ -259,7 +259,7 @@ impl AdaptiveDHT {
     pub async fn update_routing(&self, node: NodeDescriptor) -> Result<()> {
         // Convert NodeId to PeerId (using the hash as peer ID string)
         let peer_id = PeerId::from_str(&node.id.to_string())
-            .map_err(|e| AdaptiveNetworkError::Other(format!("Invalid peer ID: {e}").into()))?;
+            .map_err(|e| AdaptiveNetworkError::Other(format!("Invalid peer ID: {e}")))?;
 
         // Parse addresses to Multiaddr
         let addresses: Vec<Multiaddr> = node
@@ -270,7 +270,7 @@ impl AdaptiveDHT {
 
         if addresses.is_empty() {
             return Err(AdaptiveNetworkError::Other(
-                "No valid addresses".to_string().into(),
+                "No valid addresses".to_string(),
             ));
         }
 
@@ -281,7 +281,7 @@ impl AdaptiveDHT {
             &Self::node_id_to_key(&node.id),
         ))
         .await
-        .map_err(|e| AdaptiveNetworkError::Other(e.to_string().into()))
+        .map_err(|e| AdaptiveNetworkError::Other(e.to_string()))
     }
 
     /// Get current DHT metrics

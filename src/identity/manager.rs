@@ -103,7 +103,7 @@ impl IPv6BindingProof {
         user_keypair: &SigningKey,
         _ipv6_keypair: &SigningKey,
     ) -> Result<Self> {
-        let ipv6_address = format!("{ipv6_id:?}").into(); // Placeholder conversion
+        let ipv6_address = format!("{ipv6_id:?}"); // Placeholder conversion
         let timestamp = SystemTime::now();
 
         // Create signature data (simplified)

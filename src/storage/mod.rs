@@ -52,57 +52,57 @@ type Result<T> = std::result::Result<T, StorageError>;
 pub mod keys {
     /// User profile key pattern
     pub fn profile(user_id: &str) -> String {
-        format!("profile:{user_id}").into()
+        format!("profile:{user_id}")
     }
 
     /// Device registry key
     pub fn devices(user_id: &str) -> String {
-        format!("devices:{user_id}").into()
+        format!("devices:{user_id}")
     }
 
     /// Chat channel key
     pub fn chat_channel(channel_id: &str) -> String {
-        format!("chat:channel:{channel_id}").into()
+        format!("chat:channel:{channel_id}")
     }
 
     /// Chat message key
     pub fn chat_message(channel_id: &str, msg_id: &str) -> String {
-        format!("chat:msg:{channel_id}:{msg_id}").into()
+        format!("chat:msg:{channel_id}:{msg_id}")
     }
 
     /// Chat message index (for pagination)
     pub fn chat_index(channel_id: &str, timestamp: u64) -> String {
-        format!("chat:idx:{channel_id}:{timestamp}").into()
+        format!("chat:idx:{channel_id}:{timestamp}")
     }
 
     /// Discussion topic key
     pub fn discuss_topic(topic_id: &str) -> String {
-        format!("discuss:topic:{topic_id}").into()
+        format!("discuss:topic:{topic_id}")
     }
 
     /// Discussion reply key
     pub fn discuss_reply(topic_id: &str, reply_id: &str) -> String {
-        format!("discuss:reply:{topic_id}:{reply_id}").into()
+        format!("discuss:reply:{topic_id}:{reply_id}")
     }
 
     /// Project key
     pub fn project(project_id: &str) -> String {
-        format!("project:{project_id}").into()
+        format!("project:{project_id}")
     }
 
     /// Document metadata key
     pub fn document_meta(doc_id: &str) -> String {
-        format!("doc:meta:{doc_id}").into()
+        format!("doc:meta:{doc_id}")
     }
 
     /// File chunk key
     pub fn file_chunk(file_id: &str, chunk_num: u32) -> String {
-        format!("file:chunk:{file_id}:{chunk_num:08}").into()
+        format!("file:chunk:{file_id}:{chunk_num:08}")
     }
 
     /// Organization key
     pub fn organization(org_id: &str) -> String {
-        format!("org:{org_id}").into()
+        format!("org:{org_id}")
     }
 
     /// Public channel discovery
@@ -112,7 +112,7 @@ pub mod keys {
 
     /// User's joined channels
     pub fn user_channels(user_id: &str) -> String {
-        format!("user:channels:{user_id}").into()
+        format!("user:channels:{user_id}")
     }
 }
 
@@ -207,7 +207,7 @@ impl StorageManager {
         self.dht
             .put(dht_key, wrapper_bytes)
             .await
-            .map_err(|e| StorageError::DhtError(e.to_string().into()))?;
+            .map_err(|e| StorageError::DhtError(e.to_string()))?;
 
         Ok(())
     }
@@ -220,7 +220,7 @@ impl StorageManager {
             .dht
             .get(&dht_key)
             .await
-            .ok_or_else(|| StorageError::KeyNotFound(key.to_string().into()))?;
+            .ok_or_else(|| StorageError::KeyNotFound(key.to_string()))?;
 
         // Deserialize wrapper
         let wrapper: EncryptedData = bincode::deserialize(&record.value)?;
@@ -248,7 +248,7 @@ impl StorageManager {
         self.dht
             .put(dht_key, value)
             .await
-            .map_err(|e| StorageError::DhtError(e.to_string().into()))?;
+            .map_err(|e| StorageError::DhtError(e.to_string()))?;
 
         Ok(())
     }
@@ -260,7 +260,7 @@ impl StorageManager {
             .dht
             .get(&dht_key)
             .await
-            .ok_or_else(|| StorageError::KeyNotFound(key.to_string().into()))?;
+            .ok_or_else(|| StorageError::KeyNotFound(key.to_string()))?;
 
         let data = bincode::deserialize(&record.value)?;
         Ok(data)
@@ -273,7 +273,7 @@ impl StorageManager {
         self.dht
             .put(dht_key, vec![])
             .await
-            .map_err(|e| StorageError::DhtError(e.to_string().into()))?;
+            .map_err(|e| StorageError::DhtError(e.to_string()))?;
         Ok(())
     }
 
@@ -294,7 +294,7 @@ impl StorageManager {
 
         let ciphertext = cipher
             .encrypt(nonce, plaintext)
-            .map_err(|e| StorageError::EncryptionError(e.to_string().into()))?;
+            .map_err(|e| StorageError::EncryptionError(e.to_string()))?;
 
         Ok((ciphertext, nonce_bytes))
     }
@@ -306,7 +306,7 @@ impl StorageManager {
 
         let plaintext = cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| StorageError::EncryptionError(e.to_string().into()))?;
+            .map_err(|e| StorageError::EncryptionError(e.to_string()))?;
 
         Ok(plaintext)
     }

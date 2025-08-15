@@ -673,7 +673,7 @@ impl RecoveryManager {
         priority: RecoveryPriority,
     ) -> Result<()> {
         // Queue a replication task
-        self.queue_recovery(content_hash.clone(), vec![], priority)
+        self.queue_recovery(*content_hash, vec![], priority)
             .await
     }
 

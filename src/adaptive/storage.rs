@@ -218,7 +218,7 @@ impl ContentStore {
         let content_size = metadata.size;
         let mut cache = self.cache.write().await;
         cache.insert(
-            hash.clone(),
+            hash,
             CachedContent {
                 data: content,
                 last_access: Instant::now(),
@@ -283,7 +283,7 @@ impl ContentStore {
                 // Update cache
                 let mut cache = self.cache.write().await;
                 cache.insert(
-                    hash.clone(),
+                    *hash,
                     CachedContent {
                         data: data.clone(),
                         last_access: Instant::now(),
@@ -424,7 +424,7 @@ impl ChunkManager {
                 let chunk_hash = ContentStore::calculate_hash(chunk_data);
                 Chunk {
                     metadata: ChunkMetadata {
-                        parent_hash: parent_hash.clone(),
+                        parent_hash,
                         chunk_index: i as u32,
                         total_chunks: total_chunks as u32,
                         chunk_size: chunk_data.len(),

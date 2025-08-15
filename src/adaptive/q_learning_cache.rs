@@ -543,7 +543,7 @@ impl QLearnCacheManager {
             CacheAction::Cache(_) => {
                 stats.usage = (stats.usage + content_size).min(stats.capacity);
                 stats.access_frequency.insert(
-                    content_hash.clone(),
+                    *content_hash,
                     AccessInfo {
                         count: 1,
                         last_access_secs: Self::current_timestamp_secs(),
@@ -621,7 +621,7 @@ impl QLearnCacheManager {
         // Can cache if not already cached and have space
         if !stats.access_frequency.contains_key(content_hash) {
             if stats.usage + content_size <= stats.capacity {
-                actions.push(CacheAction::Cache(content_hash.clone()));
+                actions.push(CacheAction::Cache(*content_hash));
             } else {
                 // Need to evict something first - use eviction strategy
                 let cache_state = CacheState {

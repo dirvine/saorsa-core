@@ -10,6 +10,12 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MessageId(pub Uuid);
 
+impl Default for MessageId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
@@ -26,6 +32,12 @@ impl std::fmt::Display for MessageId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ThreadId(pub Uuid);
 
+impl Default for ThreadId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThreadId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
@@ -41,6 +53,12 @@ impl std::fmt::Display for ThreadId {
 /// Channel/conversation identifier  
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ChannelId(pub Uuid);
+
+impl Default for ChannelId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ChannelId {
     pub fn new() -> Self {

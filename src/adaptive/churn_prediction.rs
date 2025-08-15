@@ -184,6 +184,12 @@ pub struct ChurnPrediction {
     pub confidence: f64,
 }
 
+impl Default for LSTMChurnPredictor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LSTMChurnPredictor {
     /// Create new LSTM predictor
     pub fn new() -> Self {
@@ -269,7 +275,7 @@ impl LSTMChurnPredictor {
         }
 
         // Output layer
-        let mut output = vec![0.0; 3];
+        let mut output = [0.0; 3];
         for i in 0..3 {
             for j in 0..current_input.len() {
                 output[i] += self.output_weights[i][j] * current_input[j];
@@ -374,7 +380,7 @@ impl LSTMChurnPredictor {
         let prediction = tokio::runtime::Handle::current().block_on(self.predict(features))?;
 
         // Calculate loss
-        let pred_vec = vec![prediction.hour_1, prediction.hour_6, prediction.hour_24];
+        let pred_vec = [prediction.hour_1, prediction.hour_6, prediction.hour_24];
         let _losses: Vec<f64> = pred_vec
             .iter()
             .zip(&experience.actual_churn)
@@ -399,7 +405,7 @@ impl LSTMChurnPredictor {
     pub async fn save(&self, path: &std::path::Path) -> Result<()> {
         let model_data = ModelData {
             version: self.version,
-            layers: self.layers.iter().map(|l| LayerData::from(l)).collect(),
+            layers: self.layers.iter().map(LayerData::from).collect(),
             output_weights: self.output_weights.clone(),
             output_bias: self.output_bias.clone(),
         };

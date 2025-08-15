@@ -414,8 +414,8 @@ impl DhtNetworkManager {
         info!("Getting value for key: {}", key.to_hex());
 
         // Check local storage first
-        if let Some(record) = self.dht.read().await.get(key).await {
-            if !record.is_expired() {
+        if let Some(record) = self.dht.read().await.get(key).await
+            && !record.is_expired() {
                 info!("Found value locally for key: {}", key.to_hex());
                 return Ok(DhtNetworkResult::GetSuccess {
                     key: key.clone(),
@@ -423,7 +423,6 @@ impl DhtNetworkManager {
                     source: self.config.local_peer_id.clone(),
                 });
             }
-        }
 
         // Query remote nodes
         let operation = DhtNetworkOperation::Get { key: key.clone() };

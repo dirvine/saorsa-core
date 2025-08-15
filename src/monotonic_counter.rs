@@ -236,7 +236,7 @@ impl MonotonicCounterSystem {
             })?;
             let peer_counter = counters
                 .entry(user_id.clone())
-                .or_insert_with(|| PeerCounter::new());
+                .or_insert_with(PeerCounter::new);
 
             // Validate the sequence number
             let result =
@@ -316,7 +316,7 @@ impl MonotonicCounterSystem {
             for request in requests {
                 let peer_counter = counters
                     .entry(request.user_id.clone())
-                    .or_insert_with(|| PeerCounter::new());
+                    .or_insert_with(PeerCounter::new);
 
                 let validation_result = self.validate_sequence_internal(
                     peer_counter,

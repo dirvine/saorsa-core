@@ -41,6 +41,7 @@ use tracing::info;
 /// Main configuration structure for the P2P network
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Config {
     /// Network configuration
     pub network: NetworkConfig,
@@ -171,19 +172,6 @@ pub struct IdentityConfig {
 }
 
 // Default implementations
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            network: NetworkConfig::default(),
-            security: SecurityConfig::default(),
-            storage: StorageConfig::default(),
-            mcp: McpConfig::default(),
-            dht: DhtConfig::default(),
-            transport: TransportConfig::default(),
-            identity: IdentityConfig::default(),
-        }
-    }
-}
 
 impl Default for NetworkConfig {
     fn default() -> Self {
@@ -439,11 +427,10 @@ impl Config {
             errors.push(e);
         }
 
-        if let Some(addr) = &self.network.public_address {
-            if let Err(e) = self.validate_address(addr, "public_address") {
+        if let Some(addr) = &self.network.public_address
+            && let Err(e) = self.validate_address(addr, "public_address") {
                 errors.push(e);
             }
-        }
 
         for (i, node) in self.network.bootstrap_nodes.iter().enumerate() {
             if let Err(e) = self.validate_address(node, &format!("bootstrap_node[{}]", i)) {

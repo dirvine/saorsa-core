@@ -778,7 +778,7 @@ impl NetworkCoordinator {
             handler(message).await?;
         } else {
             return Err(AdaptiveNetworkError::Routing(
-                format!("No handler for message type: {:?}", msg_type).into(),
+                format!("No handler for message type: {:?}", msg_type),
             )
             .into());
         }

@@ -157,7 +157,7 @@ fn derive_key_from_password(password: &str, salt: &[u8; SALT_SIZE]) -> Result<Ke
         )));
     }
 
-    Ok(Key::<Aes256Gcm>::from_slice(&key_bytes[..AES_KEY_SIZE]).clone())
+    Ok(*Key::<Aes256Gcm>::from_slice(&key_bytes[..AES_KEY_SIZE]))
 }
 
 /// Encrypt data with a shared secret (for peer-to-peer encryption)

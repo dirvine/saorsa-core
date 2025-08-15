@@ -297,11 +297,10 @@ impl MediaStreamManager {
     pub async fn switch_audio_device(&self, call_id: CallId, device: AudioDevice) -> Result<()> {
         let mut streams = self.streams.write().await;
         
-        if let Some(stream) = streams.get_mut(&call_id) {
-            if let Some(ref mut audio_track) = stream.audio_track {
+        if let Some(stream) = streams.get_mut(&call_id)
+            && let Some(ref mut audio_track) = stream.audio_track {
                 self.audio_processor.switch_device(audio_track, device).await?;
             }
-        }
         
         Ok(())
     }
@@ -310,11 +309,10 @@ impl MediaStreamManager {
     pub async fn switch_video_device(&self, call_id: CallId, device: VideoDevice) -> Result<()> {
         let mut streams = self.streams.write().await;
         
-        if let Some(stream) = streams.get_mut(&call_id) {
-            if let Some(ref mut video_track) = stream.video_track {
+        if let Some(stream) = streams.get_mut(&call_id)
+            && let Some(ref mut video_track) = stream.video_track {
                 self.video_processor.switch_device(video_track, device).await?;
             }
-        }
         
         Ok(())
     }
@@ -326,6 +324,12 @@ pub struct AudioProcessor {
     current_device: Arc<RwLock<Option<AudioDevice>>>,
     _media_engine: Arc<MediaEngine>,
     active_tracks: Arc<RwLock<HashMap<String, Option<Arc<TrackLocalStaticRTP>>>>>,
+}
+
+impl Default for AudioProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AudioProcessor {
@@ -441,6 +445,12 @@ pub struct VideoProcessor {
     current_device: Arc<RwLock<Option<VideoDevice>>>,
     _media_engine: Arc<MediaEngine>,
     active_tracks: Arc<RwLock<HashMap<String, Option<Arc<TrackLocalStaticRTP>>>>>,
+}
+
+impl Default for VideoProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VideoProcessor {

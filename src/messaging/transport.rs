@@ -399,7 +399,7 @@ impl MessageQueue {
         self.messages.insert(message.id, queued);
         self.by_recipient
             .entry(recipient)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(message.id);
     }
     

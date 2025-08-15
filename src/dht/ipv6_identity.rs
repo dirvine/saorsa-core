@@ -366,7 +366,7 @@ impl IPv6DHTIdentityManager {
             confidence -= 0.3;
         }
 
-        confidence = confidence.max(0.0).min(1.0);
+        confidence = confidence.clamp(0.0, 1.0);
 
         // Cache the identity
         self.identity_cache.insert(

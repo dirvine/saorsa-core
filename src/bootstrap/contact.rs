@@ -277,7 +277,6 @@ impl ContactEntry {
                 " QUIC: Setup:{:.0}ms",
                 quic_contact.quic_quality.avg_connection_setup_time_ms
             )
-            .into()
         } else {
             " QUIC: None".to_string()
         };

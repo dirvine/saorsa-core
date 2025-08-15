@@ -90,7 +90,7 @@ impl PrometheusExporter {
         let mut degraded = 0u64;
         let mut unhealthy = 0u64;
 
-        for (_, component) in &health.checks {
+        for component in health.checks.values() {
             match component.status {
                 HealthStatus::Healthy => healthy += 1,
                 HealthStatus::Degraded => degraded += 1,
@@ -232,7 +232,7 @@ impl PrometheusExporter {
         let mut degraded = 0u64;
         let mut unhealthy = 0u64;
 
-        for (_, component) in &health.checks {
+        for component in health.checks.values() {
             match component.status {
                 HealthStatus::Healthy => healthy += 1,
                 HealthStatus::Degraded => degraded += 1,

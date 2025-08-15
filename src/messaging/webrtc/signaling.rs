@@ -97,22 +97,20 @@ impl SignalingHandler {
         
         for line in lines {
             // Block private IP addresses in connection data
-            if line.starts_with("c=") {
-                if line.contains("127.0.0.1") || 
+            if line.starts_with("c=")
+                && (line.contains("127.0.0.1") || 
                    line.contains("localhost") ||
                    line.contains("192.168.") ||
                    line.contains("10.") ||
-                   line.contains("172.16.") {
+                   line.contains("172.16.")) {
                     return Err(anyhow::anyhow!("Private IP address not allowed in SDP connection data: {}", line));
                 }
-            }
             
             // Validate media descriptions
-            if line.starts_with("m=") {
-                if !line.contains("audio") && !line.contains("video") && !line.contains("application") {
+            if line.starts_with("m=")
+                && !line.contains("audio") && !line.contains("video") && !line.contains("application") {
                     return Err(anyhow::anyhow!("Invalid media type in SDP: {}", line));
                 }
-            }
             
             // Block potentially dangerous attributes
             if line.contains("a=tool:") && line.to_lowercase().contains("script") {
@@ -446,12 +444,11 @@ impl SignalingHandler {
     /// Handle incoming call answer
     async fn _handle_incoming_answer(&self, answer: CallAnswer) -> Result<()> {
         // Validate incoming SDP (if call was accepted)
-        if answer.accepted {
-            if let Err(e) = Self::validate_sdp(&answer.sdp) {
+        if answer.accepted
+            && let Err(e) = Self::validate_sdp(&answer.sdp) {
                 error!("Rejecting call answer due to invalid SDP: {}", e);
                 return Err(e);
             }
-        }
         
         // Update session
         let mut sessions = self.sessions.write().await;

@@ -95,7 +95,7 @@ impl P2PNetworkNode {
             .map_err(|e| anyhow::anyhow!("Failed to connect to peer: {}", e))?;
 
         // Register the peer
-        self.add_peer(peer_id.clone(), peer_addr).await;
+        self.add_peer(peer_id, peer_addr).await;
 
         log::info!("Connected to peer {} at {}", peer_id, peer_addr);
         Ok(peer_id)
@@ -110,7 +110,7 @@ impl P2PNetworkNode {
             .map_err(|e| anyhow::anyhow!("Failed to accept connection: {}", e))?;
 
         // Register the peer
-        self.add_peer(peer_id.clone(), addr).await;
+        self.add_peer(peer_id, addr).await;
 
         log::info!("Accepted connection from peer {} at {}", peer_id, addr);
         Ok((peer_id, addr))

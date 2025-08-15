@@ -227,8 +227,8 @@ impl ConnectionPool {
         // Check active connections
         {
             let mut active = self.active_connections.write().await;
-            if active.contains_key(&node_id) {
-                if let Some(conn) = active.get_mut(&node_id) {
+            if active.contains_key(&node_id)
+                && let Some(conn) = active.get_mut(&node_id) {
                     if conn.connection.is_alive() {
                         conn.touch();
                         // For now, just return error - this is a mock implementation
@@ -237,18 +237,16 @@ impl ConnectionPool {
                         active.remove(&node_id);
                     }
                 }
-            }
         }
 
         // Check cache
         {
             let mut cache = self.connection_cache.write().await;
-            if let Some(mut conn) = cache.pop(&node_id) {
-                if conn.connection.is_alive() {
+            if let Some(mut conn) = cache.pop(&node_id)
+                && conn.connection.is_alive() {
                     conn.touch();
                     return Ok(conn.connection);
                 }
-            }
         }
 
         // Create new connection
@@ -279,12 +277,11 @@ impl ConnectionPool {
 
     pub async fn release_connection(&self, node_id: NodeId) {
         let mut active = self.active_connections.write().await;
-        if let Some(conn) = active.remove(&node_id) {
-            if conn.connection.is_alive() && !conn.is_idle() {
+        if let Some(conn) = active.remove(&node_id)
+            && conn.connection.is_alive() && !conn.is_idle() {
                 let mut cache = self.connection_cache.write().await;
                 cache.put(node_id, conn);
             }
-        }
     }
 
     pub async fn cleanup_idle_connections(&self) {
@@ -302,6 +299,12 @@ pub struct MessageRouter {
     normal_priority: Arc<Mutex<VecDeque<(NodeId, DhtMessage)>>>,
     batch_buffer: Arc<Mutex<Vec<(NodeId, DhtMessage)>>>,
     last_batch_time: Arc<Mutex<Instant>>,
+}
+
+impl Default for MessageRouter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MessageRouter {
@@ -372,6 +375,12 @@ struct PeerInfo {
     last_seen: SystemTime,
     reputation: f64,
     failure_count: u32,
+}
+
+impl Default for PeerManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PeerManager {

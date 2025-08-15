@@ -66,14 +66,14 @@ pub fn encapsulate(public_key: &[u8]) -> Result<(Vec<u8>, SharedSecret)> {
     // Validate ML-KEM format
     if public_key.len() != 1184 {
         return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM public key length".to_string().into(),
+            "Invalid ML-KEM public key length".to_string(),
         ));
     }
 
     // Check format marker
     if &public_key[32..36] != b"E25K" {
         return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM key format".to_string().into(),
+            "Invalid ML-KEM key format".to_string(),
         ));
     }
 
@@ -84,17 +84,16 @@ pub fn encapsulate(public_key: &[u8]) -> Result<(Vec<u8>, SharedSecret)> {
     if public_key[36..68] != expected_hash[..] {
         return Err(QuantumCryptoError::MlKemError(
             "ML-KEM public key integrity check failed"
-                .to_string()
-                .into(),
+                .to_string(),
         ));
     }
 
     // Extract Ed25519 public key
     let their_public = VerifyingKey::from_bytes(&public_key[0..32].try_into().map_err(|_| {
-        QuantumCryptoError::MlKemError("Invalid public key length".to_string().into())
+        QuantumCryptoError::MlKemError("Invalid public key length".to_string())
     })?)
     .map_err(|e| {
-        QuantumCryptoError::MlKemError(format!("Invalid Ed25519 public key: {e}").into())
+        QuantumCryptoError::MlKemError(format!("Invalid Ed25519 public key: {e}"))
     })?;
 
     // Generate ephemeral keypair for key exchange
@@ -154,26 +153,26 @@ pub fn decapsulate(private_key: &[u8], ciphertext: &[u8]) -> Result<SharedSecret
     // Validate inputs
     if private_key.len() != 2400 {
         return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM private key length".to_string().into(),
+            "Invalid ML-KEM private key length".to_string(),
         ));
     }
 
     if ciphertext.len() != 1088 {
         return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM ciphertext length".to_string().into(),
+            "Invalid ML-KEM ciphertext length".to_string(),
         ));
     }
 
     // Check format markers
     if &private_key[64..68] != b"E25K" {
         return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM private key format".to_string().into(),
+            "Invalid ML-KEM private key format".to_string(),
         ));
     }
 
     if &ciphertext[32..36] != b"E25C" {
         return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM ciphertext format".to_string().into(),
+            "Invalid ML-KEM ciphertext format".to_string(),
         ));
     }
 
@@ -184,7 +183,7 @@ pub fn decapsulate(private_key: &[u8], ciphertext: &[u8]) -> Result<SharedSecret
     // Extract shared secret embedded in ciphertext (placeholder approach)
     // The encapsulate function stores the final_secret at bytes 1056..1088
     let final_secret: [u8; 32] = ciphertext[1056..1088].try_into().map_err(|_| {
-        QuantumCryptoError::MlKemError("Invalid ciphertext secret section".to_string().into())
+        QuantumCryptoError::MlKemError("Invalid ciphertext secret section".to_string())
     })?;
 
     // In a real implementation, we would verify that we can decrypt this
@@ -318,7 +317,7 @@ impl HybridKeyExchange {
         let hkdf = Hkdf::<Sha256>::new(None, &combined);
         let mut output = [0u8; 32];
         hkdf.expand(b"hybrid-key-exchange", &mut output)
-            .map_err(|e| QuantumCryptoError::MlKemError(format!("HKDF failed: {e}").into()))?;
+            .map_err(|e| QuantumCryptoError::MlKemError(format!("HKDF failed: {e}")))?;
 
         Ok(output)
     }

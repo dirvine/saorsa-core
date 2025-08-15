@@ -412,9 +412,8 @@ impl AdaptiveGossipSub {
         // Validate message before publishing
         if !self.validate_message(&message).await? {
             return Err(AdaptiveNetworkError::Gossip(
-                "Message validation failed".to_string().into(),
-            )
-            .into());
+                "Message validation failed".to_string(),
+            ));
         }
 
         let msg_id = self.compute_message_id(&message);
@@ -459,7 +458,7 @@ impl AdaptiveGossipSub {
                 topic: topic.to_string(),
             };
             tx.send((peer.clone(), msg)).await.map_err(|_| {
-                AdaptiveNetworkError::Other("Failed to send GRAFT".to_string().into())
+                AdaptiveNetworkError::Other("Failed to send GRAFT".to_string())
             })?;
         }
         Ok(())
@@ -474,7 +473,7 @@ impl AdaptiveGossipSub {
                 backoff,
             };
             tx.send((peer.clone(), msg)).await.map_err(|_| {
-                AdaptiveNetworkError::Other("Failed to send PRUNE".to_string().into())
+                AdaptiveNetworkError::Other("Failed to send PRUNE".to_string())
             })?;
         }
         Ok(())
@@ -494,7 +493,7 @@ impl AdaptiveGossipSub {
                 message_ids,
             };
             tx.send((peer.clone(), msg)).await.map_err(|_| {
-                AdaptiveNetworkError::Other("Failed to send IHAVE".to_string().into())
+                AdaptiveNetworkError::Other("Failed to send IHAVE".to_string())
             })?;
         }
         Ok(())
@@ -506,7 +505,7 @@ impl AdaptiveGossipSub {
         if let Some(tx) = control_tx.as_ref() {
             let msg = ControlMessage::IWant { message_ids };
             tx.send((peer.clone(), msg)).await.map_err(|_| {
-                AdaptiveNetworkError::Other("Failed to send IWANT".to_string().into())
+                AdaptiveNetworkError::Other("Failed to send IWANT".to_string())
             })?;
         }
         Ok(())
@@ -530,11 +529,10 @@ impl AdaptiveGossipSub {
             {
                 let scores = self.peer_scores.read().await;
                 for peer in &mesh_peers {
-                    if let Some(score) = scores.get(peer) {
-                        if score.score() < params.graylist_threshold {
+                    if let Some(score) = scores.get(peer)
+                        && score.score() < params.graylist_threshold {
                             peers_to_remove.push(peer.clone());
                         }
-                    }
                 }
             }
 

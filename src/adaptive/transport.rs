@@ -266,13 +266,13 @@ impl QuicTransport {
 impl Transport for QuicTransport {
     async fn listen(&self, _addr: SocketAddr) -> Result<Box<dyn TransportListener>> {
         Err(AdaptiveNetworkError::Other(
-            "QUIC transport not yet implemented".to_string().into(),
+            "QUIC transport not yet implemented".to_string(),
         ))
     }
 
     async fn connect(&self, _addr: SocketAddr) -> Result<Box<dyn TransportConnection>> {
         Err(AdaptiveNetworkError::Other(
-            "QUIC transport not yet implemented".to_string().into(),
+            "QUIC transport not yet implemented".to_string(),
         ))
     }
 
@@ -347,7 +347,7 @@ impl TransportManager {
 
         if listeners.is_empty() {
             return Err(AdaptiveNetworkError::Other(
-                "Failed to listen on any protocol".to_string().into(),
+                "Failed to listen on any protocol".to_string(),
             ));
         }
 
@@ -372,7 +372,7 @@ impl TransportManager {
         }
 
         Err(AdaptiveNetworkError::Other(
-            "Failed to connect with any protocol".to_string().into(),
+            "Failed to connect with any protocol".to_string(),
         ))
     }
 
@@ -382,7 +382,7 @@ impl TransportManager {
 
         if listeners.is_empty() {
             return Err(AdaptiveNetworkError::Other(
-                "No active listeners".to_string().into(),
+                "No active listeners".to_string(),
             ));
         }
 

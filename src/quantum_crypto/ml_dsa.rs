@@ -40,7 +40,7 @@ pub fn sign(private_key: &[u8], message: &[u8]) -> Result<Vec<u8>> {
     let signing_key =
         if private_key.len() == 32 {
             SigningKey::from_bytes(private_key.try_into().map_err(|_| {
-                QuantumCryptoError::MlDsaError("Invalid key length".to_string().into())
+                QuantumCryptoError::MlDsaError("Invalid key length".to_string())
             })?)
         } else {
             // For other key lengths, create a deterministic signing key from the key data
@@ -62,17 +62,17 @@ pub fn verify(public_key: &[u8], message: &[u8], signature: &[u8]) -> Result<()>
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
     let verifying_key = VerifyingKey::from_bytes(public_key.try_into().map_err(|_| {
-        QuantumCryptoError::MlDsaError("Invalid public key length".to_string().into())
+        QuantumCryptoError::MlDsaError("Invalid public key length".to_string())
     })?)
-    .map_err(|e| QuantumCryptoError::MlDsaError(format!("Invalid public key: {e}").into()))?;
+    .map_err(|e| QuantumCryptoError::MlDsaError(format!("Invalid public key: {e}")))?;
 
     let signature_bytes: [u8; 64] = signature.try_into().map_err(|_| {
-        QuantumCryptoError::MlDsaError("Invalid signature length".to_string().into())
+        QuantumCryptoError::MlDsaError("Invalid signature length".to_string())
     })?;
     let signature = Signature::from_bytes(&signature_bytes);
 
     verifying_key.verify(message, &signature).map_err(|_| {
-        QuantumCryptoError::MlDsaError("Signature verification failed".to_string().into())
+        QuantumCryptoError::MlDsaError("Signature verification failed".to_string())
     })?;
 
     Ok(())
@@ -263,7 +263,7 @@ impl AggregatedSignature {
                 .map(|(_, key)| key)
                 .ok_or_else(|| {
                     QuantumCryptoError::MlDsaError(
-                        format!("No public key for participant {participant_id:?}").into(),
+                        format!("No public key for participant {participant_id:?}"),
                     )
                 })?;
 

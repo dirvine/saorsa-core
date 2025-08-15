@@ -64,7 +64,8 @@ impl OptimizedDHTStorage {
         
         Self {
             records: Arc::new(RwLock::new(
-                LruCache::new(NonZeroUsize::new(cache_size).unwrap())
+                // Safe: calculate_cache_size guarantees minimum of 100
+                LruCache::new(NonZeroUsize::new(cache_size).unwrap_or(NonZeroUsize::MIN))
             )),
             expiration_index: Arc::new(RwLock::new(BTreeMap::new())),
             publisher_index: Arc::new(RwLock::new(HashMap::new())),
@@ -81,7 +82,8 @@ impl OptimizedDHTStorage {
         
         Self {
             records: Arc::new(RwLock::new(
-                LruCache::new(NonZeroUsize::new(cache_size.max(100)).unwrap())
+                // Safe: max(100) guarantees non-zero value
+                LruCache::new(NonZeroUsize::new(cache_size.max(100)).unwrap_or(NonZeroUsize::MIN))
             )),
             expiration_index: Arc::new(RwLock::new(BTreeMap::new())),
             publisher_index: Arc::new(RwLock::new(HashMap::new())),
@@ -240,10 +242,10 @@ impl OptimizedDHTStorage {
             let take_count = limit.unwrap_or(keys.len());
             
             for key in keys.iter().take(take_count) {
-                if let Some(record) = records.peek(key) {
-                    if !record.is_expired() {
-                        results.push(record.clone());
-                    }
+                if let Some(record) = records.peek(key)
+                    && !record.is_expired()
+                {
+                    results.push(record.clone());
                 }
             }
             results
@@ -262,10 +264,10 @@ impl OptimizedDHTStorage {
         
         for (_, keys) in expiration_index.range(..target_time) {
             for key in keys {
-                if let Some(record) = records.peek(key) {
-                    if !record.is_expired() {
-                        results.push(record.clone());
-                    }
+                if let Some(record) = records.peek(key)
+                    && !record.is_expired()
+                {
+                    results.push(record.clone());
                 }
             }
         }
@@ -316,7 +318,7 @@ impl OptimizedDHTStorage {
     fn calculate_cache_size(config: &DHTConfig) -> usize {
         // Base cache size on replication factor and expected network size
         let base_size = config.replication_factor * 500; // 500 records per replication node
-        base_size.min(DEFAULT_MAX_CACHE_SIZE).max(100) // Minimum 100, maximum 10k
+        base_size.clamp(100, DEFAULT_MAX_CACHE_SIZE) // Minimum 100, maximum 10k
     }
 
     fn estimate_record_size(&self, record: &Record) -> usize {

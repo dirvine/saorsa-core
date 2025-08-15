@@ -269,7 +269,7 @@ impl ThresholdGroup {
         for participant in &self.active_participants {
             if !seen_ids.insert(&participant.participant_id) {
                 return Err(ThresholdError::InvalidParameters(
-                    format!("Duplicate participant ID: {:?}", participant.participant_id).into(),
+                    format!("Duplicate participant ID: {:?}", participant.participant_id),
                 ));
             }
         }

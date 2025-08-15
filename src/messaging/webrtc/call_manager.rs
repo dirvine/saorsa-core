@@ -456,13 +456,12 @@ impl CallManager {
             MediaEvent::CaptureStarted { call_id } => {
                 // Update call state when media starts
                 let mut calls = calls.write().await;
-                if let Some(session) = calls.get_mut(&call_id) {
-                    if session.state == CallState::Connecting {
+                if let Some(session) = calls.get_mut(&call_id)
+                    && session.state == CallState::Connecting {
                         session.state = CallState::Connected;
                         
                         let _ = event_sender.send(CallEvent::ConnectionEstablished { call_id });
                     }
-                }
             }
             MediaEvent::QualityAdapted { call_id, metrics, .. } => {
                 // Add quality metrics to call session
@@ -532,6 +531,12 @@ impl CallManager {
 /// Network adapter for quality management
 pub struct NetworkAdapter {
     quality_history: Arc<RwLock<Vec<CallQualityMetrics>>>,
+}
+
+impl Default for NetworkAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NetworkAdapter {
