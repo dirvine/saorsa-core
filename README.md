@@ -9,6 +9,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, four-w
 ## Features
 
 - **DHT (Distributed Hash Table)**: Advanced DHT implementation with RSPS (Root-Scoped Provider Summaries)
+- **Placement System**: Intelligent shard placement with EigenTrust integration and Byzantine fault tolerance
 - **QUIC Transport**: High-performance networking with ant-quic
 - **Four-Word Addresses**: Human-readable network addresses
 - **MCP Integration**: Model Context Protocol support
@@ -98,10 +99,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 1. **Network Layer**: QUIC-based P2P networking with NAT traversal
 2. **DHT**: Kademlia-based DHT with RSPS optimization
-3. **Identity**: Ed25519 cryptographic identities with four-word addresses
-4. **Storage**: Local and distributed content storage
-5. **Geographic Routing**: Location-aware message routing
-6. **MCP Integration**: Model Context Protocol for AI/LLM integration
+3. **Placement System**: Intelligent shard placement with weighted selection algorithms
+4. **Identity**: Ed25519 cryptographic identities with four-word addresses
+5. **Storage**: Local and distributed content storage with audit and repair
+6. **Geographic Routing**: Location-aware message routing
+7. **MCP Integration**: Model Context Protocol for AI/LLM integration
 
 ### Data Flow
 
@@ -110,12 +112,68 @@ Application
     ↓
 Network API
     ↓
-DHT + Geographic Routing
-    ↓
+Placement Engine → DHT + Geographic Routing
+    ↓              ↓
+    ↓         Audit & Repair
+    ↓              ↓
 QUIC Transport (ant-quic)
     ↓
 Internet
 ```
+
+### Placement System
+
+Saorsa Core includes an advanced placement system for optimal distribution of erasure-coded shards across the network:
+
+```rust
+use saorsa_core::placement::{
+    PlacementEngine, PlacementConfig, GeographicLocation, NetworkRegion
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Configure placement system
+    let config = PlacementConfig {
+        replication_factor: (3, 8).into(), // Min 3, target 8 replicas
+        byzantine_tolerance: 2.into(),      // Tolerate up to 2 Byzantine nodes
+        placement_timeout: Duration::from_secs(30),
+        geographic_diversity: true,
+        weights: OptimizationWeights {
+            trust_weight: 0.4,        // EigenTrust reputation
+            performance_weight: 0.3,   // Node performance metrics
+            capacity_weight: 0.2,      // Available storage capacity
+            diversity_bonus: 0.1,      // Geographic/network diversity
+        },
+    };
+    
+    // Create placement engine
+    let mut engine = PlacementEngine::new(config);
+    
+    // Place data with optimal shard distribution
+    let data = b"important data to store";
+    let decision = placement_orchestrator.place_data(
+        data.to_vec(),
+        8, // replication factor
+        Some(NetworkRegion::NorthAmerica),
+    ).await?;
+    
+    println!("Placed {} shards across {} nodes", 
+             decision.shard_count, 
+             decision.selected_nodes.len());
+    
+    Ok(())
+}
+```
+
+#### Key Features
+
+- **EigenTrust Integration**: Uses reputation scores for node selection
+- **Weighted Selection**: Balances trust, performance, capacity, and diversity
+- **Byzantine Fault Tolerance**: Configurable f-out-of-3f+1 security model
+- **Geographic Diversity**: Ensures shards are distributed across regions
+- **Continuous Monitoring**: Audit system with automatic repair
+- **DHT Record Types**: Efficient ≤512B records with proof-of-work
+- **Hysteresis Control**: Prevents repair storms with smart cooldown
 
 ## Configuration
 
@@ -169,6 +227,8 @@ Key benchmarks:
 - DHT operations: ~10,000 ops/sec
 - Storage throughput: ~100 MB/sec
 - Geographic routing: <10ms latency
+- Placement decisions: <1s for 8-node selection
+- Shard repair: Automatic with <1h detection
 - Cryptographic operations: Hardware-accelerated
 
 ## Security

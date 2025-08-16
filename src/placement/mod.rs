@@ -10,6 +10,149 @@
 //! This module implements the core placement system for optimal distribution
 //! of erasure-coded shards across the network, integrating EigenTrust reputation,
 //! churn prediction, capacity constraints, and diversity rules.
+//!
+//! ## Core Concepts
+//!
+//! ### Weighted Selection Algorithm
+//!
+//! The placement system uses Efraimidis-Spirakis weighted sampling with the formula:
+//!
+//! ```text
+//! w_i = (τ_i^α) * (p_i^β) * (c_i^γ) * d_i
+//! ```
+//!
+//! Where:
+//! - `τ_i`: EigenTrust reputation score (0.0-1.0)
+//! - `p_i`: Node performance score (0.0-1.0)
+//! - `c_i`: Available capacity score (0.0-1.0)
+//! - `d_i`: Geographic/network diversity bonus (1.0-2.0)
+//! - `α, β, γ`: Configurable weight exponents
+//!
+//! ### Byzantine Fault Tolerance
+//!
+//! Implements configurable f-out-of-3f+1 Byzantine fault tolerance:
+//! - Tolerates up to f Byzantine (malicious) nodes
+//! - Requires minimum 3f+1 nodes for safety
+//! - Automatically adjusts replication based on network size
+//!
+//! ### Geographic Diversity
+//!
+//! Ensures optimal shard distribution across:
+//! - Geographic regions (7 major regions)
+//! - Autonomous System Numbers (ASNs)
+//! - Network operators and data centers
+//!
+//! ## Usage Examples
+//!
+//! ### Basic Placement
+//!
+//! ```rust,no_run
+//! use saorsa_core::placement::{PlacementEngine, PlacementConfig};
+//! use std::time::Duration;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let config = PlacementConfig {
+//!     replication_factor: (3, 8).into(),
+//!     byzantine_tolerance: 2.into(),
+//!     placement_timeout: Duration::from_secs(30),
+//!     geographic_diversity: true,
+//!     ..Default::default()
+//! };
+//!
+//! let mut engine = PlacementEngine::new(config);
+//!
+//! // Select optimal nodes for shard placement
+//! let decision = engine.select_nodes(
+//!     &available_nodes,
+//!     8, // replication factor
+//!     &trust_system,
+//!     &performance_monitor,
+//!     &node_metadata,
+//! ).await?;
+//!
+//! println!("Selected {} nodes with {:.2}% reliability",
+//!          decision.selected_nodes.len(),
+//!          decision.estimated_reliability * 100.0);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ### Advanced Configuration
+//!
+//! ```rust,no_run
+//! use saorsa_core::placement::{
+//!     PlacementConfig, OptimizationWeights, PlacementConstraint
+//! };
+//! use std::time::Duration;
+//!
+//! let config = PlacementConfig {
+//!     weights: OptimizationWeights {
+//!         trust_weight: 0.5,      // High trust emphasis
+//!         performance_weight: 0.25,
+//!         capacity_weight: 0.15,
+//!         diversity_bonus: 0.1,
+//!     },
+//!     constraints: vec![
+//!         PlacementConstraint::MinimumTrustScore(0.7),
+//!         PlacementConstraint::MaximumLatency(Duration::from_millis(500)),
+//!         PlacementConstraint::RequireGeographicDiversity,
+//!     ],
+//!     ..Default::default()
+//! };
+//! ```
+//!
+//! ### Storage Orchestration
+//!
+//! ```rust,no_run
+//! use saorsa_core::placement::PlacementOrchestrator;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let orchestrator = PlacementOrchestrator::new(
+//!     config,
+//!     dht_engine,
+//!     trust_system,
+//!     performance_monitor,
+//!     churn_predictor,
+//! ).await?;
+//!
+//! // Start audit and repair systems
+//! orchestrator.start().await?;
+//!
+//! // Place data with optimal distribution
+//! let decision = orchestrator.place_data(
+//!     data,
+//!     8, // replication factor
+//!     Some(NetworkRegion::Europe),
+//! ).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Architecture
+//!
+//! The placement system consists of several key components:
+//!
+//! - **PlacementEngine**: Main orchestrator for placement decisions
+//! - **WeightedPlacementStrategy**: Implements the weighted selection algorithm
+//! - **StorageOrchestrator**: Manages shard storage and retrieval
+//! - **AuditSystem**: Continuous monitoring of shard health
+//! - **RepairSystem**: Automatic repair with hysteresis control
+//! - **DiversityEnforcer**: Geographic and network diversity constraints
+//!
+//! ## Performance Characteristics
+//!
+//! - **Selection Speed**: <1 second for 8-node selection from 1000+ candidates
+//! - **Memory Usage**: O(n) where n is candidate node count
+//! - **Audit Frequency**: Every 5 minutes with concurrent limits
+//! - **Repair Latency**: <1 hour detection, immediate repair initiation
+//!
+//! ## Security Features
+//!
+//! - EigenTrust integration for reputation-based selection
+//! - Byzantine fault tolerance with configurable parameters
+//! - Proof-of-work for DHT records (~18 bits difficulty)
+//! - Cryptographic verification of all operations
+//! - Secure random selection with cryptographic entropy
 
 pub mod traits;
 pub mod types;

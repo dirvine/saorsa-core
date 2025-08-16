@@ -112,7 +112,18 @@ Distributed storage with geographic awareness:
 - Encrypted DHT storage
 - Multi-device synchronization
 
-#### 6. Application Features
+#### 6. Placement System (`src/placement/`)
+Advanced storage orchestration with EigenTrust integration:
+
+- **Placement Engine** (`mod.rs`): Main orchestrator for shard placement
+- **Weighted Algorithms** (`algorithms.rs`): Efraimidis-Spirakis sampling with formula `w_i = (τ_i^α) * (p_i^β) * (c_i^γ) * d_i`
+- **DHT Records** (`dht_records.rs`): NODE_AD, GROUP_BEACON, DATA_POINTER, REGISTER_POINTER (≤512B)
+- **Storage Orchestrator** (`orchestrator.rs`): Audit and repair systems with hysteresis
+- **Geographic Diversity** (`types.rs`): Location-aware placement constraints
+- **Byzantine Tolerance**: Configurable f-out-of-3f+1 fault tolerance
+- **Zero-Panic Code**: Comprehensive error handling with recovery patterns
+
+#### 7. Application Features
 - **Chat** (`src/chat/`): Slack-like messaging
 - **Discuss** (`src/discuss/`): Forum system
 - **Projects** (`src/projects/`): Hierarchical organization
@@ -170,6 +181,47 @@ let addr = NetworkAddress::from_ipv4("192.168.1.1".parse()?, 9000);
 if let Some(words) = addr.four_words() {
     println!("Address: {}", words);
 }
+```
+
+### Placement System Usage
+```rust
+use saorsa_core::placement::{
+    PlacementEngine, PlacementConfig, PlacementOrchestrator,
+    OptimizationWeights, GeographicLocation, NetworkRegion
+};
+
+// Configure placement with EigenTrust integration
+let config = PlacementConfig {
+    replication_factor: (3, 8).into(),
+    byzantine_tolerance: 2.into(),
+    placement_timeout: Duration::from_secs(30),
+    geographic_diversity: true,
+    weights: OptimizationWeights {
+        trust_weight: 0.4,        // EigenTrust reputation
+        performance_weight: 0.3,   // Node performance metrics  
+        capacity_weight: 0.2,      // Available storage capacity
+        diversity_bonus: 0.1,      // Geographic/network diversity
+    },
+};
+
+// Create placement orchestrator
+let orchestrator = PlacementOrchestrator::new(
+    config,
+    dht_engine,
+    trust_system,
+    performance_monitor,
+    churn_predictor,
+).await?;
+
+// Start audit and repair systems
+orchestrator.start().await?;
+
+// Place data with optimal shard distribution
+let decision = orchestrator.place_data(
+    data,
+    8, // replication factor
+    Some(NetworkRegion::Europe),
+).await?;
 ```
 
 ## External Crate Dependencies
@@ -251,6 +303,15 @@ sudo apt-get install -y \
 4. Add performance metrics
 5. Write tests in `tests/adaptive_components_test.rs`
 
+### Adding New Placement Strategy
+1. Implement `PlacementStrategy` trait in `src/placement/algorithms.rs`
+2. Add strategy to placement engine configuration
+3. Ensure geographic diversity compliance
+4. Add EigenTrust integration hooks
+5. Write comprehensive tests with property-based testing
+6. Benchmark placement performance
+7. Document algorithm complexity and trade-offs
+
 ### DHT Operation with Witnesses
 ```rust
 // Store with witness validation
@@ -286,11 +347,25 @@ let metrics = monitor.get_metrics(peer_id)?;
 - **Churn Prediction**: Anticipates node departures
 - **Strategy Selection**: Based on network conditions and content type
 
+### Placement System Configuration
+- **Weighted Selection Formula**: `w_i = (τ_i^α) * (p_i^β) * (c_i^γ) * d_i`
+  - `τ_i`: EigenTrust reputation score (0.0-1.0)
+  - `p_i`: Performance score (0.0-1.0)
+  - `c_i`: Capacity score (0.0-1.0)
+  - `d_i`: Diversity bonus multiplier (1.0-2.0)
+- **Byzantine Tolerance**: f-out-of-3f+1 nodes (configurable f)
+- **DHT Record Limits**: ≤512 bytes with proof-of-work (~18 bits)
+- **Audit Frequency**: 5-minute intervals with concurrent limits
+- **Repair Hysteresis**: 10% band to prevent repair storms
+- **Geographic Regions**: 7 major regions with ASN diversity
+
 ### Performance Optimizations
 - **Connection Pooling**: Max 100 connections with LRU eviction
 - **Message Batching**: 10ms window, 64KB max batch
 - **Caching**: LRU caches throughout with configurable TTL
 - **Hashing**: BLAKE3 for speed, SHA2 for compatibility
+- **Placement Decisions**: <1s for 8-node selection
+- **Shard Repair**: Lazy repair with 1-hour cooldown
 
 ## Licensing
 
