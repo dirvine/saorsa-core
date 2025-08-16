@@ -19,6 +19,19 @@
 //!
 //! This is much simpler and more efficient than trying to bridge between
 //! different architectural paradigms.
+//!
+//! ## Metrics Integration
+//!
+//! When saorsa-core is compiled with the `metrics` feature, this adapter
+//! automatically enables ant-quic's prometheus metrics collection.
+//!
+//! Ant-quic v0.8.0 provides comprehensive QUIC-level performance data including:
+//! - Connection establishment times
+//! - Packet loss and retransmission rates  
+//! - NAT traversal success rates
+//! - Transport-layer bandwidth utilization
+//! - Connection state metrics
+//! - Stream performance data
 
 use anyhow::Result;
 use std::net::SocketAddr;
@@ -54,7 +67,7 @@ impl P2PNetworkNode {
             max_connections: 100,       // Reasonable default
             connection_timeout: Duration::from_secs(30),
             stats_interval: Duration::from_secs(60),
-            auth_config: AuthConfig::default(), // Use ant-quic's default auth
+            auth_config: AuthConfig::default(), // Use ant-quic's default auth (includes PQC)
             bind_addr: Some(bind_addr),
         };
 

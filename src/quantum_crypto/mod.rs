@@ -22,6 +22,7 @@ pub mod hybrid;
 pub mod ml_dsa;
 pub mod ml_kem;
 pub mod types;
+pub mod ant_quic_integration;
 
 pub use self::types::*;
 

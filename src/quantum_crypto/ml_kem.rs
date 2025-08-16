@@ -17,177 +17,44 @@
 
 use super::{QuantumCryptoError, Result};
 use crate::quantum_crypto::types::*;
-use sha2::{Digest, Sha256};
 // use ml_kem::{MlKem768, EncapsulatePair, DecapsulatePair}; // Temporarily disabled
 
-/// Generate ML-KEM keypair (Ed25519-based implementation for current use)
+/// Generate ML-KEM keypair using ant-quic's implementation
 pub fn generate_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
-    use ed25519_dalek::SigningKey;
-    use rand::rngs::OsRng;
-
-    // Generate Ed25519 keypair as foundation
-    let keypair = SigningKey::generate(&mut OsRng);
-
-    // Convert to ML-KEM format (pad to expected sizes)
-    let mut ml_kem_public = vec![0u8; 1184]; // ML-KEM-768 public key size
-    let mut ml_kem_private = vec![0u8; 2400]; // ML-KEM-768 private key size
-
-    // Embed Ed25519 keys in the ML-KEM format with proper structure
-    ml_kem_public[0..32].copy_from_slice(&keypair.verifying_key().to_bytes());
-    ml_kem_private[0..32].copy_from_slice(&keypair.to_bytes());
-
-    // Add format identifier for validation
-    ml_kem_public[32..36].copy_from_slice(b"E25K"); // Format marker
-    ml_kem_private[64..68].copy_from_slice(b"E25K");
-
-    // Add cryptographic hash for integrity
-    let mut hasher = Sha256::new();
-    hasher.update(&ml_kem_public[0..36]);
-    let public_hash = hasher.finalize();
-    ml_kem_public[36..68].copy_from_slice(&public_hash);
-
-    let mut hasher = Sha256::new();
-    hasher.update(&ml_kem_private[0..68]);
-    let private_hash = hasher.finalize();
-    ml_kem_private[68..100].copy_from_slice(&private_hash);
-
-    // Fill remaining space with cryptographically secure random data
-    rand::RngCore::fill_bytes(&mut OsRng, &mut ml_kem_public[68..]);
-    rand::RngCore::fill_bytes(&mut OsRng, &mut ml_kem_private[100..]);
-
-    Ok((ml_kem_public, ml_kem_private))
+    use crate::quantum_crypto::ant_quic_integration;
+    
+    ant_quic_integration::generate_ml_kem_keypair()
+        .map_err(|e| QuantumCryptoError::KeyGenerationError(e.to_string()))
 }
 
-/// Encapsulate a shared secret using ML-KEM public key (Ed25519-based KDF)
+/// Encapsulate a shared secret using ML-KEM public key
 pub fn encapsulate(public_key: &[u8]) -> Result<(Vec<u8>, SharedSecret)> {
-    use ed25519_dalek::{SigningKey, VerifyingKey};
-    use rand::rngs::OsRng;
-
-    // Validate ML-KEM format
-    if public_key.len() != 1184 {
-        return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM public key length".to_string(),
-        ));
-    }
-
-    // Check format marker
-    if &public_key[32..36] != b"E25K" {
-        return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM key format".to_string(),
-        ));
-    }
-
-    // Verify integrity hash
-    let mut hasher = Sha256::new();
-    hasher.update(&public_key[0..36]);
-    let expected_hash = hasher.finalize();
-    if public_key[36..68] != expected_hash[..] {
-        return Err(QuantumCryptoError::MlKemError(
-            "ML-KEM public key integrity check failed".to_string(),
-        ));
-    }
-
-    // Extract Ed25519 public key
-    let their_public =
-        VerifyingKey::from_bytes(&public_key[0..32].try_into().map_err(|_| {
-            QuantumCryptoError::MlKemError("Invalid public key length".to_string())
-        })?)
-        .map_err(|e| QuantumCryptoError::MlKemError(format!("Invalid Ed25519 public key: {e}")))?;
-
-    // Generate ephemeral keypair for key exchange
-    let our_signing_key = SigningKey::generate(&mut OsRng);
-
-    // Create shared secret using deterministic key derivation
-    let mut hasher = Sha256::new();
-    hasher.update(their_public.to_bytes());
-    hasher.update(our_signing_key.verifying_key().to_bytes());
-    hasher.update(our_signing_key.to_bytes());
-    hasher.update(b"ML-KEM-768-ENCAPSULATE");
-    let shared_secret_round1 = hasher.finalize();
-
-    // Second round of KDF for additional security
-    let mut hasher = Sha256::new();
-    hasher.update(shared_secret_round1);
-    hasher.update(&public_key[68..100]); // Include more entropy from original key
-    let final_secret = hasher.finalize();
-
-    let shared_secret = SharedSecret(final_secret.into());
-
-    // Create ciphertext (our ephemeral public key + padding)
-    let mut ciphertext = vec![0u8; 1088]; // ML-KEM-768 ciphertext size
-    ciphertext[0..32].copy_from_slice(&our_signing_key.verifying_key().to_bytes());
-    ciphertext[32..36].copy_from_slice(b"E25C"); // Ciphertext marker
-
-    // Add ciphertext integrity hash
-    let mut hasher = Sha256::new();
-    hasher.update(&ciphertext[0..36]);
-    hasher.update(&shared_secret.as_bytes()[0..16]); // Include secret in integrity check
-    let ciphertext_hash = hasher.finalize();
-    ciphertext[36..68].copy_from_slice(&ciphertext_hash);
-
-    // Fill remaining space with derived randomness
-    let mut expansion_hasher = Sha256::new();
-    expansion_hasher.update(final_secret);
-    expansion_hasher.update(b"ML-KEM-CIPHERTEXT-EXPANSION");
-    for i in 0..((1088 - 68 - 32) / 32) {
-        // Leave last 32 bytes for secret
-        let mut round_hasher = expansion_hasher.clone();
-        round_hasher.update((i as u32).to_be_bytes());
-        let round_hash = round_hasher.finalize();
-        let start = 68 + i * 32;
-        let end = std::cmp::min(start + 32, 1056);
-        ciphertext[start..end].copy_from_slice(&round_hash[0..(end - start)]);
-    }
-
-    // Embed shared secret at the end (placeholder approach)
-    // In real ML-KEM, this would be encrypted using lattice-based encryption
-    ciphertext[1056..1088].copy_from_slice(&final_secret);
-
+    use crate::quantum_crypto::ant_quic_integration;
+    
+    let (ciphertext, shared_secret_bytes) = ant_quic_integration::ml_kem_encapsulate(public_key)
+        .map_err(|e| QuantumCryptoError::MlKemError(e.to_string()))?;
+    
+    // Convert raw bytes to our SharedSecret type
+    let shared_secret = SharedSecret(shared_secret_bytes.try_into().map_err(|_| {
+        QuantumCryptoError::MlKemError("Invalid shared secret length".to_string())
+    })?);
+    
     Ok((ciphertext, shared_secret))
 }
 
-/// Decapsulate shared secret using ML-KEM private key (Ed25519-based KDF)
+/// Decapsulate shared secret using ML-KEM private key
 pub fn decapsulate(private_key: &[u8], ciphertext: &[u8]) -> Result<SharedSecret> {
-    // Validate inputs
-    if private_key.len() != 2400 {
-        return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM private key length".to_string(),
-        ));
-    }
-
-    if ciphertext.len() != 1088 {
-        return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM ciphertext length".to_string(),
-        ));
-    }
-
-    // Check format markers
-    if &private_key[64..68] != b"E25K" {
-        return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM private key format".to_string(),
-        ));
-    }
-
-    if &ciphertext[32..36] != b"E25C" {
-        return Err(QuantumCryptoError::MlKemError(
-            "Invalid ML-KEM ciphertext format".to_string(),
-        ));
-    }
-
-    // For this placeholder implementation, we'll extract the shared secret
-    // that was embedded in the ciphertext
-    // In a real ML-KEM implementation, this would use lattice-based decapsulation
-
-    // Extract shared secret embedded in ciphertext (placeholder approach)
-    // The encapsulate function stores the final_secret at bytes 1056..1088
-    let final_secret: [u8; 32] = ciphertext[1056..1088].try_into().map_err(|_| {
-        QuantumCryptoError::MlKemError("Invalid ciphertext secret section".to_string())
-    })?;
-
-    // In a real implementation, we would verify that we can decrypt this
-    // using our private key. For now, we trust it.
-
-    Ok(SharedSecret(final_secret))
+    use crate::quantum_crypto::ant_quic_integration;
+    
+    let shared_secret_bytes = ant_quic_integration::ml_kem_decapsulate(private_key, ciphertext)
+        .map_err(|e| QuantumCryptoError::MlKemError(e.to_string()))?;
+    
+    // Convert raw bytes to our SharedSecret type
+    let shared_secret = SharedSecret(shared_secret_bytes.try_into().map_err(|_| {
+        QuantumCryptoError::MlKemError("Invalid shared secret length".to_string())
+    })?);
+    
+    Ok(shared_secret)
 }
 
 /// ML-KEM key exchange state for handshake protocol

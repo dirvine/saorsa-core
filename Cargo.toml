@@ -20,7 +20,7 @@ default-target = "x86_64-unknown-linux-gnu"
 
 [features]
 default = ["metrics"]
-metrics = ["dep:prometheus"]
+metrics = ["dep:prometheus", "ant-quic/prometheus"]
 
 [dependencies]
 # Core async and serialization
@@ -61,7 +61,7 @@ flate2 = "1.0"
 once_cell = "1.19"
 
 # Networking
-ant-quic = { version = "0.6" }
+ant-quic = { version = "0.8.1", features = ["pqc"] }
 four-word-networking = { version = "2.3" }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 

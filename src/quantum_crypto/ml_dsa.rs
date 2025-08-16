@@ -18,66 +18,36 @@
 use super::{QuantumCryptoError, Result};
 use crate::quantum_crypto::types::*;
 // use ml_dsa::{MlDsa65, SigningKey, VerificationKey, Signature}; // Temporarily disabled
-use rand::rngs::OsRng;
+// use rand::rngs::OsRng; // No longer needed with ant-quic integration
 
-/// Generate ML-DSA keypair (using Ed25519 for testing)
+/// Generate ML-DSA keypair using ant-quic's implementation
 pub fn generate_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
-    use ed25519_dalek::SigningKey;
-
-    let keypair = SigningKey::generate(&mut OsRng);
-    let public_key = keypair.verifying_key().to_bytes().to_vec();
-    let private_key = keypair.to_bytes().to_vec();
-
-    Ok((public_key, private_key))
+    use crate::quantum_crypto::ant_quic_integration;
+    
+    ant_quic_integration::generate_ml_dsa_keypair()
+        .map_err(|e| QuantumCryptoError::KeyGenerationError(e.to_string()))
 }
 
-/// Sign a message with ML-DSA private key (using Ed25519 for testing)
+/// Sign a message with ML-DSA private key using ant-quic's implementation
 pub fn sign(private_key: &[u8], message: &[u8]) -> Result<Vec<u8>> {
-    // Use Ed25519 for ML-DSA implementation until real ML-DSA is available
-    use ed25519_dalek::{Signer, SigningKey};
-
-    // If this is already a proper 32-byte signing key, use it directly
-    let signing_key = if private_key.len() == 32 {
-        SigningKey::from_bytes(
-            private_key
-                .try_into()
-                .map_err(|_| QuantumCryptoError::MlDsaError("Invalid key length".to_string()))?,
-        )
-    } else {
-        // For other key lengths, create a deterministic signing key from the key data
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(private_key);
-        hasher.update([0u8; 32]); // Add padding for deterministic derivation
-        let key_bytes = hasher.finalize();
-
-        SigningKey::from_bytes(&key_bytes.into())
-    };
-
-    let signature = signing_key.sign(message);
-    Ok(signature.to_bytes().to_vec())
+    use crate::quantum_crypto::ant_quic_integration;
+    
+    ant_quic_integration::ml_dsa_sign(private_key, message)
+        .map_err(|e| QuantumCryptoError::MlDsaError(e.to_string()))
 }
 
-/// Verify ML-DSA signature (using Ed25519 for testing)
+/// Verify ML-DSA signature using ant-quic's implementation
 pub fn verify(public_key: &[u8], message: &[u8], signature: &[u8]) -> Result<()> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-    let verifying_key =
-        VerifyingKey::from_bytes(public_key.try_into().map_err(|_| {
-            QuantumCryptoError::MlDsaError("Invalid public key length".to_string())
-        })?)
-        .map_err(|e| QuantumCryptoError::MlDsaError(format!("Invalid public key: {e}")))?;
-
-    let signature_bytes: [u8; 64] = signature
-        .try_into()
-        .map_err(|_| QuantumCryptoError::MlDsaError("Invalid signature length".to_string()))?;
-    let signature = Signature::from_bytes(&signature_bytes);
-
-    verifying_key
-        .verify(message, &signature)
-        .map_err(|_| QuantumCryptoError::MlDsaError("Signature verification failed".to_string()))?;
-
-    Ok(())
+    use crate::quantum_crypto::ant_quic_integration;
+    
+    let is_valid = ant_quic_integration::ml_dsa_verify(public_key, message, signature)
+        .map_err(|e| QuantumCryptoError::MlDsaError(e.to_string()))?;
+    
+    if is_valid {
+        Ok(())
+    } else {
+        Err(QuantumCryptoError::SignatureVerificationFailed)
+    }
 }
 
 /// ML-DSA signature state for protocol operations

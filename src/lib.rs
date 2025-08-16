@@ -233,6 +233,19 @@ pub use threshold::{
 // Quantum crypto exports for types used by threshold
 pub use quantum_crypto::types::{GroupId, ParticipantId};
 
+// Post-quantum cryptography exports from ant-quic integration
+pub use quantum_crypto::ant_quic_integration::{
+    create_default_pqc_config, create_pqc_only_config, generate_ml_dsa_keypair,
+    generate_ml_kem_keypair, ml_dsa_sign, ml_dsa_verify, ml_kem_encapsulate, ml_kem_decapsulate,
+    HybridPreference, PqcConfigBuilder, PqcMode,
+};
+
+// Re-export specific PQC types from ant-quic directly
+pub use ant_quic::crypto::pqc::{MlDsa65, MlKem768};
+
+// Re-export ant-quic PQC module for direct access
+pub use quantum_crypto::ant_quic_integration::pqc;
+
 // Placement system exports
 pub use placement::{
     AuditSystem, DataPointer, DhtRecord, DiversityEnforcer, GeographicLocation, GroupBeacon,
