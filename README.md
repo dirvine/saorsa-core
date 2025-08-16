@@ -27,7 +27,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-saorsa-core = "0.3.3"
+saorsa-core = "0.3.4"
 ```
 
 ### Basic DHT Node
