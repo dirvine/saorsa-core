@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     let mut security_config = SecurityConfig::default();
     security_config.rate_limit.node_requests_per_window = 10;
     security_config.rate_limit.window_duration = Duration::from_secs(60);
-    security_config.blacklist.max_size = 1000;
+    security_config.blacklist.max_entries = 1000;
     security_config.eclipse_detection.min_diversity_score = 0.6;
 
     // Create security manager
@@ -56,7 +56,11 @@ async fn main() -> Result<()> {
     // Example: Check rate limits
     let peer_id = NodeId { hash: [2u8; 32] };
     for i in 0..12 {
-        if security_manager.check_rate_limit(&peer_id).await {
+        if security_manager
+            .check_rate_limit(&peer_id, None)
+            .await
+            .is_ok()
+        {
             println!("Request {} allowed", i + 1);
         } else {
             println!("Request {} rate limited!", i + 1);
@@ -65,9 +69,12 @@ async fn main() -> Result<()> {
 
     // Example: Verify data integrity
     let data = b"Important network data";
-    let hash = security_manager.compute_hash(data).await;
-
-    if security_manager.verify_integrity(data, &hash).await? {
+    let hash = blake3::hash(data);
+    if security_manager
+        .verify_message_integrity(data, hash.as_bytes(), None)
+        .await
+        .is_ok()
+    {
         println!("Data integrity verified");
     } else {
         println!("Data integrity check failed!");
@@ -82,7 +89,7 @@ async fn main() -> Result<()> {
         NodeId { hash: [50u8; 32] },
     ];
 
-    match security_manager.check_eclipse_attack(&routing_table).await {
+    match security_manager.detect_eclipse_attack(&routing_table).await {
         Ok(()) => println!("No eclipse attack detected"),
         Err(e) => println!("Eclipse attack warning: {}", e),
     }
@@ -97,10 +104,10 @@ async fn main() -> Result<()> {
     println!("  Audit entries: {}", metrics.audit_entries);
 
     // Example: Export audit report
-    let report = security_manager.export_audit_report().await;
+    let report = security_manager.get_metrics().await; // Simplified example
     println!("\nAudit Report:");
-    println!("  Total entries: {}", report.total_entries);
-    println!("  Critical events: {}", report.recent_critical_events.len());
+    println!("  Rate limit violations: {}", report.rate_limit_violations);
+    println!("  Blacklisted nodes: {}", report.blacklisted_nodes);
 
     Ok(())
 }

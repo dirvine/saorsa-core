@@ -18,7 +18,7 @@
 
 use proptest::prelude::*;
 use saorsa_core::adaptive::som::{GridSize, NodeFeatures, SelfOrganizingMap, SomConfig};
-use saorsa_core::identity::NodeId;
+use saorsa_core::adaptive::NodeId;
 // use std::collections::HashSet;
 use std::time::Instant;
 
@@ -36,7 +36,7 @@ fn create_test_features(seed: u8) -> NodeFeatures {
 fn create_test_node_id(seed: u8) -> NodeId {
     let mut bytes = [0u8; 32];
     bytes[0] = seed;
-    NodeId::from_bytes(&bytes).unwrap()
+    NodeId::from_bytes(bytes)
 }
 
 #[cfg(test)]

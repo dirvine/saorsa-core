@@ -178,7 +178,8 @@ async fn test_greedy_routing_decisions() {
 
     // Verify it chose a node closer to target
     if let Some(chosen) = next_hop {
-        let neighbors = space.neighbor_coordinates.read().await;
+        let neighbors_arc = space.neighbors_arc();
+        let neighbors = neighbors_arc.read().await;
         let chosen_coord = neighbors
             .get(&chosen)
             .expect("chosen neighbor should exist");
@@ -359,7 +360,7 @@ mod simulation_tests {
             // Connect to m existing nodes (preferential attachment)
             let m = 3;
             for j in 0..m {
-                let target_idx = (i * 7 + j * 13) % nodes.len(); // Pseudo-random selection
+                let target_idx = (i as usize * 7 + j as usize * 13) % nodes.len(); // Pseudo-random selection
                 let target = &nodes[target_idx];
 
                 // Update coordinates to reflect connection

@@ -71,7 +71,7 @@ impl WeightedSampler {
         // Validate inputs
         if trust_score < 0.0 || trust_score > 1.0 {
             return Err(PlacementError::InvalidWeight {
-                node_id: *node_id,
+                node_id: node_id.clone(),
                 weight: trust_score,
                 reason: "Trust score must be between 0.0 and 1.0".to_string(),
             });
@@ -79,7 +79,7 @@ impl WeightedSampler {
 
         if stability_score < 0.0 || stability_score > 1.0 {
             return Err(PlacementError::InvalidWeight {
-                node_id: *node_id,
+                node_id: node_id.clone(),
                 weight: stability_score,
                 reason: "Stability score must be between 0.0 and 1.0".to_string(),
             });
@@ -87,7 +87,7 @@ impl WeightedSampler {
 
         if capacity_factor < 0.0 {
             return Err(PlacementError::InvalidWeight {
-                node_id: *node_id,
+                node_id: node_id.clone(),
                 weight: capacity_factor,
                 reason: "Capacity factor must be non-negative".to_string(),
             });
@@ -95,7 +95,7 @@ impl WeightedSampler {
 
         if diversity_factor < 0.0 {
             return Err(PlacementError::InvalidWeight {
-                node_id: *node_id,
+                node_id: node_id.clone(),
                 weight: diversity_factor,
                 reason: "Diversity factor must be non-negative".to_string(),
             });
@@ -111,7 +111,7 @@ impl WeightedSampler {
         // Ensure weight is finite and positive
         if !weight.is_finite() || weight <= 0.0 {
             return Err(PlacementError::InvalidWeight {
-                node_id: *node_id,
+                node_id: node_id.clone(),
                 weight,
                 reason: "Computed weight is not finite or positive".to_string(),
             });
@@ -150,7 +150,7 @@ impl WeightedSampler {
             .map(|(node_id, weight)| {
                 if *weight <= 0.0 {
                     return Err(PlacementError::InvalidWeight {
-                        node_id: *node_id,
+                        node_id: node_id.clone(),
                         weight: *weight,
                         reason: "Weight must be positive".to_string(),
                     });
@@ -162,7 +162,7 @@ impl WeightedSampler {
                 // Calculate weighted key: k_i = u^(1/w_i)
                 let key = u.powf(1.0 / weight);
                 
-                Ok((key, *node_id))
+                Ok((key, node_id.clone()))
             })
             .collect::<PlacementResult<Vec<_>>>()?;
 
@@ -204,7 +204,7 @@ impl DiversityEnforcer {
     /// Calculate diversity factor for a node given existing selections
     pub fn calculate_diversity_factor(
         &self,
-        candidate: &NodeId,
+        _candidate: &NodeId,
         candidate_location: &GeographicLocation,
         candidate_asn: u32,
         candidate_region: &NetworkRegion,
@@ -333,8 +333,8 @@ impl WeightedPlacementStrategy {
     async fn calculate_weights(
         &self,
         candidates: &HashSet<NodeId>,
-        trust_system: &EigenTrustEngine,
-        performance_monitor: &PerformanceMonitor,
+        _trust_system: &EigenTrustEngine,
+        _performance_monitor: &PerformanceMonitor,
         node_metadata: &HashMap<NodeId, (GeographicLocation, u32, NetworkRegion)>,
         selected_nodes: &[(NodeId, GeographicLocation, u32, NetworkRegion)],
     ) -> PlacementResult<Vec<(NodeId, f64)>> {
@@ -392,8 +392,8 @@ impl PlacementStrategy for WeightedPlacementStrategy {
         &mut self,
         candidates: &HashSet<NodeId>,
         replication_factor: u8,
-        _trust_system: &EigenTrustEngine,
-        _performance_monitor: &PerformanceMonitor,
+        trust_system: &EigenTrustEngine,
+        performance_monitor: &PerformanceMonitor,
         node_metadata: &HashMap<NodeId, (GeographicLocation, u32, NetworkRegion)>,
     ) -> PlacementResult<PlacementDecision> {
         let start_time = Instant::now();

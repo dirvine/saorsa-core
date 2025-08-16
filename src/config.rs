@@ -428,9 +428,10 @@ impl Config {
         }
 
         if let Some(addr) = &self.network.public_address
-            && let Err(e) = self.validate_address(addr, "public_address") {
-                errors.push(e);
-            }
+            && let Err(e) = self.validate_address(addr, "public_address")
+        {
+            errors.push(e);
+        }
 
         for (i, node) in self.network.bootstrap_nodes.iter().enumerate() {
             if let Err(e) = self.validate_address(node, &format!("bootstrap_node[{}]", i)) {
@@ -546,10 +547,10 @@ impl Config {
     /// Validate size format (e.g., "10GB", "500MB")
     fn validate_size_format(&self, size: &str) -> bool {
         thread_local! {
-            static SIZE_REGEX: Regex = Regex::new(r"^\d+(\.\d+)?\s*(B|KB|MB|GB|TB)$")
-                .unwrap_or_else(|_| Regex::new(r"^\d+$").expect("fallback size regex"));
+            static SIZE_REGEX: std::result::Result<Regex, P2PError> = Regex::new(r"^\\d+(?:\\.\\d+)?\\s*(?:B|KB|MB|GB|TB)$")
+                .map_err(|e| P2PError::Config(ConfigError::InvalidValue { field: "size".to_string().into(), reason: e.to_string().into() }));
         }
-        SIZE_REGEX.with(|re| re.is_match(size))
+        SIZE_REGEX.with(|re| re.as_ref().ok().map(|r| r.is_match(size)).unwrap_or(false))
     }
 
     /// Create development configuration
@@ -613,11 +614,20 @@ impl Config {
     /// ```
     pub fn parse_size(size: &str) -> Result<u64> {
         thread_local! {
-            static SIZE_REGEX: Regex = Regex::new(r"^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)$")
-                .unwrap_or_else(|_| Regex::new(r"^(\d+)$").expect("fallback size regex"));
+            static SIZE_REGEX: std::result::Result<Regex, P2PError> = Regex::new(r"^(\\d+(?:\\.\\d+)?)\\s*(B|KB|MB|GB|TB)$")
+                .map_err(|e| P2PError::Config(ConfigError::InvalidValue { field: "size".to_string().into(), reason: e.to_string().into() }));
         }
 
-        SIZE_REGEX.with(|re| {
+        SIZE_REGEX.with(|re| -> Result<u64> {
+            let re = match re {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(P2PError::Config(ConfigError::InvalidValue {
+                        field: "size".to_string().into(),
+                        reason: e.to_string().into(),
+                    }));
+                }
+            };
             if let Some(captures) = re.captures(size) {
                 let value: f64 = captures
                     .get(1)

@@ -6,10 +6,10 @@
 //! - Batched operations for improved performance
 //! - Memory-efficient data structures
 
-use crate::dht::{Key, Record, DHTConfig};
+use crate::dht::{DHTConfig, Key, Record};
 use crate::error::P2pResult as Result;
 use lru::LruCache;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -59,13 +59,16 @@ impl OptimizedDHTStorage {
     /// Create new optimized DHT storage with memory bounds
     pub fn new(config: DHTConfig) -> Self {
         let cache_size = Self::calculate_cache_size(&config);
-        
-        info!("Creating optimized DHT storage with cache size: {}", cache_size);
-        
+
+        info!(
+            "Creating optimized DHT storage with cache size: {}",
+            cache_size
+        );
+
         Self {
             records: Arc::new(RwLock::new(
                 // Safe: calculate_cache_size guarantees minimum of 100
-                LruCache::new(NonZeroUsize::new(cache_size).unwrap_or(NonZeroUsize::MIN))
+                LruCache::new(NonZeroUsize::new(cache_size).unwrap_or(NonZeroUsize::MIN)),
             )),
             expiration_index: Arc::new(RwLock::new(BTreeMap::new())),
             publisher_index: Arc::new(RwLock::new(HashMap::new())),
@@ -78,12 +81,15 @@ impl OptimizedDHTStorage {
 
     /// Create with custom cache size
     pub fn with_cache_size(config: DHTConfig, cache_size: usize) -> Self {
-        info!("Creating optimized DHT storage with custom cache size: {}", cache_size);
-        
+        info!(
+            "Creating optimized DHT storage with custom cache size: {}",
+            cache_size
+        );
+
         Self {
             records: Arc::new(RwLock::new(
                 // Safe: max(100) guarantees non-zero value
-                LruCache::new(NonZeroUsize::new(cache_size.max(100)).unwrap_or(NonZeroUsize::MIN))
+                LruCache::new(NonZeroUsize::new(cache_size.max(100)).unwrap_or(NonZeroUsize::MIN)),
             )),
             expiration_index: Arc::new(RwLock::new(BTreeMap::new())),
             publisher_index: Arc::new(RwLock::new(HashMap::new())),
@@ -112,10 +118,14 @@ impl OptimizedDHTStorage {
         if let Some(old_record) = records.peek(&key) {
             let old_size = self.estimate_record_size(old_record);
             size_delta -= old_size as i64;
-            
+
             // Remove old record from indexes
             self.remove_from_expiration_index(&mut expiration_index, &old_record.expires_at, &key);
-            self.remove_from_publisher_index(&mut publisher_index, &old_record.publisher.to_string(), &key);
+            self.remove_from_publisher_index(
+                &mut publisher_index,
+                &old_record.publisher.to_string(),
+                &key,
+            );
         }
 
         // Store record (LRU will handle eviction if needed)
@@ -123,9 +133,17 @@ impl OptimizedDHTStorage {
             // Update indexes for evicted record
             let evicted_size = self.estimate_record_size(&evicted);
             size_delta -= evicted_size as i64;
-            
-            self.remove_from_expiration_index(&mut expiration_index, &evicted.expires_at, &evicted.key);
-            self.remove_from_publisher_index(&mut publisher_index, &evicted.publisher.to_string(), &evicted.key);
+
+            self.remove_from_expiration_index(
+                &mut expiration_index,
+                &evicted.expires_at,
+                &evicted.key,
+            );
+            self.remove_from_publisher_index(
+                &mut publisher_index,
+                &evicted.publisher.to_string(),
+                &evicted.key,
+            );
         }
 
         // Update indexes for new record
@@ -141,13 +159,17 @@ impl OptimizedDHTStorage {
 
         // Update memory usage
         *memory_usage = (*memory_usage as i64 + size_delta).max(0) as usize;
-        
+
         // Update stats
         stats.total_records = records.len();
         stats.memory_usage_bytes = *memory_usage;
         stats.total_stores += 1;
 
-        debug!("Stored record, cache size: {}, memory: {} bytes", records.len(), *memory_usage);
+        debug!(
+            "Stored record, cache size: {}, memory: {} bytes",
+            records.len(),
+            *memory_usage
+        );
         Ok(())
     }
 
@@ -155,9 +177,9 @@ impl OptimizedDHTStorage {
     pub async fn get(&self, key: &Key) -> Option<Record> {
         let mut records = self.records.write().await; // Write lock needed for LRU updates
         let mut stats = self.stats.write().await;
-        
+
         stats.total_gets += 1;
-        
+
         if let Some(record) = records.get(key) {
             // Check if record is expired
             if record.is_expired() {
@@ -179,7 +201,7 @@ impl OptimizedDHTStorage {
     pub async fn cleanup_expired(&self) -> Result<usize> {
         let now = SystemTime::now();
         let mut cleaned_count = 0;
-        
+
         // Check if cleanup is needed (avoid excessive cleanup calls)
         {
             let last_cleanup = self.last_cleanup.read().await;
@@ -209,7 +231,11 @@ impl OptimizedDHTStorage {
                         cleaned_count += 1;
 
                         // Remove from publisher index
-                        self.remove_from_publisher_index(&mut publisher_index, &record.publisher.to_string(), &key);
+                        self.remove_from_publisher_index(
+                            &mut publisher_index,
+                            &record.publisher.to_string(),
+                            &key,
+                        );
                     }
                 }
             }
@@ -225,22 +251,30 @@ impl OptimizedDHTStorage {
         *self.last_cleanup.write().await = Instant::now();
 
         if cleaned_count > 0 {
-            info!("Cleaned up {} expired records, cache size: {}, memory: {} bytes", 
-                  cleaned_count, records.len(), *memory_usage);
+            info!(
+                "Cleaned up {} expired records, cache size: {}, memory: {} bytes",
+                cleaned_count,
+                records.len(),
+                *memory_usage
+            );
         }
 
         Ok(cleaned_count)
     }
 
     /// Get records by publisher with indexed lookup - O(1) performance
-    pub async fn get_records_by_publisher(&self, publisher: &str, limit: Option<usize>) -> Vec<Record> {
+    pub async fn get_records_by_publisher(
+        &self,
+        publisher: &str,
+        limit: Option<usize>,
+    ) -> Vec<Record> {
         let publisher_index = self.publisher_index.read().await;
         let records = self.records.read().await;
-        
+
         if let Some(keys) = publisher_index.get(publisher) {
             let mut results = Vec::new();
             let take_count = limit.unwrap_or(keys.len());
-            
+
             for key in keys.iter().take(take_count) {
                 if let Some(record) = records.peek(key)
                     && !record.is_expired()
@@ -259,9 +293,9 @@ impl OptimizedDHTStorage {
         let target_time = SystemTime::now() + within;
         let expiration_index = self.expiration_index.read().await;
         let records = self.records.read().await;
-        
+
         let mut results = Vec::new();
-        
+
         for (_, keys) in expiration_index.range(..target_time) {
             for key in keys {
                 if let Some(record) = records.peek(key)
@@ -271,7 +305,7 @@ impl OptimizedDHTStorage {
                 }
             }
         }
-        
+
         results
     }
 
@@ -280,11 +314,11 @@ impl OptimizedDHTStorage {
         let records = self.records.read().await;
         let memory_usage = self.memory_usage.read().await;
         let mut stats = self.stats.write().await;
-        
+
         // Update current stats
         stats.total_records = records.len();
         stats.memory_usage_bytes = *memory_usage;
-        
+
         stats.clone()
     }
 
@@ -292,7 +326,7 @@ impl OptimizedDHTStorage {
     pub async fn is_near_memory_limit(&self) -> bool {
         let memory_usage = self.memory_usage.read().await;
         let max_memory = Self::calculate_cache_size(&self.config) * AVG_RECORD_SIZE;
-        
+
         *memory_usage > (max_memory * 90 / 100) // 90% threshold
     }
 
@@ -300,7 +334,7 @@ impl OptimizedDHTStorage {
     pub async fn force_eviction(&self, target_count: usize) -> Result<usize> {
         let mut records = self.records.write().await;
         let mut evicted_count = 0;
-        
+
         while records.len() > target_count && evicted_count < CLEANUP_BATCH_SIZE {
             if records.pop_lru().is_some() {
                 evicted_count += 1;
@@ -308,8 +342,12 @@ impl OptimizedDHTStorage {
                 break;
             }
         }
-        
-        info!("Force evicted {} records, cache size now: {}", evicted_count, records.len());
+
+        info!(
+            "Force evicted {} records, cache size now: {}",
+            evicted_count,
+            records.len()
+        );
         Ok(evicted_count)
     }
 
@@ -326,10 +364,12 @@ impl OptimizedDHTStorage {
         32 + record.value.len() + 64 // Conservative estimate
     }
 
-    fn remove_from_expiration_index(&self, 
-        expiration_index: &mut BTreeMap<SystemTime, Vec<Key>>, 
-        expires_at: &SystemTime, 
-        key: &Key) {
+    fn remove_from_expiration_index(
+        &self,
+        expiration_index: &mut BTreeMap<SystemTime, Vec<Key>>,
+        expires_at: &SystemTime,
+        key: &Key,
+    ) {
         if let Some(keys) = expiration_index.get_mut(expires_at) {
             keys.retain(|k| k != key);
             if keys.is_empty() {
@@ -338,10 +378,12 @@ impl OptimizedDHTStorage {
         }
     }
 
-    fn remove_from_publisher_index(&self,
+    fn remove_from_publisher_index(
+        &self,
         publisher_index: &mut HashMap<String, Vec<Key>>,
         publisher: &str,
-        key: &Key) {
+        key: &Key,
+    ) {
         if let Some(keys) = publisher_index.get_mut(publisher) {
             keys.retain(|k| k != key);
             if keys.is_empty() {
@@ -360,17 +402,17 @@ mod tests {
     async fn test_optimized_storage_basic_operations() {
         let config = DHTConfig::default();
         let storage = OptimizedDHTStorage::new(config);
-        
+
         // Create test record
         let key = Key::new(b"test_key");
         let value = b"test_value".to_vec();
         let publisher = PeerId::from("test_peer".to_string());
         let record = Record::new(key.clone(), value.clone(), publisher);
-        
+
         // Store and retrieve
         storage.store(record.clone()).await.unwrap();
         let retrieved = storage.get(&key).await;
-        
+
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().value, value);
     }
@@ -379,7 +421,7 @@ mod tests {
     async fn test_lru_eviction() {
         let config = DHTConfig::default();
         let storage = OptimizedDHTStorage::with_cache_size(config, 3); // Very small cache
-        
+
         // Fill cache beyond capacity
         for i in 0..5 {
             let key = Key::new(format!("key_{}", i).as_bytes());
@@ -388,7 +430,7 @@ mod tests {
             let record = Record::new(key, value, publisher);
             storage.store(record).await.unwrap();
         }
-        
+
         let stats = storage.get_stats().await;
         assert_eq!(stats.total_records, 3); // Should be limited by cache size
     }
@@ -397,9 +439,9 @@ mod tests {
     async fn test_indexed_publisher_lookup() {
         let config = DHTConfig::default();
         let storage = OptimizedDHTStorage::new(config);
-        
+
         let publisher = PeerId::from("test_publisher".to_string());
-        
+
         // Store multiple records from same publisher
         for i in 0..3 {
             let key = Key::new(format!("key_{}", i).as_bytes());
@@ -407,9 +449,11 @@ mod tests {
             let record = Record::new(key, value, publisher.clone());
             storage.store(record).await.unwrap();
         }
-        
+
         // Query by publisher
-        let records = storage.get_records_by_publisher("test_publisher", None).await;
+        let records = storage
+            .get_records_by_publisher("test_publisher", None)
+            .await;
         assert_eq!(records.len(), 3);
     }
 
@@ -417,22 +461,22 @@ mod tests {
     async fn test_expiration_cleanup() {
         let config = DHTConfig::default();
         let storage = OptimizedDHTStorage::new(config);
-        
+
         // Create expired record
         let key = Key::new(b"expired_key");
         let value = b"expired_value".to_vec();
         let publisher = PeerId::from("test_peer".to_string());
         let mut record = Record::new(key.clone(), value, publisher);
-        
+
         // Set expiration to past
         record.expires_at = SystemTime::now() - Duration::from_secs(3600);
-        
+
         storage.store(record).await.unwrap();
-        
+
         // Should return None for expired record
         let retrieved = storage.get(&key).await;
         assert!(retrieved.is_none());
-        
+
         // Run cleanup
         let cleaned = storage.cleanup_expired().await.unwrap();
         assert!(cleaned >= 0); // Should clean up expired records

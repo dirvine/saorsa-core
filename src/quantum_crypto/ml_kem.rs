@@ -83,18 +83,16 @@ pub fn encapsulate(public_key: &[u8]) -> Result<(Vec<u8>, SharedSecret)> {
     let expected_hash = hasher.finalize();
     if public_key[36..68] != expected_hash[..] {
         return Err(QuantumCryptoError::MlKemError(
-            "ML-KEM public key integrity check failed"
-                .to_string(),
+            "ML-KEM public key integrity check failed".to_string(),
         ));
     }
 
     // Extract Ed25519 public key
-    let their_public = VerifyingKey::from_bytes(&public_key[0..32].try_into().map_err(|_| {
-        QuantumCryptoError::MlKemError("Invalid public key length".to_string())
-    })?)
-    .map_err(|e| {
-        QuantumCryptoError::MlKemError(format!("Invalid Ed25519 public key: {e}"))
-    })?;
+    let their_public =
+        VerifyingKey::from_bytes(&public_key[0..32].try_into().map_err(|_| {
+            QuantumCryptoError::MlKemError("Invalid public key length".to_string())
+        })?)
+        .map_err(|e| QuantumCryptoError::MlKemError(format!("Invalid Ed25519 public key: {e}")))?;
 
     // Generate ephemeral keypair for key exchange
     let our_signing_key = SigningKey::generate(&mut OsRng);

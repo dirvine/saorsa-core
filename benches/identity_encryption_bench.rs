@@ -28,7 +28,7 @@ fn encryption_benchmark(c: &mut Criterion) {
         let mgr = IdentityManager::new(temp_dir.path(), SecurityLevel::High)
             .await
             .unwrap();
-        let password = SecureString::from_str("test_password").unwrap();
+        let password = SecureString::from_plain_str("test_password").unwrap();
         mgr.initialize(&password).await.unwrap();
 
         // Create test identity
@@ -44,7 +44,7 @@ fn encryption_benchmark(c: &mut Criterion) {
     });
 
     let (mgr, identity_id, password) = manager;
-    let device_password = SecureString::from_str("device_password").unwrap();
+    let device_password = SecureString::from_plain_str("device_password").unwrap();
 
     // Benchmark sync package creation (includes encryption)
     c.bench_function("identity_encryption_sync_package", |b| {

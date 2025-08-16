@@ -149,7 +149,7 @@ pub mod health;
 pub mod geographic_enhanced_network;
 
 /// Placement Loop & Storage Orchestration System
-pub mod placement;
+// pub mod placement; // Temporarily disabled for 0.2.9 release
 
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
@@ -234,13 +234,13 @@ pub use threshold::{
 // Quantum crypto exports for types used by threshold
 pub use quantum_crypto::types::{GroupId, ParticipantId};
 
-// Placement system exports
-pub use placement::{
-    PlacementEngine, PlacementConfig, PlacementDecision, PlacementMetrics,
-    PlacementOrchestrator, StorageOrchestrator, AuditSystem, RepairSystem,
-    WeightedPlacementStrategy, DiversityEnforcer, GeographicLocation, NetworkRegion,
-    NodeAd, GroupBeacon, DataPointer, RegisterPointer, DhtRecord,
-};
+// Placement system exports - temporarily disabled for 0.2.9 release
+// pub use placement::{
+//     PlacementEngine, PlacementConfig, PlacementDecision, PlacementMetrics,
+//     PlacementOrchestrator, StorageOrchestrator, AuditSystem, RepairSystem,
+//     WeightedPlacementStrategy, DiversityEnforcer, GeographicLocation, NetworkRegion,
+//     NodeAd, GroupBeacon, DataPointer, RegisterPointer, DhtRecord,
+// };
 
 // Network address types
 /// Peer identifier used throughout Saorsa

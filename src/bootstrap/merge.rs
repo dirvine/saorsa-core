@@ -413,17 +413,18 @@ impl MergeCoordinator {
         for cache_file in cache_files {
             // Check if process is still running
             if let Some(process_id) = self.extract_process_id(&cache_file)
-                && !self.is_process_running(process_id) {
-                    // Process is dead, safe to remove cache
-                    if let Err(e) = std::fs::remove_file(&cache_file) {
-                        warn!(
-                            "Failed to remove old instance cache {:?}: {}",
-                            cache_file, e
-                        );
-                    } else {
-                        cleaned_count += 1;
-                    }
+                && !self.is_process_running(process_id)
+            {
+                // Process is dead, safe to remove cache
+                if let Err(e) = std::fs::remove_file(&cache_file) {
+                    warn!(
+                        "Failed to remove old instance cache {:?}: {}",
+                        cache_file, e
+                    );
+                } else {
+                    cleaned_count += 1;
                 }
+            }
         }
 
         if cleaned_count > 0 {

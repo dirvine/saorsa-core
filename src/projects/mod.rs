@@ -841,9 +841,7 @@ impl ProjectsManager {
         let mut ciphertext = content.to_vec();
         let tag = cipher
             .encrypt_in_place_detached(nonce, b"", &mut ciphertext)
-            .map_err(|e| {
-                ProjectsError::InvalidOperation(format!("Encryption failed: {e}"))
-            })?;
+            .map_err(|e| ProjectsError::InvalidOperation(format!("Encryption failed: {e}")))?;
 
         // Combine nonce + ciphertext + tag
         let mut result = Vec::with_capacity(12 + ciphertext.len() + 16);
@@ -889,9 +887,7 @@ impl ProjectsManager {
         // Decrypt the data
         cipher
             .decrypt_in_place_detached(nonce, b"", &mut plaintext, tag.into())
-            .map_err(|e| {
-                ProjectsError::InvalidOperation(format!("Decryption failed: {e}"))
-            })?;
+            .map_err(|e| ProjectsError::InvalidOperation(format!("Decryption failed: {e}")))?;
 
         Ok(plaintext)
     }

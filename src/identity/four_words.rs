@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Four-word address integration: delegate to external crate API, keep our API facade
-use crate::{P2PError, Result};
 use crate::error::IdentityError;
+use crate::{P2PError, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use super::node_identity::NodeId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FourWordAddress(String);
@@ -22,7 +23,11 @@ impl FourWordAddress {
         let port = u16::from_be_bytes([bytes[4], bytes[5]]);
         let enc = four_word_networking::FourWordEncoder::new()
             .encode_ipv4(ip, port)
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFourWordAddress(format!("{}", e).into())))?;
+            .map_err(|e| {
+                P2PError::Identity(IdentityError::InvalidFourWordAddress(
+                    format!("{}", e).into(),
+                ))
+            })?;
         Ok(Self(enc.to_string().replace(' ', "-")))
     }
 
@@ -39,8 +44,27 @@ impl FourWordAddress {
         Ok(Self(parts.join("-")))
     }
 
-    pub fn as_str(&self) -> &str { &self.0 }
-    pub fn words(&self) -> Vec<String> { self.0.split('-').map(|w| w.to_string()).collect() }
+    /// Back-compat helper expected by tests
+    pub fn from_str(s: &str) -> Result<Self> {
+        Self::parse_str(s)
+    }
+
+    /// Construct from a `NodeId` by encoding first 6 bytes as IPv4+port
+    pub fn from_node_id(node_id: &NodeId) -> Self {
+        // Safe: always 32 bytes; take first 6 for IPv4+port derivation
+        let bytes = node_id.to_bytes();
+        match Self::from_bytes(&bytes[..6]) {
+            Ok(addr) => addr,
+            Err(_) => FourWordAddress(hex::encode(&bytes[..4])),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn words(&self) -> Vec<String> {
+        self.0.split('-').map(|w| w.to_string()).collect()
+    }
 
     pub fn to_hash_prefix(&self) -> Result<[u8; 6]> {
         // Interpret address as IPv4+port derived encoding if possible
@@ -52,7 +76,11 @@ impl FourWordAddress {
                 words.split_whitespace().nth(2).unwrap_or("").to_string(),
                 words.split_whitespace().nth(3).unwrap_or("").to_string(),
             ))
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFourWordAddress(format!("{}", e).into())))?;
+            .map_err(|e| {
+                P2PError::Identity(IdentityError::InvalidFourWordAddress(
+                    format!("{}", e).into(),
+                ))
+            })?;
         let mut bytes = Vec::with_capacity(6);
         bytes.extend_from_slice(&ip.octets());
         bytes.extend_from_slice(&port.to_be_bytes());
@@ -64,12 +92,16 @@ impl FourWordAddress {
 }
 
 impl fmt::Display for FourWordAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.as_str()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 pub struct WordEncoder;
 impl WordEncoder {
-    pub fn encode(bytes: &[u8]) -> Result<FourWordAddress> { FourWordAddress::from_bytes(bytes) }
+    pub fn encode(bytes: &[u8]) -> Result<FourWordAddress> {
+        FourWordAddress::from_bytes(bytes)
+    }
     pub fn decode(addr: &FourWordAddress) -> Result<Vec<u8>> {
         // Decode hyphen-separated words back into IPv4 + port bytes
         let parts: Vec<&str> = addr.as_str().split('-').collect();
@@ -99,9 +131,13 @@ impl WordEncoder {
 }
 
 impl From<&str> for FourWordAddress {
-    fn from(s: &str) -> Self { FourWordAddress(s.to_lowercase()) }
+    fn from(s: &str) -> Self {
+        FourWordAddress(s.to_lowercase())
+    }
 }
 
 impl From<String> for FourWordAddress {
-    fn from(s: String) -> Self { FourWordAddress(s.to_lowercase()) }
+    fn from(s: String) -> Self {
+        FourWordAddress(s.to_lowercase())
+    }
 }

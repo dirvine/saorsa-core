@@ -19,6 +19,7 @@
 //! demonstrating all adaptive layers working together.
 
 use saorsa_core::adaptive::*;
+use saorsa_core::adaptive::coordinator::DegradationReason;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,7 +39,7 @@ impl NetworkSimulation {
 
         for i in 0..num_nodes {
             let identity = NodeIdentity::generate().unwrap();
-            let node_id = identity.node_id();
+            let node_id = identity.node_id().clone();
 
             let config = NetworkConfig {
                 bootstrap_nodes: bootstrap_nodes.clone(),

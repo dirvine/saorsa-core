@@ -163,6 +163,8 @@ pub enum FlushStrategy {
 }
 
 /// Persistent state manager
+type ListenerFn<T> = Box<dyn Fn(&str, Option<&T>) + Send + Sync>;
+
 pub struct PersistentStateManager<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq> {
     /// Configuration
     config: StateConfig,
@@ -177,7 +179,7 @@ pub struct PersistentStateManager<T: Serialize + for<'de> Deserialize<'de> + Clo
     /// Recovery statistics
     recovery_stats: Arc<Mutex<RecoveryStats>>,
     /// State change listeners
-    listeners: Arc<RwLock<Vec<Box<dyn Fn(&str, Option<&T>) + Send + Sync>>>>,
+    listeners: Arc<RwLock<Vec<ListenerFn<T>>>>,
     /// HMAC key for integrity
     hmac_key: SecureMemory,
 }

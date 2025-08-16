@@ -747,6 +747,23 @@ impl NetworkCoordinator {
         info!("Shutdown complete");
         Ok(())
     }
+
+    /// Public accessor for basic node information used by tests/examples
+    pub async fn get_node_info(&self) -> Result<NodeDescriptor> {
+        Ok(NodeDescriptor {
+            id: self.identity.node_id().clone(),
+            public_key: self.identity.public_key().clone(),
+            addresses: vec![],
+            hyperbolic: None,
+            som_position: None,
+            trust: 0.0,
+            capabilities: NodeCapabilities {
+                storage: self.config.storage_capacity,
+                compute: 0,
+                bandwidth: 0,
+            },
+        })
+    }
 }
 
 /// Reasons for network degradation
@@ -777,9 +794,10 @@ impl NetworkCoordinator {
         if let Some(handler) = handlers.get(&msg_type) {
             handler(message).await?;
         } else {
-            return Err(AdaptiveNetworkError::Routing(
-                format!("No handler for message type: {:?}", msg_type),
-            )
+            return Err(AdaptiveNetworkError::Routing(format!(
+                "No handler for message type: {:?}",
+                msg_type
+            ))
             .into());
         }
 

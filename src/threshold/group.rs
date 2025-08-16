@@ -227,12 +227,15 @@ impl ThresholdGroup {
     pub fn get_participants_by_role(&self, role_filter: RoleFilter) -> Vec<&ParticipantInfo> {
         self.active_participants
             .iter()
-            .filter(|p| matches!((&p.role, &role_filter),
-                (ParticipantRole::Leader { .. }, RoleFilter::Leaders)
-                | (ParticipantRole::Member { .. }, RoleFilter::Members)
-                | (ParticipantRole::Observer, RoleFilter::Observers)
-                | (_, RoleFilter::All)
-            ))
+            .filter(|p| {
+                matches!(
+                    (&p.role, &role_filter),
+                    (ParticipantRole::Leader { .. }, RoleFilter::Leaders)
+                        | (ParticipantRole::Member { .. }, RoleFilter::Members)
+                        | (ParticipantRole::Observer, RoleFilter::Observers)
+                        | (_, RoleFilter::All)
+                )
+            })
             .collect()
     }
 
@@ -267,9 +270,10 @@ impl ThresholdGroup {
         let mut seen_ids = HashSet::new();
         for participant in &self.active_participants {
             if !seen_ids.insert(&participant.participant_id) {
-                return Err(ThresholdError::InvalidParameters(
-                    format!("Duplicate participant ID: {:?}", participant.participant_id),
-                ));
+                return Err(ThresholdError::InvalidParameters(format!(
+                    "Duplicate participant ID: {:?}",
+                    participant.participant_id
+                )));
             }
         }
 

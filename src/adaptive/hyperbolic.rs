@@ -66,6 +66,11 @@ impl HyperbolicSpace {
         }
     }
 
+    /// Test helper: expose neighbor map for read access
+    pub fn neighbors_arc(&self) -> Arc<RwLock<HashMap<NodeId, HyperbolicCoordinate>>> {
+        Arc::clone(&self.neighbor_coordinates)
+    }
+
     /// Calculate hyperbolic distance between two coordinates
     pub fn distance(a: &HyperbolicCoordinate, b: &HyperbolicCoordinate) -> f64 {
         let delta = 2.0 * ((a.r - b.r).powi(2) + (a.theta - b.theta).cos().acos().powi(2)).sqrt();

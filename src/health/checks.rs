@@ -21,6 +21,18 @@ use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 use tokio::time::{Duration, timeout};
 
+// Reduce type complexity with aliases for boxed async fn types
+type BoxedAsyncUsizeFn = Box<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>> + Send>>
+        + Send
+        + Sync,
+>;
+type BoxedAsyncBoolFn = Box<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Trait for component health checkers
 #[async_trait]
 pub trait ComponentChecker: Send + Sync {
@@ -38,11 +50,7 @@ pub trait ComponentChecker: Send + Sync {
 /// This is a placeholder implementation that will be connected to the actual
 /// Network type once it's available
 pub struct NetworkHealthChecker {
-    get_peer_count: Box<
-        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>> + Send>>
-            + Send
-            + Sync,
-    >,
+    get_peer_count: BoxedAsyncUsizeFn,
     min_peers: usize,
     timeout_duration: Duration,
 }
@@ -106,11 +114,7 @@ impl ComponentChecker for NetworkHealthChecker {
 /// This is a placeholder implementation that will be connected to the actual
 /// DHT type once it's available
 pub struct DhtHealthChecker {
-    get_routing_table_size: Box<
-        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>> + Send>>
-            + Send
-            + Sync,
-    >,
+    get_routing_table_size: BoxedAsyncUsizeFn,
     min_nodes: usize,
     timeout_duration: Duration,
 }
@@ -265,80 +269,77 @@ fn get_free_space(_path: &std::path::Path) -> u64 {
     1024 * 1024 * 1024 // 1GB default
 }
 
-// TODO: Uncomment when ResourceManager is implemented in production module
-// /// Resource usage health checker
-// pub struct ResourceHealthChecker {
-//     resource_manager: Arc<ResourceManager>,
-//     max_memory_percent: f64,
-//     max_cpu_percent: f64,
-//     timeout_duration: Duration,
-// }
-//
-// impl ResourceHealthChecker {
-//     /// Create a new resource health checker
-//     pub fn new(resource_manager: Arc<ResourceManager>) -> Self {
-//         Self {
-//             resource_manager,
-//             max_memory_percent: 80.0,
-//             max_cpu_percent: 90.0,
-//             timeout_duration: Duration::from_millis(50),
-//         }
-//     }
-// }
-//
-// #[async_trait]
-// impl ComponentChecker for ResourceHealthChecker {
-//     async fn check(&self) -> Result<HealthStatus> {
-//         match timeout(self.timeout_duration, self.resource_manager.get_metrics()).await {
-//             Ok(metrics) => {
-//                 // Check CPU usage
-//                 if metrics.cpu_usage > self.max_cpu_percent {
-//                     return Ok(HealthStatus::Unhealthy);
-//                 }
-//
-//                 // Check memory usage (simplified - compare against configured limit)
-//                 let memory_percent = if self.resource_manager.config.max_memory_bytes > 0 {
-//                     (metrics.memory_used as f64 / self.resource_manager.config.max_memory_bytes as f64) * 100.0
-//                 } else {
-//                     0.0
-//                 };
-//
-//                 if memory_percent > self.max_memory_percent {
-//                     Ok(HealthStatus::Degraded)
-//                 } else {
-//                     Ok(HealthStatus::Healthy)
-//                 }
-//             }
-//             Err(_) => Ok(HealthStatus::Unhealthy), // Timeout
-//         }
-//     }
-//
-//     async fn debug_info(&self) -> Option<JsonValue> {
-//         if let Ok(metrics) = self.resource_manager.get_metrics().await {
-//             Some(serde_json::json!({
-//                 "memory_used": metrics.memory_used,
-//                 "active_connections": metrics.active_connections,
-//                 "bandwidth_usage": metrics.bandwidth_usage,
-//                 "cpu_usage": metrics.cpu_usage,
-//                 "dht_ops_per_sec": metrics.dht_metrics.ops_per_sec,
-//                 "mcp_calls_per_sec": metrics.mcp_metrics.calls_per_sec,
-//             }))
-//         } else {
-//             None
-//         }
-//     }
-// }
+use std::sync::Arc;
+use crate::production::ResourceManager;
+
+/// Resource usage health checker
+pub struct ResourceHealthChecker {
+    resource_manager: Arc<ResourceManager>,
+    max_memory_percent: f64,
+    max_cpu_percent: f64,
+    timeout_duration: Duration,
+}
+
+impl ResourceHealthChecker {
+    /// Create a new resource health checker
+    pub fn new(resource_manager: Arc<ResourceManager>) -> Self {
+        Self {
+            resource_manager,
+            max_memory_percent: 80.0,
+            max_cpu_percent: 90.0,
+            timeout_duration: Duration::from_millis(50),
+        }
+    }
+}
+
+#[async_trait]
+impl ComponentChecker for ResourceHealthChecker {
+    async fn check(&self) -> Result<HealthStatus> {
+        match timeout(self.timeout_duration, async { self.resource_manager.get_metrics().await }).await {
+            Ok(metrics) => {
+                // Check CPU usage
+                if metrics.cpu_usage > self.max_cpu_percent {
+                    return Ok(HealthStatus::Unhealthy);
+                }
+
+                // Check memory usage (simplified - compare against configured limit)
+                let memory_percent = if self.resource_manager.config.max_memory_bytes > 0 {
+                    (metrics.memory_used as f64
+                        / self.resource_manager.config.max_memory_bytes as f64)
+                        * 100.0
+                } else {
+                    0.0
+                };
+
+                if memory_percent > self.max_memory_percent {
+                    Ok(HealthStatus::Degraded)
+                } else {
+                    Ok(HealthStatus::Healthy)
+                }
+            }
+            _ => Ok(HealthStatus::Unhealthy), // Timeout
+        }
+    }
+
+    async fn debug_info(&self) -> Option<JsonValue> {
+        let metrics = self.resource_manager.get_metrics().await;
+        Some(serde_json::json!({
+            "memory_used": metrics.memory_used,
+            "active_connections": metrics.active_connections,
+            "bandwidth_usage": metrics.bandwidth_usage,
+            "cpu_usage": metrics.cpu_usage,
+            "dht_ops_per_sec": metrics.dht_metrics.ops_per_sec,
+            "mcp_calls_per_sec": metrics.mcp_metrics.calls_per_sec,
+        }))
+    }
+}
 
 /// Transport health checker
 ///
 /// This is a placeholder implementation that will be connected to the actual
 /// Transport type once it's available
 pub struct TransportHealthChecker {
-    is_listening: Box<
-        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool>> + Send>>
-            + Send
-            + Sync,
-    >,
+    is_listening: BoxedAsyncBoolFn,
     timeout_duration: Duration,
 }
 
@@ -386,11 +387,7 @@ impl ComponentChecker for TransportHealthChecker {
 /// This is a placeholder implementation that will be connected to the actual
 /// Network type once it's available
 pub struct PeerHealthChecker {
-    get_peer_count: Box<
-        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>> + Send>>
-            + Send
-            + Sync,
-    >,
+    get_peer_count: BoxedAsyncUsizeFn,
     min_peers: usize,
     max_peers: usize,
     timeout_duration: Duration,

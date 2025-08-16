@@ -96,7 +96,7 @@ impl Clone for DerivedKey {
         // Create new Ed25519 key from bytes
         let signing_key = SigningKey::from_bytes(self.secret_key.as_bytes());
         let verifying_key =
-            VerifyingKey::from_bytes(self.public_key.as_bytes()).expect("valid public key bytes");
+            VerifyingKey::from_bytes(self.public_key.as_bytes()).unwrap_or(self.public_key);
 
         Self {
             secret_key: signing_key,
@@ -128,8 +128,6 @@ pub struct HierarchicalKeyDerivation {
     master_seed: MasterSeed,
     /// Derivation cache
     cache: Arc<KeyDerivationCache>,
-    /// Secure random number generator
-    _rng: Arc<std::sync::Mutex<rand::rngs::ThreadRng>>,
 }
 
 /// Batch key derivation request
@@ -269,8 +267,8 @@ impl DerivationPath {
                 continue;
             }
 
-            let (index_str, hardened) = if part.ends_with('\'') {
-                (&part[..part.len() - 1], true)
+            let (index_str, hardened) = if let Some(stripped) = part.strip_suffix('\'') {
+                (stripped, true)
             } else {
                 (*part, false)
             };
@@ -293,22 +291,7 @@ impl DerivationPath {
         Self::new(components)
     }
 
-    /// Convert to string representation
-    pub fn to_string(&self) -> String {
-        let mut result = String::from("m");
-
-        for &component in &self.components {
-            result.push('/');
-            if component >= HARDENED_OFFSET {
-                result.push_str(&format!("{}'", component - HARDENED_OFFSET));
-            } else {
-                result.push_str(&component.to_string());
-            }
-        }
-
-        result
-    }
-
+    // (Removed inherent to_string; rely on Display/ToString)
     /// Get path components
     pub fn components(&self) -> &[u32] {
         &self.components
@@ -340,6 +323,21 @@ impl DerivationPath {
     }
 }
 
+impl std::fmt::Display for DerivationPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "m")?;
+        for &component in &self.components {
+            write!(f, "/")?;
+            if component >= HARDENED_OFFSET {
+                write!(f, "{}'", component - HARDENED_OFFSET)?;
+            } else {
+                write!(f, "{}", component)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl KeyDerivationCache {
     /// Create new key derivation cache
     pub fn new(max_size: usize) -> Self {
@@ -353,7 +351,10 @@ impl KeyDerivationCache {
 
     /// Get cached key
     pub fn get(&self, path: &DerivationPath) -> Option<DerivedKey> {
-        let cache = self.cache.read().expect("cache lock not poisoned");
+        let cache = match self.cache.read() {
+            Ok(c) => c,
+            Err(_) => return None,
+        };
         if let Some(key) = cache.get(path) {
             self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Some(key.clone())
@@ -366,7 +367,10 @@ impl KeyDerivationCache {
 
     /// Insert key into cache
     pub fn insert(&self, path: DerivationPath, key: DerivedKey) {
-        let mut cache = self.cache.write().expect("cache lock not poisoned");
+        let mut cache = match self.cache.write() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
 
         // Evict oldest entries if cache is full
         if cache.len() >= self.max_size {
@@ -385,7 +389,10 @@ impl KeyDerivationCache {
 
     /// Clear the cache
     pub fn clear(&self) {
-        let mut cache = self.cache.write().expect("cache lock not poisoned");
+        let mut cache = match self.cache.write() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
         cache.clear();
     }
 
@@ -393,7 +400,7 @@ impl KeyDerivationCache {
     pub fn stats(&self) -> (u64, u64, usize) {
         let hits = self.hits.load(std::sync::atomic::Ordering::Relaxed);
         let misses = self.misses.load(std::sync::atomic::Ordering::Relaxed);
-        let size = self.cache.read().expect("cache lock not poisoned").len();
+        let size = self.cache.read().map(|c| c.len()).unwrap_or(0);
         (hits, misses, size)
     }
 }
@@ -402,25 +409,14 @@ impl HierarchicalKeyDerivation {
     /// Create new hierarchical key derivation engine
     pub fn new(master_seed: MasterSeed) -> Self {
         let cache = Arc::new(KeyDerivationCache::new(1000)); // Default cache size
-        let rng = Arc::new(std::sync::Mutex::new(thread_rng())); // Random number generator
-
-        Self {
-            master_seed,
-            cache,
-            _rng: rng,
-        }
+        // Use thread-local RNG holder; generate randomness locally where needed
+        Self { master_seed, cache }
     }
 
     /// Create with custom cache size
     pub fn with_cache_size(master_seed: MasterSeed, cache_size: usize) -> Self {
         let cache = Arc::new(KeyDerivationCache::new(cache_size));
-        let rng = Arc::new(std::sync::Mutex::new(thread_rng())); // Random number generator
-
-        Self {
-            master_seed,
-            cache,
-            _rng: rng,
-        }
+        Self { master_seed, cache }
     }
 
     /// Derive key at specific path

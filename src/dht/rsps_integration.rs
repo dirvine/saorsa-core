@@ -3,15 +3,13 @@
 //! This module integrates Root-Scoped Provider Summaries (RSPS) with the DHT storage layer,
 //! enabling efficient content discovery and cache admission control.
 
-use crate::dht::{Key, Record};
 use crate::dht::optimized_storage::OptimizedDHTStorage;
+use crate::dht::{Key, Record};
 use crate::error::{P2PError, P2pResult as Result, StorageError};
-use crate::{PeerId, Multiaddr};
+use crate::{Multiaddr, PeerId};
 use saorsa_rsps::{
-    Rsps, RootAnchoredCache, CachePolicy, RspsConfig,
-    WitnessReceipt, WitnessKey,
-    TtlEngine, TtlConfig, TtlStats, Cid, RootCid,
-    witness::ReceiptMetadata,
+    CachePolicy, Cid, RootAnchoredCache, RootCid, Rsps, RspsConfig, TtlConfig, TtlEngine, TtlStats,
+    WitnessKey, WitnessReceipt, witness::ReceiptMetadata,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -65,7 +63,7 @@ impl Default for RspsDhtConfig {
             min_receipts_for_extension: 3,
             max_ttl_multiplier: 8.0,
             pseudonym_refresh_interval: Duration::from_secs(86400), // 24 hours
-            summary_update_interval: Duration::from_secs(300), // 5 minutes
+            summary_update_interval: Duration::from_secs(300),      // 5 minutes
         }
     }
 }
@@ -111,11 +109,11 @@ impl RspsDhtStorage {
         // Initialize TTL manager
         let ttl_config = TtlConfig {
             base_ttl: config.base_ttl,
-            ttl_per_hit: Duration::from_secs(30 * 60),    // 30 minutes per hit
-            max_hit_ttl: Duration::from_secs(12 * 3600),  // 12 hours max from hits
+            ttl_per_hit: Duration::from_secs(30 * 60), // 30 minutes per hit
+            max_hit_ttl: Duration::from_secs(12 * 3600), // 12 hours max from hits
             ttl_per_receipt: Duration::from_secs(10 * 60), // 10 minutes per receipt
             max_receipt_ttl: Duration::from_secs(2 * 3600), // 2 hours max from receipts
-            bucket_window: Duration::from_secs(5 * 60),    // 5 minute buckets
+            bucket_window: Duration::from_secs(5 * 60), // 5 minute buckets
         };
         let ttl_manager = Arc::new(TtlEngine::new(ttl_config));
 
@@ -141,7 +139,10 @@ impl RspsDhtStorage {
         addresses: Vec<Multiaddr>,
         rsps: Rsps,
     ) -> Result<()> {
-        info!("Storing provider record for root {:?} from peer {:?}", root_cid, provider);
+        info!(
+            "Storing provider record for root {:?} from peer {:?}",
+            root_cid, provider
+        );
 
         // Create provider record
         let record = ProviderRecord {
@@ -159,7 +160,7 @@ impl RspsDhtStorage {
         // Create DHT record for provider announcement
         let key = self.provider_key(&root_cid, &provider);
         let value = self.serialize_provider_record(&record)?;
-        
+
         let dht_record = Record {
             key: key.clone(),
             value,
@@ -179,7 +180,7 @@ impl RspsDhtStorage {
     /// Find providers for a root CID
     pub async fn find_providers(&self, root_cid: &RootCid) -> Result<Vec<ProviderRecord>> {
         let summaries = self.provider_summaries.read().await;
-        
+
         // Check local cache first
         if let Some(record) = summaries.get(root_cid) {
             debug!("Found provider in local cache");
@@ -188,7 +189,11 @@ impl RspsDhtStorage {
 
         // Query DHT for providers
         let pattern = self.provider_key_pattern(root_cid);
-        let records = self.base_storage.get_records_by_publisher(&pattern, None).await.iter()
+        let records = self
+            .base_storage
+            .get_records_by_publisher(&pattern, None)
+            .await
+            .iter()
             .filter_map(|record| {
                 let key_str = std::str::from_utf8(record.key.as_bytes()).ok()?;
                 if key_str.starts_with(&pattern) {
@@ -206,7 +211,11 @@ impl RspsDhtStorage {
             }
         }
 
-        info!("Found {} providers for root {:?}", providers.len(), root_cid);
+        info!(
+            "Found {} providers for root {:?}",
+            providers.len(),
+            root_cid
+        );
         Ok(providers)
     }
 
@@ -219,18 +228,30 @@ impl RspsDhtStorage {
     ) -> Result<bool> {
         // Check if we have RSPS for this root
         let summaries = self.provider_summaries.read().await;
-        let _provider_record = summaries.get(&root_cid)
-            .ok_or(P2PError::Storage(StorageError::Database(std::borrow::Cow::Borrowed("No RSPS for root"))))?;
+        let _provider_record =
+            summaries
+                .get(&root_cid)
+                .ok_or(P2PError::Storage(StorageError::Database(
+                    std::borrow::Cow::Borrowed("No RSPS for root"),
+                )))?;
 
         // Use cache admission control
-        let admitted = self.cache.admit(root_cid, cid, data.clone())
-            .map_err(|e| P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!("Cache admission failed: {}", e)))))?;
+        let admitted = self.cache.admit(root_cid, cid, data.clone()).map_err(|e| {
+            P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!(
+                "Cache admission failed: {}",
+                e
+            ))))
+        })?;
 
         if admitted {
             // Record in TTL manager
-            let ttl = self.ttl_manager.record_hit(&cid)
-                .map_err(|e| P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!("TTL record failed: {}", e)))))?;
-            
+            let ttl = self.ttl_manager.record_hit(&cid).map_err(|e| {
+                P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!(
+                    "TTL record failed: {}",
+                    e
+                ))))
+            })?;
+
             info!("Cached CID {:?} with TTL {:?}", cid, ttl);
         } else {
             debug!("CID {:?} not admitted to cache", cid);
@@ -246,7 +267,7 @@ impl RspsDhtStorage {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         // Create receipt metadata
         let metadata = ReceiptMetadata {
             latency_ms: 0,
@@ -254,14 +275,20 @@ impl RspsDhtStorage {
             valid: true,
             error: None,
         };
-        
+
         // Create receipt using proper API
         let receipt = self.witness_key.create_receipt(*cid, epoch, metadata);
-        
+
         // Record receipt in TTL manager for extension logic
         let witness_id = self.witness_key.public_key();
-        self.ttl_manager.record_receipt(cid, witness_id)
-            .map_err(|e| P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!("Failed to record receipt: {}", e)))))?;
+        self.ttl_manager
+            .record_receipt(cid, witness_id)
+            .map_err(|e| {
+                P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!(
+                    "Failed to record receipt: {}",
+                    e
+                ))))
+            })?;
 
         Ok(receipt)
     }
@@ -269,7 +296,7 @@ impl RspsDhtStorage {
     /// Batch generate receipts for multiple CIDs
     pub async fn generate_receipt_batch(&self, cids: &[Cid]) -> Result<Vec<WitnessReceipt>> {
         let mut batch = Vec::new();
-        
+
         for cid in cids {
             let receipt = self.generate_receipt(cid).await?;
             batch.push(receipt);
@@ -286,21 +313,17 @@ impl RspsDhtStorage {
     }
 
     /// Update RSPS for a root based on new content
-    pub async fn update_rsps(
-        &self,
-        root_cid: &RootCid,
-        new_cids: Vec<Cid>,
-    ) -> Result<()> {
+    pub async fn update_rsps(&self, root_cid: &RootCid, new_cids: Vec<Cid>) -> Result<()> {
         let mut summaries = self.provider_summaries.write().await;
-        
+
         if let Some(record) = summaries.get_mut(root_cid) {
             // Create new RSPS with updated CIDs
             let mut all_cids = HashSet::new();
-            
+
             // Get existing CIDs from RSPS
             // Note: This requires iterating through possible CIDs to check membership
             // In production, we'd maintain a separate index
-            
+
             // Add new CIDs
             for cid in new_cids {
                 all_cids.insert(cid);
@@ -308,13 +331,18 @@ impl RspsDhtStorage {
 
             // Create updated RSPS
             let cid_vec: Vec<Cid> = all_cids.into_iter().collect();
-            let new_rsps = Rsps::new(*root_cid, 1, &cid_vec, &RspsConfig::default())
-                .map_err(|e| P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!("RSPS creation failed: {}", e)))))?;
-            
+            let new_rsps =
+                Rsps::new(*root_cid, 1, &cid_vec, &RspsConfig::default()).map_err(|e| {
+                    P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!(
+                        "RSPS creation failed: {}",
+                        e
+                    ))))
+                })?;
+
             // Update record
             record.rsps = Arc::new(new_rsps);
             record.last_updated = SystemTime::now();
-            
+
             info!("Updated RSPS for root {:?}", root_cid);
         } else {
             warn!("No existing RSPS for root {:?}", root_cid);
@@ -340,7 +368,8 @@ impl RspsDhtStorage {
             .iter()
             .filter(|(_, record)| {
                 now.duration_since(record.last_updated)
-                    .unwrap_or(Duration::ZERO) > self.config.summary_update_interval * 2
+                    .unwrap_or(Duration::ZERO)
+                    > self.config.summary_update_interval * 2
             })
             .map(|(root, _)| *root)
             .collect();

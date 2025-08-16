@@ -966,9 +966,10 @@ impl AlertManager {
         // Check cooldown
         let mut cooldowns = self.cooldowns.write().await;
         if let Some(last_trigger) = cooldowns.get(&alert.id)
-            && last_trigger.elapsed() < self.cooldown_period {
-                return Ok(()); // Skip due to cooldown
-            }
+            && last_trigger.elapsed() < self.cooldown_period
+        {
+            return Ok(()); // Skip due to cooldown
+        }
 
         // Record alert
         let mut active_alerts = self.active_alerts.write().await;

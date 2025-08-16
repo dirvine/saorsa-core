@@ -17,6 +17,7 @@
 // (c) 2025 Saorsa P2P Foundation
 
 use saorsa_core::{error::P2PError, identity_manager::*, secure_memory::SecureString};
+use saorsa_core::encrypted_key_storage::SecurityLevel;
 use std::collections::HashMap;
 use tempfile::TempDir;
 use tokio;
@@ -27,7 +28,7 @@ async fn test_basic_identity_encryption() -> Result<(), P2PError> {
     let temp_dir = TempDir::new().unwrap();
     let manager = IdentityManager::new(temp_dir.path(), SecurityLevel::Fast).await?;
 
-    let password = SecureString::from_str("test_password_123!").unwrap();
+    let password = SecureString::from_plain_str("test_password_123!").unwrap();
     manager.initialize(&password).await?;
 
     // Create an identity
@@ -71,9 +72,9 @@ async fn test_basic_migration() -> Result<(), P2PError> {
     let temp_dir = TempDir::new().unwrap();
 
     // Create a mock plaintext identity file
-    let identity_id = UserId::generate();
+    let identity_id = "test-user-001".to_string();
     let plaintext_identity = Identity {
-        id: identity_id.clone(),
+        id: saorsa_core::peer_record::UserId::from_bytes(*blake3::hash(identity_id.as_bytes()).as_bytes()),
         four_word_address: "test.word.address.here".to_string(),
         state: IdentityState::Active,
         display_name: Some("Plaintext User".to_string()),
@@ -96,7 +97,7 @@ async fn test_basic_migration() -> Result<(), P2PError> {
     // Initialize manager and migrate
     let manager = IdentityManager::new(temp_dir.path(), SecurityLevel::Fast).await?;
 
-    let password = SecureString::from_str("migration_password_123!").unwrap();
+    let password = SecureString::from_plain_str("migration_password_123!").unwrap();
     manager.initialize(&password).await?;
 
     // Migrate existing identities

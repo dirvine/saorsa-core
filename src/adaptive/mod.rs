@@ -117,11 +117,23 @@ pub enum AdaptiveNetworkError {
     #[error("Network error: {0}")]
     Network(#[from] std::io::Error),
 
+    #[error("IO error: {0}")]
+    Io(std::io::Error),
+
     #[error("Serialization error: {0}")]
     Serialization(#[from] bincode::Error),
 
     #[error("Other error: {0}")]
     Other(String),
+}
+
+impl From<anyhow::Error> for AdaptiveNetworkError {
+    fn from(e: anyhow::Error) -> Self {
+        AdaptiveNetworkError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        ))
+    }
 }
 
 /// Content hash type used throughout the network

@@ -193,7 +193,7 @@ fn test_dos_protection_rate_limiting() {
 }
 
 #[test]
-fn test_null_byte_injection() -> Result<()> {
+fn test_null_byte_injection() -> anyhow::Result<()> {
     // Null bytes can be used to bypass validation
     let null_byte_attempts = vec![
         "file.txt\0.exe",
@@ -228,7 +228,7 @@ fn test_unicode_normalization_attacks() {
 }
 
 #[test]
-fn test_timing_attack_resistance() -> Result<()> {
+fn test_timing_attack_resistance() -> anyhow::Result<()> {
     use std::time::Instant;
 
     // Ensure validation timing doesn't leak information
@@ -276,7 +276,7 @@ fn test_timing_attack_resistance() -> Result<()> {
 }
 
 #[test]
-fn test_regex_dos_protection() -> Result<()> {
+fn test_regex_dos_protection() -> anyhow::Result<()> {
     // Test that regex patterns don't cause ReDoS
     use std::time::Instant;
 

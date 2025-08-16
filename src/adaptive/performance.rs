@@ -293,9 +293,9 @@ impl<K: Eq + std::hash::Hash + Clone, V: Clone> PerformanceCache<K, V> {
                     .iter()
                     .min_by_key(|(_, entry)| entry.inserted_at)
                     .map(|(k, _)| k.clone())
-                {
-                    entries.remove(&oldest_key);
-                }
+            {
+                entries.remove(&oldest_key);
+            }
         }
 
         entries.insert(
@@ -334,9 +334,10 @@ impl<T: Send + 'static> BatchProcessor<T> {
 
     /// Add item to batch
     pub async fn add(&self, item: T) -> Result<()> {
-        self.tx.send(item).await.map_err(|_| {
-            AdaptiveNetworkError::Other("Batch processor closed".to_string())
-        })?;
+        self.tx
+            .send(item)
+            .await
+            .map_err(|_| AdaptiveNetworkError::Other("Batch processor closed".to_string()))?;
         Ok(())
     }
 

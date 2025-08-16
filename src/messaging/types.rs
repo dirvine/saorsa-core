@@ -1,9 +1,9 @@
 // Message type definitions for rich messaging
 
 use crate::identity::FourWordAddress;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 /// Unique message identifier
@@ -81,75 +81,71 @@ pub struct DeviceId(pub String);
 pub struct RichMessage {
     /// Unique message ID
     pub id: MessageId,
-    
+
     /// Thread ID if part of a thread
     pub thread_id: Option<ThreadId>,
-    
+
     /// Channel/conversation ID
     pub channel_id: ChannelId,
-    
+
     /// Sender's four-word identity
     pub sender: FourWordAddress,
-    
+
     /// Sender's device
     pub sender_device: DeviceId,
-    
+
     /// Message content
     pub content: MessageContent,
-    
+
     /// File attachments
     pub attachments: Vec<Attachment>,
-    
+
     /// User mentions
     pub mentions: Vec<FourWordAddress>,
-    
+
     /// Reply to another message
     pub reply_to: Option<MessageId>,
-    
+
     /// Number of thread replies
     pub thread_count: u32,
-    
+
     /// Last thread reply time
     pub last_thread_reply: Option<DateTime<Utc>>,
-    
+
     /// Reactions grouped by emoji
     pub reactions: HashMap<String, Vec<FourWordAddress>>,
-    
+
     /// Read receipts
     pub read_by: HashMap<FourWordAddress, DateTime<Utc>>,
-    
+
     /// Delivery receipts
     pub delivered_to: HashMap<FourWordAddress, DateTime<Utc>>,
-    
+
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
-    
+
     /// Edit timestamp
     pub edited_at: Option<DateTime<Utc>>,
-    
+
     /// Deletion timestamp (soft delete)
     pub deleted_at: Option<DateTime<Utc>>,
-    
+
     /// Message expiration for ephemeral messages
     pub expires_at: Option<DateTime<Utc>>,
-    
+
     /// Whether this is an ephemeral message
     pub ephemeral: bool,
-    
+
     /// Encryption method used
     pub encryption: EncryptionMethod,
-    
+
     /// Message signature for verification
     pub signature: MessageSignature,
 }
 
 impl RichMessage {
     /// Create a new message
-    pub fn new(
-        sender: FourWordAddress,
-        channel_id: ChannelId,
-        content: MessageContent,
-    ) -> Self {
+    pub fn new(sender: FourWordAddress, channel_id: ChannelId, content: MessageContent) -> Self {
         Self {
             id: MessageId::new(),
             thread_id: None,
@@ -174,17 +170,17 @@ impl RichMessage {
             signature: MessageSignature::default(),
         }
     }
-    
+
     /// Check if message is deleted
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
     }
-    
+
     /// Check if message is edited
     pub fn is_edited(&self) -> bool {
         self.edited_at.is_some()
     }
-    
+
     /// Check if message has expired
     pub fn is_expired(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
@@ -200,31 +196,31 @@ impl RichMessage {
 pub enum MessageContent {
     /// Plain text message
     Text(String),
-    
+
     /// Rich text with markdown formatting
     RichText(MarkdownContent),
-    
+
     /// Code block with syntax highlighting
     Code(CodeBlock),
-    
+
     /// Voice message
     Voice(VoiceMessage),
-    
+
     /// Video message
     Video(VideoMessage),
-    
+
     /// Location sharing
     Location(GeoLocation),
-    
+
     /// Poll/survey
     Poll(PollMessage),
-    
+
     /// System message (join, leave, etc.)
     System(SystemMessage),
-    
+
     /// Sticker
     Sticker(Sticker),
-    
+
     /// GIF
     Gif(GifMessage),
 }
@@ -442,34 +438,34 @@ pub enum DeviceType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_message_creation() {
         let sender = FourWordAddress::from("ocean-forest-moon-star");
         let channel = ChannelId::new();
         let content = MessageContent::Text("Hello, world!".to_string());
-        
+
         let message = RichMessage::new(sender.clone(), channel, content);
-        
+
         assert_eq!(message.sender, sender);
         assert_eq!(message.channel_id, channel);
         assert!(!message.is_deleted());
         assert!(!message.is_edited());
         assert!(!message.is_expired());
     }
-    
+
     #[test]
     fn test_message_expiration() {
         let sender = FourWordAddress::from("ocean-forest-moon-star");
         let channel = ChannelId::new();
         let content = MessageContent::Text("Ephemeral".to_string());
-        
+
         let mut message = RichMessage::new(sender, channel, content);
-        
+
         // Set expiration in the past
         message.expires_at = Some(Utc::now() - chrono::Duration::hours(1));
         assert!(message.is_expired());
-        
+
         // Set expiration in the future
         message.expires_at = Some(Utc::now() + chrono::Duration::hours(1));
         assert!(!message.is_expired());

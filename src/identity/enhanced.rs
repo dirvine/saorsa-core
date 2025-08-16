@@ -318,9 +318,10 @@ impl EnhancedIdentityManager {
             base_identity.user_id,
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|e| EnhancedIdentityError::SystemTime(
-                    format!("System time error: {}", e)
-                ))?
+                .map_err(|e| EnhancedIdentityError::SystemTime(format!(
+                    "System time error: {}",
+                    e
+                )))?
                 .as_secs()
         ));
 
@@ -472,12 +473,10 @@ impl EnhancedIdentityManager {
         if allowed {
             Ok(())
         } else {
-            Err(EnhancedIdentityError::PermissionDenied(
-                format!(
-                    "Permission {:?} denied for role {:?}",
-                    permission, membership.role
-                ),
-            ))
+            Err(EnhancedIdentityError::PermissionDenied(format!(
+                "Permission {:?} denied for role {:?}",
+                permission, membership.role
+            )))
         }
     }
 }

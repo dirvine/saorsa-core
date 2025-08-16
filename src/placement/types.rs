@@ -11,7 +11,7 @@
 //! throughout the placement system.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+// use std::net::SocketAddr; // Unused import - commented out
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};

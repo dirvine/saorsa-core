@@ -55,6 +55,11 @@ impl NodeId {
     pub fn from_key(key: DhtKey) -> Self {
         Self(key)
     }
+
+    /// Backwards-compat helper for tests expecting from_bytes
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(DhtKey::from_bytes(bytes))
+    }
 }
 
 /// Node information for routing
@@ -155,10 +160,7 @@ impl KademliaRoutingTable {
         }
 
         // Sort by XOR distance
-        all_nodes.sort_by_key(|node| {
-            
-            node.id.0.distance(key)
-        });
+        all_nodes.sort_by_key(|node| node.id.0.distance(key));
 
         all_nodes.truncate(count);
         all_nodes
@@ -324,10 +326,7 @@ impl LoadBalancer {
             .collect();
 
         use std::cmp::Ordering;
-        sorted.sort_by(|a, b| a
-            .1
-            .partial_cmp(&b.1)
-            .unwrap_or(Ordering::Equal));
+        sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
 
         sorted.into_iter().take(count).map(|(id, _)| id).collect()
     }

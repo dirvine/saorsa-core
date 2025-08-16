@@ -848,8 +848,7 @@ impl EncryptedKeyStorageManager {
                 .open(&temp_path)
                 .map_err(P2PError::Io)?;
 
-            file.write_all(&serialized_storage)
-                .map_err(P2PError::Io)?;
+            file.write_all(&serialized_storage).map_err(P2PError::Io)?;
 
             file.flush().map_err(P2PError::Io)?;
         }
@@ -959,7 +958,7 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password = SecureString::from_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         assert!(storage_path.exists());
@@ -974,7 +973,7 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password = SecureString::from_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         // Create and store master seed
@@ -999,7 +998,7 @@ mod tests {
             .expect("Test assertion failed");
 
         // Test weak password
-        let weak_password = SecureString::from_str("123").expect("Test assertion failed");
+        let weak_password = SecureString::from_plain_str("123").expect("Test assertion failed");
         let validation = manager
             .validate_password(&weak_password)
             .expect("Test assertion failed");
@@ -1008,7 +1007,7 @@ mod tests {
 
         // Test strong password
         let strong_password =
-            SecureString::from_str("MySecurePassword123!").expect("Test assertion failed");
+            SecureString::from_plain_str("MySecurePassword123!").expect("Test assertion failed");
         let validation = manager
             .validate_password(&strong_password)
             .expect("Test assertion failed");
@@ -1025,9 +1024,9 @@ mod tests {
             .expect("Test assertion failed");
 
         let old_password =
-            SecureString::from_str("old_password_123!").expect("Test assertion failed");
+            SecureString::from_plain_str("old_password_123!").expect("Test assertion failed");
         let new_password =
-            SecureString::from_str("new_password_456!").expect("Test assertion failed");
+            SecureString::from_plain_str("new_password_456!").expect("Test assertion failed");
 
         manager.initialize(&old_password).await?;
 
@@ -1075,7 +1074,7 @@ mod tests {
             let manager = EncryptedKeyStorageManager::new(&storage_path, level)
                 .expect("Test assertion failed");
             let password =
-                SecureString::from_str("test_password_123!").expect("Test assertion failed");
+                SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
 
             let start_time = Instant::now();
             manager.initialize(&password).await?;
@@ -1103,7 +1102,7 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password = SecureString::from_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         // Store master seed

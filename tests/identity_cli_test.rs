@@ -16,7 +16,7 @@
 //! Tests the command-line interface for identity management
 
 use saorsa_core::Result;
-use saorsa_core::identity::cli::{IdentityCliHandler, IdentityCommand};
+use saorsa_core::identity::cli::{IdentityCliHandler, IdentityCommand, MessageInput};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -36,6 +36,7 @@ mod cli_command_tests {
         let cmd = IdentityCommand::Generate {
             difficulty: Some(8),
             output: Some(identity_path.clone()),
+            seed: None,
         };
 
         let result = handler.execute(cmd).await.unwrap();
@@ -61,6 +62,7 @@ mod cli_command_tests {
         let gen_cmd = IdentityCommand::Generate {
             difficulty: Some(8),
             output: Some(identity_path.clone()),
+            seed: None,
         };
         handler.execute(gen_cmd).await.unwrap();
 
@@ -90,6 +92,7 @@ mod cli_command_tests {
         let gen_cmd = IdentityCommand::Generate {
             difficulty: Some(8),
             output: Some(identity_path.clone()),
+            seed: None,
         };
         handler.execute(gen_cmd).await.unwrap();
 
@@ -119,6 +122,7 @@ mod cli_command_tests {
         let gen_cmd = IdentityCommand::Generate {
             difficulty: Some(8),
             output: Some(identity_path.clone()),
+            seed: None,
         };
         handler.execute(gen_cmd).await.unwrap();
 
@@ -126,7 +130,7 @@ mod cli_command_tests {
         let export_cmd = IdentityCommand::Export {
             path: Some(identity_path.clone()),
             output: export_path.clone(),
-            format: ExportFormat::Json,
+            format: "json".to_string(),
         };
 
         let result = handler.execute(export_cmd).await.unwrap();
@@ -153,6 +157,7 @@ mod cli_command_tests {
         let gen_cmd = IdentityCommand::Generate {
             difficulty: Some(8),
             output: Some(identity_path.clone()),
+            seed: None,
         };
         handler.execute(gen_cmd).await.unwrap();
 
@@ -281,17 +286,4 @@ mod cli_integration_tests {
     }
 }
 
-// Helper types for CLI testing
-
-#[derive(Debug)]
-enum MessageInput {
-    Text(String),
-    File(PathBuf),
-}
-
-#[derive(Debug)]
-enum ExportFormat {
-    Json,
-    Base64,
-    Hex,
-}
+// Removed local helper types; use `saorsa_core::identity::cli::MessageInput` instead.

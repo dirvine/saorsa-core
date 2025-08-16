@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     // Create storage instances
     let config = DHTConfig::default();
     let legacy_storage = LegacyDHTStorage::new();
-    let optimized_storage = OptimizedDHTStorage::new(config);
+    let optimized_storage = OptimizedDHTStorage::new(config.clone());
 
     println!("\n🔄 Running performance benchmarks...");
 

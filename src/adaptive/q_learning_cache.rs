@@ -679,6 +679,29 @@ impl QLearnCacheManager {
             ..Default::default()
         };
     }
+
+    /// Public accessor for current cache statistics (clone for read-only view)
+    pub async fn stats(&self) -> CacheStatistics {
+        self.cache_stats.read().await.clone()
+    }
+
+    /// Reset hit/miss counters without clearing stored entries
+    pub async fn reset_counters(&self) {
+        let mut stats = self.cache_stats.write().await;
+        stats.hits = 0;
+        stats.misses = 0;
+    }
+
+    /// Check if content is currently cached
+    pub async fn is_cached(&self, content_hash: &ContentHash) -> bool {
+        let stats = self.cache_stats.read().await;
+        stats.access_frequency.contains_key(content_hash)
+    }
+
+    /// Get the current epsilon value used for exploration
+    pub async fn current_epsilon(&self) -> f64 {
+        *self.current_epsilon.read().await
+    }
 }
 
 #[cfg(test)]

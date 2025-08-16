@@ -257,8 +257,8 @@ mod tests {
             IdentityMigrator::new(source_dir.path(), target_dir.path(), backup_dir.path()).unwrap();
 
         // Perform migration
-        let storage_password = SecureString::from_str("test_storage").unwrap();
-        let device_password = SecureString::from_str("test_device").unwrap();
+        let storage_password = SecureString::from_plain_str("test_storage").unwrap();
+        let device_password = SecureString::from_plain_str("test_device").unwrap();
 
         let status = migrator
             .migrate(&storage_password, &device_password)

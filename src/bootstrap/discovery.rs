@@ -56,7 +56,7 @@ impl BootstrapDiscovery {
             NetworkAddress::from_ipv6(
                 "2604:a880:400:d1:0:2:40d7:9001"
                     .parse()
-                    .expect("valid discovery operation"),
+                    .unwrap_or(std::net::Ipv6Addr::LOCALHOST),
                 9000,
             ),
         );

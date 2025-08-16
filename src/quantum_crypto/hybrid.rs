@@ -201,9 +201,7 @@ impl HybridSigner {
 
             let signature_bytes: [u8; 64] =
                 signature.classical.0.as_slice().try_into().map_err(|_| {
-                    QuantumCryptoError::InvalidKeyError(
-                        "Invalid signature length".to_string(),
-                    )
+                    QuantumCryptoError::InvalidKeyError("Invalid signature length".to_string())
                 })?;
             let signature = Signature::from_bytes(&signature_bytes);
 
@@ -237,14 +235,10 @@ pub mod migration {
 
         // Convert slices to arrays
         let ed25519_pub_array: [u8; 32] = ed25519_public.try_into().map_err(|_| {
-            QuantumCryptoError::InvalidKeyError(
-                "Ed25519 public key must be 32 bytes".to_string(),
-            )
+            QuantumCryptoError::InvalidKeyError("Ed25519 public key must be 32 bytes".to_string())
         })?;
         let ed25519_priv_array: [u8; 64] = ed25519_private.try_into().map_err(|_| {
-            QuantumCryptoError::InvalidKeyError(
-                "Ed25519 private key must be 64 bytes".to_string(),
-            )
+            QuantumCryptoError::InvalidKeyError("Ed25519 private key must be 64 bytes".to_string())
         })?;
 
         let public_keys = PublicKeySet {

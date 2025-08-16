@@ -1328,21 +1328,23 @@ impl MCPServer {
     async fn check_resource_requirements(&self, requirements: &ToolRequirements) -> Result<()> {
         // Check memory limit
         if let Some(max_memory) = requirements.max_memory
-            && max_memory > self.config.tool_memory_limit {
-                return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                    "Tool memory requirement exceeds limit".to_string().into(),
-                )));
-            }
+            && max_memory > self.config.tool_memory_limit
+        {
+            return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
+                "Tool memory requirement exceeds limit".to_string().into(),
+            )));
+        }
 
         // Check execution time limit
         if let Some(max_execution_time) = requirements.max_execution_time
-            && max_execution_time > self.config.max_tool_execution_time {
-                return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                    "Tool execution time requirement exceeds limit"
-                        .to_string()
-                        .into(),
-                )));
-            }
+            && max_execution_time > self.config.max_tool_execution_time
+        {
+            return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
+                "Tool execution time requirement exceeds limit"
+                    .to_string()
+                    .into(),
+            )));
+        }
 
         // TODO: Check other requirements (capabilities, network, filesystem)
 
@@ -1404,15 +1406,8 @@ impl MCPServer {
             // and process them through a receiver channel. For now, we'll implement
             // the message handling infrastructure without the actual network loop.
 
-            loop {
-                // Sleep to prevent busy loop - in real implementation,
-                // this would block on receiving messages
-                tokio::time::sleep(Duration::from_millis(100)).await;
-
-                // Check if we should shutdown
-                // This is a placeholder - real implementation would have proper shutdown signaling
-                break;
-            }
+            // Placeholder single sleep to simulate periodic work without an infinite or never loop
+            tokio::time::sleep(Duration::from_millis(100)).await;
 
             info!("MCP request processor stopped");
         });
@@ -1775,23 +1770,24 @@ impl MCPServer {
         for (service_id, health) in health_guard.iter_mut() {
             if let Some(last_heartbeat) = health.last_heartbeat
                 && let Ok(duration) = now.duration_since(last_heartbeat)
-                    && duration > config.heartbeat_timeout {
-                        let previous_status = health.status;
-                        health.status = ServiceHealthStatus::Unhealthy;
-                        health.error_message = Some("Heartbeat timeout".to_string());
+                && duration > config.heartbeat_timeout
+            {
+                let previous_status = health.status;
+                health.status = ServiceHealthStatus::Unhealthy;
+                health.error_message = Some("Heartbeat timeout".to_string());
 
-                        // Send timeout event if status changed
-                        if previous_status != ServiceHealthStatus::Unhealthy {
-                            let event = HealthEvent::HeartbeatTimeout {
-                                service_id: service_id.clone(),
-                                peer_id: PeerId::from("unknown".to_string()), // TODO: Store peer ID in health
-                            };
+                // Send timeout event if status changed
+                if previous_status != ServiceHealthStatus::Unhealthy {
+                    let event = HealthEvent::HeartbeatTimeout {
+                        service_id: service_id.clone(),
+                        peer_id: PeerId::from("unknown".to_string()), // TODO: Store peer ID in health
+                    };
 
-                            if let Err(e) = health_event_tx.send(event) {
-                                debug!("Failed to send timeout event: {}", e);
-                            }
-                        }
+                    if let Err(e) = health_event_tx.send(event) {
+                        debug!("Failed to send timeout event: {}", e);
                     }
+                }
+            }
         }
     }
 
@@ -2862,9 +2858,10 @@ impl MCPServer {
 
             // Store in DHT if available
             if let Some(dht) = &self.dht
-                && let Err(e) = self.store_service_in_dht(&service, dht).await {
-                    warn!("Failed to store remote service in DHT: {}", e);
-                }
+                && let Err(e) = self.store_service_in_dht(&service, dht).await
+            {
+                warn!("Failed to store remote service in DHT: {}", e);
+            }
 
             info!(
                 "Registered remote MCP service from {} with {} tools",
@@ -2947,8 +2944,8 @@ impl MCPServer {
 }
 
 impl Tool {
-    /// Create a new tool
-    pub fn new(name: &str, description: &str, input_schema: Value) -> ToolBuilder {
+    /// Create a tool builder
+    pub fn builder(name: &str, description: &str, input_schema: Value) -> ToolBuilder {
         ToolBuilder {
             name: name.to_string(),
             description: description.to_string(),

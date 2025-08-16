@@ -230,25 +230,27 @@ impl ConnectionPool {
         {
             let mut active = self.active_connections.write().await;
             if active.contains_key(&node_id)
-                && let Some(conn) = active.get_mut(&node_id) {
-                    if conn.connection.is_alive() {
-                        conn.touch();
-                        // For now, just return error - this is a mock implementation
-                        return Err(anyhow!("Connection already exists"));
-                    } else {
-                        active.remove(&node_id);
-                    }
+                && let Some(conn) = active.get_mut(&node_id)
+            {
+                if conn.connection.is_alive() {
+                    conn.touch();
+                    // For now, just return error - this is a mock implementation
+                    return Err(anyhow!("Connection already exists"));
+                } else {
+                    active.remove(&node_id);
                 }
+            }
         }
 
         // Check cache
         {
             let mut cache = self.connection_cache.write().await;
             if let Some(mut conn) = cache.pop(&node_id)
-                && conn.connection.is_alive() {
-                    conn.touch();
-                    return Ok(conn.connection);
-                }
+                && conn.connection.is_alive()
+            {
+                conn.touch();
+                return Ok(conn.connection);
+            }
         }
 
         // Create new connection
@@ -280,10 +282,12 @@ impl ConnectionPool {
     pub async fn release_connection(&self, node_id: NodeId) {
         let mut active = self.active_connections.write().await;
         if let Some(conn) = active.remove(&node_id)
-            && conn.connection.is_alive() && !conn.is_idle() {
-                let mut cache = self.connection_cache.write().await;
-                cache.put(node_id, conn);
-            }
+            && conn.connection.is_alive()
+            && !conn.is_idle()
+        {
+            let mut cache = self.connection_cache.write().await;
+            cache.put(node_id, conn);
+        }
     }
 
     pub async fn cleanup_idle_connections(&self) {

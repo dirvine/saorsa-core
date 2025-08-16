@@ -161,9 +161,10 @@ impl PlacementOrchestrator {
         // In a real implementation, this would query the DHT or network discovery
         let mut nodes = HashSet::new();
         for i in 0..20 {
-            let mut node_id = [0u8; 32];
-            node_id[0] = i;
-            nodes.insert(NodeId::from(node_id));
+            let mut hash = [0u8; 32];
+            hash[0] = i;
+            let user_id = crate::peer_record::UserId { hash };
+            nodes.insert(user_id);
         }
         Ok(nodes)
     }
@@ -357,7 +358,7 @@ impl AuditSystem {
     /// Audit a specific shard
     async fn audit_shard(
         shard_id: String,
-        trust_system: Arc<EigenTrustEngine>,
+        _trust_system: Arc<EigenTrustEngine>,
         _churn_predictor: Arc<ChurnPredictor>,
     ) -> PlacementResult<AuditResult> {
         // Mock audit implementation
@@ -480,7 +481,7 @@ impl RepairSystem {
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         // Update shard store after repair
-        if let Some(shard_info) = self.storage_orchestrator.get_shard_info(shard_id).await {
+        if let Some(_shard_info) = self.storage_orchestrator.get_shard_info(shard_id).await {
             let mut store = self.storage_orchestrator.shard_store.write().await;
             if let Some(info) = store.get_mut(shard_id) {
                 info.repair_count += 1;

@@ -45,7 +45,7 @@ impl RSConfig {
 
 /// Reed-Solomon encoder with configurable parameters
 pub struct ReedSolomonEncoder {
-    config: RSConfig,
+    pub(crate) config: RSConfig,
     encoder: Arc<RwLock<ReedSolomon>>,
 }
 

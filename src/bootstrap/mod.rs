@@ -43,7 +43,9 @@ impl FourWordAddress {
         if parts.len() != 4 {
             return Err(P2PError::Bootstrap(
                 crate::error::BootstrapError::InvalidData(
-                    "Four-word address must have exactly 4 words".to_string().into(),
+                    "Four-word address must have exactly 4 words"
+                        .to_string()
+                        .into(),
                 ),
             ));
         }
@@ -62,25 +64,35 @@ pub struct WordDictionary;
 #[derive(Debug, Clone)]
 pub struct WordEncoder;
 
-impl Default for WordEncoder { fn default() -> Self { Self::new() } }
+impl Default for WordEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl WordEncoder {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn encode_multiaddr_string(&self, multiaddr: &str) -> Result<FourWordAddress> {
         // Map multiaddr to IPv4:port if possible, else hash deterministically
-        let socket_addr: std::net::SocketAddr = multiaddr
-            .parse()
-            .map_err(|e| P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(format!("{e}").into())))?;
+        let socket_addr: std::net::SocketAddr = multiaddr.parse().map_err(|e| {
+            P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                format!("{e}").into(),
+            ))
+        })?;
         self.encode_socket_addr(&socket_addr)
     }
 
     pub fn decode_to_socket_addr(&self, words: &FourWordAddress) -> Result<std::net::SocketAddr> {
         let parts: Vec<&str> = words.0.split(['.', '-']).collect();
         if parts.len() != 4 {
-            return Err(P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
-                "Invalid four-word address".to_string().into(),
-            )));
+            return Err(P2PError::Bootstrap(
+                crate::error::BootstrapError::InvalidData(
+                    "Invalid four-word address".to_string().into(),
+                ),
+            ));
         }
         let encoding = four_word_networking::FourWordEncoding::new(
             parts[0].to_string(),
@@ -88,12 +100,15 @@ impl WordEncoder {
             parts[2].to_string(),
             parts[3].to_string(),
         );
-        if let Ok((ip, port)) = four_word_networking::FourWordEncoder::new().decode_ipv4(&encoding) {
+        if let Ok((ip, port)) = four_word_networking::FourWordEncoder::new().decode_ipv4(&encoding)
+        {
             Ok(std::net::SocketAddr::from((ip, port)))
         } else {
-            Err(P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
-                "Decoding four-word address failed".to_string().into(),
-            )))
+            Err(P2PError::Bootstrap(
+                crate::error::BootstrapError::InvalidData(
+                    "Decoding four-word address failed".to_string().into(),
+                ),
+            ))
         }
     }
 
@@ -102,12 +117,18 @@ impl WordEncoder {
             std::net::SocketAddr::V4(v4) => {
                 let enc = four_word_networking::FourWordEncoder::new()
                     .encode_ipv4(*v4.ip(), v4.port())
-                    .map_err(|e| P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(format!("{e}").into())))?;
+                    .map_err(|e| {
+                        P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                            format!("{e}").into(),
+                        ))
+                    })?;
                 Ok(FourWordAddress(enc.to_string().replace(' ', "-")))
             }
-            std::net::SocketAddr::V6(_) => Err(P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
-                "IPv6 not supported by four-word encoder".to_string().into(),
-            ))),
+            std::net::SocketAddr::V6(_) => Err(P2PError::Bootstrap(
+                crate::error::BootstrapError::InvalidData(
+                    "IPv6 not supported by four-word encoder".to_string().into(),
+                ),
+            )),
         }
     }
 }

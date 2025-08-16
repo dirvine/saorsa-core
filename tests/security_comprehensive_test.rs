@@ -10,8 +10,8 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::RwLock;
 use tokio::time::sleep;
@@ -34,18 +34,21 @@ impl MockInputValidator {
 
     pub fn validate_four_words(&self, input: &str) -> Result<String> {
         self.validation_count.fetch_add(1, Ordering::SeqCst);
-        
+
         // Simulate comprehensive validation
         if input.is_empty() {
             return Err(anyhow::anyhow!("Four-word address cannot be empty"));
         }
-        
+
         if input.len() > 100 {
             return Err(anyhow::anyhow!("Four-word address too long"));
         }
 
         // Check for malicious patterns
-        if input.contains("<script") || input.contains("javascript:") || input.contains("DROP TABLE") {
+        if input.contains("<script")
+            || input.contains("javascript:")
+            || input.contains("DROP TABLE")
+        {
             return Err(anyhow::anyhow!("Malicious content detected"));
         }
 
@@ -71,7 +74,10 @@ impl MockInputValidator {
         }
 
         // Check for script injection
-        if input.contains("<script") || input.contains("javascript:") || input.contains("on") && input.contains("=") {
+        if input.contains("<script")
+            || input.contains("javascript:")
+            || input.contains("on") && input.contains("=")
+        {
             return Err(anyhow::anyhow!("Script injection detected"));
         }
 
@@ -90,7 +96,7 @@ impl MockInputValidator {
 }
 
 /// Mock rate limiter for testing
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MockRateLimiter {
     requests: Arc<RwLock<HashMap<String, Vec<Instant>>>>,
     max_requests: usize,
@@ -109,17 +115,19 @@ impl MockRateLimiter {
     pub async fn check_rate_limit(&self, identifier: &str) -> Result<bool> {
         let mut requests = self.requests.write().await;
         let now = Instant::now();
-        
-        let client_requests = requests.entry(identifier.to_string()).or_insert_with(Vec::new);
-        
+
+        let client_requests = requests
+            .entry(identifier.to_string())
+            .or_insert_with(Vec::new);
+
         // Remove old requests outside the window
         client_requests.retain(|&timestamp| now.duration_since(timestamp) < self.window_duration);
-        
+
         // Check if limit exceeded
         if client_requests.len() >= self.max_requests {
             return Ok(false); // Rate limited
         }
-        
+
         // Add current request
         client_requests.push(now);
         Ok(true) // Allowed
@@ -132,7 +140,7 @@ impl MockRateLimiter {
 }
 
 /// Mock authentication service for testing
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MockAuthService {
     valid_tokens: Arc<RwLock<HashMap<String, AuthToken>>>,
     failed_attempts: Arc<AtomicUsize>,
@@ -160,7 +168,7 @@ impl MockAuthService {
             expires_at: SystemTime::now() + Duration::from_secs(3600),
             permissions,
         };
-        
+
         let mut tokens = self.valid_tokens.write().await;
         tokens.insert(token.clone(), auth_token);
         token
@@ -168,7 +176,7 @@ impl MockAuthService {
 
     pub async fn validate_token(&self, token: &str) -> Result<AuthToken> {
         let tokens = self.valid_tokens.read().await;
-        
+
         if let Some(auth_token) = tokens.get(token) {
             if auth_token.expires_at > SystemTime::now() {
                 return Ok(auth_token.clone());
@@ -177,7 +185,7 @@ impl MockAuthService {
                 return Err(anyhow::anyhow!("Token expired"));
             }
         }
-        
+
         self.failed_attempts.fetch_add(1, Ordering::SeqCst);
         Err(anyhow::anyhow!("Invalid token"))
     }
@@ -195,7 +203,7 @@ impl MockAuthService {
 }
 
 /// Mock secure storage for testing
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MockSecureStorage {
     encrypted_data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     access_count: Arc<AtomicUsize>,
@@ -211,13 +219,13 @@ impl MockSecureStorage {
 
     pub async fn store_encrypted(&self, key: &str, data: &[u8], _password: &str) -> Result<()> {
         self.access_count.fetch_add(1, Ordering::SeqCst);
-        
+
         // Mock encryption (in reality, this would use proper AES-GCM encryption)
         let mut encrypted = data.to_vec();
         for byte in encrypted.iter_mut() {
             *byte ^= 0x5A; // Simple XOR for testing
         }
-        
+
         let mut storage = self.encrypted_data.write().await;
         storage.insert(key.to_string(), encrypted);
         Ok(())
@@ -225,7 +233,7 @@ impl MockSecureStorage {
 
     pub async fn retrieve_decrypted(&self, key: &str, _password: &str) -> Result<Vec<u8>> {
         self.access_count.fetch_add(1, Ordering::SeqCst);
-        
+
         let storage = self.encrypted_data.read().await;
         if let Some(encrypted_data) = storage.get(key) {
             // Mock decryption
@@ -235,7 +243,7 @@ impl MockSecureStorage {
             }
             return Ok(decrypted);
         }
-        
+
         Err(anyhow::anyhow!("Key not found"))
     }
 
@@ -276,8 +284,16 @@ async fn test_input_validation_security() -> Result<()> {
 
     // Test 1: Valid inputs should pass
     println!("  Testing valid inputs...");
-    assert!(validator.validate_four_words("hello-world-test-network").is_ok());
-    assert!(validator.validate_message_content("This is a normal message").is_ok());
+    assert!(
+        validator
+            .validate_four_words("hello-world-test-network")
+            .is_ok()
+    );
+    assert!(
+        validator
+            .validate_message_content("This is a normal message")
+            .is_ok()
+    );
 
     // Test 2: XSS attack prevention
     println!("  Testing XSS attack prevention...");
@@ -332,7 +348,10 @@ async fn test_input_validation_security() -> Result<()> {
     }
     let validation_time = start.elapsed();
     println!("    ✅ 1000 validations completed in {:?}", validation_time);
-    assert!(validation_time < Duration::from_secs(1), "Validation should be fast");
+    assert!(
+        validation_time < Duration::from_secs(1),
+        "Validation should be fast"
+    );
 
     println!("  Validation count: {}", validator.get_validation_count());
     println!("✅ Input validation security test passed");
@@ -357,7 +376,7 @@ async fn test_rate_limiting_security() -> Result<()> {
     // Test 2: Rate limiting should trigger
     println!("  Testing rate limit enforcement...");
     let client_id = "aggressive_client";
-    
+
     // Fill up the rate limit
     for i in 0..10 {
         let allowed = rate_limiter.check_rate_limit(client_id).await?;
@@ -385,31 +404,38 @@ async fn test_rate_limiting_security() -> Result<()> {
         if !allowed {
             blocked_requests += 1;
         }
-        
+
         // Small delay to simulate real requests
         if i % 10 == 0 {
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
     }
 
-    assert!(blocked_requests > 80, "Most DoS requests should be blocked (blocked: {})", blocked_requests);
-    println!("    ✅ DoS attack blocked ({} requests blocked)", blocked_requests);
+    assert!(
+        blocked_requests > 80,
+        "Most DoS requests should be blocked (blocked: {})",
+        blocked_requests
+    );
+    println!(
+        "    ✅ DoS attack blocked ({} requests blocked)",
+        blocked_requests
+    );
 
     // Test 5: Rate limit window expiry
     println!("  Testing rate limit window expiry...");
     let test_client = "window_test_client";
-    
+
     // Use up the rate limit
     for _ in 0..10 {
         rate_limiter.check_rate_limit(test_client).await?;
     }
-    
+
     // Should be blocked now
     assert!(!rate_limiter.check_rate_limit(test_client).await?);
-    
+
     // Wait for window to partially expire (simulate with small delay)
     tokio::time::sleep(Duration::from_millis(10)).await;
-    
+
     println!("    ✅ Rate limit window behavior verified");
 
     println!("✅ Rate limiting security test passed");
@@ -425,7 +451,9 @@ async fn test_authentication_security() -> Result<()> {
 
     // Test 1: Token creation and validation
     println!("  Testing token lifecycle...");
-    let token = auth_service.create_token("user123", vec!["read".to_string(), "write".to_string()]).await;
+    let token = auth_service
+        .create_token("user123", vec!["read".to_string(), "write".to_string()])
+        .await;
     let auth_token = auth_service.validate_token(&token).await?;
     assert_eq!(auth_token.user_id, "user123");
     assert!(auth_token.permissions.contains(&"read".to_string()));
@@ -443,14 +471,25 @@ async fn test_authentication_security() -> Result<()> {
 
     for invalid_token in &invalid_tokens {
         let result = auth_service.validate_token(invalid_token).await;
-        assert!(result.is_err(), "Invalid token should be rejected: {}", invalid_token);
+        assert!(
+            result.is_err(),
+            "Invalid token should be rejected: {}",
+            invalid_token
+        );
     }
     println!("    ✅ Invalid tokens rejected");
 
     // Test 3: Permission-based access control
     println!("  Testing permission-based access control...");
-    let read_only_token = auth_service.create_token("reader", vec!["read".to_string()]).await;
-    let admin_token = auth_service.create_token("admin", vec!["read".to_string(), "write".to_string(), "admin".to_string()]).await;
+    let read_only_token = auth_service
+        .create_token("reader", vec!["read".to_string()])
+        .await;
+    let admin_token = auth_service
+        .create_token(
+            "admin",
+            vec!["read".to_string(), "write".to_string(), "admin".to_string()],
+        )
+        .await;
 
     assert!(auth_service.has_permission(&read_only_token, "read").await);
     assert!(!auth_service.has_permission(&read_only_token, "write").await);
@@ -464,14 +503,22 @@ async fn test_authentication_security() -> Result<()> {
     // Test 4: Brute force attack resistance
     println!("  Testing brute force attack resistance...");
     let initial_failures = auth_service.get_failed_attempts();
-    
+
     for i in 0..50 {
-        let _ = auth_service.validate_token(&format!("brute_force_attempt_{}", i)).await;
+        let _ = auth_service
+            .validate_token(&format!("brute_force_attempt_{}", i))
+            .await;
     }
-    
+
     let final_failures = auth_service.get_failed_attempts();
-    assert!(final_failures > initial_failures + 45, "Failed attempts should be tracked");
-    println!("    ✅ Brute force attempts tracked ({} failed attempts)", final_failures - initial_failures);
+    assert!(
+        final_failures > initial_failures + 45,
+        "Failed attempts should be tracked"
+    );
+    println!(
+        "    ✅ Brute force attempts tracked ({} failed attempts)",
+        final_failures - initial_failures
+    );
 
     // Test 5: Token format validation
     println!("  Testing token format validation...");
@@ -484,19 +531,25 @@ async fn test_authentication_security() -> Result<()> {
 
     for malicious_token in &malicious_tokens {
         let result = auth_service.validate_token(malicious_token).await;
-        assert!(result.is_err(), "Malicious token should be rejected: {}", malicious_token);
+        assert!(
+            result.is_err(),
+            "Malicious token should be rejected: {}",
+            malicious_token
+        );
     }
     println!("    ✅ Malicious tokens rejected");
 
     // Test 6: Concurrent access safety
     println!("  Testing concurrent access safety...");
-    let shared_auth = Arc::new(suite.auth_service);
+    let shared_auth: Arc<MockAuthService> = Arc::new(suite.auth_service.clone());
     let mut handles = Vec::new();
 
     for i in 0..10 {
         let auth_clone = Arc::clone(&shared_auth);
         let handle = tokio::spawn(async move {
-            let token = auth_clone.create_token(&format!("concurrent_user_{}", i), vec!["test".to_string()]).await;
+            let token = auth_clone
+                .create_token(&format!("concurrent_user_{}", i), vec!["test".to_string()])
+                .await;
             let _ = auth_clone.validate_token(&token).await;
             let _ = auth_clone.has_permission(&token, "test").await;
         });
@@ -559,14 +612,18 @@ async fn test_secure_storage_security() -> Result<()> {
     // Test 4: Large data handling
     println!("  Testing large data handling...");
     let large_data = vec![0xAA; 1_000_000]; // 1MB of data
-    storage.store_encrypted("large_data", &large_data, password).await?;
+    storage
+        .store_encrypted("large_data", &large_data, password)
+        .await?;
     let retrieved_large = storage.retrieve_decrypted("large_data", password).await?;
     assert_eq!(retrieved_large.len(), large_data.len());
     println!("    ✅ Large data handled correctly");
 
     // Test 5: Key not found handling
     println!("  Testing key not found scenarios...");
-    let result = storage.retrieve_decrypted("non_existent_key", password).await;
+    let result = storage
+        .retrieve_decrypted("non_existent_key", password)
+        .await;
     assert!(result.is_err(), "Non-existent key should return error");
     println!("    ✅ Non-existent key handled properly");
 
@@ -581,9 +638,15 @@ async fn test_secure_storage_security() -> Result<()> {
             let data = format!("concurrent_data_{}", i).into_bytes();
             let key = format!("concurrent_key_{}", i);
             let password = format!("password_{}", i);
-            
-            storage_clone.store_encrypted(&key, &data, &password).await.unwrap();
-            let retrieved = storage_clone.retrieve_decrypted(&key, &password).await.unwrap();
+
+            storage_clone
+                .store_encrypted(&key, &data, &password)
+                .await
+                .unwrap();
+            let retrieved = storage_clone
+                .retrieve_decrypted(&key, &password)
+                .await
+                .unwrap();
             assert_eq!(retrieved, data);
         });
         handles.push(handle);
@@ -597,15 +660,17 @@ async fn test_secure_storage_security() -> Result<()> {
     // Test 7: Memory security (data clearing)
     println!("  Testing memory security properties...");
     let secret_data = b"very_secret_password_that_should_be_cleared";
-    storage.store_encrypted("memory_test", secret_data, password).await?;
-    
+    storage
+        .store_encrypted("memory_test", secret_data, password)
+        .await?;
+
     // In a real implementation, sensitive data should be cleared from memory
     // This is more of a conceptual test for our mock
     println!("    ✅ Memory security properties considered");
 
     let access_count = storage.get_access_count();
     println!("  Total storage access operations: {}", access_count);
-    
+
     println!("✅ Secure storage security test passed");
     Ok(())
 }
@@ -619,36 +684,60 @@ async fn test_attack_scenarios() -> Result<()> {
     // Attack Scenario 1: Combined XSS + SQL Injection
     println!("  Scenario 1: Combined XSS + SQL injection attack...");
     let combined_attack = "<script>alert('xss')</script>'; DROP TABLE users;--";
-    let result = suite.input_validator.validate_message_content(combined_attack);
+    let result = suite
+        .input_validator
+        .validate_message_content(combined_attack);
     assert!(result.is_err(), "Combined attack should be blocked");
     println!("    ✅ Combined XSS/SQL attack blocked");
 
     // Attack Scenario 2: Rate limit bypass attempts
     println!("  Scenario 2: Rate limit bypass attempts...");
     let bypass_attempts = [
-        "attacker_1", "attacker_2", "attacker_3", "attacker_4", "attacker_5",
-        "attacker_1_variation", "attacker.1", "attacker-1", "ATTACKER_1"
+        "attacker_1",
+        "attacker_2",
+        "attacker_3",
+        "attacker_4",
+        "attacker_5",
+        "attacker_1_variation",
+        "attacker.1",
+        "attacker-1",
+        "ATTACKER_1",
     ];
 
     let mut total_blocked = 0;
     for variant in &bypass_attempts {
-        for _ in 0..15 { // Attempt to overwhelm each variant
+        for _ in 0..15 {
+            // Attempt to overwhelm each variant
             let allowed = suite.rate_limiter.check_rate_limit(variant).await?;
             if !allowed {
                 total_blocked += 1;
             }
         }
     }
-    
-    assert!(total_blocked > 50, "Rate limiting should block bypass attempts");
-    println!("    ✅ Rate limit bypass attempts blocked ({} requests)", total_blocked);
+
+    assert!(
+        total_blocked > 50,
+        "Rate limiting should block bypass attempts"
+    );
+    println!(
+        "    ✅ Rate limit bypass attempts blocked ({} requests)",
+        total_blocked
+    );
 
     // Attack Scenario 3: Authentication bypass attempts
     println!("  Scenario 3: Authentication bypass attempts...");
     let bypass_tokens = [
-        "admin", "root", "system", "null", "undefined",
-        "Bearer admin", "JWT admin", "session_admin",
-        "../../../etc/passwd", "' OR '1'='1", "admin'; --",
+        "admin",
+        "root",
+        "system",
+        "null",
+        "undefined",
+        "Bearer admin",
+        "JWT admin",
+        "session_admin",
+        "../../../etc/passwd",
+        "' OR '1'='1",
+        "admin'; --",
     ];
 
     let mut blocked_auths = 0;
@@ -658,28 +747,44 @@ async fn test_attack_scenarios() -> Result<()> {
             blocked_auths += 1;
         }
     }
-    
-    assert_eq!(blocked_auths, bypass_tokens.len(), "All bypass attempts should be blocked");
+
+    assert_eq!(
+        blocked_auths,
+        bypass_tokens.len(),
+        "All bypass attempts should be blocked"
+    );
     println!("    ✅ Authentication bypass attempts blocked");
 
     // Attack Scenario 4: Data exfiltration attempts
     println!("  Scenario 4: Data exfiltration attempts...");
     let exfiltration_keys = [
-        "../../../secrets", "/etc/passwd", "C:\\Windows\\System32\\config",
-        "users.db", "passwords.txt", "private_keys",
-        "config/../../../database.sql", "backup\\..\\..\\admin",
+        "../../../secrets",
+        "/etc/passwd",
+        "C:\\Windows\\System32\\config",
+        "users.db",
+        "passwords.txt",
+        "private_keys",
+        "config/../../../database.sql",
+        "backup\\..\\..\\admin",
     ];
 
     let mut blocked_access = 0;
     for key in &exfiltration_keys {
-        let result = suite.secure_storage.retrieve_decrypted(key, "any_password").await;
+        let result = suite
+            .secure_storage
+            .retrieve_decrypted(key, "any_password")
+            .await;
         if result.is_err() {
             blocked_access += 1;
         }
     }
-    
+
     // All should fail since these keys don't exist (proper behavior)
-    assert_eq!(blocked_access, exfiltration_keys.len(), "Data exfiltration attempts should fail");
+    assert_eq!(
+        blocked_access,
+        exfiltration_keys.len(),
+        "Data exfiltration attempts should fail"
+    );
     println!("    ✅ Data exfiltration attempts blocked");
 
     // Attack Scenario 5: Resource exhaustion attempts
@@ -689,37 +794,58 @@ async fn test_attack_scenarios() -> Result<()> {
 
     for i in 0..1000 {
         // Simulate various resource-intensive operations
-        let _ = suite.input_validator.validate_four_words(&format!("test-attack-resource-{}", i));
-        let _ = suite.rate_limiter.check_rate_limit(&format!("resource_attacker_{}", i % 10)).await;
-        
+        let _ = suite
+            .input_validator
+            .validate_four_words(&format!("test-attack-resource-{}", i));
+        let _ = suite
+            .rate_limiter
+            .check_rate_limit(&format!("resource_attacker_{}", i % 10))
+            .await;
+
         operations_completed += 1;
-        
+
         // Ensure we don't take too long (prevent real DoS of our test)
         if start_time.elapsed() > Duration::from_secs(5) {
             break;
         }
     }
-    
+
     let elapsed = start_time.elapsed();
-    println!("    Completed {} operations in {:?}", operations_completed, elapsed);
-    assert!(operations_completed > 500, "System should handle reasonable load");
+    println!(
+        "    Completed {} operations in {:?}",
+        operations_completed, elapsed
+    );
+    assert!(
+        operations_completed > 500,
+        "System should handle reasonable load"
+    );
     println!("    ✅ Resource exhaustion resistance verified");
 
     // Attack Scenario 6: Privilege escalation attempts
     println!("  Scenario 6: Privilege escalation attempts...");
-    let user_token = suite.auth_service.create_token("regular_user", vec!["read".to_string()]).await;
-    
+    let user_token = suite
+        .auth_service
+        .create_token("regular_user", vec!["read".to_string()])
+        .await;
+
     let privileged_operations = ["admin", "root", "system", "write", "delete", "execute"];
     let mut blocked_operations = 0;
-    
+
     for operation in &privileged_operations {
-        let has_permission = suite.auth_service.has_permission(&user_token, operation).await;
+        let has_permission = suite
+            .auth_service
+            .has_permission(&user_token, operation)
+            .await;
         if !has_permission {
             blocked_operations += 1;
         }
     }
-    
-    assert_eq!(blocked_operations, privileged_operations.len() - 1, "Only 'read' should be allowed"); // -1 because read should be allowed
+
+    assert_eq!(
+        blocked_operations,
+        privileged_operations.len() - 1,
+        "Only 'read' should be allowed"
+    ); // -1 because read should be allowed
     println!("    ✅ Privilege escalation attempts blocked");
 
     println!("✅ Attack scenarios test passed");
@@ -734,114 +860,153 @@ async fn test_security_integration() -> Result<()> {
 
     // Integration Test 1: Complete secure message flow
     println!("  Integration 1: Secure message flow...");
-    
+
     // Step 1: Create authenticated session
-    let user_token = suite.auth_service.create_token("messaging_user", vec!["message".to_string()]).await;
+    let user_token = suite
+        .auth_service
+        .create_token("messaging_user", vec!["message".to_string()])
+        .await;
     let auth_result = suite.auth_service.validate_token(&user_token).await?;
     assert_eq!(auth_result.user_id, "messaging_user");
-    
+
     // Step 2: Check rate limiting
-    let allowed = suite.rate_limiter.check_rate_limit("messaging_user").await?;
+    let allowed = suite
+        .rate_limiter
+        .check_rate_limit("messaging_user")
+        .await?;
     assert!(allowed, "First message should be allowed");
-    
+
     // Step 3: Validate message content
     let message = "Hello, this is a secure message from the P2P network!";
     let validated_message = suite.input_validator.validate_message_content(message)?;
     assert_eq!(validated_message, message);
-    
+
     // Step 4: Store message securely
-    let message_key = format!("message_{}_{}", auth_result.user_id, chrono::Utc::now().timestamp());
-    suite.secure_storage.store_encrypted(&message_key, validated_message.as_bytes(), "message_encryption_key").await?;
-    
+    let message_key = format!(
+        "message_{}_{}",
+        auth_result.user_id,
+        chrono::Utc::now().timestamp()
+    );
+    suite
+        .secure_storage
+        .store_encrypted(
+            &message_key,
+            validated_message.as_bytes(),
+            "message_encryption_key",
+        )
+        .await?;
+
     // Step 5: Retrieve and verify
-    let retrieved_message = suite.secure_storage.retrieve_decrypted(&message_key, "message_encryption_key").await?;
+    let retrieved_message = suite
+        .secure_storage
+        .retrieve_decrypted(&message_key, "message_encryption_key")
+        .await?;
     assert_eq!(retrieved_message, validated_message.as_bytes());
-    
+
     println!("    ✅ Complete secure message flow working");
 
     // Integration Test 2: Security layer interaction under load
     println!("  Integration 2: Security layers under concurrent load...");
-    
+
     let mut handles = Vec::new();
     let concurrent_users = 20;
-    
+
     for user_id in 0..concurrent_users {
         let validator = suite.input_validator.clone();
-        let rate_limiter = &suite.rate_limiter;
-        let auth_service = &suite.auth_service;
-        let secure_storage = &suite.secure_storage;
-        
+        let rate_limiter = suite.rate_limiter.clone();
+        let auth_service = suite.auth_service.clone();
+        let secure_storage = suite.secure_storage.clone();
+
         let handle = tokio::spawn(async move {
             let user_name = format!("integration_user_{}", user_id);
-            let token = auth_service.create_token(&user_name, vec!["test".to_string()]).await;
-            
+            let token = auth_service
+                .create_token(&user_name, vec!["test".to_string()])
+                .await;
+
             // Each user performs multiple operations
             for operation_id in 0..10 {
                 // Check auth
                 let _auth = auth_service.validate_token(&token).await.unwrap();
-                
+
                 // Check rate limit
-                let allowed = rate_limiter.check_rate_limit(&user_name).await.unwrap();
+                let allowed = rate_limiter
+                    .check_rate_limit(&user_name)
+                    .await
+                    .unwrap_or(true);
                 if !allowed {
                     continue; // Skip if rate limited
                 }
-                
+
                 // Validate input
                 let test_message = format!("integration-test-message-{}", operation_id);
                 let validated = validator.validate_four_words(&test_message);
                 if validated.is_err() {
                     continue; // Skip invalid input
                 }
-                
+
                 // Store securely
                 let key = format!("integration_{}_{}", user_name, operation_id);
-                let _ = secure_storage.store_encrypted(&key, test_message.as_bytes(), "integration_key").await;
-                
+                let _ = secure_storage
+                    .store_encrypted(&key, test_message.as_bytes(), "integration_key")
+                    .await;
+
                 // Small delay to simulate real usage
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
-        
+
         handles.push(handle);
     }
-    
+
     // Wait for all concurrent operations to complete
     for handle in handles {
         handle.await?;
     }
-    
-    println!("    ✅ {} users completed concurrent operations", concurrent_users);
+
+    println!(
+        "    ✅ {} users completed concurrent operations",
+        concurrent_users
+    );
 
     // Integration Test 3: Error propagation and recovery
     println!("  Integration 3: Error handling and recovery...");
-    
+
     // Test graceful degradation when components fail
     let invalid_token = "definitely_invalid_token";
     let auth_result = suite.auth_service.validate_token(invalid_token).await;
     assert!(auth_result.is_err(), "Invalid auth should propagate error");
-    
+
     let malicious_input = "<script>alert('xss')</script>";
-    let validation_result = suite.input_validator.validate_message_content(malicious_input);
-    assert!(validation_result.is_err(), "Validation error should propagate");
-    
+    let validation_result = suite
+        .input_validator
+        .validate_message_content(malicious_input);
+    assert!(
+        validation_result.is_err(),
+        "Validation error should propagate"
+    );
+
     let non_existent_key = "non_existent_data_key";
-    let storage_result = suite.secure_storage.retrieve_decrypted(non_existent_key, "any_password").await;
+    let storage_result = suite
+        .secure_storage
+        .retrieve_decrypted(non_existent_key, "any_password")
+        .await;
     assert!(storage_result.is_err(), "Storage error should propagate");
-    
+
     println!("    ✅ Error handling and propagation working");
 
     // Integration Test 4: Security policy compliance
     println!("  Integration 4: Security policy compliance...");
-    
+
+    let oversized = "a".repeat(200_000);
     let policy_tests = vec![
         ("Empty input rejection", ""),
-        ("Oversized input rejection", &"a".repeat(200_000)),
+        ("Oversized input rejection", &oversized),
         ("Malicious script rejection", "<script>evil()</script>"),
         ("SQL injection rejection", "'; DROP TABLE users;--"),
         ("Path traversal rejection", "../../etc/passwd"),
         ("Null byte rejection", "normal\x00malicious"),
     ];
-    
+
     let mut policy_violations = 0;
     for (test_name, test_input) in &policy_tests {
         let validation_result = suite.input_validator.validate_message_content(test_input);
@@ -852,19 +1017,22 @@ async fn test_security_integration() -> Result<()> {
             println!("    ❌ {} - should have been rejected", test_name);
         }
     }
-    
-    assert_eq!(policy_violations, 0, "All security policies should be enforced");
+
+    assert_eq!(
+        policy_violations, 0,
+        "All security policies should be enforced"
+    );
 
     // Performance verification
     let validation_count = suite.input_validator.get_validation_count();
     let storage_access_count = suite.secure_storage.get_access_count();
     let auth_failures = suite.auth_service.get_failed_attempts();
-    
+
     println!("  Performance summary:");
     println!("    Validations performed: {}", validation_count);
     println!("    Storage operations: {}", storage_access_count);
     println!("    Authentication failures: {}", auth_failures);
-    
+
     println!("✅ Security integration test passed");
     Ok(())
 }
@@ -881,90 +1049,136 @@ async fn test_security_system_health() -> Result<()> {
     // Health Check 1: All components responsive
     println!("  1. Component responsiveness check...");
     let start = Instant::now();
-    
-    let _ = suite.input_validator.validate_four_words("health-check-test-message");
+
+    let _ = suite
+        .input_validator
+        .validate_four_words("health-check-test-message");
     let _ = suite.rate_limiter.check_rate_limit("health_checker").await;
-    let health_token = suite.auth_service.create_token("health_user", vec!["health".to_string()]).await;
+    let health_token = suite
+        .auth_service
+        .create_token("health_user", vec!["health".to_string()])
+        .await;
     let _ = suite.auth_service.validate_token(&health_token).await;
-    suite.secure_storage.store_encrypted("health_key", b"health_data", "health_password").await?;
-    let _ = suite.secure_storage.retrieve_decrypted("health_key", "health_password").await;
-    
+    suite
+        .secure_storage
+        .store_encrypted("health_key", b"health_data", "health_password")
+        .await?;
+    let _ = suite
+        .secure_storage
+        .retrieve_decrypted("health_key", "health_password")
+        .await;
+
     let response_time = start.elapsed();
-    assert!(response_time < Duration::from_millis(100), "Components should respond quickly");
+    assert!(
+        response_time < Duration::from_millis(100),
+        "Components should respond quickly"
+    );
     println!("    ✅ All components responsive ({:?})", response_time);
 
     // Health Check 2: Security boundaries intact
     println!("  2. Security boundary integrity check...");
-    
+
     // Test cross-component isolation
     let malicious_data = "malicious_data_<script>alert('xss')</script>";
-    let validation_blocked = suite.input_validator.validate_message_content(malicious_data).is_err();
-    let storage_isolated = suite.secure_storage.retrieve_decrypted("non_existent", "wrong_key").await.is_err();
-    let auth_protected = suite.auth_service.validate_token("fake_token").await.is_err();
-    
-    assert!(validation_blocked, "Input validation boundary should block malicious data");
+    let validation_blocked = suite
+        .input_validator
+        .validate_message_content(malicious_data)
+        .is_err();
+    let storage_isolated = suite
+        .secure_storage
+        .retrieve_decrypted("non_existent", "wrong_key")
+        .await
+        .is_err();
+    let auth_protected = suite
+        .auth_service
+        .validate_token("fake_token")
+        .await
+        .is_err();
+
+    assert!(
+        validation_blocked,
+        "Input validation boundary should block malicious data"
+    );
     assert!(storage_isolated, "Storage should be isolated");
     assert!(auth_protected, "Authentication should be protected");
-    
+
     println!("    ✅ Security boundaries intact");
 
     // Health Check 3: Performance under normal load
     println!("  3. Performance under normal load...");
-    
+
     let load_start = Instant::now();
     let load_operations = 500;
-    
+
     for i in 0..load_operations {
         let user_id = format!("load_test_{}", i % 50); // 50 different users
         let message = format!("load-test-message-{}", i);
-        
+
         // Simulate normal user workflow
         let _ = suite.input_validator.validate_four_words(&message);
         let _ = suite.rate_limiter.check_rate_limit(&user_id).await;
-        
+
         if i % 10 == 0 {
             // Occasional auth operations
-            let token = suite.auth_service.create_token(&user_id, vec!["test".to_string()]).await;
+            let token = suite
+                .auth_service
+                .create_token(&user_id, vec!["test".to_string()])
+                .await;
             let _ = suite.auth_service.validate_token(&token).await;
         }
-        
+
         if i % 20 == 0 {
             // Occasional storage operations
             let key = format!("load_key_{}", i);
-            suite.secure_storage.store_encrypted(&key, message.as_bytes(), "load_password").await?;
+            suite
+                .secure_storage
+                .store_encrypted(&key, message.as_bytes(), "load_password")
+                .await?;
         }
     }
-    
+
     let load_time = load_start.elapsed();
     let ops_per_second = load_operations as f64 / load_time.as_secs_f64();
-    
-    println!("    ✅ Handled {} operations in {:?} ({:.0} ops/sec)", load_operations, load_time, ops_per_second);
-    assert!(ops_per_second > 1000.0, "Should handle >1000 ops/sec under normal load");
+
+    println!(
+        "    ✅ Handled {} operations in {:?} ({:.0} ops/sec)",
+        load_operations, load_time, ops_per_second
+    );
+    assert!(
+        ops_per_second > 1000.0,
+        "Should handle >1000 ops/sec under normal load"
+    );
 
     // Health Check 4: Memory and resource stability
     println!("  4. Memory and resource stability...");
-    
+
     // Simulate extended operation to check for memory leaks
     let stability_start = Instant::now();
     let mut operation_count = 0;
-    
+
     while stability_start.elapsed() < Duration::from_secs(2) {
         let user_id = format!("stability_user_{}", operation_count % 10);
-        let _ = suite.input_validator.validate_four_words(&format!("stability-test-{}", operation_count));
+        let _ = suite
+            .input_validator
+            .validate_four_words(&format!("stability-test-{}", operation_count));
         let _ = suite.rate_limiter.check_rate_limit(&user_id).await;
         operation_count += 1;
-        
+
         // Prevent tight loop that might affect other tests
         if operation_count % 100 == 0 {
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
     }
-    
-    println!("    ✅ System stable after {} operations over {:?}", operation_count, stability_start.elapsed());
+
+    println!(
+        "    ✅ System stable after {} operations over {:?}",
+        operation_count,
+        stability_start.elapsed()
+    );
 
     // Health Check 5: Security posture verification
     println!("  5. Security posture verification...");
-    
+
     let security_tests = vec![
         ("XSS prevention", "<script>alert('test')</script>"),
         ("SQL injection prevention", "'; DROP TABLE test;--"),
@@ -972,24 +1186,42 @@ async fn test_security_system_health() -> Result<()> {
         ("Path traversal prevention", "../../../etc/passwd"),
         ("Null byte prevention", "test\x00malicious"),
     ];
-    
+
     let mut security_score = 0;
     for (test_name, payload) in &security_tests {
-        if suite.input_validator.validate_message_content(payload).is_err() {
+        if suite
+            .input_validator
+            .validate_message_content(payload)
+            .is_err()
+        {
             security_score += 1;
         }
     }
-    
+
     let security_percentage = (security_score * 100) / security_tests.len();
-    println!("    ✅ Security posture: {}/{}  ({}%)", security_score, security_tests.len(), security_percentage);
-    assert_eq!(security_score, security_tests.len(), "All security tests should pass");
+    println!(
+        "    ✅ Security posture: {}/{}  ({}%)",
+        security_score,
+        security_tests.len(),
+        security_percentage
+    );
+    assert_eq!(
+        security_score,
+        security_tests.len(),
+        "All security tests should pass"
+    );
 
     // Final Health Summary
     println!("  📊 Security Health Summary:");
     println!("    - Component Response Time: {:?}", response_time);
     println!("    - Load Performance: {:.0} ops/sec", ops_per_second);
     println!("    - Stability Operations: {}", operation_count);
-    println!("    - Security Score: {}% ({}/ {})", security_percentage, security_score, security_tests.len());
+    println!(
+        "    - Security Score: {}% ({}/ {})",
+        security_percentage,
+        security_score,
+        security_tests.len()
+    );
     println!("    - Overall Status: ✅ HEALTHY");
 
     println!("✅ Security system health check passed");

@@ -17,8 +17,8 @@
 //! success rates, and geographic proximity for optimal P2P network performance.
 
 use super::geographic_routing::{GeographicRegion, PeerQualityMetrics};
-use crate::error::{P2PError, P2pResult as Result};
 use crate::PeerId;
+use crate::error::{P2PError, P2pResult as Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -85,7 +85,7 @@ impl PeerMetricsCache {
     /// Add or update a peer in the cache
     pub fn insert(&mut self, peer_id: PeerId, metrics: PeerQualityMetrics) {
         let now = Instant::now();
-        
+
         // Remove from old position if exists
         if self.entries.contains_key(&peer_id) {
             self.remove_from_access_order(&peer_id);
@@ -93,17 +93,21 @@ impl PeerMetricsCache {
         }
 
         // Add to cache
-        self.entries.insert(peer_id.clone(), CacheEntry {
-            peer_id: peer_id.clone(),
-            metrics: metrics.clone(),
-            last_accessed: now,
-        });
+        self.entries.insert(
+            peer_id.clone(),
+            CacheEntry {
+                peer_id: peer_id.clone(),
+                metrics: metrics.clone(),
+                last_accessed: now,
+            },
+        );
 
         // Update access order
         self.access_order.push_back(peer_id.clone());
 
         // Update regional index
-        self.regional_peers.entry(metrics.region)
+        self.regional_peers
+            .entry(metrics.region)
             .or_default()
             .push(peer_id.clone());
 
@@ -119,7 +123,7 @@ impl PeerMetricsCache {
             // Update access order first
             self.remove_from_access_order(peer_id);
             self.access_order.push_back(peer_id.clone());
-            
+
             // Now update the entry and return the metrics
             if let Some(entry) = self.entries.get_mut(peer_id) {
                 entry.last_accessed = Instant::now();
@@ -133,10 +137,15 @@ impl PeerMetricsCache {
     }
 
     /// Get peers from a specific region
-    pub fn get_regional_peers(&self, region: GeographicRegion) -> Vec<(PeerId, PeerQualityMetrics)> {
-        self.regional_peers.get(&region)
+    pub fn get_regional_peers(
+        &self,
+        region: GeographicRegion,
+    ) -> Vec<(PeerId, PeerQualityMetrics)> {
+        self.regional_peers
+            .get(&region)
             .map(|peer_ids| {
-                peer_ids.iter()
+                peer_ids
+                    .iter()
                     .filter_map(|id| self.entries.get(id))
                     .map(|entry| (entry.peer_id.clone(), entry.metrics.clone()))
                     .collect()
@@ -158,7 +167,9 @@ impl PeerMetricsCache {
     /// Clean up expired entries
     pub fn cleanup_expired(&mut self, max_age: Duration) {
         let now = Instant::now();
-        let expired_peers: Vec<PeerId> = self.entries.iter()
+        let expired_peers: Vec<PeerId> = self
+            .entries
+            .iter()
             .filter(|(_, entry)| now.duration_since(entry.last_accessed) > max_age)
             .map(|(peer_id, _)| peer_id.clone())
             .collect();
@@ -170,7 +181,9 @@ impl PeerMetricsCache {
 
     /// Get cache statistics
     pub fn stats(&self) -> CacheStats {
-        let regional_counts: HashMap<GeographicRegion, usize> = self.regional_peers.iter()
+        let regional_counts: HashMap<GeographicRegion, usize> = self
+            .regional_peers
+            .iter()
             .map(|(region, peers)| (*region, peers.len()))
             .collect();
 
@@ -185,9 +198,10 @@ impl PeerMetricsCache {
     /// Evict least recently used entry
     fn evict_lru(&mut self) {
         if let Some(peer_id) = self.access_order.pop_front()
-            && let Some(entry) = self.entries.remove(&peer_id) {
-                self.remove_from_regional_index(&entry.peer_id);
-            }
+            && let Some(entry) = self.entries.remove(&peer_id)
+        {
+            self.remove_from_regional_index(&entry.peer_id);
+        }
     }
 
     /// Remove peer from access order tracking
@@ -243,7 +257,7 @@ impl LatencyAwarePeerSelection {
     /// Create a new latency-aware peer selection system
     pub fn new(config: LatencySelectionConfig, local_region: GeographicRegion) -> Self {
         let cache_size = config.max_peers_per_region * GeographicRegion::all_regions().len();
-        
+
         Self {
             config,
             cache: PeerMetricsCache::new(cache_size),
@@ -253,7 +267,11 @@ impl LatencyAwarePeerSelection {
     }
 
     /// Update metrics for a peer
-    pub fn update_peer_metrics(&mut self, peer_id: PeerId, metrics: PeerQualityMetrics) -> Result<()> {
+    pub fn update_peer_metrics(
+        &mut self,
+        peer_id: PeerId,
+        metrics: PeerQualityMetrics,
+    ) -> Result<()> {
         // Validate metrics quality
         if metrics.get_reliability_score() < 0.0 || metrics.get_reliability_score() > 1.0 {
             return Err(P2PError::validation("Invalid reliability score"));
@@ -266,16 +284,16 @@ impl LatencyAwarePeerSelection {
 
     /// Select best peers for a request
     pub fn select_peers(
-        &mut self, 
+        &mut self,
         target_region: Option<GeographicRegion>,
-        count: Option<usize>
+        count: Option<usize>,
     ) -> Result<Vec<SelectedPeer>> {
         let selection_count = count.unwrap_or(self.config.default_selection_count);
         let preferred_region = target_region.unwrap_or(self.local_region);
-        
+
         // Collect all suitable peers from cache
         let mut candidates = Vec::new();
-        
+
         // Start with preferred region
         let regional_peers = self.cache.get_regional_peers(preferred_region);
         for (peer_id, metrics) in regional_peers {
@@ -290,7 +308,8 @@ impl LatencyAwarePeerSelection {
                 if region != preferred_region {
                     let regional_peers = self.cache.get_regional_peers(region);
                     for (peer_id, metrics) in regional_peers {
-                        if metrics.get_reliability_score() >= self.config.min_reliability_threshold {
+                        if metrics.get_reliability_score() >= self.config.min_reliability_threshold
+                        {
                             candidates.push((peer_id, metrics, region));
                         }
                     }
@@ -299,7 +318,8 @@ impl LatencyAwarePeerSelection {
         }
 
         // Score and sort candidates
-        let mut scored_peers: Vec<_> = candidates.into_iter()
+        let mut scored_peers: Vec<_> = candidates
+            .into_iter()
             .map(|(peer_id, metrics, region)| {
                 let score = self.calculate_selection_score(&metrics, region, preferred_region);
                 (peer_id, metrics, region, score)
@@ -333,11 +353,11 @@ impl LatencyAwarePeerSelection {
         &mut self,
         source_region: GeographicRegion,
         target_region: GeographicRegion,
-        count: usize
+        count: usize,
     ) -> Result<Vec<SelectedPeer>> {
         // Look for peers that can bridge between regions
         let mut bridge_candidates = Vec::new();
-        
+
         // Prefer peers in target region
         let target_peers = self.cache.get_regional_peers(target_region);
         for (peer_id, metrics) in target_peers {
@@ -351,12 +371,13 @@ impl LatencyAwarePeerSelection {
         if bridge_candidates.len() < count {
             for region in GeographicRegion::all_regions() {
                 if region != source_region && region != target_region {
-                    let preference_score = source_region.preference_score(&region) * 
-                                           region.preference_score(&target_region);
-                    
+                    let preference_score = source_region.preference_score(&region)
+                        * region.preference_score(&target_region);
+
                     let regional_peers = self.cache.get_regional_peers(region);
                     for (peer_id, metrics) in regional_peers {
-                        if metrics.get_reliability_score() >= self.config.min_reliability_threshold {
+                        if metrics.get_reliability_score() >= self.config.min_reliability_threshold
+                        {
                             bridge_candidates.push((peer_id, metrics, region, preference_score));
                         }
                     }
@@ -368,7 +389,9 @@ impl LatencyAwarePeerSelection {
         bridge_candidates.sort_by(|a, b| {
             let score_a = a.3 * a.1.get_reliability_score();
             let score_b = b.3 * b.1.get_reliability_score();
-            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+            score_b
+                .partial_cmp(&score_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let selected_peers: Vec<SelectedPeer> = bridge_candidates
@@ -381,8 +404,11 @@ impl LatencyAwarePeerSelection {
                     metrics,
                     region,
                     selection_score,
-                    selection_reason: format!("Cross-region bridge: {} -> {}", 
-                                            source_region.to_string(), target_region.to_string()),
+                    selection_reason: format!(
+                        "Cross-region bridge: {} -> {}",
+                        source_region.to_string(),
+                        target_region.to_string()
+                    ),
                 }
             })
             .collect();
@@ -398,13 +424,17 @@ impl LatencyAwarePeerSelection {
     /// Get the best peer from a specific region
     pub fn get_best_regional_peer(&mut self, region: GeographicRegion) -> Option<SelectedPeer> {
         let regional_peers = self.cache.get_regional_peers(region);
-        
-        regional_peers.into_iter()
-            .filter(|(_, metrics)| metrics.get_reliability_score() >= self.config.min_reliability_threshold)
-            .max_by(|(_, a), (_, b)| a
-                .get_reliability_score()
-                .partial_cmp(&b.get_reliability_score())
-                .unwrap_or(std::cmp::Ordering::Equal))
+
+        regional_peers
+            .into_iter()
+            .filter(|(_, metrics)| {
+                metrics.get_reliability_score() >= self.config.min_reliability_threshold
+            })
+            .max_by(|(_, a), (_, b)| {
+                a.get_reliability_score()
+                    .partial_cmp(&b.get_reliability_score())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(peer_id, metrics)| SelectedPeer {
                 peer_id,
                 region,
@@ -436,10 +466,10 @@ impl LatencyAwarePeerSelection {
         &self,
         metrics: &PeerQualityMetrics,
         peer_region: GeographicRegion,
-        preferred_region: GeographicRegion
+        preferred_region: GeographicRegion,
     ) -> f64 {
         let mut score = metrics.get_reliability_score();
-        
+
         // Add region preference bonus
         if peer_region == preferred_region {
             score += self.config.region_preference_bonus;
@@ -463,20 +493,36 @@ impl LatencyAwarePeerSelection {
     }
 
     /// Get human-readable selection reason
-    fn get_selection_reason(&self, peer_region: GeographicRegion, preferred_region: GeographicRegion) -> String {
+    fn get_selection_reason(
+        &self,
+        peer_region: GeographicRegion,
+        preferred_region: GeographicRegion,
+    ) -> String {
         if peer_region == preferred_region {
             format!("Same region ({})", peer_region.to_string())
         } else {
-            format!("Cross-region ({} -> {})", preferred_region.to_string(), peer_region.to_string())
+            format!(
+                "Cross-region ({} -> {})",
+                preferred_region.to_string(),
+                peer_region.to_string()
+            )
         }
     }
 
     /// Update selection statistics
-    fn update_selection_stats(&mut self, selected_peers: &[SelectedPeer], _preferred_region: GeographicRegion) {
+    fn update_selection_stats(
+        &mut self,
+        selected_peers: &[SelectedPeer],
+        _preferred_region: GeographicRegion,
+    ) {
         self.stats.total_selections += 1;
-        
+
         for peer in selected_peers {
-            *self.stats.regional_selections.entry(peer.region).or_insert(0) += 1;
+            *self
+                .stats
+                .regional_selections
+                .entry(peer.region)
+                .or_insert(0) += 1;
         }
 
         if !selected_peers.is_empty() {
@@ -511,7 +557,7 @@ impl GeographicRegion {
         match self {
             GeographicRegion::NorthAmerica => "NorthAmerica",
             GeographicRegion::Europe => "Europe",
-            GeographicRegion::AsiaPacific => "AsiaPacific", 
+            GeographicRegion::AsiaPacific => "AsiaPacific",
             GeographicRegion::SouthAmerica => "SouthAmerica",
             GeographicRegion::Africa => "Africa",
             GeographicRegion::Oceania => "Oceania",
@@ -528,20 +574,20 @@ mod tests {
     #[test]
     fn test_peer_metrics_cache() {
         let mut cache = PeerMetricsCache::new(3);
-        
+
         let peer1 = "peer1".to_string();
         let peer2 = "peer2".to_string();
         let peer3 = "peer3".to_string();
         let peer4 = "peer4".to_string();
-        
+
         let metrics = PeerQualityMetrics::new(GeographicRegion::Europe);
-        
+
         cache.insert(peer1.clone(), metrics.clone());
         cache.insert(peer2.clone(), metrics.clone());
         cache.insert(peer3.clone(), metrics.clone());
-        
+
         assert_eq!(cache.entries.len(), 3);
-        
+
         // This should evict peer1 (LRU)
         cache.insert(peer4.clone(), metrics);
         assert_eq!(cache.entries.len(), 3);
@@ -553,21 +599,27 @@ mod tests {
     fn test_latency_aware_peer_selection() {
         let config = LatencySelectionConfig::default();
         let mut selector = LatencyAwarePeerSelection::new(config, GeographicRegion::Europe);
-        
+
         // Add some test peers
         let mut metrics1 = PeerQualityMetrics::new(GeographicRegion::Europe);
         metrics1.record_request(true);
         metrics1.record_rtt(Duration::from_millis(50));
-        
-        let mut metrics2 = PeerQualityMetrics::new(GeographicRegion::NorthAmerica);  
+
+        let mut metrics2 = PeerQualityMetrics::new(GeographicRegion::NorthAmerica);
         metrics2.record_request(true);
         metrics2.record_rtt(Duration::from_millis(100));
-        
-        selector.update_peer_metrics("peer1".to_string(), metrics1).unwrap();
-        selector.update_peer_metrics("peer2".to_string(), metrics2).unwrap();
-        
+
+        selector
+            .update_peer_metrics("peer1".to_string(), metrics1)
+            .unwrap();
+        selector
+            .update_peer_metrics("peer2".to_string(), metrics2)
+            .unwrap();
+
         // Select peers - should prefer European peer
-        let selected = selector.select_peers(Some(GeographicRegion::Europe), Some(1)).unwrap();
+        let selected = selector
+            .select_peers(Some(GeographicRegion::Europe), Some(1))
+            .unwrap();
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].peer_id, "peer1");
         assert_eq!(selected[0].region, GeographicRegion::Europe);
@@ -577,26 +629,32 @@ mod tests {
     fn test_cross_region_peer_selection() {
         let config = LatencySelectionConfig::default();
         let mut selector = LatencyAwarePeerSelection::new(config, GeographicRegion::Europe);
-        
+
         // Add peers in different regions
         let mut eu_metrics = PeerQualityMetrics::new(GeographicRegion::Europe);
         eu_metrics.record_request(true);
-        
+
         let mut na_metrics = PeerQualityMetrics::new(GeographicRegion::NorthAmerica);
         na_metrics.record_request(true);
-        
-        selector.update_peer_metrics("eu_peer".to_string(), eu_metrics).unwrap();
-        selector.update_peer_metrics("na_peer".to_string(), na_metrics).unwrap();
-        
+
+        selector
+            .update_peer_metrics("eu_peer".to_string(), eu_metrics)
+            .unwrap();
+        selector
+            .update_peer_metrics("na_peer".to_string(), na_metrics)
+            .unwrap();
+
         // Select cross-region peers
-        let selected = selector.select_cross_region_peers(
-            GeographicRegion::Europe,
-            GeographicRegion::NorthAmerica,
-            2
-        ).unwrap();
-        
+        let selected = selector
+            .select_cross_region_peers(GeographicRegion::Europe, GeographicRegion::NorthAmerica, 2)
+            .unwrap();
+
         // Should get the NA peer first (target region)
         assert!(!selected.is_empty());
-        assert!(selected.iter().any(|p| p.region == GeographicRegion::NorthAmerica));
+        assert!(
+            selected
+                .iter()
+                .any(|p| p.region == GeographicRegion::NorthAmerica)
+        );
     }
 }

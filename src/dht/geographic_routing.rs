@@ -25,7 +25,7 @@ use std::time::{Duration, Instant, SystemTime};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GeographicRegion {
     NorthAmerica,
-    Europe, 
+    Europe,
     AsiaPacific,
     SouthAmerica,
     Africa,
@@ -89,10 +89,16 @@ impl GeographicRegion {
     /// Get expected latency range for this region
     pub fn expected_latency_range(&self) -> (Duration, Duration) {
         match self {
-            GeographicRegion::NorthAmerica => (Duration::from_millis(20), Duration::from_millis(100)),
+            GeographicRegion::NorthAmerica => {
+                (Duration::from_millis(20), Duration::from_millis(100))
+            }
             GeographicRegion::Europe => (Duration::from_millis(15), Duration::from_millis(80)),
-            GeographicRegion::AsiaPacific => (Duration::from_millis(25), Duration::from_millis(150)),
-            GeographicRegion::SouthAmerica => (Duration::from_millis(30), Duration::from_millis(120)),
+            GeographicRegion::AsiaPacific => {
+                (Duration::from_millis(25), Duration::from_millis(150))
+            }
+            GeographicRegion::SouthAmerica => {
+                (Duration::from_millis(30), Duration::from_millis(120))
+            }
             GeographicRegion::Africa => (Duration::from_millis(40), Duration::from_millis(200)),
             GeographicRegion::Oceania => (Duration::from_millis(35), Duration::from_millis(180)),
             GeographicRegion::Unknown => (Duration::from_millis(50), Duration::from_millis(500)),
@@ -158,12 +164,12 @@ impl PeerQualityMetrics {
     /// Record a new RTT measurement
     pub fn record_rtt(&mut self, rtt: Duration) {
         self.rtt_history.push(rtt);
-        
+
         // Keep only last 10 measurements for efficiency
         if self.rtt_history.len() > 10 {
             self.rtt_history.remove(0);
         }
-        
+
         self.last_measured = SystemTime::now();
         self.update_reliability_score();
     }
@@ -174,7 +180,7 @@ impl PeerQualityMetrics {
         if success {
             self.successful_requests += 1;
         }
-        
+
         self.success_rate = self.successful_requests as f64 / self.total_requests as f64;
         self.last_measured = SystemTime::now();
         self.update_reliability_score();
@@ -198,10 +204,10 @@ impl PeerQualityMetrics {
     /// Update the reliability score based on current metrics
     fn update_reliability_score(&mut self) {
         let mut score = 0.5; // Base score
-        
+
         // Factor in success rate (40% weight)
         score += (self.success_rate - 0.5) * 0.4;
-        
+
         // Factor in RTT performance (30% weight)
         if let Some(avg_rtt) = self.average_rtt() {
             let (min_expected, max_expected) = self.region.expected_latency_range();
@@ -217,9 +223,12 @@ impl PeerQualityMetrics {
             };
             score += (rtt_score - 0.5) * 0.3;
         }
-        
+
         // Factor in measurement freshness (30% weight)
-        let age = self.last_measured.elapsed().unwrap_or(Duration::from_secs(0));
+        let age = self
+            .last_measured
+            .elapsed()
+            .unwrap_or(Duration::from_secs(0));
         let freshness_score = if age < Duration::from_secs(60) {
             1.0 // Fresh measurements
         } else if age > Duration::from_secs(600) {
@@ -229,14 +238,17 @@ impl PeerQualityMetrics {
             1.0 - (age.as_secs() as f64 / 600.0)
         };
         score += (freshness_score - 0.5) * 0.3;
-        
+
         // Clamp to valid range
         self.reliability_score = score.clamp(0.0, 1.0);
     }
 
     /// Check if metrics are stale and need refresh
     pub fn needs_refresh(&self, max_age: Duration) -> bool {
-        self.last_measured.elapsed().unwrap_or(Duration::from_secs(0)) > max_age
+        self.last_measured
+            .elapsed()
+            .unwrap_or(Duration::from_secs(0))
+            > max_age
     }
 
     /// Reset metrics (for testing or peer reconnection)
@@ -278,7 +290,7 @@ impl RegionalBucket {
     pub fn add_peer(&mut self, peer_id: String, mut metrics: PeerQualityMetrics) -> bool {
         // Ensure the metrics region matches this bucket
         metrics.region = self.region;
-        
+
         if self.peers.contains_key(&peer_id) {
             // Update existing peer
             self.peers.insert(peer_id, metrics);
@@ -307,12 +319,13 @@ impl RegionalBucket {
             .map(|(id, metrics)| (id.clone(), metrics.get_reliability_score()));
 
         if let Some((worst_peer_id, worst_score)) = worst_peer
-            && new_metrics.get_reliability_score() > worst_score {
-                self.peers.remove(&worst_peer_id);
-                self.peers.insert(new_peer_id, new_metrics);
-                return true;
-            }
-        
+            && new_metrics.get_reliability_score() > worst_score
+        {
+            self.peers.remove(&worst_peer_id);
+            self.peers.insert(new_peer_id, new_metrics);
+            return true;
+        }
+
         false
     }
 
@@ -323,24 +336,28 @@ impl RegionalBucket {
 
     /// Get the best peers from this bucket
     pub fn get_best_peers(&self, count: usize) -> Vec<(String, PeerQualityMetrics)> {
-        let mut peer_list: Vec<_> = self.peers.iter()
+        let mut peer_list: Vec<_> = self
+            .peers
+            .iter()
             .map(|(id, metrics)| (id.clone(), metrics.clone()))
             .collect();
-        
+
         // Sort by reliability score (descending)
         peer_list.sort_by(|(_, a), (_, b)| {
             b.get_reliability_score()
                 .partial_cmp(&a.get_reliability_score())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        
+
         peer_list.into_iter().take(count).collect()
     }
 
     /// Perform maintenance on this bucket
     pub fn maintenance(&mut self, max_peer_age: Duration) {
         // Remove stale peers
-        let stale_peers: Vec<String> = self.peers.iter()
+        let stale_peers: Vec<String> = self
+            .peers
+            .iter()
             .filter(|(_, metrics)| metrics.needs_refresh(max_peer_age))
             .map(|(id, _)| id.clone())
             .collect();
@@ -356,15 +373,17 @@ impl RegionalBucket {
     pub fn stats(&self) -> RegionalBucketStats {
         let peer_count = self.peers.len();
         let avg_reliability = if peer_count > 0 {
-            self.peers.values().map(|m| m.get_reliability_score()).sum::<f64>() / peer_count as f64
+            self.peers
+                .values()
+                .map(|m| m.get_reliability_score())
+                .sum::<f64>()
+                / peer_count as f64
         } else {
             0.0
         };
 
         let avg_rtt = if peer_count > 0 {
-            let total_rtt: Duration = self.peers.values()
-                .filter_map(|m| m.average_rtt())
-                .sum();
+            let total_rtt: Duration = self.peers.values().filter_map(|m| m.average_rtt()).sum();
             Some(total_rtt / peer_count as u32)
         } else {
             None
@@ -399,21 +418,27 @@ mod tests {
     fn test_geographic_region_from_ip() {
         // Test DigitalOcean IP (159.89.81.21)
         let digitalocean_ip = IpAddr::V4(Ipv4Addr::new(159, 89, 81, 21));
-        assert_eq!(GeographicRegion::from_ip(digitalocean_ip), GeographicRegion::Europe);
+        assert_eq!(
+            GeographicRegion::from_ip(digitalocean_ip),
+            GeographicRegion::Europe
+        );
 
         // Test other regions
         let na_ip = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
-        assert_eq!(GeographicRegion::from_ip(na_ip), GeographicRegion::NorthAmerica);
+        assert_eq!(
+            GeographicRegion::from_ip(na_ip),
+            GeographicRegion::NorthAmerica
+        );
     }
 
     #[test]
     fn test_peer_quality_metrics() {
         let mut metrics = PeerQualityMetrics::new(GeographicRegion::Europe);
-        
+
         // Record some measurements
         metrics.record_rtt(Duration::from_millis(50));
         metrics.record_request(true);
-        
+
         assert!(metrics.get_reliability_score() > 0.5);
         assert_eq!(metrics.average_rtt(), Some(Duration::from_millis(50)));
         assert_eq!(metrics.success_rate, 1.0);
@@ -422,14 +447,14 @@ mod tests {
     #[test]
     fn test_regional_bucket() {
         let mut bucket = RegionalBucket::new(GeographicRegion::Europe, 3);
-        
+
         let metrics1 = PeerQualityMetrics::new(GeographicRegion::Europe);
         let metrics2 = PeerQualityMetrics::new(GeographicRegion::Europe);
-        
+
         assert!(bucket.add_peer("peer1".to_string(), metrics1));
         assert!(bucket.add_peer("peer2".to_string(), metrics2));
         assert_eq!(bucket.peers.len(), 2);
-        
+
         let best_peers = bucket.get_best_peers(1);
         assert_eq!(best_peers.len(), 1);
     }

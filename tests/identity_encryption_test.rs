@@ -13,6 +13,7 @@
 
 use saorsa_core::encrypted_key_storage::SecurityLevel;
 use saorsa_core::identity_manager::{IdentityCreationParams, IdentityManager};
+use std::collections::HashMap;
 use saorsa_core::secure_memory::SecureString;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -29,7 +30,7 @@ async fn test_identity_encryption_sync_package() {
         .unwrap();
 
     // Initialize with storage password
-    let storage_password = SecureString::from_str("test_storage_password_123!").unwrap();
+    let storage_password = SecureString::from_plain_str("test_storage_password_123!").unwrap();
     manager.initialize(&storage_password).await.unwrap();
 
     // Create an identity
@@ -39,7 +40,7 @@ async fn test_identity_encryption_sync_package() {
         derivation_path: None,
         avatar_url: None,
         key_lifetime: None,
-        metadata: std::collections::HashMap::new(),
+        metadata: HashMap::new(),
     };
 
     let identity = manager
@@ -48,9 +49,9 @@ async fn test_identity_encryption_sync_package() {
         .unwrap();
 
     // Create sync package with device password
-    let device_password = SecureString::from_str("device_password_456!").unwrap();
+    let device_password = SecureString::from_plain_str("device_password_456!").unwrap();
     let sync_package = manager
-        .create_sync_package(&identity.id, &device_password, &storage_password)
+        .create_sync_package(&identity.id, &storage_password, &device_password)
         .await
         .unwrap();
 
@@ -69,7 +70,7 @@ async fn test_identity_encryption_sync_package() {
         .await
         .unwrap();
 
-    let storage_password2 = SecureString::from_str("new_storage_password_789!").unwrap();
+    let storage_password2 = SecureString::from_plain_str("new_storage_password_789!").unwrap();
     manager2.initialize(&storage_password2).await.unwrap();
 
     // Import the sync package
@@ -95,7 +96,7 @@ async fn test_identity_encryption_wrong_password() {
         .await
         .unwrap();
 
-    let storage_password = SecureString::from_str("storage_pass").unwrap();
+    let storage_password = SecureString::from_plain_str("storage_pass").unwrap();
     manager.initialize(&storage_password).await.unwrap();
 
     // Create identity
@@ -103,7 +104,9 @@ async fn test_identity_encryption_wrong_password() {
         display_name: Some("Test User".to_string()),
         bio: None,
         derivation_path: None,
-        recovery_threshold: None,
+        avatar_url: None,
+        key_lifetime: None,
+        metadata: HashMap::new(),
     };
 
     let identity = manager
@@ -112,9 +115,9 @@ async fn test_identity_encryption_wrong_password() {
         .unwrap();
 
     // Create sync package
-    let device_password = SecureString::from_str("correct_password").unwrap();
+    let device_password = SecureString::from_plain_str("correct_password").unwrap();
     let sync_package = manager
-        .create_sync_package(&identity.id, &device_password, &storage_password)
+        .create_sync_package(&identity.id, &storage_password, &device_password)
         .await
         .unwrap();
 
@@ -125,7 +128,7 @@ async fn test_identity_encryption_wrong_password() {
         .unwrap();
     manager2.initialize(&storage_password).await.unwrap();
 
-    let wrong_password = SecureString::from_str("wrong_password").unwrap();
+    let wrong_password = SecureString::from_plain_str("wrong_password").unwrap();
     let result = manager2
         .import_sync_package(&sync_package, &wrong_password, &storage_password)
         .await;
@@ -143,7 +146,7 @@ async fn test_identity_encryption_key_rotation() {
         .await
         .unwrap();
 
-    let storage_password = SecureString::from_str("storage_pass").unwrap();
+    let storage_password = SecureString::from_plain_str("storage_pass").unwrap();
     manager.initialize(&storage_password).await.unwrap();
 
     // Create identity
@@ -151,7 +154,9 @@ async fn test_identity_encryption_key_rotation() {
         display_name: Some("Rotation Test".to_string()),
         bio: None,
         derivation_path: None,
-        recovery_threshold: None,
+        avatar_url: None,
+        key_lifetime: None,
+        metadata: HashMap::new(),
     };
 
     let identity = manager
@@ -160,9 +165,9 @@ async fn test_identity_encryption_key_rotation() {
         .unwrap();
 
     // Create first sync package
-    let password1 = SecureString::from_str("password_v1").unwrap();
+    let password1 = SecureString::from_plain_str("password_v1").unwrap();
     let package1 = manager
-        .create_sync_package(&identity.id, &password1)
+        .create_sync_package(&identity.id, &storage_password, &password1)
         .await
         .unwrap();
 
@@ -170,9 +175,9 @@ async fn test_identity_encryption_key_rotation() {
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     // Create second sync package with different password (simulating key rotation)
-    let password2 = SecureString::from_str("password_v2").unwrap();
+    let password2 = SecureString::from_plain_str("password_v2").unwrap();
     let package2 = manager
-        .create_sync_package(&identity.id, &password2)
+        .create_sync_package(&identity.id, &storage_password, &password2)
         .await
         .unwrap();
 

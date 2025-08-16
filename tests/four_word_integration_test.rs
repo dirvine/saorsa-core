@@ -2,7 +2,6 @@
 //
 // Integration tests for four-word-networking library
 
-
 use saorsa_core::{AddressBook, NetworkAddress};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 

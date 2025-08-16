@@ -84,6 +84,11 @@ impl NodeId {
 
         Ok(NodeId::from_public_key(&verifying_key))
     }
+
+    /// Helper for tests/backwards-compat: construct from raw bytes
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
 }
 
 impl fmt::Display for NodeId {
@@ -255,6 +260,72 @@ impl NodeIdentity {
     /// Verify a signature
     pub fn verify(&self, message: &[u8], signature: &Signature) -> bool {
         self.verification_key.verify(message, signature).is_ok()
+    }
+}
+
+impl NodeIdentity {
+    /// Create an identity from an existing signing key
+    /// Solves PoW and derives NodeId and four-word address
+    pub fn from_signing_key(signing_key: SigningKey) -> Result<Self> {
+        let verification_key = signing_key.verifying_key();
+        let node_id = NodeId::from_public_key(&verification_key);
+
+        // Solve proof of work using default low difficulty for construction
+        // Callers who need specific difficulty should call `generate`/`from_seed` instead
+        let proof_of_work = ProofOfWork::solve(&node_id, 8)?;
+
+        let word_address = WordEncoder::encode(node_id.to_bytes())?;
+
+        Ok(Self {
+            signing_key,
+            verification_key,
+            node_id,
+            word_address,
+            proof_of_work,
+        })
+    }
+}
+
+impl NodeIdentity {
+    /// Save identity to a JSON file (async)
+    pub async fn save_to_file(&self, path: &std::path::Path) -> Result<()> {
+        use tokio::fs;
+        let data = self.export();
+        let json = serde_json::to_string_pretty(&data).map_err(|e| {
+            P2PError::Identity(crate::error::IdentityError::InvalidFormat(
+                format!("Failed to serialize identity: {}", e).into(),
+            ))
+        })?;
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await.map_err(|e| {
+                P2PError::Identity(crate::error::IdentityError::InvalidFormat(
+                    format!("Failed to create directory: {}", e).into(),
+                ))
+            })?;
+        }
+
+        tokio::fs::write(path, json).await.map_err(|e| {
+            P2PError::Identity(crate::error::IdentityError::InvalidFormat(
+                format!("Failed to write identity file: {}", e).into(),
+            ))
+        })?;
+        Ok(())
+    }
+
+    /// Load identity from a JSON file (async)
+    pub async fn load_from_file(path: &std::path::Path) -> Result<Self> {
+        let json = tokio::fs::read_to_string(path).await.map_err(|e| {
+            P2PError::Identity(crate::error::IdentityError::InvalidFormat(
+                format!("Failed to read identity file: {}", e).into(),
+            ))
+        })?;
+        let data: IdentityData = serde_json::from_str(&json).map_err(|e| {
+            P2PError::Identity(crate::error::IdentityError::InvalidFormat(
+                format!("Failed to deserialize identity: {}", e).into(),
+            ))
+        })?;
+        Self::import(&data)
     }
 }
 

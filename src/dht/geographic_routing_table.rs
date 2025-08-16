@@ -17,10 +17,12 @@
 //! peer discovery and routing decisions in P2P networks.
 
 use super::geographic_routing::{GeographicRegion, PeerQualityMetrics, RegionalBucket};
-use super::latency_aware_selection::{LatencyAwarePeerSelection, LatencySelectionConfig, SelectedPeer};
+use super::latency_aware_selection::{
+    LatencyAwarePeerSelection, LatencySelectionConfig, SelectedPeer,
+};
+use crate::PeerId;
 use crate::dht::Key;
 use crate::error::{P2PError, P2pResult as Result};
-use crate::PeerId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -99,14 +101,15 @@ pub struct RoutingTableStats {
 impl GeographicRoutingTable {
     /// Create a new geographic routing table
     pub fn new(local_region: GeographicRegion, config: GeographicRoutingConfig) -> Self {
-        let peer_selector = LatencyAwarePeerSelection::new(config.selection_config.clone(), local_region);
-        
+        let peer_selector =
+            LatencyAwarePeerSelection::new(config.selection_config.clone(), local_region);
+
         // Initialize regional buckets
         let mut regional_buckets = HashMap::new();
         for region in GeographicRegion::all_regions() {
             regional_buckets.insert(
                 region,
-                RegionalBucket::new(region, config.max_peers_per_region)
+                RegionalBucket::new(region, config.max_peers_per_region),
             );
         }
 
@@ -121,7 +124,12 @@ impl GeographicRoutingTable {
     }
 
     /// Add a peer to the routing table with geographic awareness
-    pub fn add_peer(&mut self, peer_id: PeerId, region: GeographicRegion, metrics: PeerQualityMetrics) -> Result<bool> {
+    pub fn add_peer(
+        &mut self,
+        peer_id: PeerId,
+        region: GeographicRegion,
+        metrics: PeerQualityMetrics,
+    ) -> Result<bool> {
         // Add to regional bucket
         let added = if let Some(bucket) = self.regional_buckets.get_mut(&region) {
             bucket.add_peer(peer_id.clone(), metrics.clone())
@@ -161,11 +169,13 @@ impl GeographicRoutingTable {
     /// Select optimal peers for a DHT operation
     pub fn select_peers_for_key(&mut self, _key: &Key, count: usize) -> Result<Vec<SelectedPeer>> {
         let start = Instant::now();
-        
+
         // For DHT operations, we want peers close to the key
         // Use local region as preference if no specific targeting is needed
-        let selected_peers = self.peer_selector.select_peers(Some(self.local_region), Some(count))?;
-        
+        let selected_peers = self
+            .peer_selector
+            .select_peers(Some(self.local_region), Some(count))?;
+
         // Update selection statistics
         self.stats.average_selection_latency = start.elapsed();
         if selected_peers.is_empty() {
@@ -182,18 +192,18 @@ impl GeographicRoutingTable {
         &mut self,
         source_region: GeographicRegion,
         target_region: GeographicRegion,
-        count: usize
+        count: usize,
     ) -> Result<Vec<SelectedPeer>> {
         if !self.config.enable_cross_region_optimization {
             // Fall back to regular selection
-            return self.peer_selector.select_peers(Some(target_region), Some(count));
+            return self
+                .peer_selector
+                .select_peers(Some(target_region), Some(count));
         }
 
-        let selected_peers = self.peer_selector.select_cross_region_peers(
-            source_region,
-            target_region,
-            count
-        )?;
+        let selected_peers =
+            self.peer_selector
+                .select_cross_region_peers(source_region, target_region, count)?;
 
         // Update cross-region statistics
         if !selected_peers.is_empty() {
@@ -209,10 +219,16 @@ impl GeographicRoutingTable {
     }
 
     /// Get all peers from a specific region
-    pub fn get_regional_peers(&self, region: GeographicRegion) -> Vec<(PeerId, PeerQualityMetrics)> {
-        self.regional_buckets.get(&region)
+    pub fn get_regional_peers(
+        &self,
+        region: GeographicRegion,
+    ) -> Vec<(PeerId, PeerQualityMetrics)> {
+        self.regional_buckets
+            .get(&region)
             .map(|bucket| {
-                bucket.peers.iter()
+                bucket
+                    .peers
+                    .iter()
                     .map(|(peer_id, metrics)| (peer_id.clone(), metrics.clone()))
                     .collect()
             })
@@ -229,7 +245,7 @@ impl GeographicRoutingTable {
     /// Perform maintenance on the routing table
     pub fn maintenance(&mut self) -> Result<()> {
         let now = Instant::now();
-        
+
         // Only run maintenance if enough time has passed
         if now.duration_since(self.last_maintenance) < self.config.maintenance_interval {
             return Ok(());
@@ -258,7 +274,8 @@ impl GeographicRoutingTable {
 
     /// Get detailed regional statistics
     pub fn get_regional_stats(&self) -> Vec<RegionalStats> {
-        self.regional_buckets.iter()
+        self.regional_buckets
+            .iter()
             .map(|(region, bucket)| {
                 let bucket_stats = bucket.stats();
                 RegionalStats {
@@ -276,9 +293,9 @@ impl GeographicRoutingTable {
     /// Check if the routing table has sufficient peers for reliable operation
     pub fn is_sufficiently_populated(&self) -> bool {
         let total_peers = self.stats.total_peers;
-        let min_total = self.config.min_peers_per_region * 
-                       std::cmp::min(GeographicRegion::all_regions().len(), 3);
-        
+        let min_total = self.config.min_peers_per_region
+            * std::cmp::min(GeographicRegion::all_regions().len(), 3);
+
         total_peers >= min_total
     }
 
@@ -295,7 +312,9 @@ impl GeographicRoutingTable {
         }
 
         if config.min_peers_per_region > config.max_peers_per_region {
-            return Err(P2PError::validation("Minimum peers cannot exceed maximum peers"));
+            return Err(P2PError::validation(
+                "Minimum peers cannot exceed maximum peers",
+            ));
         }
 
         self.config = config;
@@ -304,20 +323,26 @@ impl GeographicRoutingTable {
 
     /// Export routing table state for debugging
     pub fn export_state(&self) -> RoutingTableState {
-        let regional_states: HashMap<GeographicRegion, RegionalBucketState> = 
-            self.regional_buckets.iter()
-                .map(|(region, bucket)| {
-                    let peers: Vec<_> = bucket.peers.iter()
-                        .map(|(peer_id, metrics)| (peer_id.clone(), metrics.clone()))
-                        .collect();
-                    
-                    (*region, RegionalBucketState {
+        let regional_states: HashMap<GeographicRegion, RegionalBucketState> = self
+            .regional_buckets
+            .iter()
+            .map(|(region, bucket)| {
+                let peers: Vec<_> = bucket
+                    .peers
+                    .iter()
+                    .map(|(peer_id, metrics)| (peer_id.clone(), metrics.clone()))
+                    .collect();
+
+                (
+                    *region,
+                    RegionalBucketState {
                         region: *region,
                         peers,
                         last_maintenance: SystemTime::now() - bucket.last_maintenance.elapsed(),
-                    })
-                })
-                .collect();
+                    },
+                )
+            })
+            .collect();
 
         RoutingTableState {
             local_region: self.local_region,
@@ -331,7 +356,9 @@ impl GeographicRoutingTable {
     pub fn import_state(&mut self, state: RoutingTableState) -> Result<()> {
         // Validate state
         if state.regional_buckets.is_empty() {
-            return Err(P2PError::validation("Cannot import empty routing table state"));
+            return Err(P2PError::validation(
+                "Cannot import empty routing table state",
+            ));
         }
 
         // Update regional buckets
@@ -339,15 +366,16 @@ impl GeographicRoutingTable {
             if let Some(bucket) = self.regional_buckets.get_mut(&region) {
                 // Clear existing peers
                 bucket.peers.clear();
-                
+
                 // Add peers from state
                 for (peer_id, metrics) in bucket_state.peers {
                     bucket.add_peer(peer_id.clone(), metrics.clone());
                     // Also update peer selector
                     self.peer_selector.update_peer_metrics(peer_id, metrics)?;
                 }
-                
-                bucket.last_maintenance = Instant::now() - bucket_state.last_maintenance.elapsed().unwrap_or_default();
+
+                bucket.last_maintenance =
+                    Instant::now() - bucket_state.last_maintenance.elapsed().unwrap_or_default();
             }
         }
 
@@ -405,10 +433,13 @@ pub struct RegionalBucketState {
 
 /// Helper function for creating thread-safe routing table
 pub fn create_safe_geographic_routing_table(
-    local_region: GeographicRegion, 
-    config: GeographicRoutingConfig
+    local_region: GeographicRegion,
+    config: GeographicRoutingConfig,
 ) -> SafeGeographicRoutingTable {
-    Arc::new(RwLock::new(GeographicRoutingTable::new(local_region, config)))
+    Arc::new(RwLock::new(GeographicRoutingTable::new(
+        local_region,
+        config,
+    )))
 }
 
 #[cfg(test)]
@@ -420,31 +451,39 @@ mod tests {
     fn test_geographic_routing_table_creation() {
         let config = GeographicRoutingConfig::default();
         let table = GeographicRoutingTable::new(GeographicRegion::Europe, config);
-        
+
         assert_eq!(table.local_region, GeographicRegion::Europe);
-        assert_eq!(table.regional_buckets.len(), GeographicRegion::all_regions().len());
+        assert_eq!(
+            table.regional_buckets.len(),
+            GeographicRegion::all_regions().len()
+        );
     }
 
     #[test]
     fn test_peer_addition_and_removal() {
         let config = GeographicRoutingConfig::default();
         let mut table = GeographicRoutingTable::new(GeographicRegion::Europe, config);
-        
+
         let peer_id = "test_peer".to_string();
         let metrics = PeerQualityMetrics::new(GeographicRegion::Europe);
-        
+
         // Add peer
-        let added = table.add_peer(peer_id.clone(), GeographicRegion::Europe, metrics).unwrap();
+        let added = table
+            .add_peer(peer_id.clone(), GeographicRegion::Europe, metrics)
+            .unwrap();
         assert!(added);
-        
+
         let stats = table.get_stats();
         assert_eq!(stats.total_peers, 1);
-        assert_eq!(stats.peers_by_region.get(&GeographicRegion::Europe), Some(&1));
-        
+        assert_eq!(
+            stats.peers_by_region.get(&GeographicRegion::Europe),
+            Some(&1)
+        );
+
         // Remove peer
         let removed = table.remove_peer(&peer_id, GeographicRegion::Europe);
         assert!(removed);
-        
+
         let stats = table.get_stats();
         assert_eq!(stats.total_peers, 0);
     }
@@ -453,45 +492,55 @@ mod tests {
     fn test_cross_region_peer_selection() {
         let config = GeographicRoutingConfig::default();
         let mut table = GeographicRoutingTable::new(GeographicRegion::Europe, config);
-        
+
         // Add peers in different regions
         let mut eu_metrics = PeerQualityMetrics::new(GeographicRegion::Europe);
         eu_metrics.record_request(true);
         eu_metrics.record_rtt(Duration::from_millis(50));
-        
+
         let mut na_metrics = PeerQualityMetrics::new(GeographicRegion::NorthAmerica);
         na_metrics.record_request(true);
         na_metrics.record_rtt(Duration::from_millis(100));
-        
-        table.add_peer("eu_peer".to_string(), GeographicRegion::Europe, eu_metrics).unwrap();
-        table.add_peer("na_peer".to_string(), GeographicRegion::NorthAmerica, na_metrics).unwrap();
-        
+
+        table
+            .add_peer("eu_peer".to_string(), GeographicRegion::Europe, eu_metrics)
+            .unwrap();
+        table
+            .add_peer(
+                "na_peer".to_string(),
+                GeographicRegion::NorthAmerica,
+                na_metrics,
+            )
+            .unwrap();
+
         // Test cross-region selection
-        let selected = table.select_cross_region_peers(
-            GeographicRegion::Europe,
-            GeographicRegion::NorthAmerica,
-            2
-        ).unwrap();
-        
+        let selected = table
+            .select_cross_region_peers(GeographicRegion::Europe, GeographicRegion::NorthAmerica, 2)
+            .unwrap();
+
         assert!(!selected.is_empty());
         // Should include North American peer for target region
-        assert!(selected.iter().any(|p| p.region == GeographicRegion::NorthAmerica));
+        assert!(
+            selected
+                .iter()
+                .any(|p| p.region == GeographicRegion::NorthAmerica)
+        );
     }
 
     #[tokio::test]
     async fn test_thread_safe_operations() {
         let config = GeographicRoutingConfig::default();
         let table = create_safe_geographic_routing_table(GeographicRegion::Europe, config);
-        
+
         let metrics = PeerQualityMetrics::new(GeographicRegion::Europe);
-        
+
         // Test concurrent operations
         let added = {
             let mut table_guard = table.write().await;
             table_guard.add_peer("test_peer".to_string(), GeographicRegion::Europe, metrics)
         };
         assert!(added.is_ok());
-        
+
         let stats = {
             let table_guard = table.read().await;
             table_guard.get_stats()

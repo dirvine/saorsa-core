@@ -37,7 +37,7 @@ impl MediaConstraints {
             screen_share: false,
         }
     }
-    
+
     pub fn video_call() -> Self {
         Self {
             audio: true,
@@ -45,7 +45,7 @@ impl MediaConstraints {
             screen_share: false,
         }
     }
-    
+
     pub fn screen_share() -> Self {
         Self {
             audio: true,
@@ -53,19 +53,19 @@ impl MediaConstraints {
             screen_share: true,
         }
     }
-    
+
     pub fn has_audio(&self) -> bool {
         self.audio
     }
-    
+
     pub fn has_video(&self) -> bool {
         self.video
     }
-    
+
     pub fn has_screen_share(&self) -> bool {
         self.screen_share
     }
-    
+
     pub fn to_media_types(&self) -> Vec<MediaType> {
         let mut types = Vec::new();
         if self.audio {
@@ -142,15 +142,15 @@ pub struct CallQualityMetrics {
 
 impl CallQualityMetrics {
     pub fn is_good_quality(&self) -> bool {
-        self.rtt_ms < 100 
-            && self.packet_loss_percent < 1.0 
+        self.rtt_ms < 100
+            && self.packet_loss_percent < 1.0
             && self.jitter_ms < 20
             && self.bandwidth_kbps > 500
     }
-    
+
     pub fn needs_adaptation(&self) -> bool {
-        self.rtt_ms > 200 
-            || self.packet_loss_percent > 3.0 
+        self.rtt_ms > 200
+            || self.packet_loss_percent > 3.0
             || self.jitter_ms > 40
             || self.bandwidth_kbps < 300
     }
@@ -168,8 +168,8 @@ pub struct MultiPartyCall {
 /// Call architecture for multi-party calls
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CallArchitecture {
-    Mesh,  // Direct P2P between all participants (2-4 people)
-    SFU,   // Selective Forwarding Unit (5+ people)
+    Mesh, // Direct P2P between all participants (2-4 people)
+    SFU,  // Selective Forwarding Unit (5+ people)
 }
 
 /// Recording consent management
@@ -196,16 +196,16 @@ pub struct AdaptationSettings {
     pub video_resolution: VideoResolution,
     pub video_fps: u32,
     pub audio_bitrate_kbps: u32,
-    pub enable_dtx: bool,  // Discontinuous transmission
+    pub enable_dtx: bool, // Discontinuous transmission
 }
 
 /// Video resolution options
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VideoResolution {
-    QVGA240,   // 320x240
-    SD480,     // 640x480
-    HD720,     // 1280x720
-    HD1080,    // 1920x1080
+    QVGA240, // 320x240
+    SD480,   // 640x480
+    HD720,   // 1280x720
+    HD1080,  // 1920x1080
 }
 
 impl VideoResolution {
@@ -217,7 +217,7 @@ impl VideoResolution {
             VideoResolution::HD1080 => 1920,
         }
     }
-    
+
     pub fn height(&self) -> u32 {
         match self {
             VideoResolution::QVGA240 => 240,
@@ -315,32 +315,34 @@ impl CallSession {
             quality_metrics: Vec::new(),
         }
     }
-    
+
     pub fn duration(&self) -> Option<chrono::Duration> {
         if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
             Some(end - start)
-        } else { self.start_time.map(|start| Utc::now() - start) }
+        } else {
+            self.start_time.map(|start| Utc::now() - start)
+        }
     }
-    
+
     pub fn add_participant(&mut self, participant: FourWordAddress) {
         if !self.participants.contains(&participant) {
             self.participants.push(participant);
         }
     }
-    
+
     pub fn remove_participant(&mut self, participant: &FourWordAddress) {
         self.participants.retain(|p| p != participant);
     }
-    
+
     pub fn add_quality_metric(&mut self, metric: CallQualityMetrics) {
         self.quality_metrics.push(metric);
-        
+
         // Keep only last 100 metrics
         if self.quality_metrics.len() > 100 {
             self.quality_metrics.remove(0);
         }
     }
-    
+
     pub fn latest_quality(&self) -> Option<&CallQualityMetrics> {
         self.quality_metrics.last()
     }

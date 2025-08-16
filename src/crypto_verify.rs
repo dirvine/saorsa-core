@@ -167,9 +167,7 @@ impl EnhancedSignatureVerifier {
             results.push(BatchVerificationResult {
                 index,
                 success: result.is_ok(),
-                error: result
-                    .err()
-                    .map(|e| format!("Verification failed: {e}")),
+                error: result.err().map(|e| format!("Verification failed: {e}")),
             });
         }
 
@@ -193,7 +191,11 @@ impl EnhancedSignatureVerifier {
     fn validate_timestamp_freshness(&self, record: &PeerDHTRecord) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .expect("valid crypto operation")
+            .map_err(|e| {
+                P2PError::Identity(crate::error::IdentityError::SystemTime(
+                    format!("Time error: {e}").into(),
+                ))
+            })?
             .as_secs();
 
         let age = now.saturating_sub(record.timestamp);

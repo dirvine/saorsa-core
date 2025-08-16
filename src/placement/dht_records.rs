@@ -22,30 +22,42 @@
 
 use crate::error::{P2PError, P2pResult};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+// use std::collections::HashMap; // Unused import - commented out
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // External dependencies for cryptography
-use blake3::Hash;
+use blake3;
 
 /// Serializable wrapper for blake3::Hash
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SerializableHash([u8; 32]);
 
-impl From<Hash> for SerializableHash {
-    fn from(hash: Hash) -> Self {
-        Self(hash.as_bytes().clone())
+impl From<blake3::Hash> for SerializableHash {
+    fn from(hash: blake3::Hash) -> Self {
+        Self(*hash.as_bytes())
     }
 }
 
-impl From<SerializableHash> for Hash {
+impl From<SerializableHash> for blake3::Hash {
     fn from(hash: SerializableHash) -> Self {
-        Hash::from_bytes(hash.0)
+        blake3::Hash::from(hash.0)
     }
 }
 
-impl serde::Serialize for SerializableHash {
+impl From<[u8; 32]> for SerializableHash {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl AsRef<[u8]> for SerializableHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Serialize for SerializableHash {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -54,15 +66,25 @@ impl serde::Serialize for SerializableHash {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for SerializableHash {
+impl<'de> Deserialize<'de> for SerializableHash {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let bytes: [u8; 32] = serde::Deserialize::deserialize(deserializer)?;
-        Ok(SerializableHash(bytes))
+        let bytes: Vec<u8> = Vec::deserialize(deserializer)?;
+        if bytes.len() != 32 {
+            return Err(serde::de::Error::custom("Invalid hash length"));
+        }
+        let mut array = [0u8; 32];
+        array.copy_from_slice(&bytes);
+        Ok(Self(array))
     }
 }
+
+// Type alias for convenience
+pub type Hash = SerializableHash;
+
+
 
 /// Maximum payload size for DHT records (512 bytes)
 pub const MAX_RECORD_SIZE: usize = 512;

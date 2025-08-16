@@ -28,7 +28,7 @@ mod tests {
             .unwrap();
         
         // Test derive_encryption_key
-        let password = SecureString::from_str("test_password").unwrap();
+        let password = SecureString::from_plain_str("test_password").unwrap();
         let salt = b"test_salt_32_bytes_test_salt_32b";
         let key = manager.derive_encryption_key(&password, salt).unwrap();
         assert_eq!(key.len(), 32);

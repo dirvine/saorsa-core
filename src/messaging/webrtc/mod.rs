@@ -5,28 +5,30 @@
 //
 // This WebRTC implementation uses native QUIC connectivity instead of traditional ICE/STUN/TURN:
 // - **DHT-based peer discovery**: Uses the distributed hash table for finding peer endpoints
-// - **Coordinator-based hole punching**: ant-quic handles NAT traversal without STUN servers  
+// - **Coordinator-based hole punching**: ant-quic handles NAT traversal without STUN servers
 // - **Reliable media transport**: QUIC streams provide ordered, reliable delivery for WebRTC media
 // - **Better performance**: Lower latency and improved congestion control compared to UDP
 //
-// The signaling still uses standard WebRTC SDP for codec negotiation, but connection 
+// The signaling still uses standard WebRTC SDP for codec negotiation, but connection
 // establishment bypasses ICE candidates in favor of direct QUIC connections.
 
-pub mod types;
-pub mod signaling;
-pub mod media;
 pub mod call_manager;
+pub mod media;
+pub mod signaling;
+pub mod types;
 
-pub use types::*;
-pub use signaling::{SignalingHandler, SignalingEvent, SignalingSession, SignalingState};
-pub use media::{MediaStreamManager, MediaStream, MediaEvent, AudioDevice, VideoDevice, AudioTrack, VideoTrack};
 pub use call_manager::{CallManager, NetworkAdapter};
+pub use media::{
+    AudioDevice, AudioTrack, MediaEvent, MediaStream, MediaStreamManager, VideoDevice, VideoTrack,
+};
+pub use signaling::{SignalingEvent, SignalingHandler, SignalingSession, SignalingState};
+pub use types::*;
 
 use crate::dht::core_engine::DhtCoreEngine;
 use crate::identity::FourWordAddress;
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tracing::info;
 
 /// Main WebRTC service that coordinates all components
@@ -50,23 +52,26 @@ impl WebRtcService {
         dht_client: Arc<RwLock<DhtCoreEngine>>,
     ) -> Result<Self> {
         let (event_sender, _) = broadcast::channel(1000);
-        
+
         // Initialize signaling
         let signaling = Arc::new(SignalingHandler::new(
             local_identity.clone(),
             Arc::clone(&dht_client),
         ));
-        
+
         // Initialize media manager
         let media = Arc::new(MediaStreamManager::new(local_identity.clone()));
-        
+
         // Initialize call manager
-        let call_manager = Arc::new(CallManager::new(
-            local_identity.clone(),
-            Arc::clone(&signaling),
-            Arc::clone(&media),
-        ).await?);
-        
+        let call_manager = Arc::new(
+            CallManager::new(
+                local_identity.clone(),
+                Arc::clone(&signaling),
+                Arc::clone(&media),
+            )
+            .await?,
+        );
+
         Ok(Self {
             local_identity,
             signaling,
@@ -75,27 +80,27 @@ impl WebRtcService {
             event_sender,
         })
     }
-    
+
     /// Start the WebRTC service
     pub async fn start(&self) -> Result<()> {
         info!("Starting WebRTC service for {}", self.local_identity);
-        
+
         // Start signaling service
         self.signaling.start().await?;
-        
+
         // Initialize media devices
         self.media.initialize().await?;
-        
+
         // Start call manager
         self.call_manager.start().await?;
-        
+
         // Start event forwarding
         self.start_event_forwarding().await;
-        
+
         info!("WebRTC service started successfully");
         Ok(())
     }
-    
+
     /// Initiate a call to another peer
     pub async fn initiate_call(
         &self,
@@ -104,55 +109,51 @@ impl WebRtcService {
     ) -> Result<CallId> {
         self.call_manager.initiate_call(callee, constraints).await
     }
-    
+
     /// Accept an incoming call
-    pub async fn accept_call(
-        &self,
-        call_id: CallId,
-        constraints: MediaConstraints,
-    ) -> Result<()> {
+    pub async fn accept_call(&self, call_id: CallId, constraints: MediaConstraints) -> Result<()> {
         self.call_manager.accept_call(call_id, constraints).await
     }
-    
+
     /// Reject an incoming call
     pub async fn reject_call(&self, call_id: CallId) -> Result<()> {
         self.call_manager.reject_call(call_id).await
     }
-    
+
     /// End an active call
     pub async fn end_call(&self, call_id: CallId) -> Result<()> {
         self.call_manager.end_call(call_id).await
     }
-    
+
     /// Get call state
     pub async fn get_call_state(&self, call_id: CallId) -> Option<CallState> {
         self.call_manager.get_call_state(call_id).await
     }
-    
+
     /// Subscribe to WebRTC events
     pub fn subscribe_events(&self) -> broadcast::Receiver<WebRtcEvent> {
         self.event_sender.subscribe()
     }
-    
+
     /// Get signaling handler reference
     pub fn signaling(&self) -> &Arc<SignalingHandler> {
         &self.signaling
     }
-    
+
     /// Get media manager reference
     pub fn media(&self) -> &Arc<MediaStreamManager> {
         &self.media
     }
-    
+
     /// Get call manager reference
     pub fn call_manager(&self) -> &Arc<CallManager> {
         &self.call_manager
     }
-    
+
     /// Start event forwarding from sub-components
     async fn start_event_forwarding(&self) {
         let event_sender = self.event_sender.clone();
-        
+
         // Forward signaling events
         let mut signaling_events = self.signaling.subscribe_events();
         let signaling_sender = event_sender.clone();
@@ -164,7 +165,7 @@ impl WebRtcService {
                 }
             }
         });
-        
+
         // Forward media events
         let mut media_events = self.media.subscribe_events();
         let media_sender = event_sender.clone();
@@ -176,7 +177,7 @@ impl WebRtcService {
                 }
             }
         });
-        
+
         // Forward call events
         let mut call_events = self.call_manager.subscribe_events();
         let call_sender = event_sender;
@@ -248,38 +249,38 @@ impl WebRtcServiceBuilder {
             config: WebRtcConfig::default(),
         }
     }
-    
+
     /// Set native QUIC configuration
     pub fn with_quic_config(mut self, quic_config: NativeQuicConfiguration) -> Self {
         self.config.quic_config = quic_config;
         self
     }
-    
+
     /// Set default media constraints
     pub fn with_default_constraints(mut self, constraints: MediaConstraints) -> Self {
         self.config.default_constraints = constraints;
         self
     }
-    
+
     /// Enable/disable echo cancellation
     pub fn with_echo_cancellation(mut self, enabled: bool) -> Self {
         self.config.echo_cancellation = enabled;
         self
     }
-    
+
     /// Enable/disable noise suppression
     pub fn with_noise_suppression(mut self, enabled: bool) -> Self {
         self.config.noise_suppression = enabled;
         self
     }
-    
+
     /// Build the WebRTC service
     pub async fn build(self) -> Result<WebRtcService> {
         let service = WebRtcService::new(self.identity, self.dht_client).await?;
-        
+
         // Apply configuration
         // In production, this would configure the sub-components with the settings
-        
+
         Ok(service)
     }
 }
@@ -291,52 +292,52 @@ mod tests;
 mod basic_tests {
     use super::*;
     use std::sync::Arc;
-    
+
     // Mock DHT for testing
     struct MockDhtEngine;
-    
+
     impl MockDhtEngine {
         fn new() -> Self {
             Self
         }
     }
-    
-    fn create_mock_dht() -> Arc<DhtCoreEngine> {
+
+    fn create_mock_dht() -> Arc<RwLock<DhtCoreEngine>> {
         // In real tests, we would create a proper mock
         // For now, this is a placeholder
         unimplemented!("Mock DHT for testing")
     }
-    
+
     #[tokio::test]
     #[ignore = "requires mock DHT implementation"]
     async fn test_webrtc_service_creation() {
         let identity = FourWordAddress::from("alice-bob-charlie-david");
         let dht = create_mock_dht();
-        
+
         let service = WebRtcService::new(identity, dht).await;
         assert!(service.is_ok());
     }
-    
+
     #[tokio::test]
     #[ignore = "requires mock DHT implementation"]
     async fn test_webrtc_service_builder() {
         let identity = FourWordAddress::from("alice-bob-charlie-david");
         let dht = create_mock_dht();
-        
+
         let service = WebRtcServiceBuilder::new(identity, dht)
             .with_echo_cancellation(true)
             .with_noise_suppression(true)
             .with_default_constraints(MediaConstraints::video_call())
             .build()
             .await;
-        
+
         assert!(service.is_ok());
     }
-    
+
     #[test]
     fn test_webrtc_config_default() {
         let config = WebRtcConfig::default();
-        
+
         assert!(config.echo_cancellation);
         assert!(config.noise_suppression);
         assert!(config.auto_gain_control);
@@ -344,14 +345,14 @@ mod basic_tests {
         assert!(config.quic_config.dht_discovery);
         assert!(config.quic_config.hole_punching);
     }
-    
+
     #[test]
     fn test_webrtc_events() {
         // Test event enum variants exist
         let _signaling_event = WebRtcEvent::Signaling(SignalingEvent::CallEnded {
             call_id: CallId::new(),
         });
-        
+
         // Other event types would be tested similarly
     }
 }

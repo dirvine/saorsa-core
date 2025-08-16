@@ -290,10 +290,10 @@ impl IPv6DHTIdentityManager {
             && cached_identity.node_id == identity.node_id
         {
             return Ok(IPv6VerificationResult {
-                    is_valid: true,
-                    confidence: 0.9, // High confidence for cached valid identity
-                    error_message: None,
-                    ip_diversity_ok: true,
+                is_valid: true,
+                confidence: 0.9, // High confidence for cached valid identity
+                error_message: None,
+                ip_diversity_ok: true,
                 identity_age_secs: cached_at.elapsed().unwrap_or_default().as_secs(),
             });
         }

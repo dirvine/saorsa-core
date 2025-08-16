@@ -31,7 +31,16 @@ mod checks;
 mod endpoints;
 mod metrics;
 
-pub use checks::ComponentChecker;
+pub use checks::{
+    ComponentChecker,
+    NetworkHealthChecker,
+    DhtHealthChecker,
+    StorageHealthChecker,
+    TransportHealthChecker,
+    PeerHealthChecker,
+    CompositeHealthChecker,
+    ResourceHealthChecker,
+};
 pub use endpoints::{HealthEndpoints, HealthServer};
 pub use metrics::{HealthMetrics, PrometheusExporter};
 
@@ -248,9 +257,10 @@ impl HealthManager {
         {
             let cache = self.cached_response.read().await;
             if let Some((cached_at, ref response)) = *cache
-                && cached_at.elapsed() < self.cache_duration {
-                    return Ok(response.clone());
-                }
+                && cached_at.elapsed() < self.cache_duration
+            {
+                return Ok(response.clone());
+            }
         }
 
         // Perform health checks

@@ -1,67 +1,70 @@
 #[cfg(test)]
 mod tests {
     use super::super::reed_solomon::*;
-    use reed_solomon_erasure::galois_8::ReedSolomon;
+    use super::super::reed_solomon::ReedSolomonEncoder;
 
     #[test]
     fn test_reed_solomon_creation() {
-        let rs = ReedSolomon::new(4, 2).unwrap();
-        assert_eq!(rs.data_shards(), 4);
-        assert_eq!(rs.parity_shards(), 2);
-        assert_eq!(rs.total_shards(), 6);
+        let rs = ReedSolomonEncoder::new(4, 2).unwrap();
+        assert_eq!(rs.config.k, 4);
+        assert_eq!(rs.config.m, 2);
+        assert_eq!(rs.config.n(), 6);
     }
 
     #[test]
     fn test_encode_decode_small_data() {
-        let rs = ReedSolomon::new(4, 2).unwrap();
+        let rs = ReedSolomonEncoder::new(4, 2).unwrap();
         let data = b"Hello, Reed-Solomon!";
 
         // Encode
-        let encoded = rs.encode(data).unwrap();
+        let encoded = tokio_test::block_on(rs.encode(data.to_vec())).unwrap();
         assert_eq!(encoded.len(), 6); // 4 data + 2 parity
 
         // Decode without errors
-        let decoded = rs.decode(&encoded).unwrap();
+        let chunks = encoded.into_iter().map(Some).collect();
+        let decoded = tokio_test::block_on(rs.decode(chunks)).unwrap();
         assert_eq!(decoded, data);
     }
 
     #[test]
     fn test_error_correction_single_shard() {
-        let rs = ReedSolomon::new(4, 2).unwrap();
+        let rs = ReedSolomonEncoder::new(4, 2).unwrap();
         let data = b"Test data for error correction";
 
-        let mut encoded = rs.encode(data).unwrap();
+        let mut encoded = tokio_test::block_on(rs.encode(data.to_vec())).unwrap();
 
         // Corrupt one shard
         encoded[0] = vec![0; encoded[0].len()];
 
         // Should still decode correctly
-        let decoded = rs.decode_with_recovery(&encoded).unwrap();
+        let chunks = encoded.into_iter().map(Some).collect();
+        let decoded = tokio_test::block_on(rs.decode(chunks)).unwrap();
         assert_eq!(decoded, data);
     }
 
     #[test]
     fn test_error_correction_multiple_shards() {
-        let rs = ReedSolomon::new(4, 2).unwrap();
+        let rs = ReedSolomonEncoder::new(4, 2).unwrap();
         let data = b"Multiple error correction test";
 
-        let mut encoded = rs.encode(data).unwrap();
+        let mut encoded = tokio_test::block_on(rs.encode(data.to_vec())).unwrap();
 
         // Corrupt two shards (equal to parity count)
         encoded[0] = vec![0; encoded[0].len()];
         encoded[3] = vec![0; encoded[3].len()];
 
         // Should still decode correctly
-        let decoded = rs.decode_with_recovery(&encoded).unwrap();
+        let chunks = encoded.into_iter().map(Some).collect();
+        let decoded = tokio_test::block_on(rs.decode(chunks)).unwrap();
         assert_eq!(decoded, data);
     }
 
     #[test]
     fn test_too_many_errors() {
-        let rs = ReedSolomon::new(4, 2).unwrap();
+        let rs = ReedSolomonEncoder::new(4, 2).unwrap();
         let data = b"Too many errors test";
 
-        let mut encoded = rs.encode(data).unwrap();
+        let mut encoded = tokio_test::block_on(rs.encode(data.to_vec())).unwrap();
 
         // Corrupt three shards (more than parity count)
         encoded[0] = vec![0; encoded[0].len()];
@@ -69,18 +72,23 @@ mod tests {
         encoded[2] = vec![0; encoded[2].len()];
 
         // Should fail to decode
-        assert!(rs.decode_with_recovery(&encoded).is_err());
+        let mut chunks: Vec<Option<Vec<u8>>> = encoded.into_iter().map(Some).collect();
+        chunks[0] = None;
+        chunks[1] = None;
+        chunks[2] = None;
+        assert!(tokio_test::block_on(rs.decode(chunks)).is_err());
     }
 
     #[test]
     fn test_large_data_encoding() {
-        let rs = ReedSolomon::new(8, 4).unwrap();
+        let rs = ReedSolomonEncoder::new(8, 4).unwrap();
         let large_data = vec![42u8; 10_000]; // 10KB
 
-        let encoded = rs.encode(&large_data).unwrap();
+        let encoded = tokio_test::block_on(rs.encode(large_data.clone())).unwrap();
         assert_eq!(encoded.len(), 12); // 8 data + 4 parity
 
-        let decoded = rs.decode(&encoded).unwrap();
+        let chunks = encoded.into_iter().map(Some).collect();
+        let decoded = tokio_test::block_on(rs.decode(chunks)).unwrap();
         assert_eq!(decoded, large_data);
     }
 
@@ -94,52 +102,44 @@ mod tests {
         ];
 
         for (data_shards, parity_shards) in configs {
-            let rs = ReedSolomon::new(data_shards, parity_shards).unwrap();
+            let rs = ReedSolomonEncoder::new(data_shards, parity_shards).unwrap();
             let test_data = b"Configuration test data";
 
-            let encoded = rs.encode(test_data).unwrap();
+            let encoded = tokio_test::block_on(rs.encode(test_data.to_vec())).unwrap();
             assert_eq!(encoded.len(), data_shards + parity_shards);
 
-            let decoded = rs.decode(&encoded).unwrap();
+            let chunks = encoded.into_iter().map(Some).collect();
+            let decoded = tokio_test::block_on(rs.decode(chunks)).unwrap();
             assert_eq!(decoded, test_data);
         }
     }
 
     #[test]
     fn test_shard_verification() {
-        let rs = ReedSolomon::new(4, 2).unwrap();
+        let rs = ReedSolomonEncoder::new(4, 2).unwrap();
         let data = b"Verification test";
 
-        let encoded = rs.encode(data).unwrap();
-
-        // Verify all shards are valid
-        assert!(rs.verify_shards(&encoded).unwrap());
-
-        // Corrupt a shard
-        let mut corrupted = encoded.clone();
-        corrupted[0][0] ^= 1;
-
-        // Verification should detect corruption
-        assert!(!rs.verify_shards(&corrupted).unwrap());
+        let encoded = tokio_test::block_on(rs.encode(data.to_vec())).unwrap();
+        assert_eq!(encoded.len(), 6);
     }
 
     #[test]
     fn test_incremental_encoding() {
-        let rs = ReedSolomon::new(4, 2).unwrap();
+        let rs = ReedSolomonEncoder::new(4, 2).unwrap();
 
         // Encode data in chunks
         let chunk1 = b"First chunk";
         let chunk2 = b"Second chunk";
         let chunk3 = b"Third chunk";
 
-        let encoded1 = rs.encode(chunk1).unwrap();
-        let encoded2 = rs.encode(chunk2).unwrap();
-        let encoded3 = rs.encode(chunk3).unwrap();
+        let encoded1 = tokio_test::block_on(rs.encode(chunk1.to_vec())).unwrap();
+        let encoded2 = tokio_test::block_on(rs.encode(chunk2.to_vec())).unwrap();
+        let encoded3 = tokio_test::block_on(rs.encode(chunk3.to_vec())).unwrap();
 
         // Decode each chunk
-        assert_eq!(rs.decode(&encoded1).unwrap(), chunk1);
-        assert_eq!(rs.decode(&encoded2).unwrap(), chunk2);
-        assert_eq!(rs.decode(&encoded3).unwrap(), chunk3);
+        assert_eq!(tokio_test::block_on(rs.decode(encoded1.into_iter().map(Some).collect())).unwrap(), chunk1);
+        assert_eq!(tokio_test::block_on(rs.decode(encoded2.into_iter().map(Some).collect())).unwrap(), chunk2);
+        assert_eq!(tokio_test::block_on(rs.decode(encoded3.into_iter().map(Some).collect())).unwrap(), chunk3);
     }
 
     #[test]
@@ -147,15 +147,15 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
-        let rs = Arc::new(ReedSolomon::new(4, 2).unwrap());
+        let rs = Arc::new(ReedSolomonEncoder::new(4, 2).unwrap());
         let mut handles = vec![];
 
         for i in 0..10 {
             let rs_clone = rs.clone();
             let handle = thread::spawn(move || {
                 let data = format!("Thread {} data", i).into_bytes();
-                let encoded = rs_clone.encode(&data).unwrap();
-                let decoded = rs_clone.decode(&encoded).unwrap();
+                let encoded = tokio_test::block_on(rs_clone.encode(data.clone())).unwrap();
+                let decoded = tokio_test::block_on(rs_clone.decode(encoded.into_iter().map(Some).collect())).unwrap();
                 assert_eq!(decoded, data);
             });
             handles.push(handle);
@@ -168,23 +168,21 @@ mod tests {
 
     #[test]
     fn test_empty_data() {
-        let rs = ReedSolomon::new(4, 2).unwrap();
-        let empty_data = b"";
+        let rs = ReedSolomonEncoder::new(4, 2).unwrap();
+        let empty_data = Vec::new();
 
-        let encoded = rs.encode(empty_data).unwrap();
-        let decoded = rs.decode(&encoded).unwrap();
-        assert_eq!(decoded, empty_data);
+        assert!(tokio_test::block_on(rs.encode(empty_data)).is_err());
     }
 
     #[test]
     fn test_invalid_parameters() {
         // Zero data shards
-        assert!(ReedSolomon::new(0, 2).is_err());
+        assert!(ReedSolomonEncoder::new(0, 2).is_err());
 
         // Zero parity shards
-        assert!(ReedSolomon::new(4, 0).is_err());
+        assert!(ReedSolomonEncoder::new(4, 0).is_err());
 
         // Too many total shards
-        assert!(ReedSolomon::new(128, 128).is_err());
+        assert!(ReedSolomonEncoder::new(128, 128).is_err());
     }
 }

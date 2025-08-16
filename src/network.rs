@@ -29,6 +29,7 @@ use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
 use crate::transport::ant_quic_adapter::P2PNetworkNode;
 #[allow(unused_imports)] // Temporarily unused during migration
 use crate::transport::{TransportOptions, TransportType};
+use crate::validation::RateLimitConfig;
 use crate::validation::RateLimiter;
 use crate::{NetworkAddress, PeerId};
 use serde::{Deserialize, Serialize};
@@ -37,7 +38,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, broadcast};
-use crate::validation::RateLimitConfig;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -315,6 +315,18 @@ impl NodeConfig {
 
         Ok(node_config)
     }
+
+    /// Try to build a NodeConfig from a listen address string
+    pub fn with_listen_addr(addr: &str) -> Result<Self> {
+        let listen_addr: std::net::SocketAddr = addr
+            .parse()
+            .map_err(|e: std::net::AddrParseError| NetworkError::InvalidAddress(e.to_string().into()))
+            .map_err(P2PError::Network)?;
+        let mut cfg = NodeConfig::default();
+        cfg.listen_addr = listen_addr;
+        cfg.listen_addrs = vec![listen_addr];
+        Ok(cfg)
+    }
 }
 
 impl Default for DHTConfig {
@@ -532,7 +544,11 @@ impl P2PNode {
                     bind_addr: Some(bind),
                 };
                 let node = tokio::runtime::Handle::current()
-                    .block_on(crate::transport::ant_quic_adapter::P2PNetworkNode::new_with_config(bind, cfg))
+                    .block_on(
+                        crate::transport::ant_quic_adapter::P2PNetworkNode::new_with_config(
+                            bind, cfg,
+                        ),
+                    )
                     .unwrap_or_else(|_| {
                         // Create a harmless placeholder node bound to 127.0.0.1:0 for tests
                         let fallback_bind = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
@@ -1479,6 +1495,11 @@ impl P2PNode {
         Ok(())
     }
 
+    /// Graceful shutdown alias for tests
+    pub async fn shutdown(&self) -> Result<()> {
+        self.stop().await
+    }
+
     /// Check if the node is running
     pub async fn is_running(&self) -> bool {
         *self.running.read().await
@@ -1712,6 +1733,8 @@ impl P2PNode {
             ))
         })
     }
+
+    // Note: async listen_addrs() already exists above for fetching listen addresses
 }
 
 /// Create a protocol message wrapper (static version for background tasks)
@@ -1746,6 +1769,11 @@ impl P2PNode {
     /// Subscribe to network events
     pub fn subscribe_events(&self) -> broadcast::Receiver<P2PEvent> {
         self.event_tx.subscribe()
+    }
+
+    /// Backwards-compat event stream accessor for tests
+    pub fn events(&self) -> broadcast::Receiver<P2PEvent> {
+        self.subscribe_events()
     }
 
     /// Get node uptime
@@ -2242,9 +2270,7 @@ impl P2PNode {
                         warn!("Failed to connect to bootstrap peer {}: {}", addr, e);
 
                         // Update bootstrap cache with failed connection
-                        if used_cache
-                            && let Some(ref bootstrap_manager) = self.bootstrap_manager
-                        {
+                        if used_cache && let Some(ref bootstrap_manager) = self.bootstrap_manager {
                             let mut manager = bootstrap_manager.write().await;
                             let mut updated_contact = contact.clone();
                             updated_contact.update_connection_result(

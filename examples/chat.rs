@@ -69,9 +69,9 @@ async fn main() -> Result<()> {
     let discovery = BootstrapDiscovery::new();
     let mut bootstrap_addrs = Vec::new();
 
-    // Resolve three-word addresses
+    // Resolve four-word addresses
     for word_addr in &args.bootstrap_words {
-        match discovery.resolve_three_words(word_addr) {
+        match discovery.resolve_four_words(word_addr) {
             Ok(multiaddr) => {
                 info!("✅ Resolved '{}' to {}", word_addr, multiaddr);
                 bootstrap_addrs.push(multiaddr);
@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
     // Add traditional multiaddrs
     for addr_str in &args.bootstrap {
         match Multiaddr::from_str(addr_str) {
-            Ok(addr) => bootstrap_addrs.push(addr),
+            Ok(addr) => bootstrap_addrs.push(addr.into()),
             Err(e) => warn!("Invalid multiaddr '{}': {}", addr_str, e),
         }
     }
@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
         match discovery.discover_bootstraps().await {
             Ok(bootstraps) => {
                 info!("✅ Found {} bootstrap nodes", bootstraps.len());
-                bootstrap_addrs = bootstraps;
+            bootstrap_addrs = bootstraps.into_iter().map(|a| a.into()).collect();
             }
             Err(e) => {
                 warn!("⚠️  Bootstrap discovery failed: {}", e);

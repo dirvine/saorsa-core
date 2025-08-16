@@ -145,9 +145,7 @@ impl AdaptiveDHT {
                 metrics.lookups_successful += 1;
                 Ok(record.value)
             }
-            None => Err(AdaptiveNetworkError::Other(
-                "Record not found".to_string(),
-            )),
+            None => Err(AdaptiveNetworkError::Other("Record not found".to_string())),
         }
     }
 

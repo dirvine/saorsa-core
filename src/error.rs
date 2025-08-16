@@ -800,6 +800,10 @@ fn error_type_name(error: &P2PError) -> &'static str {
         P2PError::Security(_) => "Security",
         P2PError::Bootstrap(_) => "Bootstrap",
         P2PError::Encoding(_) => "Encoding",
+        P2PError::RecordTooLarge(_) => "RecordTooLarge",
+        P2PError::ProofOfWorkFailed => "ProofOfWorkFailed",
+        P2PError::TimeError => "TimeError",
+        P2PError::InvalidInput(_) => "InvalidInput",
     }
 }
 

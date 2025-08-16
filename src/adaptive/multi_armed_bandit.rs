@@ -173,9 +173,10 @@ impl MultiArmedBandit {
 
         // Load persisted statistics if available
         if let Some(path) = mab.config.storage_path.clone()
-            && let Err(e) = mab.load_statistics(&path).await {
-                tracing::warn!("Failed to load MAB statistics: {}", e);
-            }
+            && let Err(e) = mab.load_statistics(&path).await
+        {
+            tracing::warn!("Failed to load MAB statistics: {}", e);
+        }
 
         Ok(mab)
     }
@@ -331,26 +332,24 @@ impl MultiArmedBandit {
         // Check if we should persist
         let last_persist = *self.last_persist.read().await;
         if last_persist.elapsed() > self.config.persist_interval
-            && let Some(ref path) = self.config.storage_path {
-                let statistics_clone = statistics.clone();
-                let metrics_clone = metrics.clone();
-                let path_clone = path.clone();
+            && let Some(ref path) = self.config.storage_path
+        {
+            let statistics_clone = statistics.clone();
+            let metrics_clone = metrics.clone();
+            let path_clone = path.clone();
 
-                // Persist asynchronously
-                tokio::spawn(async move {
-                    if let Err(e) = Self::persist_statistics_static(
-                        &path_clone,
-                        &statistics_clone,
-                        &metrics_clone,
-                    )
-                    .await
-                    {
-                        tracing::error!("Failed to persist MAB statistics: {}", e);
-                    }
-                });
+            // Persist asynchronously
+            tokio::spawn(async move {
+                if let Err(e) =
+                    Self::persist_statistics_static(&path_clone, &statistics_clone, &metrics_clone)
+                        .await
+                {
+                    tracing::error!("Failed to persist MAB statistics: {}", e);
+                }
+            });
 
-                *self.last_persist.write().await = Instant::now();
-            }
+            *self.last_persist.write().await = Instant::now();
+        }
 
         Ok(())
     }
@@ -457,9 +456,7 @@ impl MultiArmedBandit {
 
         // Create directory if it doesn't exist
         if let Some(parent) = stats_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(P2PError::Io)?;
+            fs::create_dir_all(parent).await.map_err(P2PError::Io)?;
         }
 
         let data = serde_json::to_string_pretty(&(statistics, metrics)).map_err(|e| {
@@ -468,9 +465,7 @@ impl MultiArmedBandit {
             ))
         })?;
 
-        fs::write(&stats_path, data)
-            .await
-            .map_err(P2PError::Io)?;
+        fs::write(&stats_path, data).await.map_err(P2PError::Io)?;
 
         Ok(())
     }

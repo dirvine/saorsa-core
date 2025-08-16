@@ -1,7 +1,7 @@
 // Mock implementations for testing
 // These implementations provide test doubles that don't require network access
 
-use super::DhtClient;
+// use super::DhtClient; // Unused import - commented out
 use crate::network::P2PNode;
 
 // Mock implementations are provided via extension methods
@@ -21,12 +21,5 @@ impl P2PNode {
     }
 }
 
-// For DhtClient mock  
-impl DhtClient {
-    /// Create a mock DHT client for testing
-    #[cfg(test)]
-    pub fn new_mock() -> Self {
-        // Return an in-memory, no-op DHT client suitable for unit tests
-        Self::in_memory()
-    }
-}
+// For DhtClient mock
+// Removed duplicate new_mock to avoid conflicts with core DHT client tests

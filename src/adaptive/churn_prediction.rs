@@ -112,14 +112,14 @@ impl LSTMLayer {
 
         // Update cell state
         let mut new_c = vec![0.0; self.hidden_size];
-        for i in 0..self.hidden_size {
-            new_c[i] = f_gate[i] * prev_c[i] + i_gate[i] * g_gate[i];
+        for (i, val) in new_c.iter_mut().enumerate().take(self.hidden_size) {
+            *val = f_gate[i] * prev_c[i] + i_gate[i] * g_gate[i];
         }
 
         // Update hidden state
         let mut new_h = vec![0.0; self.hidden_size];
-        for i in 0..self.hidden_size {
-            new_h[i] = o_gate[i] * new_c[i].tanh();
+        for (i, val) in new_h.iter_mut().enumerate().take(self.hidden_size) {
+            *val = o_gate[i] * new_c[i].tanh();
         }
 
         (new_h, new_c)
@@ -129,19 +129,19 @@ impl LSTMLayer {
         let mut gates = vec![0.0; 4 * self.hidden_size];
 
         // Input contribution
-        for i in 0..4 * self.hidden_size {
-            for j in 0..self.input_size {
-                gates[i] += self.weight_ih[i][j] * input[j];
+        for (i, gate) in gates.iter_mut().enumerate().take(4 * self.hidden_size) {
+            for (j, val) in input.iter().enumerate().take(self.input_size) {
+                *gate += self.weight_ih[i][j] * *val;
             }
-            gates[i] += self.bias_ih[i];
+            *gate += self.bias_ih[i];
         }
 
         // Hidden contribution
-        for i in 0..4 * self.hidden_size {
-            for j in 0..self.hidden_size {
-                gates[i] += self.weight_hh[i][j] * hidden[j];
+        for (i, gate) in gates.iter_mut().enumerate().take(4 * self.hidden_size) {
+            for (j, val) in hidden.iter().enumerate().take(self.hidden_size) {
+                *gate += self.weight_hh[i][j] * *val;
             }
-            gates[i] += self.bias_hh[i];
+            *gate += self.bias_hh[i];
         }
 
         gates
@@ -276,12 +276,12 @@ impl LSTMChurnPredictor {
 
         // Output layer
         let mut output = [0.0; 3];
-        for i in 0..3 {
-            for j in 0..current_input.len() {
-                output[i] += self.output_weights[i][j] * current_input[j];
+        for (i, out) in output.iter_mut().enumerate() {
+            for (j, val) in current_input.iter().enumerate() {
+                *out += self.output_weights[i][j] * *val;
             }
-            output[i] += self.output_bias[i];
-            output[i] = sigmoid(output[i]); // Probability output
+            *out += self.output_bias[i];
+            *out = sigmoid(*out); // Probability output
         }
 
         // Calculate confidence based on feature quality
@@ -388,13 +388,15 @@ impl LSTMChurnPredictor {
             .collect();
 
         // Simple gradient descent on output layer
-        for i in 0..3 {
+        for (i, bias) in self.output_bias.iter_mut().enumerate() {
             let grad = 2.0 * (pred_vec[i] - experience.actual_churn[i]);
-            self.output_bias[i] -= self.learning_rate * grad;
+            *bias -= self.learning_rate * grad;
 
             // Update output weights (simplified)
-            for j in 0..self.output_weights[i].len() {
-                self.output_weights[i][j] -= self.learning_rate * grad * 0.1;
+            if let Some(row) = self.output_weights.get_mut(i) {
+                for w in row.iter_mut() {
+                    *w -= self.learning_rate * grad * 0.1;
+                }
             }
         }
 

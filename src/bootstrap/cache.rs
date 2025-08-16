@@ -251,7 +251,7 @@ impl BootstrapCache {
     /// Get contacts by QUIC direct addresses
     pub async fn get_contact_by_addresses(
         &self,
-        target_addresses: &Vec<SocketAddr>,
+        target_addresses: &[SocketAddr],
     ) -> Option<ContactEntry> {
         let contacts = self.contacts.read().await;
         contacts

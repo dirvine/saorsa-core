@@ -23,6 +23,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, mpsc};
 
+// Type aliases to reduce type complexity for channels
+type GossipMessageRx = mpsc::Receiver<(NodeId, GossipMessage)>;
+type ControlMessageTx = mpsc::Sender<(NodeId, ControlMessage)>;
+
 /// Topic identifier for gossip messages
 pub type Topic = String;
 
@@ -122,10 +126,10 @@ pub struct AdaptiveGossipSub {
     trust_provider: Arc<dyn TrustProvider>,
 
     /// Message receiver channel
-    _message_rx: Arc<RwLock<Option<mpsc::Receiver<(NodeId, GossipMessage)>>>>,
+    _message_rx: Arc<RwLock<Option<GossipMessageRx>>>,
 
     /// Control message sender
-    control_tx: Arc<RwLock<Option<mpsc::Sender<(NodeId, ControlMessage)>>>>,
+    control_tx: Arc<RwLock<Option<ControlMessageTx>>>,
 
     /// Churn detector
     churn_detector: Arc<RwLock<ChurnDetector>>,
@@ -168,7 +172,7 @@ impl PeerScore {
         }
     }
 
-    fn score(&self) -> f64 {
+    pub fn score(&self) -> f64 {
         let time_score = (self.time_in_mesh.as_secs() as f64 / 60.0).min(10.0) * 0.5;
         let delivery_score = (self.first_message_deliveries as f64).min(100.0) / 100.0;
         let mesh_score = (self.mesh_message_deliveries as f64).min(1000.0) / 1000.0 * 0.2;
@@ -457,9 +461,9 @@ impl AdaptiveGossipSub {
             let msg = ControlMessage::Graft {
                 topic: topic.to_string(),
             };
-            tx.send((peer.clone(), msg)).await.map_err(|_| {
-                AdaptiveNetworkError::Other("Failed to send GRAFT".to_string())
-            })?;
+            tx.send((peer.clone(), msg))
+                .await
+                .map_err(|_| AdaptiveNetworkError::Other("Failed to send GRAFT".to_string()))?;
         }
         Ok(())
     }
@@ -472,9 +476,9 @@ impl AdaptiveGossipSub {
                 topic: topic.to_string(),
                 backoff,
             };
-            tx.send((peer.clone(), msg)).await.map_err(|_| {
-                AdaptiveNetworkError::Other("Failed to send PRUNE".to_string())
-            })?;
+            tx.send((peer.clone(), msg))
+                .await
+                .map_err(|_| AdaptiveNetworkError::Other("Failed to send PRUNE".to_string()))?;
         }
         Ok(())
     }
@@ -492,9 +496,9 @@ impl AdaptiveGossipSub {
                 topic: topic.to_string(),
                 message_ids,
             };
-            tx.send((peer.clone(), msg)).await.map_err(|_| {
-                AdaptiveNetworkError::Other("Failed to send IHAVE".to_string())
-            })?;
+            tx.send((peer.clone(), msg))
+                .await
+                .map_err(|_| AdaptiveNetworkError::Other("Failed to send IHAVE".to_string()))?;
         }
         Ok(())
     }
@@ -504,9 +508,9 @@ impl AdaptiveGossipSub {
         let control_tx = self.control_tx.read().await;
         if let Some(tx) = control_tx.as_ref() {
             let msg = ControlMessage::IWant { message_ids };
-            tx.send((peer.clone(), msg)).await.map_err(|_| {
-                AdaptiveNetworkError::Other("Failed to send IWANT".to_string())
-            })?;
+            tx.send((peer.clone(), msg))
+                .await
+                .map_err(|_| AdaptiveNetworkError::Other("Failed to send IWANT".to_string()))?;
         }
         Ok(())
     }
@@ -530,9 +534,10 @@ impl AdaptiveGossipSub {
                 let scores = self.peer_scores.read().await;
                 for peer in &mesh_peers {
                     if let Some(score) = scores.get(peer)
-                        && score.score() < params.graylist_threshold {
-                            peers_to_remove.push(peer.clone());
-                        }
+                        && score.score() < params.graylist_threshold
+                    {
+                        peers_to_remove.push(peer.clone());
+                    }
                 }
             }
 
@@ -575,7 +580,7 @@ impl AdaptiveGossipSub {
     }
 
     /// Calculate adaptive mesh size based on network conditions
-    async fn calculate_adaptive_mesh_size(&self, topic: &str) -> usize {
+    pub async fn calculate_adaptive_mesh_size(&self, topic: &str) -> usize {
         let base_size = 8;
 
         // Get churn rate from detector
@@ -640,7 +645,7 @@ impl AdaptiveGossipSub {
     }
 
     /// Compute message ID
-    fn compute_message_id(&self, message: &GossipMessage) -> MessageId {
+    pub fn compute_message_id(&self, message: &GossipMessage) -> MessageId {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(message.topic.as_bytes());

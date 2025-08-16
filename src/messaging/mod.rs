@@ -1,23 +1,20 @@
 // Rich Messaging Module for P2P Foundation
 // Implements WhatsApp/Slack-style messaging with full decentralization
 
-pub mod types;
 pub mod composer;
-pub mod threads;
-pub mod reactions;
-pub mod media;
-pub mod search;
+pub mod database;
 pub mod encryption;
 pub mod key_exchange;
-pub mod sync;
-pub mod transport;
-pub mod database;
-pub mod webrtc;
-pub mod service;
+pub mod media;
 pub mod mocks;
-
-#[cfg(test)]
-pub mod tests;
+pub mod reactions;
+pub mod search;
+pub mod service;
+pub mod sync;
+pub mod threads;
+pub mod transport;
+pub mod types;
+pub mod webrtc;
 
 use crate::identity::FourWordAddress;
 // Removed unused imports
@@ -27,19 +24,19 @@ use serde::{Deserialize, Serialize};
 // use chrono::{DateTime, Utc};
 // Removed unused imports: use tracing::{debug, warn};
 
-pub use types::*;
 pub use composer::MessageComposer;
-pub use threads::ThreadManager;
-pub use reactions::ReactionManager;
-pub use media::MediaProcessor;
-pub use search::MessageSearch;
+pub use database::MessageStore;
 pub use encryption::SecureMessaging;
 pub use key_exchange::{KeyExchange, KeyExchangeMessage};
-pub use sync::RealtimeSync;
-pub use transport::{MessageTransport, DeliveryStatus, DeliveryReceipt, ReceivedMessage};
-pub use webrtc::{WebRtcService, WebRtcEvent, CallManager, CallEvent};
+pub use media::MediaProcessor;
+pub use reactions::ReactionManager;
+pub use search::MessageSearch;
 pub use service::{MessagingService, SendOptions};
-pub use database::MessageStore;
+pub use sync::RealtimeSync;
+pub use threads::ThreadManager;
+pub use transport::{DeliveryReceipt, DeliveryStatus, MessageTransport, ReceivedMessage};
+pub use types::*;
+pub use webrtc::{CallEvent, CallManager, WebRtcEvent, WebRtcService};
 
 // Import the real DHT client
 pub use crate::dht::client::DhtClient;
@@ -70,10 +67,10 @@ impl MessagingService {
         let node_id = crate::dht::core_engine::NodeId::from_key(
             crate::dht::core_engine::DhtKey::from_bytes(*node_id_bytes.as_bytes())
         );
-        
+
         // Create DHT client with the user's node ID
         let dht_client = DhtClient::with_node_id(node_id)?;
-        
+
         // Initialize all components
         let store = MessageStore::new(dht_client.clone()).await?;
         let threads = ThreadManager::new(store.clone());
@@ -82,7 +79,7 @@ impl MessagingService {
         let search = MessageSearch::new(store.clone()).await?;
         let encryption = SecureMessaging::new(identity.clone())?;
         let sync = RealtimeSync::new(dht_client.clone()).await?;
-        
+
         Ok(Self {
             store,
             threads,
@@ -96,7 +93,7 @@ impl MessagingService {
             identity,
         })
     }
-    
+
     /// Create a new messaging service with an existing DHT client
     pub async fn with_dht_client(
         identity: FourWordAddress,
@@ -109,7 +106,7 @@ impl MessagingService {
         let search = MessageSearch::new(store.clone()).await?;
         let encryption = SecureMessaging::new(identity.clone())?;
         let sync = RealtimeSync::new(dht_client).await?;
-        
+
         Ok(Self {
             store,
             threads,
@@ -123,19 +120,19 @@ impl MessagingService {
             identity,
         })
     }
-    
+
     /// Connect to network transport
     pub async fn connect_transport(&mut self, network: Arc<crate::network::P2PNode>) -> Result<()> {
         let transport = MessageTransport::new(network, self.store.dht_client.clone()).await?;
-        
+
         // Start background tasks
         transport.monitor_network_quality().await;
         transport.process_message_queue().await;
-        
+
         self.transport = Some(transport);
         Ok(())
     }
-    
+
     /// Initialize WebRTC service
     pub async fn initialize_webrtc(&mut self) -> Result<()> {
         // Create WebRTC service using the DHT client
@@ -144,14 +141,14 @@ impl MessagingService {
             self.identity.clone(),
             dht_engine,
         ).await?;
-        
+
         // Start the WebRTC service
         webrtc.start().await?;
-        
+
         self.webrtc = Some(webrtc);
         Ok(())
     }
-    
+
     /// Initiate a voice/video call
     pub async fn initiate_call(
         &self,
@@ -164,7 +161,7 @@ impl MessagingService {
             Err(anyhow::anyhow!("WebRTC service not initialized"))
         }
     }
-    
+
     /// Accept an incoming call
     pub async fn accept_call(
         &self,
@@ -177,7 +174,7 @@ impl MessagingService {
             Err(anyhow::anyhow!("WebRTC service not initialized"))
         }
     }
-    
+
     /// Reject an incoming call
     pub async fn reject_call(&self, call_id: webrtc::CallId) -> Result<()> {
         if let Some(ref webrtc) = self.webrtc {
@@ -186,7 +183,7 @@ impl MessagingService {
             Err(anyhow::anyhow!("WebRTC service not initialized"))
         }
     }
-    
+
     /// End an active call
     pub async fn end_call(&self, call_id: webrtc::CallId) -> Result<()> {
         if let Some(ref webrtc) = self.webrtc {
@@ -195,7 +192,7 @@ impl MessagingService {
             Err(anyhow::anyhow!("WebRTC service not initialized"))
         }
     }
-    
+
     /// Get call state
     pub async fn get_call_state(&self, call_id: webrtc::CallId) -> Option<webrtc::CallState> {
         if let Some(ref webrtc) = self.webrtc {
@@ -204,17 +201,17 @@ impl MessagingService {
             None
         }
     }
-    
+
     /// Subscribe to WebRTC events
     pub fn subscribe_webrtc_events(&self) -> Option<tokio::sync::broadcast::Receiver<WebRtcEvent>> {
         self.webrtc.as_ref().map(|w| w.subscribe_events())
     }
-    
+
     /// Get WebRTC service reference
     pub fn webrtc(&self) -> Option<&WebRtcService> {
         self.webrtc.as_ref()
     }
-    
+
     /// Send a new message
     pub async fn send_message(&mut self, request: SendMessageRequest) -> Result<RichMessage> {
         // Create message
@@ -223,36 +220,36 @@ impl MessagingService {
             request.channel_id,
             request.content,
         );
-        
+
         // Add attachments if any
         for attachment in request.attachments {
             let processed = self.media.process_attachment(attachment).await?;
             message.attachments.push(processed);
         }
-        
+
         // Handle threading
         if let Some(thread_id) = request.thread_id {
             message.thread_id = Some(thread_id);
             self.threads.add_to_thread(thread_id, &message).await?;
         }
-        
+
         // Handle reply
         if let Some(reply_to) = request.reply_to {
             message.reply_to = Some(reply_to);
         }
-        
+
         // Encrypt message
         let encrypted = self.encryption.encrypt_message(&message).await?;
-        
+
         // Store message (we store the original, not encrypted version locally)
         self.store.store_message(&message).await?;
-        
+
         // Send via transport if available, otherwise use sync
         if let Some(ref transport) = self.transport {
             // Extract recipients from channel members
             let recipients = self.get_channel_members(request.channel_id).await?;
             let receipt = transport.send_message(&encrypted, recipients).await?;
-            
+
             // Log delivery status
             for (recipient, status) in receipt.delivery_status {
                 match status {
@@ -272,36 +269,36 @@ impl MessagingService {
             // Fallback to broadcast sync
             self.sync.broadcast_message(&encrypted).await?;
         }
-        
+
         Ok(message)
     }
-    
+
     /// Receive and process an incoming message
     pub async fn receive_message(&mut self, encrypted: EncryptedMessage) -> Result<RichMessage> {
         // Decrypt message
         let message = self.encryption.decrypt_message(encrypted).await?;
-        
+
         // Verify signature
         if !self.encryption.verify_message(&message) {
             return Err(anyhow::anyhow!("Invalid message signature"));
         }
-        
+
         // Store message
         self.store.store_message(&message).await?;
-        
+
         // Update thread if applicable
         if let Some(thread_id) = &message.thread_id {
             self.threads.update_thread(*thread_id, &message).await?;
         }
-        
+
         // Process mentions
         if message.mentions.contains(&self.identity) {
             self.handle_mention(&message).await?;
         }
-        
+
         Ok(message)
     }
-    
+
     /// Add a reaction to a message
     pub async fn add_reaction(&mut self, message_id: MessageId, emoji: String) -> Result<()> {
         self.reactions.add_reaction(
@@ -309,13 +306,13 @@ impl MessagingService {
             emoji.clone(),
             self.identity.clone(),
         ).await?;
-        
+
         // Sync reaction
         self.sync.broadcast_reaction(message_id, emoji, true).await?;
-        
+
         Ok(())
     }
-    
+
     /// Remove a reaction from a message
     pub async fn remove_reaction(&mut self, message_id: MessageId, emoji: String) -> Result<()> {
         self.reactions.remove_reaction(
@@ -323,13 +320,13 @@ impl MessagingService {
             emoji.clone(),
             self.identity.clone(),
         ).await?;
-        
+
         // Sync reaction removal
         self.sync.broadcast_reaction(message_id, emoji, false).await?;
-        
+
         Ok(())
     }
-    
+
     /// Edit a message
     pub async fn edit_message(
         &mut self,
@@ -338,53 +335,53 @@ impl MessagingService {
     ) -> Result<()> {
         // Get original message
         let mut message = self.store.get_message(message_id).await?;
-        
+
         // Verify sender
         if message.sender != self.identity {
             return Err(anyhow::anyhow!("Cannot edit message from another user"));
         }
-        
+
         // Update content
         message.content = new_content.clone();
         message.edited_at = Some(Utc::now());
-        
+
         // Re-encrypt and store
         let _encrypted = self.encryption.encrypt_message(&message).await?;
         self.store.update_message(&message).await?;
-        
+
         // Sync edit
         self.sync.broadcast_edit(message_id, new_content).await?;
-        
+
         Ok(())
     }
-    
+
     /// Delete a message
     pub async fn delete_message(&mut self, message_id: MessageId) -> Result<()> {
         // Get message
         let mut message = self.store.get_message(message_id).await?;
-        
+
         // Verify sender
         if message.sender != self.identity {
             return Err(anyhow::anyhow!("Cannot delete message from another user"));
         }
-        
+
         // Soft delete
         message.deleted_at = Some(Utc::now());
-        
+
         // Update storage
         self.store.update_message(&message).await?;
-        
+
         // Sync deletion
         self.sync.broadcast_deletion(message_id).await?;
-        
+
         Ok(())
     }
-    
+
     /// Search messages
     pub async fn search_messages(&self, query: SearchQuery) -> Result<Vec<RichMessage>> {
         self.search.search(query).await
     }
-    
+
     /// Get message history for a channel
     pub async fn get_channel_messages(
         &self,
@@ -394,7 +391,7 @@ impl MessagingService {
     ) -> Result<Vec<RichMessage>> {
         self.store.get_channel_messages(channel_id, limit, before).await
     }
-    
+
     /// Get thread messages
     pub async fn get_thread_messages(
         &self,
@@ -402,7 +399,7 @@ impl MessagingService {
     ) -> Result<ThreadView> {
         self.threads.get_thread(thread_id).await
     }
-    
+
     /// Mark messages as read
     pub async fn mark_as_read(&mut self, message_ids: Vec<MessageId>) -> Result<()> {
         for message_id in message_ids {
@@ -411,26 +408,26 @@ impl MessagingService {
         }
         Ok(())
     }
-    
+
     /// Start typing indicator
     pub async fn start_typing(&mut self, channel_id: ChannelId) -> Result<()> {
         self.sync.broadcast_typing(channel_id, true).await
     }
-    
+
     /// Stop typing indicator
     pub async fn stop_typing(&mut self, channel_id: ChannelId) -> Result<()> {
         self.sync.broadcast_typing(channel_id, false).await
     }
-    
+
     /// Initiate key exchange with a peer
     pub async fn initiate_key_exchange(&self, peer: FourWordAddress) -> Result<KeyExchangeMessage> {
         self.encryption.key_exchange.initiate_exchange(peer).await
     }
-    
+
     /// Handle incoming key exchange message
     pub async fn handle_key_exchange(&self, message: KeyExchangeMessage) -> Result<Option<KeyExchangeMessage>> {
         use key_exchange::KeyExchangeType;
-        
+
         match message.message_type {
             KeyExchangeType::Initiation => {
                 // Respond to initiation
@@ -448,19 +445,19 @@ impl MessagingService {
             }
         }
     }
-    
+
     /// Get our prekey bundle for others
     pub async fn get_prekey_bundle(&self) -> key_exchange::PrekeyBundle {
         self.encryption.key_exchange.get_prekey_bundle().await
     }
-    
+
     /// Rotate encryption keys
     pub async fn rotate_keys(&self) -> Result<()> {
         self.encryption.key_exchange.rotate_prekeys().await?;
         self.encryption.key_exchange.cleanup_expired().await?;
         Ok(())
     }
-    
+
     /// Handle mention notification
     async fn handle_mention(&self, message: &RichMessage) -> Result<()> {
         // Create notification
@@ -468,7 +465,7 @@ impl MessagingService {
         // TODO: Trigger system notification
         Ok(())
     }
-    
+
     /// Get channel members
     async fn get_channel_members(&self, _channel_id: ChannelId) -> Result<Vec<FourWordAddress>> {
         // TODO: Implement channel membership lookup
@@ -493,25 +490,25 @@ impl MessageStore {
         let inner = Arc::new(
             database::DatabaseMessageStore::new(dht_client.clone(), None).await?
         );
-        
-        Ok(Self { 
+
+        Ok(Self {
             inner,
             dht_client,
         })
     }
-    
+
     pub async fn store_message(&self, message: &RichMessage) -> Result<()> {
         self.inner.store_message(message).await
     }
-    
+
     pub async fn get_message(&self, id: MessageId) -> Result<RichMessage> {
         self.inner.get_message(id).await
     }
-    
+
     pub async fn update_message(&self, message: &RichMessage) -> Result<()> {
         self.inner.update_message(message).await
     }
-    
+
     pub async fn get_channel_messages(
         &self,
         channel_id: ChannelId,
@@ -520,7 +517,7 @@ impl MessageStore {
     ) -> Result<Vec<RichMessage>> {
         self.inner.get_channel_messages(channel_id, limit, before).await
     }
-    
+
     pub async fn mark_as_read(
         &self,
         message_id: MessageId,
@@ -528,32 +525,32 @@ impl MessageStore {
     ) -> Result<()> {
         self.inner.mark_as_read(message_id, user).await
     }
-    
+
     /// Search messages
     pub async fn search_messages(&self, query: &str, channel_id: Option<ChannelId>) -> Result<Vec<RichMessage>> {
         self.inner.search_messages(query, channel_id, 50).await
     }
-    
+
     /// Get thread messages
     pub async fn get_thread_messages(&self, thread_id: ThreadId) -> Result<Vec<RichMessage>> {
         self.inner.get_thread_messages(thread_id).await
     }
-    
+
     /// Add reaction
     pub async fn add_reaction(&self, message_id: MessageId, emoji: String, user: FourWordAddress) -> Result<()> {
         self.inner.add_reaction(message_id, emoji, user).await
     }
-    
+
     /// Remove reaction
     pub async fn remove_reaction(&self, message_id: MessageId, emoji: String, user: FourWordAddress) -> Result<()> {
         self.inner.remove_reaction(message_id, emoji, user).await
     }
-    
+
     /// Get database statistics
     pub async fn get_stats(&self) -> Result<database::DatabaseStats> {
         self.inner.get_stats().await
     }
-    
+
     /// Clean up ephemeral messages
     pub async fn cleanup_ephemeral(&self, ttl_seconds: i64) -> Result<usize> {
         self.inner.cleanup_ephemeral(ttl_seconds).await
@@ -564,30 +561,30 @@ impl MessageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_message_creation() {
         let identity = FourWordAddress::from("ocean-forest-moon-star");
         let channel = ChannelId::new();
         let content = MessageContent::Text("Hello, world!".to_string());
-        
+
         let message = RichMessage::new(identity.clone(), channel, content.clone());
-        
+
         assert_eq!(message.sender, identity);
         assert_eq!(message.channel_id, channel);
         assert!(matches!(message.content, MessageContent::Text(_)));
     }
-    
+
     #[tokio::test]
     async fn test_messaging_service_with_real_dht() {
         let identity = FourWordAddress::from("ocean-forest-moon-star");
-        
+
         // Create messaging service with real DHT
-        let service = MessagingService::new(identity.clone()).await;
+        let service = MessagingService::new(identity.clone(), crate::messaging::DhtClient::new().unwrap()).await;
         assert!(service.is_ok());
-        
+
         let mut service = service.unwrap();
-        
+
         // Test sending a message
         let request = SendMessageRequest {
             channel_id: ChannelId::new(),
@@ -598,8 +595,15 @@ mod tests {
             mentions: vec![],
             ephemeral: false,
         };
-        
-        let result = service.send_message(request).await;
+
+        let result = service
+            .send_message(
+                vec![FourWordAddress::from("recipient-alpha-bravo-charlie")],
+                MessageContent::Text("Hello".to_string()),
+                ChannelId::new(),
+                crate::messaging::SendOptions::default(),
+            )
+            .await;
         assert!(result.is_ok());
     }
 }

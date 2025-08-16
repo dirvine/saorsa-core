@@ -191,14 +191,10 @@ pub async fn generate_keypair(capabilities: &CryptoCapabilities) -> Result<KeyPa
     if capabilities.supports_hybrid {
         let (pub_key, priv_key) = generate_ed25519_keypair()?;
         public.ed25519 = Some(Ed25519PublicKey(pub_key.try_into().map_err(|_| {
-            QuantumCryptoError::InvalidKeyError(
-                "Invalid Ed25519 public key length".to_string(),
-            )
+            QuantumCryptoError::InvalidKeyError("Invalid Ed25519 public key length".to_string())
         })?));
         private.ed25519 = Some(Ed25519PrivateKey(priv_key.try_into().map_err(|_| {
-            QuantumCryptoError::InvalidKeyError(
-                "Invalid Ed25519 private key length".to_string(),
-            )
+            QuantumCryptoError::InvalidKeyError("Invalid Ed25519 private key length".to_string())
         })?));
     }
 

@@ -173,6 +173,7 @@ async fn test_q_learning_improves_hit_rate() {
         buffer_size: 1000,
         batch_size: 32,
         learning_frequency: 10,
+        eviction_strategy: None,
     };
 
     let q_manager = QLearningCacheManager::new(config, cache_capacity);
@@ -198,7 +199,7 @@ async fn test_q_learning_improves_hit_rate() {
         let action = q_manager.select_action(&state, actions).await.unwrap();
 
         // Execute action and observe outcome
-        let old_stats = q_manager.cache_stats.read().await.clone();
+        let old_stats = q_manager.stats().await;
         let old_utilization = old_stats.utilization();
 
         let hit = old_stats.access_frequency.contains_key(&content_hash);
@@ -208,7 +209,7 @@ async fn test_q_learning_improves_hit_rate() {
             .await
             .unwrap();
 
-        let new_stats = q_manager.cache_stats.read().await.clone();
+        let new_stats = q_manager.stats().await;
         let new_utilization = new_stats.utilization();
 
         // Calculate reward
@@ -237,8 +238,7 @@ async fn test_q_learning_improves_hit_rate() {
     let mut q_misses = 0u64;
 
     // Reset Q-learning statistics for fair comparison
-    q_manager.cache_stats.write().await.hits = 0;
-    q_manager.cache_stats.write().await.misses = 0;
+    q_manager.reset_counters().await;
 
     for _ in 0..1000 {
         let (content_hash, content_size) = workload.next_access();
@@ -254,12 +254,7 @@ async fn test_q_learning_improves_hit_rate() {
             .unwrap();
         let action = q_manager.select_action(&state, actions).await.unwrap();
 
-        let hit = q_manager
-            .cache_stats
-            .read()
-            .await
-            .access_frequency
-            .contains_key(&content_hash);
+        let hit = q_manager.is_cached(&content_hash).await;
 
         if hit {
             q_hits += 1;
@@ -295,6 +290,7 @@ async fn test_q_learning_adapts_to_workload_changes() {
         buffer_size: 500,
         batch_size: 16,
         learning_frequency: 5,
+        eviction_strategy: None,
     };
 
     let q_manager = QLearningCacheManager::new(config, cache_capacity);
@@ -311,19 +307,14 @@ async fn test_q_learning_adapts_to_workload_changes() {
             .unwrap();
         let action = q_manager.select_action(&state, actions).await.unwrap();
 
-        let hit = q_manager
-            .cache_stats
-            .read()
-            .await
-            .access_frequency
-            .contains_key(&content_hash);
+        let hit = q_manager.is_cached(&content_hash).await;
 
         q_manager
             .update_statistics(&action, &content_hash, content_size, hit)
             .await
             .unwrap();
 
-        let old_utilization = q_manager.cache_stats.read().await.utilization();
+        let old_utilization = q_manager.stats().await.utilization();
         let reward = q_manager
             .calculate_reward(&action, hit, old_utilization, old_utilization)
             .await;
@@ -341,15 +332,14 @@ async fn test_q_learning_adapts_to_workload_changes() {
             .unwrap();
     }
 
-    let phase1_stats = q_manager.cache_stats.read().await.clone();
+    let phase1_stats = q_manager.stats().await;
     let phase1_hit_rate = phase1_stats.hit_rate();
 
     // Phase 2: Switch to temporal locality workload
     let mut workload = WorkloadGenerator::new(WorkloadPattern::Temporal { window: 10 }, 50);
 
     // Reset hit/miss counters
-    q_manager.cache_stats.write().await.hits = 0;
-    q_manager.cache_stats.write().await.misses = 0;
+    q_manager.reset_counters().await;
 
     for _ in 0..1000 {
         let (content_hash, content_size) = workload.next_access();
@@ -360,19 +350,14 @@ async fn test_q_learning_adapts_to_workload_changes() {
             .unwrap();
         let action = q_manager.select_action(&state, actions).await.unwrap();
 
-        let hit = q_manager
-            .cache_stats
-            .read()
-            .await
-            .access_frequency
-            .contains_key(&content_hash);
+        let hit = q_manager.is_cached(&content_hash).await;
 
         q_manager
             .update_statistics(&action, &content_hash, content_size, hit)
             .await
             .unwrap();
 
-        let old_utilization = q_manager.cache_stats.read().await.utilization();
+        let old_utilization = q_manager.stats().await.utilization();
         let reward = q_manager
             .calculate_reward(&action, hit, old_utilization, old_utilization)
             .await;
@@ -390,7 +375,7 @@ async fn test_q_learning_adapts_to_workload_changes() {
             .unwrap();
     }
 
-    let phase2_stats = q_manager.cache_stats.read().await.clone();
+    let phase2_stats = q_manager.stats().await;
     let phase2_hit_rate = phase2_stats.hit_rate();
 
     println!(
@@ -436,14 +421,9 @@ async fn test_q_learning_handles_mixed_content_sizes() {
             .unwrap();
         let action = q_manager.select_action(&state, actions).await.unwrap();
 
-        let hit = q_manager
-            .cache_stats
-            .read()
-            .await
-            .access_frequency
-            .contains_key(&content_hash);
+        let hit = q_manager.is_cached(&content_hash).await;
 
-        let old_stats = q_manager.cache_stats.read().await.clone();
+        let old_stats = q_manager.stats().await.clone();
         let old_utilization = old_stats.utilization();
 
         q_manager
@@ -451,7 +431,7 @@ async fn test_q_learning_handles_mixed_content_sizes() {
             .await
             .unwrap();
 
-        let new_utilization = q_manager.cache_stats.read().await.utilization();
+        let new_utilization = q_manager.stats().await.utilization();
         let reward = q_manager
             .calculate_reward(&action, hit, old_utilization, new_utilization)
             .await;
@@ -470,7 +450,7 @@ async fn test_q_learning_handles_mixed_content_sizes() {
     }
 
     // Check learned behavior
-    let final_stats = q_manager.cache_stats.read().await.clone();
+    let final_stats = q_manager.stats().await;
 
     // Should prefer caching small items due to better space efficiency
     assert!(final_stats.access_frequency.contains_key(&small_content));
@@ -479,7 +459,7 @@ async fn test_q_learning_handles_mixed_content_sizes() {
     let large_cached = final_stats.access_frequency.contains_key(&large_content);
     if large_cached {
         // If cached, should have very high access frequency
-        let large_info = &final_stats.access_frequency[&large_content];
+        let large_info = final_stats.access_frequency.get(&large_content).unwrap();
         assert!(large_info.count > 50); // High threshold
     }
 
@@ -502,6 +482,7 @@ async fn test_q_learning_convergence() {
         buffer_size: 1000,
         batch_size: 32,
         learning_frequency: 10,
+        eviction_strategy: None,
     };
 
     let q_manager = QLearningCacheManager::new(config, cache_capacity);
@@ -549,19 +530,14 @@ async fn test_q_learning_convergence() {
             let q_value = q_manager.get_q_value(&state, action.action_type()).await;
             epoch_q_values.push(q_value);
 
-            let hit = q_manager
-                .cache_stats
-                .read()
-                .await
-                .access_frequency
-                .contains_key(&content_hash);
+            let hit = q_manager.is_cached(&content_hash).await;
 
-            let old_utilization = q_manager.cache_stats.read().await.utilization();
+            let old_utilization = q_manager.stats().await.utilization();
             q_manager
                 .update_statistics(&action, &content_hash, content_size, hit)
                 .await
                 .unwrap();
-            let new_utilization = q_manager.cache_stats.read().await.utilization();
+            let new_utilization = q_manager.stats().await.utilization();
 
             let reward = q_manager
                 .calculate_reward(&action, hit, old_utilization, new_utilization)
@@ -592,16 +568,13 @@ async fn test_q_learning_convergence() {
 
     println!("Q-value convergence rate: {:.4}", change_rate);
     println!("Final average Q-value: {:.4}", last_10_avg);
-    println!(
-        "Final epsilon: {:.4}",
-        *q_manager.current_epsilon.read().await
-    );
+    println!("Final epsilon: {:.4}", q_manager.current_epsilon().await);
 
     // Should converge (small change rate)
     assert!(change_rate < 0.05); // Less than 5% change
 
     // Final policy check - should cache high-frequency items
-    let final_cache = q_manager.cache_stats.read().await.access_frequency.clone();
+    let final_cache = q_manager.stats().await.access_frequency.clone();
     assert!(final_cache.contains_key(&content_items[0].0)); // Most frequent
     assert!(final_cache.contains_key(&content_items[1].0)); // Second most frequent
 }

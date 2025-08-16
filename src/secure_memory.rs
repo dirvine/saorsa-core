@@ -420,7 +420,7 @@ impl SecureString {
     }
 
     /// Create a secure string from a regular string
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn from_plain_str(s: &str) -> Result<Self> {
         let vec = SecureVec::from_slice(s.as_bytes())?;
         Ok(Self { vec })
     }
@@ -502,7 +502,7 @@ impl SecureMemoryPool {
     }
 
     /// Create a default secure memory pool
-    pub fn default() -> Result<Self> {
+    pub fn default_pool() -> Result<Self> {
         Self::new(DEFAULT_POOL_SIZE, 4096)
     }
 
@@ -510,37 +510,39 @@ impl SecureMemoryPool {
     pub fn allocate(&self, size: usize) -> Result<SecureMemory> {
         if size > self.chunk_size {
             // Large allocation - allocate directly
-            let mut stats = self.stats.lock().expect("lock not poisoned");
-            stats.pool_misses += 1;
-            stats.total_allocations += 1;
-            stats.active_allocations += 1;
-            stats.total_bytes_allocated += size as u64;
-            stats.current_bytes_in_use += size as u64;
-
+            if let Ok(mut stats) = self.stats.lock() {
+                stats.pool_misses += 1;
+                stats.total_allocations += 1;
+                stats.active_allocations += 1;
+                stats.total_bytes_allocated += size as u64;
+                stats.current_bytes_in_use += size as u64;
+            }
             return SecureMemory::new(size);
         }
 
         // Try to get from pool
         {
-            let mut available = self.available.lock().expect("lock not poisoned");
-            if let Some(memory) = available.pop_front() {
-                let mut stats = self.stats.lock().expect("lock not poisoned");
-                stats.pool_hits += 1;
-                stats.total_allocations += 1;
-                stats.active_allocations += 1;
-                stats.current_bytes_in_use += memory.len() as u64;
-
+            if let Ok(mut available) = self.available.lock()
+                && let Some(memory) = available.pop_front()
+            {
+                if let Ok(mut stats) = self.stats.lock() {
+                    stats.pool_hits += 1;
+                    stats.total_allocations += 1;
+                    stats.active_allocations += 1;
+                    stats.current_bytes_in_use += memory.len() as u64;
+                }
                 return Ok(memory);
             }
         }
 
         // Pool empty - allocate new chunk
-        let mut stats = self.stats.lock().expect("lock not poisoned");
-        stats.pool_misses += 1;
-        stats.total_allocations += 1;
-        stats.active_allocations += 1;
-        stats.total_bytes_allocated += self.chunk_size as u64;
-        stats.current_bytes_in_use += self.chunk_size as u64;
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.pool_misses += 1;
+            stats.total_allocations += 1;
+            stats.active_allocations += 1;
+            stats.total_bytes_allocated += self.chunk_size as u64;
+            stats.current_bytes_in_use += self.chunk_size as u64;
+        }
 
         SecureMemory::new(self.chunk_size)
     }
@@ -554,30 +556,32 @@ impl SecureMemoryPool {
 
         if memory_size == self.chunk_size {
             // Return to pool
-            let mut available = self.available.lock().expect("lock not poisoned");
-            available.push_back(memory);
+            if let Ok(mut available) = self.available.lock() {
+                available.push_back(memory);
+            }
         }
         // Large allocations are dropped automatically
 
-        let mut stats = self.stats.lock().expect("lock not poisoned");
-        stats.total_deallocations += 1;
-        stats.active_allocations -= 1;
-        stats.current_bytes_in_use -= memory_size as u64;
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.total_deallocations += 1;
+            stats.active_allocations -= 1;
+            stats.current_bytes_in_use -= memory_size as u64;
+        }
     }
 
     /// Get pool statistics
     pub fn stats(&self) -> PoolStats {
-        self.stats.lock().expect("lock not poisoned").clone()
+        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
     /// Pre-allocate chunks for the pool
     fn preallocate_chunks(&self) -> Result<()> {
         let num_chunks = self.total_size / self.chunk_size;
-        let mut available = self.available.lock().expect("lock not poisoned");
-
-        for _ in 0..num_chunks {
-            let memory = SecureMemory::new(self.chunk_size)?;
-            available.push_back(memory);
+        if let Ok(mut available) = self.available.lock() {
+            for _ in 0..num_chunks {
+                let memory = SecureMemory::new(self.chunk_size)?;
+                available.push_back(memory);
+            }
         }
 
         Ok(())
@@ -585,13 +589,43 @@ impl SecureMemoryPool {
 }
 
 /// Global secure memory pool instance
-static GLOBAL_POOL: std::sync::OnceLock<SecureMemoryPool> = std::sync::OnceLock::new();
+static GLOBAL_POOL: std::sync::OnceLock<Result<SecureMemoryPool>> = std::sync::OnceLock::new();
 
 /// Get the global secure memory pool
 pub fn global_secure_pool() -> &'static SecureMemoryPool {
-    GLOBAL_POOL.get_or_init(|| {
-        SecureMemoryPool::default().expect("Failed to initialize global secure memory pool")
-    })
+    let result = GLOBAL_POOL.get_or_init(SecureMemoryPool::default_pool);
+    match result {
+        Ok(pool) => pool,
+        Err(_) => match SecureMemoryPool::new(DEFAULT_POOL_SIZE, 4096) {
+            Ok(pool) => {
+                let _ = GLOBAL_POOL.set(Ok(pool));
+                if let Some(Ok(pool)) = GLOBAL_POOL.get() {
+                    pool
+                } else {
+                    // fallback to a static default
+                    static FALLBACK: once_cell::sync::OnceCell<SecureMemoryPool> =
+                        once_cell::sync::OnceCell::new();
+                    FALLBACK.get_or_init(|| SecureMemoryPool {
+                        available: Mutex::new(VecDeque::new()),
+                        total_size: DEFAULT_POOL_SIZE,
+                        chunk_size: 4096,
+                        stats: Mutex::new(PoolStats::default()),
+                    })
+                }
+            }
+            Err(_) => {
+                // Provide minimal fallback rather than panic
+                static FALLBACK: once_cell::sync::OnceCell<SecureMemoryPool> =
+                    once_cell::sync::OnceCell::new();
+                FALLBACK.get_or_init(|| SecureMemoryPool {
+                    available: Mutex::new(VecDeque::new()),
+                    total_size: DEFAULT_POOL_SIZE,
+                    chunk_size: 4096,
+                    stats: Mutex::new(PoolStats::default()),
+                })
+            }
+        },
+    }
 }
 
 /// Convenience function to allocate secure memory from global pool

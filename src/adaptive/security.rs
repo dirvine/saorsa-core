@@ -536,17 +536,18 @@ impl SecurityManager {
 
         // Check IP rate limit if provided
         if let Some(ip_addr) = ip
-            && !self.rate_limiter.check_ip_rate(&ip_addr).await {
-                self.auditor
-                    .log_event(
-                        SecurityEvent::RateLimitExceeded,
-                        None,
-                        format!("IP {ip_addr} rate limit exceeded"),
-                        Severity::Warning,
-                    )
-                    .await;
-                return Err(SecurityError::RateLimitExceeded);
-            }
+            && !self.rate_limiter.check_ip_rate(&ip_addr).await
+        {
+            self.auditor
+                .log_event(
+                    SecurityEvent::RateLimitExceeded,
+                    None,
+                    format!("IP {ip_addr} rate limit exceeded"),
+                    Severity::Warning,
+                )
+                .await;
+            return Err(SecurityError::RateLimitExceeded);
+        }
 
         Ok(())
     }
@@ -1057,13 +1058,15 @@ impl SecurityAuditor {
         log.iter()
             .filter(|entry| {
                 if let Some(min_time) = since
-                    && entry.timestamp < min_time {
-                        return false;
-                    }
+                    && entry.timestamp < min_time
+                {
+                    return false;
+                }
                 if let Some(min_severity) = severity_filter
-                    && (entry.severity as u8) < (min_severity as u8) {
-                        return false;
-                    }
+                    && (entry.severity as u8) < (min_severity as u8)
+                {
+                    return false;
+                }
                 true
             })
             .cloned()

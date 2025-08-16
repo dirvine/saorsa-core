@@ -99,7 +99,7 @@ async fn test_message_routing() {
     // Create a test message
     let message = saorsa_core::adaptive::NetworkMessage {
         id: "test-msg-1".to_string(),
-        sender: coordinator.identity.node_id(),
+        sender: coordinator.get_node_info().await.unwrap().id,
         content: vec![1, 2, 3, 4],
         msg_type: saorsa_core::adaptive::ContentType::DHTLookup,
         timestamp: 0,

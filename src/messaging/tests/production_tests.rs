@@ -1,7 +1,7 @@
 // Tests for production readiness fixes
 use super::*;
-use crate::messaging::{MessagingService, DhtClient};
 use crate::identity::FourWordAddress;
+use crate::messaging::{DhtClient, MessagingService};
 use crate::network::P2PNode;
 
 #[cfg(test)]
@@ -12,7 +12,7 @@ mod production_readiness_tests {
     fn test_mock_p2p_node_creation() {
         // Mock P2PNode should not panic
         let node = P2PNode::new_mock();
-        
+
         // Should be a valid object
         assert_eq!(std::mem::size_of_val(&node) > 0, true);
     }
@@ -21,7 +21,7 @@ mod production_readiness_tests {
     fn test_mock_dht_client_creation() {
         // Mock DhtClient should not panic
         let client = DhtClient::new_mock();
-        
+
         // Should be a valid object
         assert_eq!(std::mem::size_of_val(&client) > 0, true);
     }
@@ -29,19 +29,19 @@ mod production_readiness_tests {
     #[tokio::test]
     async fn test_mock_dht_operations() {
         let client = DhtClient::new_mock();
-        
+
         // Should support basic put/get
         let key = "test-key".to_string();
         let value = vec![1, 2, 3, 4];
-        
+
         // Put should succeed
         let result = client.put(key.clone(), value.clone()).await;
         assert!(result.is_ok());
-        
+
         // Get should return the value
         let retrieved = client.get(key).await;
         assert!(retrieved.is_ok());
-        
+
         if let Ok(Some(data)) = retrieved {
             assert_eq!(data, value);
         }
@@ -51,13 +51,13 @@ mod production_readiness_tests {
     async fn test_messaging_service_with_mocks() {
         let identity = FourWordAddress::from("test-production-ready");
         let dht_client = DhtClient::new_mock();
-        
+
         // Should create successfully with mocks
         let service = MessagingService::new(identity, dht_client).await;
         assert!(service.is_ok());
-        
+
         let service = service.unwrap();
-        
+
         // Should be able to call methods without panic
         let status = service.get_message_status(MessageId::new()).await;
         assert!(status.is_ok());
@@ -73,12 +73,12 @@ mod production_readiness_tests {
 
     #[tokio::test]
     async fn test_thread_manager_uses_store() {
-        use crate::messaging::{ThreadManager, MessageStore, DhtClient};
-        
+        use crate::messaging::{DhtClient, MessageStore, ThreadManager};
+
         let dht_client = DhtClient::new_mock();
         let store = MessageStore::new(dht_client, None).await.unwrap();
         let thread_manager = ThreadManager::new(store);
-        
+
         // Should be able to perform thread operations
         let threads = thread_manager.get_channel_threads(ChannelId::new()).await;
         assert!(threads.is_ok());

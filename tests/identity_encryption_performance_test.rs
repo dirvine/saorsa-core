@@ -14,13 +14,14 @@
 //! Identity encryption performance tests
 
 use saorsa_core::encrypted_key_storage::SecurityLevel;
+use saorsa_core::P2PError;
 use saorsa_core::identity_manager::{IdentityCreationParams, IdentityManager};
 use saorsa_core::secure_memory::SecureString;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 #[tokio::test]
-async fn test_encryption_performance_overhead() -> Result<()> {
+async fn test_encryption_performance_overhead() -> Result<(), P2PError> {
     // Create temporary directory for storage
     let temp_dir = TempDir::new().unwrap();
     let storage_path = temp_dir.path();
@@ -31,7 +32,7 @@ async fn test_encryption_performance_overhead() -> Result<()> {
         .unwrap();
 
     // Initialize with storage password
-    let storage_password = SecureString::from_str("test_storage_password_123!").unwrap();
+    let storage_password = SecureString::from_plain_str("test_storage_password_123!").unwrap();
     manager.initialize(&storage_password).await.unwrap();
 
     // Create an identity
@@ -50,7 +51,7 @@ async fn test_encryption_performance_overhead() -> Result<()> {
         .unwrap();
 
     // Test sync package creation performance
-    let device_password = SecureString::from_str("device_password_456!").unwrap();
+    let device_password = SecureString::from_plain_str("device_password_456!").unwrap();
 
     // Warm up
     for _ in 0..5 {
@@ -133,13 +134,13 @@ async fn test_encryption_performance_overhead() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_encryption_with_different_data_sizes() -> Result<()> {
+async fn test_encryption_with_different_data_sizes() -> Result<(), P2PError> {
     let temp_dir = TempDir::new().unwrap();
     let manager = IdentityManager::new(temp_dir.path(), SecurityLevel::High)
         .await
         .unwrap();
 
-    let storage_password = SecureString::from_str("test_password").unwrap();
+    let storage_password = SecureString::from_plain_str("test_password").unwrap();
     manager.initialize(&storage_password).await.unwrap();
 
     // Test with different bio sizes
@@ -149,7 +150,10 @@ async fn test_encryption_with_different_data_sizes() -> Result<()> {
         let bio = "x".repeat(size);
         let params = IdentityCreationParams {
             display_name: Some(format!("{} User", name)),
+            avatar_url: None,
             bio: Some(bio),
+            metadata: std::collections::HashMap::new(),
+            key_lifetime: None,
             derivation_path: None,
         };
 
@@ -158,7 +162,7 @@ async fn test_encryption_with_different_data_sizes() -> Result<()> {
             .await
             .unwrap();
 
-        let device_password = SecureString::from_str("device_pass").unwrap();
+        let device_password = SecureString::from_plain_str("device_pass").unwrap();
 
         let start = Instant::now();
         let sync_package = manager

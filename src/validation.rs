@@ -51,9 +51,7 @@
 //! ```
 
 use crate::error::{P2PError, P2pResult};
-use lazy_static::lazy_static;
 use parking_lot::RwLock;
-use regex::Regex;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
@@ -75,17 +73,7 @@ const DEFAULT_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 const DEFAULT_MAX_REQUESTS_PER_WINDOW: u32 = 1000;
 const DEFAULT_BURST_SIZE: u32 = 100;
 
-lazy_static! {
-    // Pre-compiled regex patterns for validation
-    static ref PEER_ID_REGEX: Regex = Regex::new(r"^[a-zA-Z0-9_-]{16,64}$")
-        .unwrap_or_else(|_| Regex::new(r"^.{16,64}$").expect("fallback peer id regex"));
-    static ref SAFE_PATH_REGEX: Regex = Regex::new(r"^[a-zA-Z0-9/_.-]+$")
-        .unwrap_or_else(|_| Regex::new(r"^[^\\n]+$").expect("fallback safe path regex"));
-    static ref IPV4_REGEX: Regex = Regex::new(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
-        .unwrap_or_else(|_| Regex::new(r"^.+$").expect("fallback ipv4 regex"));
-    static ref IPV6_REGEX: Regex = Regex::new(r"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$")
-        .unwrap_or_else(|_| Regex::new(r"^.+$").expect("fallback ipv6 regex"));
-}
+// Validation functions below operate without panicking and avoid global regexes
 
 /// Validation errors specific to input validation
 #[derive(Debug, Error)]
@@ -234,42 +222,8 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 
 /// Validate a peer ID
 pub fn validate_peer_id(peer_id: &str) -> P2pResult<()> {
-    // For timing attack resistance, always process MIN_PEER_ID_LENGTH characters
-    let mut chars_processed = 0;
-    let length_valid = peer_id.len() >= MIN_PEER_ID_LENGTH && peer_id.len() <= MAX_PEER_ID_LENGTH;
-    let mut format_valid = true;
-
-    // Always iterate through at least MIN_PEER_ID_LENGTH characters for constant time
-    let chars: Vec<char> = peer_id.chars().collect();
-    for i in 0..MIN_PEER_ID_LENGTH {
-        if i < chars.len() {
-            let ch = chars[i];
-            if !ch.is_alphanumeric() && ch != '_' && ch != '-' {
-                format_valid = false;
-            }
-            chars_processed += 1;
-        } else {
-            // Process dummy work for short strings
-            let _dummy = i * 31; // Some computation
-            chars_processed += 1;
-        }
-    }
-
-    // Check remaining characters if string is longer
-    if chars.len() > MIN_PEER_ID_LENGTH && chars.len() <= MAX_PEER_ID_LENGTH {
-        for i in MIN_PEER_ID_LENGTH..chars.len() {
-            let ch = chars[i];
-            if !ch.is_alphanumeric() && ch != '_' && ch != '-' {
-                format_valid = false;
-            }
-        }
-    }
-
-    // Ensure we always do some minimum work
-    std::hint::black_box(chars_processed);
-
-    // Combine results after all checks complete
-    if !length_valid {
+    // Simple length and character set validation; constant-time not required here
+    if peer_id.len() < MIN_PEER_ID_LENGTH || peer_id.len() > MAX_PEER_ID_LENGTH {
         return Err(ValidationError::InvalidPeerId(format!(
             "Length must be between {} and {} characters",
             MIN_PEER_ID_LENGTH, MAX_PEER_ID_LENGTH
@@ -277,7 +231,10 @@ pub fn validate_peer_id(peer_id: &str) -> P2pResult<()> {
         .into());
     }
 
-    if !format_valid {
+    if !peer_id
+        .chars()
+        .all(|ch| ch.is_alphanumeric() || ch == '_' || ch == '-')
+    {
         return Err(ValidationError::InvalidPeerId(
             "Must contain only alphanumeric characters, hyphens, and underscores".to_string(),
         )
@@ -652,7 +609,9 @@ impl Validate for ApiRequest {
 
             for pattern in &sql_patterns {
                 if lower_value.contains(pattern) {
-                    return Err(ValidationError::InvalidFormat("Suspicious parameter value: potential SQL injection".to_string())
+                    return Err(ValidationError::InvalidFormat(
+                        "Suspicious parameter value: potential SQL injection".to_string(),
+                    )
                     .into());
                 }
             }
@@ -681,22 +640,24 @@ where
         .map_err(|_| ValidationError::InvalidFormat(format!("Failed to parse value: {}", value)))?;
 
     if let Some(min_val) = min
-        && parsed < min_val {
-            return Err(ValidationError::InvalidFormat(format!(
-                "Value {} is less than minimum {}",
-                parsed, min_val
-            ))
-            .into());
-        }
+        && parsed < min_val
+    {
+        return Err(ValidationError::InvalidFormat(format!(
+            "Value {} is less than minimum {}",
+            parsed, min_val
+        ))
+        .into());
+    }
 
     if let Some(max_val) = max
-        && parsed > max_val {
-            return Err(ValidationError::InvalidFormat(format!(
-                "Value {} is greater than maximum {}",
-                parsed, max_val
-            ))
-            .into());
-        }
+        && parsed > max_val
+    {
+        return Err(ValidationError::InvalidFormat(format!(
+            "Value {} is greater than maximum {}",
+            parsed, max_val
+        ))
+        .into());
+    }
 
     Ok(parsed)
 }

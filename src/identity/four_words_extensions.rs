@@ -18,19 +18,14 @@ use super::node_identity::NodeId;
 use crate::{P2PError, Result, error::IdentityError};
 
 impl FourWordAddress {
-    /// Create from NodeId
+    /// Create from NodeId (uses facade in four_words.rs)
     pub fn from_node_id(node_id: &NodeId) -> Result<Self> {
-        // Use WordEncoder to create the address
-        WordEncoder::encode(node_id.to_bytes()).map_err(|e| {
-            P2PError::Identity(IdentityError::InvalidFourWordAddress(
-                format!("Failed to encode node ID: {}", e).into(),
-            ))
-        })
+        Ok(super::four_words::FourWordAddress::from_node_id(node_id))
     }
 
-    /// Parse from string format (alias for from_str)
+    /// Parse from string format (alias for parse_str)
     pub fn from_string(s: &str) -> Result<Self> {
-        Self::from_str(s)
+        Self::parse_str(s)
     }
 
     /// Convert to string (compat helper)

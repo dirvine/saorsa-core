@@ -415,14 +415,15 @@ impl DhtNetworkManager {
 
         // Check local storage first
         if let Some(record) = self.dht.read().await.get(key).await
-            && !record.is_expired() {
-                info!("Found value locally for key: {}", key.to_hex());
-                return Ok(DhtNetworkResult::GetSuccess {
-                    key: key.clone(),
-                    value: record.value,
-                    source: self.config.local_peer_id.clone(),
-                });
-            }
+            && !record.is_expired()
+        {
+            info!("Found value locally for key: {}", key.to_hex());
+            return Ok(DhtNetworkResult::GetSuccess {
+                key: key.clone(),
+                value: record.value,
+                source: self.config.local_peer_id.clone(),
+            });
+        }
 
         // Query remote nodes
         let operation = DhtNetworkOperation::Get { key: key.clone() };

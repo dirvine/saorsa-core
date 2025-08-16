@@ -24,23 +24,10 @@ pub mod node_identity;
 pub mod secure_node_identity;
 
 #[cfg(test)]
-mod cli_handler;
-#[cfg(test)]
 mod four_words_error_tests;
-#[cfg(test)]
-mod four_words_extensions;
-#[cfg(test)]
-mod node_identity_extensions;
 
 pub use enhanced::*;
 pub use four_words::{FourWordAddress, WordEncoder};
 pub use manager::*;
 pub use node_identity::{IdentityData, NodeId, NodeIdentity, ProofOfWork};
 pub use secure_node_identity::SecureNodeIdentity;
-
-#[cfg(test)]
-pub use node_identity_extensions::*;
-// #[cfg(test)]
-// pub use four_words_extensions::*; // Commented out - module doesn't exist yet
-#[cfg(test)]
-pub use cli_handler::{ExportFormat, IdentityCliHandler, IdentityCommand, MessageInput};

@@ -1516,7 +1516,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let manager = IdentityManager::new(temp_dir.path(), SecurityLevel::Fast).await?;
 
-        let password = SecureString::from_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         let params = IdentityCreationParams {
@@ -1541,7 +1541,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let manager = IdentityManager::new(temp_dir.path(), SecurityLevel::Fast).await?;
 
-        let password = SecureString::from_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         let params = IdentityCreationParams::default();
@@ -1559,7 +1559,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let manager = IdentityManager::new(temp_dir.path(), SecurityLevel::Fast).await?;
 
-        let password = SecureString::from_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         let params = IdentityCreationParams::default();
@@ -1581,7 +1581,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let manager = IdentityManager::new(temp_dir.path(), SecurityLevel::Fast).await?;
 
-        let password = SecureString::from_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         let params = IdentityCreationParams::default();
@@ -1616,9 +1616,9 @@ mod tests {
         let manager2 =
             IdentityManager::new(temp_dir.path().join("device2"), SecurityLevel::Fast).await?;
 
-        let password = SecureString::from_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         let device_password =
-            SecureString::from_str("device_sync_password").expect("Test assertion failed");
+            SecureString::from_plain_str("device_sync_password").expect("Test assertion failed");
 
         manager1.initialize(&password).await?;
         manager2.initialize(&password).await?;

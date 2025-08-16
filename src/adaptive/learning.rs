@@ -55,8 +55,12 @@ struct BetaParams {
 
 impl Default for BetaParams {
     fn default() -> Self {
+        let distribution = BetaDistribution::new(1.0, 1.0).unwrap_or(BetaDistribution {
+            alpha: 1.0,
+            beta: 1.0,
+        });
         Self {
-            distribution: BetaDistribution::new(1.0, 1.0).expect("valid parameters"),
+            distribution,
             trials: 0,
             last_update: std::time::Instant::now(),
         }
@@ -125,7 +129,10 @@ impl ThompsonSampling {
                 let new_alpha = 1.0 + (alpha - 1.0) * decay;
                 let new_beta = 1.0 + (beta - 1.0) * decay;
                 params.distribution =
-                    BetaDistribution::new(new_alpha, new_beta).expect("valid decay parameters");
+                    BetaDistribution::new(new_alpha, new_beta).unwrap_or(BetaDistribution {
+                        alpha: new_alpha.max(f64::MIN_POSITIVE),
+                        beta: new_beta.max(f64::MIN_POSITIVE),
+                    });
             }
 
             // Sample from Beta distribution using proper implementation
@@ -553,11 +560,12 @@ impl QLearnCacheManager {
             .map(|(k, _)| *k);
 
         if let Some(key) = oldest
-            && let Some(value) = cache.remove(&key) {
-                self.current_size
-                    .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
-                return true;
-            }
+            && let Some(value) = cache.remove(&key)
+        {
+            self.current_size
+                .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
+            return true;
+        }
 
         false
     }
@@ -701,11 +709,12 @@ impl QLearnCacheManager {
             .map(|(k, _)| *k);
 
         if let Some(key) = least_frequent
-            && let Some(value) = cache.remove(&key) {
-                self.current_size
-                    .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
-                return true;
-            }
+            && let Some(value) = cache.remove(&key)
+        {
+            self.current_size
+                .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
+            return true;
+        }
         false
     }
 
@@ -1138,9 +1147,10 @@ impl ChurnPredictor {
         {
             let cache = self.prediction_cache.read().await;
             if let Some(cached) = cache.get(node_id)
-                && cached.timestamp.elapsed() < std::time::Duration::from_secs(300) {
-                    return cached.clone();
-                }
+                && cached.timestamp.elapsed() < std::time::Duration::from_secs(300)
+            {
+                return cached.clone();
+            }
         }
 
         // Extract features
@@ -1179,7 +1189,7 @@ impl ChurnPredictor {
         model: &ModelWeights,
     ) -> ChurnPrediction {
         // Convert features to vector
-        let feature_vec = vec![
+        let feature_vec = [
             features.online_duration / 3600.0,   // Normalize to hours
             features.avg_response_time / 1000.0, // Normalize to seconds
             features.resource_contribution,
@@ -1196,8 +1206,8 @@ impl ChurnPredictor {
         let mut base_scores = [0.0; 3]; // 1h, 6h, 24h
         for (i, &weight) in model.feature_weights.iter().enumerate() {
             if i < feature_vec.len() {
-                for j in 0..3 {
-                    base_scores[j] += weight * feature_vec[i];
+                for score in &mut base_scores {
+                    *score += weight * feature_vec[i];
                 }
             }
         }
@@ -1291,12 +1301,13 @@ impl ChurnPredictor {
             NodeEvent::Disconnected => {
                 // End current session
                 if let Some((start, end)) = node_history.sessions.last_mut()
-                    && end.is_none() {
-                        let now = std::time::Instant::now();
-                        *end = Some(now);
-                        let session_length = now.duration_since(*start).as_secs();
-                        node_history.total_uptime += session_length;
-                    }
+                    && end.is_none()
+                {
+                    let now = std::time::Instant::now();
+                    *end = Some(now);
+                    let session_length = now.duration_since(*start).as_secs();
+                    node_history.total_uptime += session_length;
+                }
             }
         }
 
@@ -1786,10 +1797,10 @@ mod tests {
         manager.get(&hash2).await; // Miss
 
         let stats = manager.get_stats();
-        assert_eq!(stats.hit_count, 2);
-        assert_eq!(stats.miss_count, 1);
+        assert_eq!(stats.hits, 2);
+        assert_eq!(stats.misses, 1);
         assert!((stats.hit_rate - 0.666).abs() < 0.01); // ~66.6% hit rate
-        assert_eq!(stats.cache_size, 100);
+        assert_eq!(stats.size_bytes, 100);
     }
 
     #[tokio::test]
@@ -1875,7 +1886,7 @@ mod tests {
         // Note: May or may not evict our specific item depending on LRU state
 
         let stats = manager.get_stats();
-        assert!(stats.cache_size <= 100); // Should be 0 or 100 depending on eviction
+        assert!(stats.size_bytes <= 100); // Should be 0 or 100 depending on eviction
         Ok(())
     }
 
@@ -1945,7 +1956,10 @@ mod tests {
             .await?;
 
         // Extract features
-        let extracted = predictor.extract_features(&node_id).await?;
+        let extracted = predictor
+            .extract_features(&node_id)
+            .await
+            .ok_or(anyhow::anyhow!("no features extracted"))?;
         assert_eq!(extracted.resource_contribution, 0.8);
         assert_eq!(extracted.avg_response_time, 50.0);
         Ok(())

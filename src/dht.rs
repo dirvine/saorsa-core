@@ -65,10 +65,10 @@ pub mod client;
 pub mod rsps_integration;
 
 // Geographic-aware DHT routing (Phase 2.2.2)
-pub mod geographic_routing;
-pub mod latency_aware_selection;
-pub mod geographic_routing_table;
 pub mod geographic_network_integration;
+pub mod geographic_routing;
+pub mod geographic_routing_table;
+pub mod latency_aware_selection;
 
 // Test modules
 #[cfg(test)]
@@ -156,9 +156,10 @@ impl Validate for Record {
 
         // Validate signature if present
         if let Some(sig) = &self.signature
-            && (sig.is_empty() || sig.len() > 512) {
-                return Err(P2PError::validation("Invalid signature size"));
-            }
+            && (sig.is_empty() || sig.len() > 512)
+        {
+            return Err(P2PError::validation("Invalid signature size"));
+        }
 
         Ok(())
     }
@@ -386,6 +387,11 @@ impl Key {
     /// Get key as bytes
     pub fn as_bytes(&self) -> &[u8] {
         &self.hash
+    }
+
+    /// Get raw 32-byte hash (by value) for integrations
+    pub fn hash_bytes(&self) -> [u8; 32] {
+        self.hash
     }
 
     /// Get key as hex string
@@ -747,11 +753,14 @@ impl DHTStorage {
         // Get records by publisher - this is an approximation since optimized storage
         // doesn't have a direct "all records" method for performance reasons
         let stats = self.optimized_storage.get_stats().await;
-        
+
         // For now, return empty vector as this is primarily used for republishing
         // which should be redesigned to work with the indexed storage
         // TODO: Implement efficient republishing that doesn't require loading all records
-        debug!("all_records() called on optimized storage with {} records - returning empty for performance", stats.total_records);
+        debug!(
+            "all_records() called on optimized storage with {} records - returning empty for performance",
+            stats.total_records
+        );
         Vec::new()
     }
 
@@ -762,8 +771,14 @@ impl DHTStorage {
     }
 
     /// Get records by publisher with indexed lookup (new optimized method)
-    pub async fn get_records_by_publisher(&self, publisher: &str, limit: Option<usize>) -> Vec<Record> {
-        self.optimized_storage.get_records_by_publisher(publisher, limit).await
+    pub async fn get_records_by_publisher(
+        &self,
+        publisher: &str,
+        limit: Option<usize>,
+    ) -> Vec<Record> {
+        self.optimized_storage
+            .get_records_by_publisher(publisher, limit)
+            .await
     }
 
     /// Get records expiring within a time window (new optimized method)
@@ -1018,9 +1033,10 @@ impl DHT {
     pub async fn get(&self, key: &Key) -> Option<Record> {
         // Check local storage first
         if let Some(record) = self.storage.get(key).await
-            && !record.is_expired() {
-                return Some(record);
-            }
+            && !record.is_expired()
+        {
+            return Some(record);
+        }
 
         // Perform iterative lookup to find the record
         if let Some(record) = self.iterative_find_value(key).await {
@@ -1053,9 +1069,10 @@ impl DHT {
             }
             DHTQuery::FindValue { key, requester: _ } => {
                 if let Some(record) = self.storage.get(&key).await
-                    && !record.is_expired() {
-                        return DHTResponse::Value { record };
-                    }
+                    && !record.is_expired()
+                {
+                    return DHTResponse::Value { record };
+                }
                 let nodes = self.find_node(&key).await;
                 let serializable_nodes = nodes.into_iter().map(|n| n.to_serializable()).collect();
                 DHTResponse::Nodes {
@@ -1112,9 +1129,10 @@ impl DHT {
     pub async fn secure_get(&mut self, key: &Key) -> Result<Option<Record>> {
         // Check local storage first
         if let Some(record) = self.storage.get(key).await
-            && !record.is_expired() {
-                return Ok(Some(record));
-            }
+            && !record.is_expired()
+        {
+            return Ok(Some(record));
+        }
 
         // Check if S/Kademlia is enabled and extract configuration
         let (enable_distance_verification, disjoint_path_count, min_reputation) =
@@ -1403,9 +1421,10 @@ impl DHT {
 
         // Check local storage first
         if let Some(record) = self.storage.get(key).await
-            && !record.is_expired() {
-                return Ok(Some(record));
-            }
+            && !record.is_expired()
+        {
+            return Ok(Some(record));
+        }
 
         // Get IPv6-verified nodes for secure lookup
         let verified_nodes = self.get_ipv6_verified_nodes_for_key(key).await?;
@@ -2185,9 +2204,10 @@ impl DHT {
         for message_ref in message_refs {
             let message_key = Key::from_inbox_message(inbox_id, &message_ref.message_id);
             if let Some(message_record) = self.get(&message_key).await
-                && let Ok(message) = serde_json::from_slice::<InboxMessage>(&message_record.value) {
-                    messages.push(message);
-                }
+                && let Ok(message) = serde_json::from_slice::<InboxMessage>(&message_record.value)
+            {
+                messages.push(message);
+            }
         }
 
         // Sort messages by timestamp (newest first)

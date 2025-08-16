@@ -22,11 +22,7 @@ mod tests {
     #[test]
     fn test_four_word_from_node_id_success() {
         let node_id = NodeId([0x42; 32]);
-        let result = FourWordAddress::from_node_id(&node_id);
-
-        // Should succeed with valid node ID
-        assert!(result.is_ok());
-        let address = result.unwrap();
+        let address = FourWordAddress::from_node_id(&node_id);
         assert_eq!(address.words().len(), 4);
     }
 
@@ -56,7 +52,7 @@ mod tests {
         ];
 
         for invalid in invalid_addresses {
-            let result = FourWordAddress::from_string(invalid);
+            let result = FourWordAddress::from_str(invalid);
             assert!(result.is_err(), "Should fail to parse: {}", invalid);
         }
     }
