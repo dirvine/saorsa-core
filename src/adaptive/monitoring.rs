@@ -27,6 +27,7 @@ use crate::adaptive::{
     learning::{QLearnCacheManager, ThompsonSampling},
 };
 use anyhow::Result;
+#[cfg(feature = "metrics")]
 use prometheus::{
     Counter, Encoder, Gauge, Histogram, IntCounter, IntGauge, Registry, TextEncoder,
     register_counter, register_gauge, register_histogram, register_int_counter, register_int_gauge,
@@ -40,6 +41,7 @@ use tokio::sync::{RwLock, mpsc};
 
 /// Monitoring system for the adaptive P2P network
 pub struct MonitoringSystem {
+    #[cfg(feature = "metrics")]
     /// Prometheus registry for metrics
     registry: Arc<Registry>,
 
@@ -113,48 +115,79 @@ pub enum LogLevel {
 /// Core network metrics exposed via Prometheus
 #[allow(dead_code)]
 struct NetworkMetrics {
+    #[cfg(feature = "metrics")]
     // Node metrics
     connected_nodes: IntGauge,
+    #[cfg(feature = "metrics")]
     active_nodes: IntGauge,
+    #[cfg(feature = "metrics")]
     suspicious_nodes: IntGauge,
+    #[cfg(feature = "metrics")]
     failed_nodes: IntGauge,
 
+    #[cfg(feature = "metrics")]
     // Routing metrics
     routing_requests: Counter,
+    #[cfg(feature = "metrics")]
     routing_success: Counter,
+    #[cfg(feature = "metrics")]
     routing_latency: Histogram,
 
+    #[cfg(feature = "metrics")]
     // Storage metrics
     stored_items: IntGauge,
+    #[cfg(feature = "metrics")]
     storage_bytes: IntGauge,
+    #[cfg(feature = "metrics")]
     replication_factor: Gauge,
 
+    #[cfg(feature = "metrics")]
     // Network traffic metrics
     messages_sent: Counter,
+    #[cfg(feature = "metrics")]
     messages_received: Counter,
+    #[cfg(feature = "metrics")]
     bytes_sent: Counter,
+    #[cfg(feature = "metrics")]
     bytes_received: Counter,
 
+    #[cfg(feature = "metrics")]
     // Cache metrics
     cache_hits: Counter,
+    #[cfg(feature = "metrics")]
     cache_misses: Counter,
+    #[cfg(feature = "metrics")]
     cache_size: IntGauge,
+    #[cfg(feature = "metrics")]
     cache_evictions: Counter,
 
+    #[cfg(feature = "metrics")]
     // Learning metrics
     thompson_selections: IntCounter,
+    #[cfg(feature = "metrics")]
     qlearn_updates: Counter,
+    #[cfg(feature = "metrics")]
     churn_predictions: Counter,
 
+    #[cfg(feature = "metrics")]
     // Gossip metrics
     gossip_messages: Counter,
+    #[cfg(feature = "metrics")]
     mesh_size: IntGauge,
+    #[cfg(feature = "metrics")]
     topic_count: IntGauge,
 
+    #[cfg(feature = "metrics")]
     // Performance metrics
     cpu_usage: Gauge,
+    #[cfg(feature = "metrics")]
     memory_usage: IntGauge,
+    #[cfg(feature = "metrics")]
     thread_count: IntGauge,
+
+    #[cfg(not(feature = "metrics"))]
+    // Placeholder for when metrics are disabled
+    _placeholder: (),
 }
 
 /// Components being monitored
@@ -411,9 +444,11 @@ pub struct LogEntry {
 impl MonitoringSystem {
     /// Create a new monitoring system
     pub fn new(components: MonitoredComponents, config: MonitoringConfig) -> Result<Self> {
+        #[cfg(feature = "metrics")]
         let registry = Registry::new();
 
         // Initialize metrics
+        #[cfg(feature = "metrics")]
         let metrics = NetworkMetrics {
             // Node metrics
             connected_nodes: register_int_gauge!(
@@ -492,6 +527,11 @@ impl MonitoringSystem {
             thread_count: register_int_gauge!("p2p_thread_count", "Number of threads")?,
         };
 
+        #[cfg(not(feature = "metrics"))]
+        let metrics = NetworkMetrics {
+            _placeholder: (),
+        };
+
         let anomaly_detector = Arc::new(AnomalyDetector::new(config.anomaly_window_size));
         let alert_manager = Arc::new(AlertManager::new(config.alert_cooldown));
         let profiler = Arc::new(PerformanceProfiler::new(config.profiling_sample_rate));
@@ -499,6 +539,7 @@ impl MonitoringSystem {
 
         // Set up default alert rules
         let monitoring = Self {
+            #[cfg(feature = "metrics")]
             registry: Arc::new(registry),
             metrics: Arc::new(metrics),
             anomaly_detector,
@@ -544,49 +585,69 @@ impl MonitoringSystem {
     async fn collect_metrics(&self) -> Result<()> {
         // Collect churn statistics
         let churn_stats = self.components.churn_handler.get_stats().await;
-        self.metrics
-            .active_nodes
-            .set(churn_stats.active_nodes as i64);
-        self.metrics
-            .suspicious_nodes
-            .set(churn_stats.suspicious_nodes as i64);
-        self.metrics
-            .failed_nodes
-            .set(churn_stats.failed_nodes as i64);
+        
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics
+                .active_nodes
+                .set(churn_stats.active_nodes as i64);
+            self.metrics
+                .suspicious_nodes
+                .set(churn_stats.suspicious_nodes as i64);
+            self.metrics
+                .failed_nodes
+                .set(churn_stats.failed_nodes as i64);
+        }
 
         // Collect routing statistics
         let routing_stats = self.components.router.get_stats().await;
-        self.metrics
-            .routing_requests
-            .inc_by(routing_stats.total_requests as f64);
-        self.metrics
-            .routing_success
-            .inc_by(routing_stats.successful_requests as f64);
+        
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics
+                .routing_requests
+                .inc_by(routing_stats.total_requests as f64);
+            self.metrics
+                .routing_success
+                .inc_by(routing_stats.successful_requests as f64);
+        }
 
         // Collect storage statistics
         let storage_stats = self.components.storage.get_stats().await;
-        self.metrics
-            .stored_items
-            .set(storage_stats.total_items as i64);
-        self.metrics
-            .storage_bytes
-            .set(storage_stats.total_bytes as i64);
+        
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics
+                .stored_items
+                .set(storage_stats.total_items as i64);
+            self.metrics
+                .storage_bytes
+                .set(storage_stats.total_bytes as i64);
+        }
 
         // Collect gossip statistics
         let gossip_stats = self.components.gossip.get_stats().await;
-        self.metrics
-            .gossip_messages
-            .inc_by(gossip_stats.messages_sent as f64);
-        self.metrics.mesh_size.set(gossip_stats.mesh_size as i64);
-        self.metrics
-            .topic_count
-            .set(gossip_stats.topic_count as i64);
+        
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics
+                .gossip_messages
+                .inc_by(gossip_stats.messages_sent as f64);
+            self.metrics.mesh_size.set(gossip_stats.mesh_size as i64);
+            self.metrics
+                .topic_count
+                .set(gossip_stats.topic_count as i64);
+        }
 
         // Collect cache statistics
         let cache_stats = self.components.cache.get_stats();
-        self.metrics.cache_hits.inc_by(cache_stats.hits as f64);
-        self.metrics.cache_misses.inc_by(cache_stats.misses as f64);
-        self.metrics.cache_size.set(cache_stats.size_bytes as i64);
+        
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.cache_hits.inc_by(cache_stats.hits as f64);
+            self.metrics.cache_misses.inc_by(cache_stats.misses as f64);
+            self.metrics.cache_size.set(cache_stats.size_bytes as i64);
+        }
 
         // Update anomaly detector
         self.update_anomaly_detector().await?;
@@ -596,11 +657,19 @@ impl MonitoringSystem {
 
     /// Export metrics in Prometheus format
     pub fn export_metrics(&self) -> Result<String> {
-        let encoder = TextEncoder::new();
-        let metric_families = self.registry.gather();
-        let mut buffer = Vec::new();
-        encoder.encode(&metric_families, &mut buffer)?;
-        String::from_utf8(buffer).map_err(|e| anyhow::anyhow!("UTF-8 error: {}", e))
+        #[cfg(feature = "metrics")]
+        {
+            let encoder = TextEncoder::new();
+            let metric_families = self.registry.gather();
+            let mut buffer = Vec::new();
+            encoder.encode(&metric_families, &mut buffer)?;
+            String::from_utf8(buffer).map_err(|e| anyhow::anyhow!("UTF-8 error: {}", e))
+        }
+        
+        #[cfg(not(feature = "metrics"))]
+        {
+            Ok("# Metrics disabled\n".to_string())
+        }
     }
 
     /// Get current network health
@@ -816,6 +885,7 @@ impl MonitoringSystem {
     /// Clone for spawning tasks
     fn clone_for_task(&self) -> Self {
         Self {
+            #[cfg(feature = "metrics")]
             registry: self.registry.clone(),
             metrics: self.metrics.clone(),
             anomaly_detector: self.anomaly_detector.clone(),
