@@ -24,7 +24,7 @@
 //! - Multi-version storage with configurable retention
 //!
 //! ## Architecture
-//! ```
+//! ```text
 //! State Changes → WAL → Apply → Snapshot → Cleanup
 //!                  ↓                ↑
 //!             Recovery ←────────────┘
