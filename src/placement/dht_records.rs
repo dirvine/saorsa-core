@@ -29,6 +29,41 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // External dependencies for cryptography
 use blake3::Hash;
 
+/// Serializable wrapper for blake3::Hash
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SerializableHash([u8; 32]);
+
+impl From<Hash> for SerializableHash {
+    fn from(hash: Hash) -> Self {
+        Self(hash.as_bytes().clone())
+    }
+}
+
+impl From<SerializableHash> for Hash {
+    fn from(hash: SerializableHash) -> Self {
+        Hash::from_bytes(hash.0)
+    }
+}
+
+impl serde::Serialize for SerializableHash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SerializableHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes: [u8; 32] = serde::Deserialize::deserialize(deserializer)?;
+        Ok(SerializableHash(bytes))
+    }
+}
+
 /// Maximum payload size for DHT records (512 bytes)
 pub const MAX_RECORD_SIZE: usize = 512;
 
@@ -68,16 +103,16 @@ impl From<[u8; 32]> for NodeId {
 }
 
 /// Group identifier for placement groups
-pub type GroupId = Hash;
+pub type GroupId = SerializableHash;
 
 /// Placement ticket identifier
-pub type PlacementTicketId = Hash;
+pub type PlacementTicketId = SerializableHash;
 
 /// Content identifier for data chunks
-pub type ContentId = Hash;
+pub type ContentId = SerializableHash;
 
 /// Name identifier for register pointers
-pub type NameId = Hash;
+pub type NameId = SerializableHash;
 
 /// Node capabilities information
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -337,7 +372,7 @@ pub struct GroupBeacon {
     /// Placement policy for the group
     pub policy: PlacementPolicy,
     /// Merkle root of group members
-    pub member_root: Hash,
+    pub member_root: SerializableHash,
     /// Guardian nodes (subset of members with special permissions)
     pub guardians: Vec<NodeId>,
     /// Timestamp (seconds since UNIX epoch)
@@ -351,7 +386,7 @@ impl GroupBeacon {
     pub fn new(
         group_id: GroupId,
         policy: PlacementPolicy,
-        member_root: Hash,
+        member_root: SerializableHash,
         guardians: Vec<NodeId>,
     ) -> P2pResult<Self> {
         let ts = SystemTime::now()
@@ -912,9 +947,9 @@ mod tests {
 
     #[test]
     fn test_group_beacon_creation() {
-        let group_id = GroupId::from_bytes([3u8; 32]);
+        let group_id = SerializableHash([3u8; 32]);
         let policy = PlacementPolicy::default();
-        let member_root = blake3::hash(b"members");
+        let member_root = SerializableHash::from(blake3::hash(b"members"));
         let guardians = vec![NodeId::from([4u8; 32]), NodeId::from([5u8; 32])];
 
         let beacon = GroupBeacon::new(group_id, policy, member_root, guardians).unwrap();

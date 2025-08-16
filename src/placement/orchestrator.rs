@@ -20,13 +20,13 @@ use tokio::time::interval;
 
 use crate::adaptive::{
     trust::EigenTrustEngine, NodeId, performance::PerformanceMonitor,
-    learning::ChurnPredictor, coordinator::NetworkCoordinator,
+    learning::ChurnPredictor,
 };
-use crate::dht::DhtCoreEngine;
+use crate::dht::core_engine::DhtCoreEngine;
 use crate::placement::{
     PlacementEngine, PlacementConfig, PlacementDecision, PlacementResult,
     PlacementError, GeographicLocation, NetworkRegion, PlacementMetrics,
-    DhtRecord, DataPointer, 
+//    DhtRecord, DataPointer, 
 };
 
 /// Main orchestrator for the placement and storage system
@@ -188,7 +188,7 @@ impl PlacementOrchestrator {
             let asn = 12345 + (i as u32 % 1000);
             let region = NetworkRegion::from_coordinates(&location);
             
-            metadata.insert(*node_id, (location, asn, region));
+            metadata.insert(node_id.clone(), (location, asn, region));
         }
         
         Ok(metadata)
@@ -224,7 +224,7 @@ impl StorageOrchestrator {
         &self,
         data: &[u8],
         decision: &PlacementDecision,
-        node_metadata: &HashMap<NodeId, (GeographicLocation, u32, NetworkRegion)>,
+        _node_metadata: &HashMap<NodeId, (GeographicLocation, u32, NetworkRegion)>,
     ) -> PlacementResult<Vec<String>> {
         // For now, simulate shard storage
         let mut shard_ids = Vec::new();
@@ -235,7 +235,7 @@ impl StorageOrchestrator {
             
             let shard_info = ShardInfo {
                 shard_id: shard_id.clone(),
-                node_id: *node_id,
+                node_id: node_id.clone(),
                 data_size: data.len() / decision.selected_nodes.len(),
                 created_at: SystemTime::now().duration_since(UNIX_EPOCH)
                     .unwrap_or_default().as_secs(),
@@ -261,7 +261,7 @@ impl StorageOrchestrator {
         // Mock shard retrieval
         let mut shards = Vec::new();
         
-        for shard_id in shard_ids {
+        for _shard_id in shard_ids {
             // Simulate retrieving shard data
             let shard_data = vec![0u8; 1024]; // Mock data
             shards.push(shard_data);

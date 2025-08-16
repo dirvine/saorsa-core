@@ -22,16 +22,16 @@ pub mod orchestrator;
 pub use errors::{PlacementError, PlacementResult};
 pub use traits::{
     PlacementStrategy, NetworkTopology, PerformanceEstimator,
-    PlacementConstraint, PlacementValidator,
+    PlacementConstraint, PlacementValidator, NodePerformanceMetrics,
 };
 pub use types::{
     PlacementConfig, PlacementDecision, PlacementMetrics,
-    NodePerformanceMetrics, GeographicLocation, NetworkRegion,
+    GeographicLocation, NetworkRegion,
     ReplicationFactor, ByzantineTolerance, OptimizationWeights,
 };
 pub use dht_records::{
     DhtRecord, NodeAd, GroupBeacon, DataPointer, RegisterPointer,
-    RecordType, NodeCapabilities, NatType, OsSignature, ProofOfWork,
+    NodeCapabilities, NatType, OsSignature,
 };
 pub use algorithms::{
     WeightedSampler, DiversityEnforcer, WeightedPlacementStrategy,

@@ -11,11 +11,10 @@
 //! to ensure optimal placement of erasure-coded shards across the network.
 
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
+//use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use rand::Rng;
-use serde::{Deserialize, Serialize};
+use async_trait::async_trait;
 
 use crate::adaptive::{
     trust::EigenTrustEngine, NodeId, performance::PerformanceMonitor,
@@ -25,7 +24,7 @@ use crate::placement::{
     PlacementDecision, PlacementConfig,
     GeographicLocation, NetworkRegion,
 };
-use crate::placement::traits::NodePerformanceMetrics;
+//use crate::placement::traits::NodePerformanceMetrics;
 
 /// Efraimidis-Spirakis weighted sampling algorithm implementation
 #[derive(Debug, Clone)]
@@ -354,7 +353,7 @@ impl WeightedPlacementStrategy {
             // Get node metadata for diversity calculation
             let (location, asn, region) = node_metadata
                 .get(node_id)
-                .ok_or_else(|| PlacementError::NodeMetadataNotFound(*node_id))?;
+                .ok_or_else(|| PlacementError::NodeMetadataNotFound(node_id.clone()))?;
 
             // Calculate diversity factor
             let diversity_factor = self.diversity_enforcer.calculate_diversity_factor(
@@ -377,7 +376,7 @@ impl WeightedPlacementStrategy {
                 self.config.optimization_weights.capacity_weight,
             )?;
 
-            weights.push((*node_id, weight));
+            weights.push((node_id.clone(), weight));
         }
 
         // Sort by weight for better selection
@@ -387,13 +386,14 @@ impl WeightedPlacementStrategy {
     }
 }
 
+#[async_trait]
 impl PlacementStrategy for WeightedPlacementStrategy {
     async fn select_nodes(
         &mut self,
         candidates: &HashSet<NodeId>,
         replication_factor: u8,
-        trust_system: &EigenTrustEngine,
-        performance_monitor: &PerformanceMonitor,
+        _trust_system: &EigenTrustEngine,
+        _performance_monitor: &PerformanceMonitor,
         node_metadata: &HashMap<NodeId, (GeographicLocation, u32, NetworkRegion)>,
     ) -> PlacementResult<PlacementDecision> {
         let start_time = Instant::now();
@@ -436,14 +436,14 @@ impl PlacementStrategy for WeightedPlacementStrategy {
 
             // Sample one node using weighted selection
             let selected = self.sampler.sample_nodes(&weights, 1)?;
-            let selected_node = selected[0];
+            let selected_node = selected[0].clone();
 
             // Add to selection with metadata
             let (location, asn, region) = node_metadata
                 .get(&selected_node)
-                .ok_or_else(|| PlacementError::NodeMetadataNotFound(selected_node))?;
+                .ok_or_else(|| PlacementError::NodeMetadataNotFound(selected_node.clone()))?;
             
-            selected_nodes.push((selected_node, *location, *asn, *region));
+            selected_nodes.push((selected_node.clone(), *location, *asn, *region));
 
             // Remove from candidates
             remaining_candidates.remove(&selected_node);
