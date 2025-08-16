@@ -204,7 +204,6 @@ pub use validation::{
 };
 
 // Enhanced identity exports
-#[cfg(feature = "quantum-resistant")]
 pub use identity::enhanced::{
     Department, EnhancedIdentity, EnhancedIdentityManager, Organization, Permission, Team,
 };

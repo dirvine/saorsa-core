@@ -2,7 +2,7 @@
 //
 // Integration tests for native ant-quic integration
 
-#![cfg(all(feature = "ant-quic", test))]
+// Integration tests for native ant-quic integration
 
 use saorsa_core::transport::ant_quic_adapter::P2PNetworkNode;
 use std::net::SocketAddr;
@@ -101,14 +101,6 @@ async fn test_p2p_peer_authentication() {
 
 #[test]
 fn test_ant_quic_feature_enabled() {
-    // Verify that ant-quic feature is enabled
-    #[cfg(feature = "ant-quic")]
-    {
-        assert!(true, "ant-quic feature is enabled");
-    }
-
-    #[cfg(not(feature = "ant-quic"))]
-    {
-        panic!("ant-quic feature should be enabled for this test");
-    }
+    // ant-quic is now always enabled (no feature flags)
+    assert!(true, "ant-quic is always enabled");
 }

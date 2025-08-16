@@ -503,7 +503,6 @@ pub struct P2PNode {
     bootstrap_manager: Option<Arc<RwLock<BootstrapManager>>>,
 
     /// Transport manager for real network connections
-    #[cfg(feature = "ant-quic")]
     network_node: Arc<P2PNetworkNode>,
 
     /// Rate limiter for connection and request throttling
@@ -527,7 +526,6 @@ impl P2PNode {
             dht: None,
             resource_manager: None,
             bootstrap_manager: None,
-            #[cfg(feature = "ant-quic")]
             network_node: {
                 // Create a fast, local test node; if it fails, leak a placeholder by panicking only when used
                 let bind: std::net::SocketAddr = "127.0.0.1:0"
@@ -733,7 +731,6 @@ impl P2PNode {
 
     /// Initialize MCP network integration
     /// This method should be called after node creation to enable MCP network features
-    #[cfg(feature = "ant-quic")]
     pub async fn initialize_mcp_network(&self) -> Result<()> {
         if let Some(ref _mcp_server) = self.mcp_server {
             // Create a channel for sending messages from MCP to the network layer
@@ -791,11 +788,6 @@ impl P2PNode {
         Ok(())
     }
 
-    #[cfg(not(feature = "ant-quic"))]
-    pub async fn initialize_mcp_network(&self) -> Result<()> {
-        warn!("MCP network integration not available - ant-quic feature is disabled");
-        Ok(())
-    }
 
     pub fn local_addr(&self) -> Option<String> {
         self.listen_addrs
@@ -925,7 +917,6 @@ impl P2PNode {
         info!("Starting network listeners...");
 
         // Get available transports from transport manager
-        #[cfg(feature = "ant-quic")]
         let _network_node = &self.network_node;
 
         // Listen on each configured address
@@ -1036,7 +1027,6 @@ impl P2PNode {
         let event_tx = self.event_tx.clone();
         let _peer_id = self.peer_id.clone();
         let peers = Arc::clone(&self.peers);
-        #[cfg(feature = "ant-quic")]
         let _network_node = Arc::clone(&self.network_node);
         let mcp_server = self.mcp_server.clone();
         let rate_limiter = Arc::clone(&self.rate_limiter);
@@ -1545,9 +1535,7 @@ impl P2PNode {
 
         // Use transport manager to establish real connection
         let peer_id = {
-            #[cfg(feature = "ant-quic")]
-            {
-                match self.network_node.connect_to_peer_string(_socket_addr).await {
+            match self.network_node.connect_to_peer_string(_socket_addr).await {
                     Ok(connected_peer_id) => {
                         info!("Successfully connected to peer: {}", connected_peer_id);
                         connected_peer_id
@@ -1565,18 +1553,6 @@ impl P2PNode {
                         );
                         demo_peer_id
                     }
-                }
-            }
-            #[cfg(not(feature = "ant-quic"))]
-            {
-                // Without ant-quic, create a mock peer ID based on address
-                let demo_peer_id =
-                    format!("peer_from_{}", address.replace("/", "_").replace(":", "_"));
-                warn!(
-                    "Using demo peer ID: {} (ant-quic transport not available)",
-                    demo_peer_id
-                );
-                demo_peer_id
             }
         };
 
@@ -2711,7 +2687,6 @@ async fn handle_mcp_message_standalone(
 }
 
 /// Helper function to handle protocol message creation
-#[cfg(feature = "ant-quic")]
 fn handle_protocol_message_creation(protocol: &str, data: Vec<u8>) -> Option<Vec<u8>> {
     match create_protocol_message_static(protocol, data) {
         Ok(msg) => Some(msg),
@@ -2723,7 +2698,6 @@ fn handle_protocol_message_creation(protocol: &str, data: Vec<u8>) -> Option<Vec
 }
 
 /// Helper function to handle message send result
-#[cfg(feature = "ant-quic")]
 async fn handle_message_send_result(result: Result<()>, peer_id: &PeerId) {
     match result {
         Ok(_) => {

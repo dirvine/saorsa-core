@@ -103,33 +103,7 @@ pub const DEFAULT_TTL: Duration = Duration::from_secs(3600);
 pub const MIN_POW_BITS: u8 = 18;
 
 /// Node identifier for compatibility with existing saorsa-core
-#[cfg(feature = "dht")]
 pub use crate::adaptive::NodeId;
-
-#[cfg(not(feature = "dht"))]
-/// Node identifier fallback if DHT feature is not enabled
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NodeId([u8; 32]);
-
-#[cfg(not(feature = "dht"))]
-impl NodeId {
-    /// Create a new NodeId from bytes
-    pub fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-    
-    /// Get the bytes of the NodeId
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-#[cfg(not(feature = "dht"))]
-impl From<[u8; 32]> for NodeId {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-}
 
 /// Group identifier for placement groups
 pub type GroupId = SerializableHash;
