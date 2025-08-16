@@ -172,6 +172,22 @@ pub enum P2PError {
     // Encoding errors
     #[error("Encoding error: {0}")]
     Encoding(Cow<'static, str>),
+
+    // Record too large errors
+    #[error("Record too large: {0} bytes (max 512)")]
+    RecordTooLarge(usize),
+
+    // Proof of work computation failed
+    #[error("Proof of work computation failed")]
+    ProofOfWorkFailed,
+
+    // Time-related error
+    #[error("Time error")]
+    TimeError,
+
+    // Invalid input parameter
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
 }
 
 /// Network-related errors
@@ -675,6 +691,7 @@ impl From<crate::adaptive::AdaptiveNetworkError> for P2PError {
         use crate::adaptive::AdaptiveNetworkError;
         match err {
             AdaptiveNetworkError::Network(io_err) => P2PError::Io(io_err),
+            AdaptiveNetworkError::Io(io_err) => P2PError::Io(io_err),
             AdaptiveNetworkError::Serialization(ser_err) => {
                 P2PError::Serialization(ser_err.to_string().into())
             }
@@ -822,12 +839,12 @@ impl<T> IntoAnyhow<T> for P2pResult<T> {
     }
 }
 
-pub trait FromAnyhow<T> {
-    fn from_anyhow(self) -> P2pResult<T>;
+pub trait FromAnyhowExt<T> {
+    fn into_p2p_result(self) -> P2pResult<T>;
 }
 
-impl<T> FromAnyhow<T> for anyhow::Result<T> {
-    fn from_anyhow(self) -> P2pResult<T> {
+impl<T> FromAnyhowExt<T> for anyhow::Result<T> {
+    fn into_p2p_result(self) -> P2pResult<T> {
         self.map_err(|e| P2PError::Internal(e.to_string().into()))
     }
 }
@@ -908,7 +925,7 @@ mod tests {
 
         let anyhow_err = anyhow::anyhow!("Test error");
         let anyhow_result: anyhow::Result<()> = Err(anyhow_err);
-        let p2p_result = anyhow_result.from_anyhow();
+        let p2p_result = crate::error::FromAnyhowExt::into_p2p_result(anyhow_result);
         assert!(p2p_result.is_err());
         match p2p_result.unwrap_err() {
             P2PError::Internal(msg) => assert!(msg.contains("Test error")),

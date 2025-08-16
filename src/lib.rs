@@ -148,6 +148,9 @@ pub mod health;
 /// Geographic-aware networking enhancements for P2P routing optimization
 pub mod geographic_enhanced_network;
 
+/// Placement Loop & Storage Orchestration System
+pub mod placement;
+
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
 pub use bootstrap::{BootstrapCache, BootstrapManager, CacheConfig, ContactEntry};
@@ -230,6 +233,14 @@ pub use threshold::{
 
 // Quantum crypto exports for types used by threshold
 pub use quantum_crypto::types::{GroupId, ParticipantId};
+
+// Placement system exports
+pub use placement::{
+    PlacementEngine, PlacementConfig, PlacementDecision, PlacementMetrics,
+    PlacementOrchestrator, StorageOrchestrator, AuditSystem, RepairSystem,
+    WeightedPlacementStrategy, DiversityEnforcer, GeographicLocation, NetworkRegion,
+    NodeAd, GroupBeacon, DataPointer, RegisterPointer, DhtRecord,
+};
 
 // Network address types
 /// Peer identifier used throughout Saorsa
