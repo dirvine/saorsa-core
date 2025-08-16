@@ -958,7 +958,8 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
+        let password =
+            SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         assert!(storage_path.exists());
@@ -973,7 +974,8 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
+        let password =
+            SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         // Create and store master seed
@@ -1102,7 +1104,8 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password = SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
+        let password =
+            SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         // Store master seed

@@ -76,7 +76,9 @@ pub enum PlacementError {
     CapacityViolation { node_id: NodeId, details: String },
 
     /// Performance constraint violation
-    #[error("Performance constraint violated for node {node_id:?}: {metric} = {value} (min: {minimum})")]
+    #[error(
+        "Performance constraint violated for node {node_id:?}: {metric} = {value} (min: {minimum})"
+    )]
     PerformanceViolation {
         node_id: NodeId,
         metric: String,
@@ -256,8 +258,9 @@ impl PlacementError {
     /// Get error category
     pub fn category(&self) -> ErrorCategory {
         match self {
-            PlacementError::InsufficientNodes { .. }
-            | PlacementError::NodeMetadataNotFound(_) => ErrorCategory::NodeAvailability,
+            PlacementError::InsufficientNodes { .. } | PlacementError::NodeMetadataNotFound(_) => {
+                ErrorCategory::NodeAvailability
+            }
 
             PlacementError::InvalidReplicationFactor(_)
             | PlacementError::InvalidConfiguration { .. }
@@ -272,8 +275,9 @@ impl PlacementError {
             | PlacementError::PerformanceViolation { .. }
             | PlacementError::ReliabilityTooLow { .. } => ErrorCategory::Performance,
 
-            PlacementError::NetworkTopology(_)
-            | PlacementError::DhtOperation(_) => ErrorCategory::Network,
+            PlacementError::NetworkTopology(_) | PlacementError::DhtOperation(_) => {
+                ErrorCategory::Network
+            }
 
             PlacementError::TrustSystem(_) => ErrorCategory::Trust,
 
@@ -281,11 +285,13 @@ impl PlacementError {
             | PlacementError::NodeSelection(_)
             | PlacementError::SamplingError(_) => ErrorCategory::Algorithm,
 
-            PlacementError::PlacementTimeout
-            | PlacementError::ResourceExhausted(_) => ErrorCategory::Resource,
+            PlacementError::PlacementTimeout | PlacementError::ResourceExhausted(_) => {
+                ErrorCategory::Resource
+            }
 
-            PlacementError::ValidationFailed(_)
-            | PlacementError::InternalConsistency(_) => ErrorCategory::Validation,
+            PlacementError::ValidationFailed(_) | PlacementError::InternalConsistency(_) => {
+                ErrorCategory::Validation
+            }
 
             PlacementError::Serialization(_) => ErrorCategory::Serialization,
 
@@ -295,8 +301,9 @@ impl PlacementError {
 
             PlacementError::ConcurrentModification(_) => ErrorCategory::Concurrency,
 
-            PlacementError::PerformanceMonitoring(_)
-            | PlacementError::ExternalDependency(_) => ErrorCategory::External,
+            PlacementError::PerformanceMonitoring(_) | PlacementError::ExternalDependency(_) => {
+                ErrorCategory::External
+            }
 
             PlacementError::Unknown(_) => ErrorCategory::Unknown,
         }
@@ -335,9 +342,7 @@ impl PlacementError {
             PlacementError::ResourceExhausted(_) => {
                 "Wait for resources to become available or add more capacity"
             }
-            PlacementError::ConcurrentModification(_) => {
-                "Retry the operation with updated state"
-            }
+            PlacementError::ConcurrentModification(_) => "Retry the operation with updated state",
             _ => "Check logs for details and consider retrying",
         }
     }
@@ -345,7 +350,10 @@ impl PlacementError {
     /// Convert to user-friendly message
     pub fn user_message(&self) -> String {
         match self {
-            PlacementError::InsufficientNodes { required, available } => {
+            PlacementError::InsufficientNodes {
+                required,
+                available,
+            } => {
                 format!(
                     "Not enough nodes available for placement. Need {} but only {} available.",
                     required, available
@@ -574,7 +582,13 @@ mod tests {
 
         assert_eq!(context.operation, "select_nodes");
         assert_eq!(context.component, "placement_engine");
-        assert_eq!(context.context.get("replication_factor"), Some(&"8".to_string()));
-        assert_eq!(context.context.get("available_nodes"), Some(&"5".to_string()));
+        assert_eq!(
+            context.context.get("replication_factor"),
+            Some(&"8".to_string())
+        );
+        assert_eq!(
+            context.context.get("available_nodes"),
+            Some(&"5".to_string())
+        );
     }
 }

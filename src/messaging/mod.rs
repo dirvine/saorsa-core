@@ -7,6 +7,7 @@ pub mod encryption;
 pub mod key_exchange;
 pub mod media;
 pub mod mocks;
+pub mod quic_media_streams;
 pub mod reactions;
 pub mod search;
 pub mod service;
@@ -15,6 +16,7 @@ pub mod threads;
 pub mod transport;
 pub mod types;
 pub mod webrtc;
+pub mod webrtc_quic_bridge;
 
 use crate::identity::FourWordAddress;
 // Removed unused imports
@@ -29,6 +31,7 @@ pub use database::MessageStore;
 pub use encryption::SecureMessaging;
 pub use key_exchange::{KeyExchange, KeyExchangeMessage};
 pub use media::MediaProcessor;
+pub use quic_media_streams::{QosParameters, QuicMediaStreamManager, StreamStats};
 pub use reactions::ReactionManager;
 pub use search::MessageSearch;
 pub use service::{MessagingService, SendOptions};
@@ -37,6 +40,7 @@ pub use threads::ThreadManager;
 pub use transport::{DeliveryReceipt, DeliveryStatus, MessageTransport, ReceivedMessage};
 pub use types::*;
 pub use webrtc::{CallEvent, CallManager, WebRtcEvent, WebRtcService};
+pub use webrtc_quic_bridge::{RtpPacket, StreamConfig, StreamType, WebRtcQuicBridge};
 
 // Import the real DHT client
 pub use crate::dht::client::DhtClient;
@@ -580,7 +584,11 @@ mod tests {
         let identity = FourWordAddress::from("ocean-forest-moon-star");
 
         // Create messaging service with real DHT
-        let service = MessagingService::new(identity.clone(), crate::messaging::DhtClient::new().unwrap()).await;
+        let service = MessagingService::new(
+            identity.clone(),
+            crate::messaging::DhtClient::new().unwrap(),
+        )
+        .await;
         assert!(service.is_ok());
 
         let mut service = service.unwrap();

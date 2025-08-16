@@ -235,10 +235,10 @@ pub use quantum_crypto::types::{GroupId, ParticipantId};
 
 // Placement system exports
 pub use placement::{
-    PlacementEngine, PlacementConfig, PlacementDecision, PlacementMetrics,
-    PlacementOrchestrator, StorageOrchestrator, AuditSystem, RepairSystem,
-    WeightedPlacementStrategy, DiversityEnforcer, GeographicLocation, NetworkRegion,
-    NodeAd, GroupBeacon, DataPointer, RegisterPointer, DhtRecord,
+    AuditSystem, DataPointer, DhtRecord, DiversityEnforcer, GeographicLocation, GroupBeacon,
+    NetworkRegion, NodeAd, PlacementConfig, PlacementDecision, PlacementEngine, PlacementMetrics,
+    PlacementOrchestrator, RegisterPointer, RepairSystem, StorageOrchestrator,
+    WeightedPlacementStrategy,
 };
 
 // Network address types

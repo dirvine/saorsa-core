@@ -16,13 +16,10 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
-use crate::adaptive::{
-    trust::EigenTrustEngine, NodeId, performance::PerformanceMonitor,
-};
+use crate::adaptive::{NodeId, performance::PerformanceMonitor, trust::EigenTrustEngine};
 use crate::placement::{
-    PlacementError, PlacementResult, PlacementStrategy, 
-    PlacementDecision, PlacementConfig,
-    GeographicLocation, NetworkRegion,
+    GeographicLocation, NetworkRegion, PlacementConfig, PlacementDecision, PlacementError,
+    PlacementResult, PlacementStrategy,
 };
 //use crate::placement::traits::NodePerformanceMetrics;
 
@@ -102,9 +99,21 @@ impl WeightedSampler {
         }
 
         // Calculate composite weight with numerical stability
-        let trust_component = if alpha == 0.0 { 1.0 } else { trust_score.powf(alpha) };
-        let stability_component = if beta == 0.0 { 1.0 } else { stability_score.powf(beta) };
-        let capacity_component = if gamma == 0.0 { 1.0 } else { capacity_factor.powf(gamma) };
+        let trust_component = if alpha == 0.0 {
+            1.0
+        } else {
+            trust_score.powf(alpha)
+        };
+        let stability_component = if beta == 0.0 {
+            1.0
+        } else {
+            stability_score.powf(beta)
+        };
+        let capacity_component = if gamma == 0.0 {
+            1.0
+        } else {
+            capacity_factor.powf(gamma)
+        };
 
         let weight = trust_component * stability_component * capacity_component * diversity_factor;
 
@@ -158,17 +167,17 @@ impl WeightedSampler {
 
                 // Generate uniform random value
                 let u = fastrand::f64();
-                
+
                 // Calculate weighted key: k_i = u^(1/w_i)
                 let key = u.powf(1.0 / weight);
-                
+
                 Ok((key, node_id.clone()))
             })
             .collect::<PlacementResult<Vec<_>>>()?;
 
         // Sort by key in descending order and take top k
         weighted_keys.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         Ok(weighted_keys
             .into_iter()
             .take(k)
@@ -225,7 +234,7 @@ impl DiversityEnforcer {
             .iter()
             .filter(|(_, _, _, region)| region == candidate_region)
             .count();
-        
+
         if region_count >= self.max_nodes_per_region {
             diversity_factor *= self.diversity_penalty;
         }
@@ -257,8 +266,11 @@ impl DiversityEnforcer {
                         return Err(PlacementError::DiversityViolation {
                             constraint: "geographic_distance".to_string(),
                             nodes: vec![node_a.clone(), node_b.clone()],
-                            details: format!("Distance {} km < minimum {} km", 
-                                           distance, self.min_geographic_distance / 2.0),
+                            details: format!(
+                                "Distance {} km < minimum {} km",
+                                distance,
+                                self.min_geographic_distance / 2.0
+                            ),
                         });
                     }
                 }
@@ -280,8 +292,10 @@ impl DiversityEnforcer {
                         .filter(|(_, _, _, r)| *r == region)
                         .map(|(node_id, _, _, _)| node_id.clone())
                         .collect(),
-                    details: format!("Region {:?} has {} nodes > maximum {}", 
-                                   region, count, self.max_nodes_per_region),
+                    details: format!(
+                        "Region {:?} has {} nodes > maximum {}",
+                        region, count, self.max_nodes_per_region
+                    ),
                 });
             }
         }
@@ -301,8 +315,10 @@ impl DiversityEnforcer {
                         .filter(|(_, _, a, _)| *a == asn)
                         .map(|(node_id, _, _, _)| node_id.clone())
                         .collect(),
-                    details: format!("ASN {} has {} nodes > maximum {}", 
-                                   asn, count, self.max_nodes_per_asn),
+                    details: format!(
+                        "ASN {} has {} nodes > maximum {}",
+                        asn, count, self.max_nodes_per_asn
+                    ),
                 });
             }
         }
@@ -426,13 +442,15 @@ impl PlacementStrategy for WeightedPlacementStrategy {
             }
 
             // Calculate weights for current candidates
-            let weights = self.calculate_weights(
-                &remaining_candidates,
-                trust_system,
-                performance_monitor,
-                node_metadata,
-                &selected_nodes,
-            ).await?;
+            let weights = self
+                .calculate_weights(
+                    &remaining_candidates,
+                    trust_system,
+                    performance_monitor,
+                    node_metadata,
+                    &selected_nodes,
+                )
+                .await?;
 
             // Sample one node using weighted selection
             let selected = self.sampler.sample_nodes(&weights, 1)?;
@@ -442,7 +460,7 @@ impl PlacementStrategy for WeightedPlacementStrategy {
             let (location, asn, region) = node_metadata
                 .get(&selected_node)
                 .ok_or_else(|| PlacementError::NodeMetadataNotFound(selected_node.clone()))?;
-            
+
             selected_nodes.push((selected_node.clone(), *location, *asn, *region));
 
             // Remove from candidates
@@ -450,13 +468,17 @@ impl PlacementStrategy for WeightedPlacementStrategy {
         }
 
         // Validate final selection
-        self.diversity_enforcer.validate_selection(&selected_nodes)?;
+        self.diversity_enforcer
+            .validate_selection(&selected_nodes)?;
 
         let selection_time = start_time.elapsed();
 
         // Create placement decision
         let decision = PlacementDecision {
-            selected_nodes: selected_nodes.into_iter().map(|(node_id, _, _, _)| node_id).collect(),
+            selected_nodes: selected_nodes
+                .into_iter()
+                .map(|(node_id, _, _, _)| node_id)
+                .collect(),
             backup_nodes: Vec::new(), // Could add backup selection here
             placement_strategy: "weighted_efraimidis_spirakis".to_string(),
             diversity_score: 1.0, // Could calculate actual diversity metric
@@ -492,30 +514,47 @@ mod tests {
         let node_id = NodeId::from([1u8; 32]);
 
         // Test normal case
-        let weight = sampler.calculate_weight(
-            &node_id,
-            0.8,  // trust
-            0.9,  // stability
-            1.2,  // capacity
-            1.0,  // diversity
-            1.0,  // alpha
-            1.0,  // beta
-            1.0,  // gamma
-        ).unwrap();
+        let weight = sampler
+            .calculate_weight(
+                &node_id, 0.8, // trust
+                0.9, // stability
+                1.2, // capacity
+                1.0, // diversity
+                1.0, // alpha
+                1.0, // beta
+                1.0, // gamma
+            )
+            .unwrap();
 
         assert!((weight - (0.8 * 0.9 * 1.2 * 1.0)).abs() < 1e-10);
 
         // Test edge cases
-        assert!(sampler.calculate_weight(&node_id, -0.1, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0).is_err());
-        assert!(sampler.calculate_weight(&node_id, 1.1, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0).is_err());
-        assert!(sampler.calculate_weight(&node_id, 0.5, -0.1, 1.0, 1.0, 1.0, 1.0, 1.0).is_err());
-        assert!(sampler.calculate_weight(&node_id, 0.5, 0.5, -1.0, 1.0, 1.0, 1.0, 1.0).is_err());
+        assert!(
+            sampler
+                .calculate_weight(&node_id, -0.1, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0)
+                .is_err()
+        );
+        assert!(
+            sampler
+                .calculate_weight(&node_id, 1.1, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0)
+                .is_err()
+        );
+        assert!(
+            sampler
+                .calculate_weight(&node_id, 0.5, -0.1, 1.0, 1.0, 1.0, 1.0, 1.0)
+                .is_err()
+        );
+        assert!(
+            sampler
+                .calculate_weight(&node_id, 0.5, 0.5, -1.0, 1.0, 1.0, 1.0, 1.0)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_efraimidis_spirakis_sampling() {
         let mut sampler = WeightedSampler::new();
-        
+
         let candidates = vec![
             (NodeId::from([1u8; 32]), 0.8),
             (NodeId::from([2u8; 32]), 0.6),
@@ -602,15 +641,35 @@ mod tests {
 
         // Test valid selection
         let valid_selection = vec![
-            (NodeId::from([1u8; 32]), create_test_location(40.7128, -74.0060), 12345, NetworkRegion::NorthAmerica), // NYC
-            (NodeId::from([2u8; 32]), create_test_location(34.0522, -118.2437), 54321, NetworkRegion::NorthAmerica), // LA
+            (
+                NodeId::from([1u8; 32]),
+                create_test_location(40.7128, -74.0060),
+                12345,
+                NetworkRegion::NorthAmerica,
+            ), // NYC
+            (
+                NodeId::from([2u8; 32]),
+                create_test_location(34.0522, -118.2437),
+                54321,
+                NetworkRegion::NorthAmerica,
+            ), // LA
         ];
         assert!(enforcer.validate_selection(&valid_selection).is_ok());
 
         // Test too close selection
         let too_close_selection = vec![
-            (NodeId::from([1u8; 32]), create_test_location(40.7128, -74.0060), 12345, NetworkRegion::NorthAmerica), // NYC
-            (NodeId::from([2u8; 32]), create_test_location(40.7589, -73.9851), 54321, NetworkRegion::NorthAmerica), // Manhattan
+            (
+                NodeId::from([1u8; 32]),
+                create_test_location(40.7128, -74.0060),
+                12345,
+                NetworkRegion::NorthAmerica,
+            ), // NYC
+            (
+                NodeId::from([2u8; 32]),
+                create_test_location(40.7589, -73.9851),
+                54321,
+                NetworkRegion::NorthAmerica,
+            ), // Manhattan
         ];
         assert!(enforcer.validate_selection(&too_close_selection).is_err());
     }

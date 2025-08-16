@@ -95,9 +95,11 @@ impl ReplicationFactor {
     /// Create new replication factor with validation
     pub fn new(min: u8, default: u8, max: u8) -> PlacementResult<Self> {
         if min == 0 {
-            return Err(crate::placement::PlacementError::InvalidReplicationFactor(min));
+            return Err(crate::placement::PlacementError::InvalidReplicationFactor(
+                min,
+            ));
         }
-        
+
         if default < min || default > max {
             return Err(crate::placement::PlacementError::InvalidConfiguration {
                 field: "replication_factor".to_string(),
@@ -154,7 +156,10 @@ pub enum ByzantineTolerance {
     /// Tolerate f faults out of 3f+1 nodes
     Classic { f: usize },
     /// Custom threshold
-    Custom { total_nodes: usize, max_faults: usize },
+    Custom {
+        total_nodes: usize,
+        max_faults: usize,
+    },
 }
 
 impl ByzantineTolerance {
@@ -181,9 +186,10 @@ impl ByzantineTolerance {
         match self {
             ByzantineTolerance::None => true,
             ByzantineTolerance::Classic { f } => *f > 0,
-            ByzantineTolerance::Custom { total_nodes, max_faults } => {
-                *max_faults < *total_nodes && *total_nodes >= 2 * max_faults + 1
-            }
+            ByzantineTolerance::Custom {
+                total_nodes,
+                max_faults,
+            } => *max_faults < *total_nodes && *total_nodes >= 2 * max_faults + 1,
         }
     }
 }
@@ -215,12 +221,22 @@ impl OptimizationWeights {
         capacity_weight: f64,
         diversity_weight: f64,
     ) -> PlacementResult<Self> {
-        let weights = [trust_weight, performance_weight, capacity_weight, diversity_weight];
-        
+        let weights = [
+            trust_weight,
+            performance_weight,
+            capacity_weight,
+            diversity_weight,
+        ];
+
         // Check all weights are non-negative
         for (i, &weight) in weights.iter().enumerate() {
             if weight < 0.0 {
-                let field_names = ["trust_weight", "performance_weight", "capacity_weight", "diversity_weight"];
+                let field_names = [
+                    "trust_weight",
+                    "performance_weight",
+                    "capacity_weight",
+                    "diversity_weight",
+                ];
                 return Err(crate::placement::PlacementError::InvalidConfiguration {
                     field: field_names[i].to_string(),
                     reason: "Weight must be non-negative".to_string(),
@@ -246,8 +262,11 @@ impl OptimizationWeights {
 
     /// Get normalized weights (sum to 1.0)
     pub fn normalized(&self) -> Self {
-        let sum = self.trust_weight + self.performance_weight + self.capacity_weight + self.diversity_weight;
-        
+        let sum = self.trust_weight
+            + self.performance_weight
+            + self.capacity_weight
+            + self.diversity_weight;
+
         if sum == 0.0 {
             return Self::default();
         }
@@ -293,10 +312,7 @@ pub struct PlacementDecision {
 
 impl PlacementDecision {
     /// Create new placement decision
-    pub fn new(
-        selected_nodes: Vec<NodeId>,
-        placement_strategy: String,
-    ) -> Self {
+    pub fn new(selected_nodes: Vec<NodeId>, placement_strategy: String) -> Self {
         Self {
             selected_nodes,
             backup_nodes: Vec::new(),
@@ -369,7 +385,10 @@ impl GeographicLocation {
             });
         }
 
-        Ok(Self { latitude, longitude })
+        Ok(Self {
+            latitude,
+            longitude,
+        })
     }
 
     /// Calculate distance to another location in kilometers using Haversine formula
@@ -383,9 +402,9 @@ impl GeographicLocation {
 
         let a = (delta_lat / 2.0).sin().powi(2)
             + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-        
+
         let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-        
+
         EARTH_RADIUS_KM * c
     }
 
@@ -458,14 +477,14 @@ impl NetworkRegion {
     /// Get typical timezone offset for the region
     pub fn timezone_offset_hours(&self) -> i8 {
         match self {
-            NetworkRegion::NorthAmerica => -6,  // Central Time
-            NetworkRegion::SouthAmerica => -3,  // Brazil Time
-            NetworkRegion::Europe => 1,         // CET
-            NetworkRegion::AsiaPacific => 8,    // China Time
-            NetworkRegion::Africa => 2,         // CAT
-            NetworkRegion::MiddleEast => 3,     // Arabia Time
-            NetworkRegion::Oceania => 10,       // AEST
-            NetworkRegion::Unknown => 0,        // UTC
+            NetworkRegion::NorthAmerica => -6, // Central Time
+            NetworkRegion::SouthAmerica => -3, // Brazil Time
+            NetworkRegion::Europe => 1,        // CET
+            NetworkRegion::AsiaPacific => 8,   // China Time
+            NetworkRegion::Africa => 2,        // CAT
+            NetworkRegion::MiddleEast => 3,    // Arabia Time
+            NetworkRegion::Oceania => 10,      // AEST
+            NetworkRegion::Unknown => 0,       // UTC
         }
     }
 }
@@ -521,15 +540,19 @@ impl PlacementMetrics {
     pub fn record_success(&mut self, decision: &PlacementDecision, region: NetworkRegion) {
         self.total_requests += 1;
         self.successful_placements += 1;
-        
+
         // Update averages
         let n = self.successful_placements as f64;
         self.average_placement_time = Duration::from_nanos(
-            ((self.average_placement_time.as_nanos() as f64 * (n - 1.0) + decision.selection_time.as_nanos() as f64) / n) as u64
+            ((self.average_placement_time.as_nanos() as f64 * (n - 1.0)
+                + decision.selection_time.as_nanos() as f64)
+                / n) as u64,
         );
-        self.average_diversity_score = (self.average_diversity_score * (n - 1.0) + decision.diversity_score) / n;
-        self.average_reliability = (self.average_reliability * (n - 1.0) + decision.estimated_reliability) / n;
-        
+        self.average_diversity_score =
+            (self.average_diversity_score * (n - 1.0) + decision.diversity_score) / n;
+        self.average_reliability =
+            (self.average_reliability * (n - 1.0) + decision.estimated_reliability) / n;
+
         // Update region counter
         *self.requests_by_region.entry(region).or_insert(0) += 1;
     }
@@ -578,13 +601,19 @@ mod tests {
         assert_eq!(bt.max_faults(), 2);
         assert!(bt.is_valid());
 
-        let bt_custom = ByzantineTolerance::Custom { total_nodes: 10, max_faults: 3 };
+        let bt_custom = ByzantineTolerance::Custom {
+            total_nodes: 10,
+            max_faults: 3,
+        };
         assert_eq!(bt_custom.required_nodes(), 10);
         assert_eq!(bt_custom.max_faults(), 3);
         assert!(bt_custom.is_valid());
 
         // Invalid custom configuration
-        let bt_invalid = ByzantineTolerance::Custom { total_nodes: 5, max_faults: 3 };
+        let bt_invalid = ByzantineTolerance::Custom {
+            total_nodes: 5,
+            max_faults: 3,
+        };
         assert!(!bt_invalid.is_valid());
     }
 
@@ -605,8 +634,10 @@ mod tests {
         // Test normalization
         let weights = OptimizationWeights::new(2.0, 4.0, 2.0, 2.0).unwrap();
         let normalized = weights.normalized();
-        let sum = normalized.trust_weight + normalized.performance_weight + 
-                  normalized.capacity_weight + normalized.diversity_weight;
+        let sum = normalized.trust_weight
+            + normalized.performance_weight
+            + normalized.capacity_weight
+            + normalized.diversity_weight;
         assert!((sum - 1.0).abs() < 1e-10);
     }
 
@@ -634,21 +665,27 @@ mod tests {
     #[test]
     fn test_network_region_from_coordinates() {
         let nyc = GeographicLocation::new(40.7128, -74.0060).unwrap();
-        assert_eq!(NetworkRegion::from_coordinates(&nyc), NetworkRegion::NorthAmerica);
+        assert_eq!(
+            NetworkRegion::from_coordinates(&nyc),
+            NetworkRegion::NorthAmerica
+        );
 
         let london = GeographicLocation::new(51.5074, -0.1278).unwrap();
-        assert_eq!(NetworkRegion::from_coordinates(&london), NetworkRegion::Europe);
+        assert_eq!(
+            NetworkRegion::from_coordinates(&london),
+            NetworkRegion::Europe
+        );
 
         let tokyo = GeographicLocation::new(35.6762, 139.6503).unwrap();
-        assert_eq!(NetworkRegion::from_coordinates(&tokyo), NetworkRegion::AsiaPacific);
+        assert_eq!(
+            NetworkRegion::from_coordinates(&tokyo),
+            NetworkRegion::AsiaPacific
+        );
     }
 
     #[test]
     fn test_placement_decision() {
-        let nodes = vec![
-            NodeId::from([1u8; 32]),
-            NodeId::from([2u8; 32]),
-        ];
+        let nodes = vec![NodeId::from([1u8; 32]), NodeId::from([2u8; 32])];
 
         let decision = PlacementDecision::new(nodes.clone(), "test_strategy".to_string())
             .with_diversity_score(0.8)
@@ -668,10 +705,7 @@ mod tests {
         let mut metrics = PlacementMetrics::new();
         assert_eq!(metrics.success_rate(), 0.0);
 
-        let decision = PlacementDecision::new(
-            vec![NodeId::from([1u8; 32])],
-            "test".to_string(),
-        );
+        let decision = PlacementDecision::new(vec![NodeId::from([1u8; 32])], "test".to_string());
 
         metrics.record_success(&decision, NetworkRegion::NorthAmerica);
         assert_eq!(metrics.success_rate(), 1.0);

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use super::super::reed_solomon::*;
     use super::super::reed_solomon::ReedSolomonEncoder;
+    use super::super::reed_solomon::*;
 
     #[test]
     fn test_reed_solomon_creation() {
@@ -137,9 +137,18 @@ mod tests {
         let encoded3 = tokio_test::block_on(rs.encode(chunk3.to_vec())).unwrap();
 
         // Decode each chunk
-        assert_eq!(tokio_test::block_on(rs.decode(encoded1.into_iter().map(Some).collect())).unwrap(), chunk1);
-        assert_eq!(tokio_test::block_on(rs.decode(encoded2.into_iter().map(Some).collect())).unwrap(), chunk2);
-        assert_eq!(tokio_test::block_on(rs.decode(encoded3.into_iter().map(Some).collect())).unwrap(), chunk3);
+        assert_eq!(
+            tokio_test::block_on(rs.decode(encoded1.into_iter().map(Some).collect())).unwrap(),
+            chunk1
+        );
+        assert_eq!(
+            tokio_test::block_on(rs.decode(encoded2.into_iter().map(Some).collect())).unwrap(),
+            chunk2
+        );
+        assert_eq!(
+            tokio_test::block_on(rs.decode(encoded3.into_iter().map(Some).collect())).unwrap(),
+            chunk3
+        );
     }
 
     #[test]
@@ -155,7 +164,9 @@ mod tests {
             let handle = thread::spawn(move || {
                 let data = format!("Thread {} data", i).into_bytes();
                 let encoded = tokio_test::block_on(rs_clone.encode(data.clone())).unwrap();
-                let decoded = tokio_test::block_on(rs_clone.decode(encoded.into_iter().map(Some).collect())).unwrap();
+                let decoded =
+                    tokio_test::block_on(rs_clone.decode(encoded.into_iter().map(Some).collect()))
+                        .unwrap();
                 assert_eq!(decoded, data);
             });
             handles.push(handle);

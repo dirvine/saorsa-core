@@ -188,6 +188,10 @@ pub enum P2PError {
     // Invalid input parameter
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+
+    // WebRTC bridge errors
+    #[error("WebRTC error: {0}")]
+    WebRtcError(String),
 }
 
 /// Network-related errors
@@ -804,6 +808,7 @@ fn error_type_name(error: &P2PError) -> &'static str {
         P2PError::ProofOfWorkFailed => "ProofOfWorkFailed",
         P2PError::TimeError => "TimeError",
         P2PError::InvalidInput(_) => "InvalidInput",
+        P2PError::WebRtcError(_) => "WebRTC",
     }
 }
 

@@ -17,8 +17,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use proptest::prelude::*;
-use saorsa_core::adaptive::som::{GridSize, NodeFeatures, SelfOrganizingMap, SomConfig};
 use saorsa_core::adaptive::NodeId;
+use saorsa_core::adaptive::som::{GridSize, NodeFeatures, SelfOrganizingMap, SomConfig};
 // use std::collections::HashSet;
 use std::time::Instant;
 

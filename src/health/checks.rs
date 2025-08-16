@@ -269,8 +269,8 @@ fn get_free_space(_path: &std::path::Path) -> u64 {
     1024 * 1024 * 1024 // 1GB default
 }
 
-use std::sync::Arc;
 use crate::production::ResourceManager;
+use std::sync::Arc;
 
 /// Resource usage health checker
 pub struct ResourceHealthChecker {
@@ -295,7 +295,11 @@ impl ResourceHealthChecker {
 #[async_trait]
 impl ComponentChecker for ResourceHealthChecker {
     async fn check(&self) -> Result<HealthStatus> {
-        match timeout(self.timeout_duration, async { self.resource_manager.get_metrics().await }).await {
+        match timeout(self.timeout_duration, async {
+            self.resource_manager.get_metrics().await
+        })
+        .await
+        {
             Ok(metrics) => {
                 // Check CPU usage
                 if metrics.cpu_usage > self.max_cpu_percent {

@@ -18,8 +18,8 @@
 //! This test simulates a complete P2P network with multiple nodes
 //! demonstrating all adaptive layers working together.
 
-use saorsa_core::adaptive::*;
 use saorsa_core::adaptive::coordinator::DegradationReason;
+use saorsa_core::adaptive::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

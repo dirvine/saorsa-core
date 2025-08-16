@@ -15,9 +15,9 @@
 
 //! Network module error handling tests
 
-use saorsa_core::error::{NetworkError, P2PError};
 use saorsa_core::Result;
-use saorsa_core::network::{P2PNode, NodeConfig as P2PNodeConfig};
+use saorsa_core::error::{NetworkError, P2PError};
+use saorsa_core::network::{NodeConfig as P2PNodeConfig, P2PNode};
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -32,9 +32,9 @@ async fn test_invalid_address_parsing() {
     ];
 
     for addr in invalid_addrs {
-        let result: Result<SocketAddr> = addr
-            .parse()
-            .map_err(|e: std::net::AddrParseError| NetworkError::InvalidAddress(e.to_string().into()).into());
+        let result: Result<SocketAddr> = addr.parse().map_err(|e: std::net::AddrParseError| {
+            NetworkError::InvalidAddress(e.to_string().into()).into()
+        });
 
         assert!(result.is_err());
         if let Err(P2PError::Network(NetworkError::InvalidAddress(_))) = result {

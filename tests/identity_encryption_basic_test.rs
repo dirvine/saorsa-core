@@ -16,8 +16,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // (c) 2025 Saorsa P2P Foundation
 
-use saorsa_core::{error::P2PError, identity_manager::*, secure_memory::SecureString};
 use saorsa_core::encrypted_key_storage::SecurityLevel;
+use saorsa_core::{error::P2PError, identity_manager::*, secure_memory::SecureString};
 use std::collections::HashMap;
 use tempfile::TempDir;
 use tokio;
@@ -74,7 +74,9 @@ async fn test_basic_migration() -> Result<(), P2PError> {
     // Create a mock plaintext identity file
     let identity_id = "test-user-001".to_string();
     let plaintext_identity = Identity {
-        id: saorsa_core::peer_record::UserId::from_bytes(*blake3::hash(identity_id.as_bytes()).as_bytes()),
+        id: saorsa_core::peer_record::UserId::from_bytes(
+            *blake3::hash(identity_id.as_bytes()).as_bytes(),
+        ),
         four_word_address: "test.word.address.here".to_string(),
         state: IdentityState::Active,
         display_name: Some("Plaintext User".to_string()),

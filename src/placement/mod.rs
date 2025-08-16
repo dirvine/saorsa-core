@@ -154,39 +154,34 @@
 //! - Cryptographic verification of all operations
 //! - Secure random selection with cryptographic entropy
 
+pub mod algorithms;
+pub mod dht_records;
+pub mod errors;
+pub mod orchestrator;
 pub mod traits;
 pub mod types;
-pub mod errors;
-pub mod dht_records;
-pub mod algorithms;
-pub mod orchestrator;
 
 // Re-export core types for convenience
+pub use algorithms::{DiversityEnforcer, WeightedPlacementStrategy, WeightedSampler};
+pub use dht_records::{
+    DataPointer, DhtRecord, GroupBeacon, NatType, NodeAd, NodeCapabilities, OsSignature,
+    RegisterPointer,
+};
 pub use errors::{PlacementError, PlacementResult};
+pub use orchestrator::{AuditSystem, PlacementOrchestrator, RepairSystem, StorageOrchestrator};
 pub use traits::{
-    PlacementStrategy, NetworkTopology, PerformanceEstimator,
-    PlacementConstraint, PlacementValidator, NodePerformanceMetrics,
+    NetworkTopology, NodePerformanceMetrics, PerformanceEstimator, PlacementConstraint,
+    PlacementStrategy, PlacementValidator,
 };
 pub use types::{
-    PlacementConfig, PlacementDecision, PlacementMetrics,
-    GeographicLocation, NetworkRegion,
-    ReplicationFactor, ByzantineTolerance, OptimizationWeights,
-};
-pub use dht_records::{
-    DhtRecord, NodeAd, GroupBeacon, DataPointer, RegisterPointer,
-    NodeCapabilities, NatType, OsSignature,
-};
-pub use algorithms::{
-    WeightedSampler, DiversityEnforcer, WeightedPlacementStrategy,
-};
-pub use orchestrator::{
-    PlacementOrchestrator, StorageOrchestrator, AuditSystem, RepairSystem,
+    ByzantineTolerance, GeographicLocation, NetworkRegion, OptimizationWeights, PlacementConfig,
+    PlacementDecision, PlacementMetrics, ReplicationFactor,
 };
 
 use std::collections::HashSet;
 use std::time::Instant;
 
-use crate::adaptive::{NodeId, trust::EigenTrustEngine, performance::PerformanceMonitor};
+use crate::adaptive::{NodeId, performance::PerformanceMonitor, trust::EigenTrustEngine};
 
 /// Main placement engine that orchestrates the entire placement process
 #[derive(Debug)]
@@ -199,11 +194,8 @@ impl PlacementEngine {
     /// Create new placement engine with default weighted strategy
     pub fn new(config: PlacementConfig) -> Self {
         let strategy = Box::new(algorithms::WeightedPlacementStrategy::new(config.clone()));
-        
-        Self {
-            config,
-            strategy,
-        }
+
+        Self { config, strategy }
     }
 
     /// Create placement engine with custom strategy
@@ -211,10 +203,7 @@ impl PlacementEngine {
         config: PlacementConfig,
         strategy: Box<dyn PlacementStrategy + Send + Sync>,
     ) -> Self {
-        Self {
-            config,
-            strategy,
-        }
+        Self { config, strategy }
     }
 
     /// Select optimal nodes for shard placement

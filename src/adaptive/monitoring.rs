@@ -528,9 +528,7 @@ impl MonitoringSystem {
         };
 
         #[cfg(not(feature = "metrics"))]
-        let metrics = NetworkMetrics {
-            _placeholder: (),
-        };
+        let metrics = NetworkMetrics { _placeholder: () };
 
         let anomaly_detector = Arc::new(AnomalyDetector::new(config.anomaly_window_size));
         let alert_manager = Arc::new(AlertManager::new(config.alert_cooldown));
@@ -585,7 +583,7 @@ impl MonitoringSystem {
     async fn collect_metrics(&self) -> Result<()> {
         // Collect churn statistics
         let churn_stats = self.components.churn_handler.get_stats().await;
-        
+
         #[cfg(feature = "metrics")]
         {
             self.metrics
@@ -601,7 +599,7 @@ impl MonitoringSystem {
 
         // Collect routing statistics
         let routing_stats = self.components.router.get_stats().await;
-        
+
         #[cfg(feature = "metrics")]
         {
             self.metrics
@@ -614,7 +612,7 @@ impl MonitoringSystem {
 
         // Collect storage statistics
         let storage_stats = self.components.storage.get_stats().await;
-        
+
         #[cfg(feature = "metrics")]
         {
             self.metrics
@@ -627,7 +625,7 @@ impl MonitoringSystem {
 
         // Collect gossip statistics
         let gossip_stats = self.components.gossip.get_stats().await;
-        
+
         #[cfg(feature = "metrics")]
         {
             self.metrics
@@ -641,7 +639,7 @@ impl MonitoringSystem {
 
         // Collect cache statistics
         let cache_stats = self.components.cache.get_stats();
-        
+
         #[cfg(feature = "metrics")]
         {
             self.metrics.cache_hits.inc_by(cache_stats.hits as f64);
@@ -665,7 +663,7 @@ impl MonitoringSystem {
             encoder.encode(&metric_families, &mut buffer)?;
             String::from_utf8(buffer).map_err(|e| anyhow::anyhow!("UTF-8 error: {}", e))
         }
-        
+
         #[cfg(not(feature = "metrics"))]
         {
             Ok("# Metrics disabled\n".to_string())

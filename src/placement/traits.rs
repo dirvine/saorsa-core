@@ -16,10 +16,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::adaptive::{trust::EigenTrustEngine, NodeId, performance::PerformanceMonitor};
-use crate::placement::{
-    GeographicLocation, NetworkRegion, PlacementDecision, PlacementResult,
-};
+use crate::adaptive::{NodeId, performance::PerformanceMonitor, trust::EigenTrustEngine};
+use crate::placement::{GeographicLocation, NetworkRegion, PlacementDecision, PlacementResult};
 
 /// Core trait for placement strategies
 #[async_trait]
@@ -232,7 +230,7 @@ impl Default for NodePerformanceMetrics {
         Self {
             availability: 0.9,
             latency_ms: 50.0,
-            bandwidth_bps: 1_000_000, // 1 Mbps
+            bandwidth_bps: 1_000_000,         // 1 Mbps
             storage_capacity: 10_000_000_000, // 10 GB
             storage_utilization: 0.5,
             cpu_utilization: 0.3,
@@ -252,19 +250,46 @@ mod tests {
     fn test_node_performance_metrics_validation() {
         // Test valid metrics
         let metrics = NodePerformanceMetrics::new(
-            0.9, 50.0, 1_000_000, 10_000_000_000, 0.5, 0.3, 0.4, 0.8, 0.5, 168.0,
+            0.9,
+            50.0,
+            1_000_000,
+            10_000_000_000,
+            0.5,
+            0.3,
+            0.4,
+            0.8,
+            0.5,
+            168.0,
         );
         assert!(metrics.is_ok());
 
         // Test invalid availability
         let metrics = NodePerformanceMetrics::new(
-            1.5, 50.0, 1_000_000, 10_000_000_000, 0.5, 0.3, 0.4, 0.8, 0.5, 168.0,
+            1.5,
+            50.0,
+            1_000_000,
+            10_000_000_000,
+            0.5,
+            0.3,
+            0.4,
+            0.8,
+            0.5,
+            168.0,
         );
         assert!(metrics.is_err());
 
         // Test negative latency
         let metrics = NodePerformanceMetrics::new(
-            0.9, -10.0, 1_000_000, 10_000_000_000, 0.5, 0.3, 0.4, 0.8, 0.5, 168.0,
+            0.9,
+            -10.0,
+            1_000_000,
+            10_000_000_000,
+            0.5,
+            0.3,
+            0.4,
+            0.8,
+            0.5,
+            168.0,
         );
         assert!(metrics.is_err());
     }
@@ -272,8 +297,18 @@ mod tests {
     #[test]
     fn test_overall_score_calculation() {
         let metrics = NodePerformanceMetrics::new(
-            1.0, 10.0, 1_000_000, 10_000_000_000, 0.2, 0.1, 0.1, 0.9, 0.1, 168.0,
-        ).unwrap();
+            1.0,
+            10.0,
+            1_000_000,
+            10_000_000_000,
+            0.2,
+            0.1,
+            0.1,
+            0.9,
+            0.1,
+            168.0,
+        )
+        .unwrap();
 
         let score = metrics.overall_score();
         assert!(score >= 0.0 && score <= 1.0);
@@ -284,28 +319,68 @@ mod tests {
     fn test_storage_suitability() {
         // Good node
         let good_metrics = NodePerformanceMetrics::new(
-            0.95, 20.0, 1_000_000, 10_000_000_000, 0.3, 0.2, 0.2, 0.9, 0.1, 168.0,
-        ).unwrap();
+            0.95,
+            20.0,
+            1_000_000,
+            10_000_000_000,
+            0.3,
+            0.2,
+            0.2,
+            0.9,
+            0.1,
+            168.0,
+        )
+        .unwrap();
         assert!(good_metrics.is_suitable_for_storage());
 
         // Poor availability
         let poor_availability = NodePerformanceMetrics::new(
-            0.5, 20.0, 1_000_000, 10_000_000_000, 0.3, 0.2, 0.2, 0.9, 0.1, 168.0,
-        ).unwrap();
+            0.5,
+            20.0,
+            1_000_000,
+            10_000_000_000,
+            0.3,
+            0.2,
+            0.2,
+            0.9,
+            0.1,
+            168.0,
+        )
+        .unwrap();
         assert!(!poor_availability.is_suitable_for_storage());
 
         // High storage utilization
         let full_storage = NodePerformanceMetrics::new(
-            0.95, 20.0, 1_000_000, 10_000_000_000, 0.95, 0.2, 0.2, 0.9, 0.1, 168.0,
-        ).unwrap();
+            0.95,
+            20.0,
+            1_000_000,
+            10_000_000_000,
+            0.95,
+            0.2,
+            0.2,
+            0.9,
+            0.1,
+            168.0,
+        )
+        .unwrap();
         assert!(!full_storage.is_suitable_for_storage());
     }
 
     #[test]
     fn test_remaining_capacity_calculation() {
         let metrics = NodePerformanceMetrics::new(
-            0.9, 50.0, 1_000_000, 1_000_000_000, 0.3, 0.3, 0.4, 0.8, 0.5, 168.0,
-        ).unwrap();
+            0.9,
+            50.0,
+            1_000_000,
+            1_000_000_000,
+            0.3,
+            0.3,
+            0.4,
+            0.8,
+            0.5,
+            168.0,
+        )
+        .unwrap();
 
         let remaining = metrics.remaining_capacity();
         assert_eq!(remaining, 700_000_000); // 70% of 1GB

@@ -13,8 +13,8 @@
 
 use saorsa_core::encrypted_key_storage::SecurityLevel;
 use saorsa_core::identity_manager::{IdentityCreationParams, IdentityManager};
-use std::collections::HashMap;
 use saorsa_core::secure_memory::SecureString;
+use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::TempDir;
 

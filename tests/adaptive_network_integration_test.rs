@@ -4,7 +4,7 @@
 
 use saorsa_core::{
     adaptive::{
-        ChurnPredictor,
+        ChurnPredictor, NetworkConfig, SecurityConfig, SecurityManager,
         coordinator::NetworkCoordinator as AdaptiveCoordinator,
         eviction::AdaptiveStrategy,
         gossip::AdaptiveGossipSub,
@@ -13,10 +13,8 @@ use saorsa_core::{
         q_learning_cache::QLearningConfig,
         replication::ReplicationManager,
         routing::AdaptiveRouter,
-        SecurityManager, SecurityConfig,
-        NetworkConfig,
     },
-    dht::{Key},
+    dht::Key,
 };
 use std::{
     collections::HashMap,
@@ -57,11 +55,17 @@ impl Default for TestConfig {
 struct TestNetwork {}
 
 impl TestNetwork {
-    async fn new(_config: TestConfig) -> anyhow::Result<Self> { Ok(Self {}) }
+    async fn new(_config: TestConfig) -> anyhow::Result<Self> {
+        Ok(Self {})
+    }
 
-    async fn start_all(&self) -> anyhow::Result<()> { Ok(()) }
+    async fn start_all(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 
-    async fn stop_all(&self) -> anyhow::Result<()> { Ok(()) }
+    async fn stop_all(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -82,7 +86,14 @@ async fn test_thompson_sampling_adaptation() -> anyhow::Result<()> {
     for _ in 0..100 {
         let selected_arm = saorsa_core::adaptive::StrategyChoice::Kademlia; // placeholder
         let success = rand::random::<bool>();
-        let _ = thompson.update(saorsa_core::adaptive::ContentType::DHTLookup, selected_arm, success, 0).await;
+        let _ = thompson
+            .update(
+                saorsa_core::adaptive::ContentType::DHTLookup,
+                selected_arm,
+                success,
+                0,
+            )
+            .await;
     }
 
     // Verify that Thompson Sampling is learning
@@ -115,12 +126,33 @@ async fn test_multi_armed_bandit_routing() -> anyhow::Result<()> {
     let mut route_attempts = HashMap::new();
 
     for _ in 0..200 {
-        let decision = mab.select_route(&saorsa_core::adaptive::NodeId{ hash: [0u8;32] }, saorsa_core::adaptive::ContentType::DHTLookup, &[saorsa_core::adaptive::StrategyChoice::Kademlia]).await.unwrap();
+        let decision = mab
+            .select_route(
+                &saorsa_core::adaptive::NodeId { hash: [0u8; 32] },
+                saorsa_core::adaptive::ContentType::DHTLookup,
+                &[saorsa_core::adaptive::StrategyChoice::Kademlia],
+            )
+            .await
+            .unwrap();
         let success = rand::random::<bool>();
         *route_attempts.entry(decision.route_id.clone()).or_insert(0) += 1;
-        if success { *route_successes.entry(decision.route_id.clone()).or_insert(0) += 1; }
-        let outcome = saorsa_core::adaptive::Outcome { success, latency_ms: 100, hops: 1 };
-        mab.update_route(&decision.route_id, saorsa_core::adaptive::ContentType::DHTLookup, &outcome).await.unwrap();
+        if success {
+            *route_successes
+                .entry(decision.route_id.clone())
+                .or_insert(0) += 1;
+        }
+        let outcome = saorsa_core::adaptive::Outcome {
+            success,
+            latency_ms: 100,
+            hops: 1,
+        };
+        mab.update_route(
+            &decision.route_id,
+            saorsa_core::adaptive::ContentType::DHTLookup,
+            &outcome,
+        )
+        .await
+        .unwrap();
     }
 
     // Verify MAB is learning optimal routes
@@ -148,7 +180,13 @@ async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
     let mut q_cache = saorsa_core::adaptive::QLearningCacheManager::new(q_config, 1024);
 
     // Simulate cache operations
-    let keys: Vec<Key> = (0..50).map(|i| { let mut k=[0u8;32]; k[0]=i as u8; Key::new(&k) }).collect();
+    let keys: Vec<Key> = (0..50)
+        .map(|i| {
+            let mut k = [0u8; 32];
+            k[0] = i as u8;
+            Key::new(&k)
+        })
+        .collect();
 
     // Access patterns with locality
     for epoch in 0..10 {
@@ -169,7 +207,9 @@ async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
 
     // Check cache performance
     // Placeholder stats structure not available; skip strict assertion
-    struct Stats { hit_rate: f64 }
+    struct Stats {
+        hit_rate: f64,
+    }
     let stats = Stats { hit_rate: 0.0 };
     println!(
         "Q-Learning Cache Stats: Hit rate: {:.2}%",
@@ -264,7 +304,7 @@ async fn test_adaptive_eviction_strategies() -> anyhow::Result<()> {
         // Simulate some accesses
         if rand::random::<f64>() < 0.3 {
             use saorsa_core::adaptive::EvictionStrategy;
-            eviction.on_access(&saorsa_core::adaptive::ContentHash([0u8;32]));
+            eviction.on_access(&saorsa_core::adaptive::ContentHash([0u8; 32]));
         }
     }
 
@@ -317,7 +357,10 @@ async fn test_adaptive_replication() -> anyhow::Result<()> {
 
     // Check replication levels
     let critical_replicas = 1usize;
-    println!("Critical data replicas (placeholder): {}", critical_replicas);
+    println!(
+        "Critical data replicas (placeholder): {}",
+        critical_replicas
+    );
     assert!(critical_replicas >= 0);
 
     network.stop_all().await?;
@@ -435,9 +478,13 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
 
     // Create all adaptive components
     let thompson = Arc::new(Mutex::new(ThompsonSampling::new()));
-    let mab = Arc::new(Mutex::new(MultiArmedBandit::new(MABConfig::default()).await.unwrap()));
+    let mab = Arc::new(Mutex::new(
+        MultiArmedBandit::new(MABConfig::default()).await.unwrap(),
+    ));
     // Placeholders for remaining components to keep compile-only
-    let eviction = Arc::new(Mutex::new(AdaptiveStrategy::new(Arc::new(RwLock::new(HashMap::new())))));
+    let eviction = Arc::new(Mutex::new(AdaptiveStrategy::new(Arc::new(RwLock::new(
+        HashMap::new(),
+    )))));
 
     // Metrics tracking
     let metrics = Arc::new(RwLock::new(SimulationMetrics::default()));
@@ -623,7 +670,11 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
     for _ in 0..20 {
         let start = Instant::now();
         // Simulate a request (placeholder)
-        let key = { let mut k=[0u8;32]; k[0]=rand::random::<u8>(); Key::new(&k) };
+        let key = {
+            let mut k = [0u8; 32];
+            k[0] = rand::random::<u8>();
+            Key::new(&k)
+        };
         let _ = key; // placeholder
         baseline_latencies.push(start.elapsed());
     }
@@ -643,7 +694,11 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
     let mut optimized_latencies = Vec::new();
     for _ in 0..20 {
         let start = Instant::now();
-        let key = { let mut k=[0u8;32]; k[0]=rand::random::<u8>(); Key::new(&k) };
+        let key = {
+            let mut k = [0u8; 32];
+            k[0] = rand::random::<u8>();
+            Key::new(&k)
+        };
         let _ = key; // placeholder
         optimized_latencies.push(start.elapsed());
     }

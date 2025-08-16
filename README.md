@@ -14,7 +14,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, four-w
 - **Four-Word Addresses**: Human-readable network addresses
 - **MCP Integration**: Model Context Protocol support
 - **Post-Quantum Cryptography**: Future-ready cryptographic algorithms
-- **WebRTC Support**: Voice and video calling capabilities
+- **WebRTC over QUIC**: Advanced WebRTC-QUIC bridge for real-time media streaming with adaptive quality
 - **Media Processing**: Image and audio processing with blurhash and symphonia
 - **Geographic Routing**: Location-aware networking
 - **Identity Management**: Ed25519-based identity system
@@ -27,7 +27,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-saorsa-core = "0.2.6"
+saorsa-core = "0.3.3"
 ```
 
 ### Basic DHT Node
@@ -239,16 +239,255 @@ Key benchmarks:
 - **Post-Quantum Ready**: ML-KEM and ML-DSA support
 - **Secure Memory**: Platform-specific memory protection
 
-## WebRTC Integration
+## WebRTC over QUIC Integration
 
-Full WebRTC stack for real-time communication:
+Saorsa Core provides a unique **WebRTC-over-QUIC bridge** that combines the real-time capabilities of WebRTC with the performance and reliability of QUIC transport. This allows for high-quality media streaming with improved NAT traversal and congestion control.
+
+### Key Features
+
+- **Seamless Integration**: Bridge WebRTC media streams over ant-quic transport
+- **Adaptive Quality**: Automatic bandwidth and quality adaptation based on network conditions
+- **Multiple Stream Types**: Support for audio, video, screen sharing, and data channels
+- **QoS Management**: Intelligent Quality of Service with stream prioritization
+- **Jitter Buffering**: Built-in jitter buffers for smooth media playback
+- **Performance Monitoring**: Real-time statistics and performance metrics
+
+### Basic WebRTC-QUIC Bridge Setup
 
 ```rust
-use saorsa_core::webrtc::{WebRtcManager, CallConfig};
+use saorsa_core::messaging::{
+    WebRtcQuicBridge, QuicMediaStreamManager, StreamConfig, StreamType, QosParameters
+};
+use saorsa_core::transport::ant_quic_adapter::P2PNetworkNode;
+use std::sync::Arc;
 
-let webrtc = WebRtcManager::new().await?;
-let call = webrtc.create_call(peer_id, CallConfig::voice_only()).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create network node
+    let node = Arc::new(P2PNetworkNode::new("127.0.0.1:0".parse()?).await?);
+    
+    // Create WebRTC-QUIC bridge
+    let bridge = WebRtcQuicBridge::new(node).await?;
+    
+    // Create stream manager for bandwidth management
+    let manager = QuicMediaStreamManager::new(2000); // 2 Mbps
+    manager.start_background_tasks().await?;
+    
+    // Connect to peer
+    let peer_addr = "192.168.1.100:9000".parse()?;
+    let peer_id = bridge.connect_peer(peer_addr).await?;
+    
+    // Configure audio stream
+    let audio_config = StreamConfig {
+        stream_type: StreamType::Audio,
+        codec: "opus".to_string(),
+        bitrate_kbps: 64,
+        sample_rate: Some(48000),
+        resolution: None,
+    };
+    bridge.add_stream(peer_id, StreamType::Audio, audio_config).await?;
+    
+    // Configure video stream
+    let video_config = StreamConfig {
+        stream_type: StreamType::Video,
+        codec: "h264".to_string(),
+        bitrate_kbps: 1000,
+        sample_rate: None,
+        resolution: Some((1280, 720)),
+    };
+    bridge.add_stream(peer_id, StreamType::Video, video_config).await?;
+    
+    // Set QoS parameters
+    manager.set_qos_params(StreamType::Audio, QosParameters::audio()).await;
+    manager.set_qos_params(StreamType::Video, QosParameters::video()).await;
+    
+    // Start receiving packets
+    let mut receiver = bridge.start_receiving().await?;
+    
+    // Handle incoming packets
+    tokio::spawn(async move {
+        while let Some((peer_id, packet)) = receiver.recv().await {
+            println!("Received {} packet from {}", packet.stream_type, peer_id);
+            // Process packet...
+        }
+    });
+    
+    Ok(())
+}
 ```
+
+### Media Streaming Example
+
+```rust
+use saorsa_core::messaging::RtpPacket;
+
+// Create and send RTP packets
+async fn send_media_packets(
+    bridge: &WebRtcQuicBridge,
+    peer_id: PeerId,
+) -> Result<()> {
+    // Audio packet (Opus codec)
+    let audio_packet = RtpPacket::new(
+        96,                    // Payload type (Opus)
+        1001,                  // Sequence number
+        48000,                 // Timestamp (48kHz sample rate)
+        0x12345678,            // SSRC identifier
+        vec![0xAA; 160],       // Opus frame data (20ms @ 48kHz)
+        StreamType::Audio,
+    );
+    bridge.send_rtp_packet(peer_id, audio_packet).await?;
+    
+    // Video packet (H.264 codec)
+    let video_packet = RtpPacket::new(
+        97,                    // Payload type (H.264)
+        2001,                  // Sequence number
+        90000,                 // Timestamp (90kHz for video)
+        0x87654321,            // SSRC identifier
+        vec![0xBB; 1200],      // H.264 NAL unit
+        StreamType::Video,
+    );
+    bridge.send_rtp_packet(peer_id, video_packet).await?;
+    
+    Ok(())
+}
+```
+
+### Quality of Service (QoS) Configuration
+
+```rust
+use saorsa_core::messaging::QosParameters;
+
+// Configure QoS for different stream types
+let audio_qos = QosParameters {
+    priority: 3,           // Highest priority
+    max_latency_ms: 20,    // Low latency for real-time audio
+    max_jitter_ms: 5,      // Minimal jitter tolerance
+    target_bitrate_kbps: 64,
+    max_bitrate_kbps: 128,
+    min_bitrate_kbps: 32,
+    loss_threshold: 1.0,   // 1% packet loss threshold
+};
+
+let video_qos = QosParameters {
+    priority: 2,           // Medium priority
+    max_latency_ms: 100,   // Higher latency tolerance
+    max_jitter_ms: 20,     // More jitter tolerance
+    target_bitrate_kbps: 1000,
+    max_bitrate_kbps: 2000,
+    min_bitrate_kbps: 200,
+    loss_threshold: 3.0,   // 3% packet loss threshold
+};
+
+manager.set_qos_params(StreamType::Audio, audio_qos).await;
+manager.set_qos_params(StreamType::Video, video_qos).await;
+```
+
+### Bandwidth Adaptation
+
+```rust
+// Check for bandwidth adaptation recommendations
+if let Some(adjustment) = manager.check_bandwidth_adaptation().await {
+    match adjustment {
+        BandwidthAdjustment::Increase { current, recommended } => {
+            println!("Increase bandwidth: {} -> {} kbps", current, recommended);
+            // Adjust encoder settings...
+        }
+        BandwidthAdjustment::Decrease { current, recommended } => {
+            println!("Decrease bandwidth: {} -> {} kbps", current, recommended);
+            // Reduce quality or bitrate...
+        }
+    }
+}
+
+// Check transmission capacity
+let can_send_hd = manager.can_transmit(1500).await; // 1.5KB HD frame
+if !can_send_hd {
+    // Switch to lower resolution or quality
+}
+```
+
+### Performance Monitoring
+
+```rust
+// Get peer statistics
+if let Some(stats) = bridge.get_peer_stats(peer_id).await {
+    println!("Packets sent: {}", stats.packets_sent);
+    println!("Packets received: {}", stats.packets_received);
+    println!("Bytes transferred: {}", stats.bytes_sent);
+    println!("Active streams: {}", stats.streams.len());
+}
+
+// Get stream-specific statistics
+let stream_stats = manager.get_all_stats().await;
+for ((peer_id, stream_type), stats) in stream_stats {
+    println!("{:?} stream to {}:", stream_type, peer_id);
+    println!("  RTT: {}ms", stats.rtt_ms);
+    println!("  Loss: {:.2}%", stats.loss_percentage());
+    println!("  Throughput: {} kbps", stats.effective_bitrate_kbps());
+}
+```
+
+### Advanced Features
+
+#### Multi-Stream Management
+```rust
+// Configure multiple streams for comprehensive communication
+bridge.add_stream(peer_id, StreamType::Audio, audio_config).await?;
+bridge.add_stream(peer_id, StreamType::Video, video_config).await?;
+bridge.add_stream(peer_id, StreamType::ScreenShare, screen_config).await?;
+bridge.add_stream(peer_id, StreamType::Data, data_config).await?;
+```
+
+#### Custom Bridge Configuration
+```rust
+use saorsa_core::messaging::BridgeConfig;
+
+let config = BridgeConfig {
+    jitter_buffer_size: 100,                    // 100 packets max
+    jitter_buffer_delay: Duration::from_millis(50), // 50ms buffer
+    peer_timeout: Duration::from_secs(30),      // 30s peer timeout
+    cleanup_interval: Duration::from_secs(5),   // Cleanup every 5s
+    max_packet_size: 1500,                      // MTU consideration
+    enable_adaptive_jitter: true,               // Adaptive jitter buffering
+};
+
+let bridge = WebRtcQuicBridge::new_with_config(node, config).await?;
+```
+
+#### Error Handling and Reconnection
+```rust
+// Robust error handling
+match bridge.send_rtp_packet(peer_id, packet).await {
+    Ok(_) => {
+        // Packet sent successfully
+    }
+    Err(e) => {
+        eprintln!("Failed to send packet: {}", e);
+        
+        // Attempt reconnection if peer disconnected
+        if e.to_string().contains("not connected") {
+            match bridge.connect_peer(peer_addr).await {
+                Ok(new_peer_id) => {
+                    // Reconfigure streams for new connection
+                    configure_streams(&bridge, new_peer_id).await?;
+                }
+                Err(reconnect_err) => {
+                    eprintln!("Reconnection failed: {}", reconnect_err);
+                }
+            }
+        }
+    }
+}
+```
+
+### Use Cases
+
+1. **Voice Calls**: Low-latency audio streaming with Opus codec
+2. **Video Conferencing**: Adaptive video quality with H.264/VP8 codecs  
+3. **Screen Sharing**: High-quality desktop streaming
+4. **File Transfer**: Reliable data channel communication
+5. **Gaming**: Real-time game state synchronization
+6. **IoT Streaming**: Sensor data and telemetry transmission
 
 ## Media Processing
 

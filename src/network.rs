@@ -320,7 +320,9 @@ impl NodeConfig {
     pub fn with_listen_addr(addr: &str) -> Result<Self> {
         let listen_addr: std::net::SocketAddr = addr
             .parse()
-            .map_err(|e: std::net::AddrParseError| NetworkError::InvalidAddress(e.to_string().into()))
+            .map_err(|e: std::net::AddrParseError| {
+                NetworkError::InvalidAddress(e.to_string().into())
+            })
             .map_err(P2PError::Network)?;
         let mut cfg = NodeConfig::default();
         cfg.listen_addr = listen_addr;
@@ -787,7 +789,6 @@ impl P2PNode {
         }
         Ok(())
     }
-
 
     pub fn local_addr(&self) -> Option<String> {
         self.listen_addrs
@@ -1536,23 +1537,23 @@ impl P2PNode {
         // Use transport manager to establish real connection
         let peer_id = {
             match self.network_node.connect_to_peer_string(_socket_addr).await {
-                    Ok(connected_peer_id) => {
-                        info!("Successfully connected to peer: {}", connected_peer_id);
-                        connected_peer_id
-                    }
-                    Err(e) => {
-                        warn!("Failed to connect to peer at {}: {}", address, e);
+                Ok(connected_peer_id) => {
+                    info!("Successfully connected to peer: {}", connected_peer_id);
+                    connected_peer_id
+                }
+                Err(e) => {
+                    warn!("Failed to connect to peer at {}: {}", address, e);
 
-                        // For demo purposes, try a simplified connection approach
-                        // Create a mock peer ID based on address for now
-                        let demo_peer_id =
-                            format!("peer_from_{}", address.replace("/", "_").replace(":", "_"));
-                        warn!(
-                            "Using demo peer ID: {} (transport connection failed)",
-                            demo_peer_id
-                        );
+                    // For demo purposes, try a simplified connection approach
+                    // Create a mock peer ID based on address for now
+                    let demo_peer_id =
+                        format!("peer_from_{}", address.replace("/", "_").replace(":", "_"));
+                    warn!(
+                        "Using demo peer ID: {} (transport connection failed)",
                         demo_peer_id
-                    }
+                    );
+                    demo_peer_id
+                }
             }
         };
 

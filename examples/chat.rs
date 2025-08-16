@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
         match discovery.discover_bootstraps().await {
             Ok(bootstraps) => {
                 info!("✅ Found {} bootstrap nodes", bootstraps.len());
-            bootstrap_addrs = bootstraps.into_iter().map(|a| a.into()).collect();
+                bootstrap_addrs = bootstraps.into_iter().map(|a| a.into()).collect();
             }
             Err(e) => {
                 warn!("⚠️  Bootstrap discovery failed: {}", e);

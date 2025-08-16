@@ -19,14 +19,19 @@ use tokio::sync::{RwLock, Semaphore};
 use tokio::time::interval;
 
 use crate::adaptive::{
-    trust::EigenTrustEngine, NodeId, performance::PerformanceMonitor,
-    learning::ChurnPredictor,
+    NodeId, learning::ChurnPredictor, performance::PerformanceMonitor, trust::EigenTrustEngine,
 };
 use crate::dht::core_engine::DhtCoreEngine;
 use crate::placement::{
-    PlacementEngine, PlacementConfig, PlacementDecision, PlacementResult,
-    PlacementError, GeographicLocation, NetworkRegion, PlacementMetrics,
-//    DhtRecord, DataPointer, 
+    GeographicLocation,
+    NetworkRegion,
+    PlacementConfig,
+    PlacementDecision,
+    PlacementEngine,
+    PlacementError,
+    PlacementMetrics,
+    //    DhtRecord, DataPointer,
+    PlacementResult,
 };
 
 /// Main orchestrator for the placement and storage system
@@ -50,24 +55,33 @@ impl PlacementOrchestrator {
         churn_predictor: Arc<ChurnPredictor>,
     ) -> PlacementResult<Self> {
         let placement_engine = Arc::new(RwLock::new(PlacementEngine::new(config.clone())));
-        
-        let storage_orchestrator = Arc::new(StorageOrchestrator::new(
-            dht_engine.clone(),
-            trust_system.clone(),
-            performance_monitor.clone(),
-        ).await?);
 
-        let audit_system = Arc::new(AuditSystem::new(
-            dht_engine.clone(),
-            trust_system.clone(),
-            churn_predictor.clone(),
-        ).await?);
+        let storage_orchestrator = Arc::new(
+            StorageOrchestrator::new(
+                dht_engine.clone(),
+                trust_system.clone(),
+                performance_monitor.clone(),
+            )
+            .await?,
+        );
 
-        let repair_system = Arc::new(RepairSystem::new(
-            dht_engine.clone(),
-            storage_orchestrator.clone(),
-            audit_system.clone(),
-        ).await?);
+        let audit_system = Arc::new(
+            AuditSystem::new(
+                dht_engine.clone(),
+                trust_system.clone(),
+                churn_predictor.clone(),
+            )
+            .await?,
+        );
+
+        let repair_system = Arc::new(
+            RepairSystem::new(
+                dht_engine.clone(),
+                storage_orchestrator.clone(),
+                audit_system.clone(),
+            )
+            .await?,
+        );
 
         Ok(Self {
             placement_engine,
@@ -122,20 +136,20 @@ impl PlacementOrchestrator {
 
         // Perform placement
         let mut placement_engine = self.placement_engine.write().await;
-        let decision = placement_engine.select_nodes(
-            &available_nodes,
-            replication_factor,
-            &trust_system,
-            &performance_monitor,
-            &node_metadata,
-        ).await?;
+        let decision = placement_engine
+            .select_nodes(
+                &available_nodes,
+                replication_factor,
+                &trust_system,
+                &performance_monitor,
+                &node_metadata,
+            )
+            .await?;
 
         // Store data using the placement decision
-        self.storage_orchestrator.store_shards(
-            &data,
-            &decision,
-            &node_metadata,
-        ).await?;
+        self.storage_orchestrator
+            .store_shards(&data, &decision, &node_metadata)
+            .await?;
 
         // Record metrics
         let region = region_preference.unwrap_or(NetworkRegion::Unknown);
@@ -157,7 +171,10 @@ impl PlacementOrchestrator {
     }
 
     /// Mock method for getting available nodes
-    async fn get_available_nodes(&self, _region: Option<NetworkRegion>) -> PlacementResult<HashSet<NodeId>> {
+    async fn get_available_nodes(
+        &self,
+        _region: Option<NetworkRegion>,
+    ) -> PlacementResult<HashSet<NodeId>> {
         // In a real implementation, this would query the DHT or network discovery
         let mut nodes = HashSet::new();
         for i in 0..20 {
@@ -175,23 +192,24 @@ impl PlacementOrchestrator {
         nodes: &HashSet<NodeId>,
     ) -> PlacementResult<HashMap<NodeId, (GeographicLocation, u32, NetworkRegion)>> {
         let mut metadata = HashMap::new();
-        
+
         for (i, node_id) in nodes.iter().enumerate() {
             // Generate diverse geographic locations
             let lat = 40.0 + (i as f64 * 0.1) % 90.0;
             let lon = -74.0 + (i as f64 * 0.2) % 180.0;
-            let location = GeographicLocation::new(lat, lon)
-                .map_err(|_| PlacementError::InvalidConfiguration {
+            let location = GeographicLocation::new(lat, lon).map_err(|_| {
+                PlacementError::InvalidConfiguration {
                     field: "location".to_string(),
                     reason: "Invalid coordinates".to_string(),
-                })?;
-            
+                }
+            })?;
+
             let asn = 12345 + (i as u32 % 1000);
             let region = NetworkRegion::from_coordinates(&location);
-            
+
             metadata.insert(node_id.clone(), (location, asn, region));
         }
-        
+
         Ok(metadata)
     }
 }
@@ -229,17 +247,18 @@ impl StorageOrchestrator {
     ) -> PlacementResult<Vec<String>> {
         // For now, simulate shard storage
         let mut shard_ids = Vec::new();
-        
+
         for (i, node_id) in decision.selected_nodes.iter().enumerate() {
-            let shard_id = format!("shard_{}_{}", 
-                                   hex::encode(&data[..8.min(data.len())]), i);
-            
+            let shard_id = format!("shard_{}_{}", hex::encode(&data[..8.min(data.len())]), i);
+
             let shard_info = ShardInfo {
                 shard_id: shard_id.clone(),
                 node_id: node_id.clone(),
                 data_size: data.len() / decision.selected_nodes.len(),
-                created_at: SystemTime::now().duration_since(UNIX_EPOCH)
-                    .unwrap_or_default().as_secs(),
+                created_at: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
                 last_verified: 0,
                 verification_count: 0,
                 repair_count: 0,
@@ -247,12 +266,15 @@ impl StorageOrchestrator {
 
             let mut store = self.shard_store.write().await;
             store.insert(shard_id.clone(), shard_info);
-            
+
             shard_ids.push(shard_id);
         }
 
-        tracing::debug!("Stored {} shards across {} nodes", 
-                       shard_ids.len(), decision.selected_nodes.len());
+        tracing::debug!(
+            "Stored {} shards across {} nodes",
+            shard_ids.len(),
+            decision.selected_nodes.len()
+        );
 
         Ok(shard_ids)
     }
@@ -261,7 +283,7 @@ impl StorageOrchestrator {
     pub async fn retrieve_shards(&self, shard_ids: &[String]) -> PlacementResult<Vec<Vec<u8>>> {
         // Mock shard retrieval
         let mut shards = Vec::new();
-        
+
         for _shard_id in shard_ids {
             // Simulate retrieving shard data
             let shard_data = vec![0u8; 1024]; // Mock data
@@ -280,8 +302,10 @@ impl StorageOrchestrator {
     pub async fn update_shard_verification(&self, shard_id: &str) -> PlacementResult<()> {
         let mut store = self.shard_store.write().await;
         if let Some(shard_info) = store.get_mut(shard_id) {
-            shard_info.last_verified = SystemTime::now().duration_since(UNIX_EPOCH)
-                .unwrap_or_default().as_secs();
+            shard_info.last_verified = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
             shard_info.verification_count += 1;
         }
         Ok(())
@@ -319,7 +343,10 @@ impl AuditSystem {
         let mut interval = interval(self.audit_interval);
         let semaphore = Arc::new(Semaphore::new(self.max_concurrent_audits));
 
-        tracing::info!("Starting audit loop with interval {:?}", self.audit_interval);
+        tracing::info!(
+            "Starting audit loop with interval {:?}",
+            self.audit_interval
+        );
 
         loop {
             interval.tick().await;
@@ -328,16 +355,20 @@ impl AuditSystem {
             let shards_to_audit = self.select_shards_for_audit().await?;
 
             for shard_id in shards_to_audit {
-                let permit = semaphore.clone().acquire_owned().await
+                let permit = semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
                     .map_err(|e| PlacementError::AuditSystem(e.to_string()))?;
-                
+
                 let trust_system = self.trust_system.clone();
                 let churn_predictor = self.churn_predictor.clone();
 
                 tokio::spawn(async move {
                     let _permit = permit; // Keep permit until task completes
-                    
-                    if let Err(e) = Self::audit_shard(shard_id, trust_system, churn_predictor).await {
+
+                    if let Err(e) = Self::audit_shard(shard_id, trust_system, churn_predictor).await
+                    {
                         tracing::warn!("Shard audit failed: {}", e);
                     }
                 });
@@ -402,8 +433,8 @@ impl RepairSystem {
             dht_engine,
             storage_orchestrator,
             audit_system,
-            repair_threshold: 0.7,     // Start repair when availability < 70%
-            repair_hysteresis: 0.1,    // 10% hysteresis band
+            repair_threshold: 0.7,  // Start repair when availability < 70%
+            repair_hysteresis: 0.1, // 10% hysteresis band
             repair_cooldown: Duration::from_secs(3600), // 1 hour cooldown
             active_repairs: Arc::new(RwLock::new(HashMap::new())),
         })

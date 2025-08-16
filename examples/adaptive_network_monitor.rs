@@ -1,13 +1,15 @@
 //! Live monitoring tool for the adaptive network
 //! Run with: cargo run --example adaptive_network_monitor
 
+use saorsa_core::adaptive::NodeIdentity as Identity;
+use saorsa_core::adaptive::coordinator::NetworkConfig;
 use saorsa_core::adaptive::coordinator::NetworkCoordinator as AdaptiveCoordinator;
 use saorsa_core::adaptive::learning::ThompsonSampling;
 use saorsa_core::adaptive::multi_armed_bandit::{MABConfig, MultiArmedBandit};
-use saorsa_core::adaptive::q_learning_cache::{QLearnCacheManager as QLearningCache, QLearningConfig};
-use saorsa_core::adaptive::coordinator::NetworkConfig;
-use saorsa_core::adaptive::NodeIdentity as Identity;
-use saorsa_core::network::{P2PNode as Network, NodeConfig};
+use saorsa_core::adaptive::q_learning_cache::{
+    QLearnCacheManager as QLearningCache, QLearningConfig,
+};
+use saorsa_core::network::{NodeConfig, P2PNode as Network};
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -103,7 +105,10 @@ impl AdaptiveNetworkMonitor {
 
     async fn start(&self) -> anyhow::Result<()> {
         println!("Adaptive Network Monitor Started");
-        println!("Listening addresses: {:?}", self.network.listen_addrs().await);
+        println!(
+            "Listening addresses: {:?}",
+            self.network.listen_addrs().await
+        );
         Ok(())
     }
 
@@ -233,13 +238,24 @@ impl AdaptiveNetworkMonitor {
                 // Simulate cache operations
                 use saorsa_core::adaptive::coordinator_extensions::QLearningCacheExtensions;
                 let key = saorsa_core::dht::Key::new(&[0u8; 32]);
-                if cache.get(&saorsa_core::adaptive::ContentHash(key.hash_bytes())).await.is_some() {
+                if cache
+                    .get(&saorsa_core::adaptive::ContentHash(key.hash_bytes()))
+                    .await
+                    .is_some()
+                {
                     m.cache_hits += 1;
                 } else {
                     m.cache_misses += 1;
                     // simulate insert by updating statistics directly
                     let h = saorsa_core::adaptive::ContentHash(key.hash_bytes());
-                    let _ = cache.update_statistics(&saorsa_core::adaptive::CacheAction::Cache(h), &h, 100, false).await;
+                    let _ = cache
+                        .update_statistics(
+                            &saorsa_core::adaptive::CacheAction::Cache(h),
+                            &h,
+                            100,
+                            false,
+                        )
+                        .await;
                 }
 
                 // Simulate network activity

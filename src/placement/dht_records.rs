@@ -91,8 +91,6 @@ impl<'de> Deserialize<'de> for SerializableHash {
 // Type alias for convenience
 pub type Hash = SerializableHash;
 
-
-
 /// Maximum payload size for DHT records (512 bytes)
 pub const MAX_RECORD_SIZE: usize = 512;
 
@@ -257,10 +255,7 @@ pub struct FecParams {
 
 impl Default for FecParams {
     fn default() -> Self {
-        Self {
-            data: 8,
-            parity: 4,
-        }
+        Self { data: 8, parity: 4 }
     }
 }
 
@@ -601,8 +596,8 @@ impl DhtRecord {
 
     /// Serialize the record to bytes
     pub fn serialize(&self) -> P2pResult<Vec<u8>> {
-        let bytes = bincode::serialize(self)
-            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
+        let bytes =
+            bincode::serialize(self).map_err(|e| P2PError::Serialization(e.to_string().into()))?;
 
         if bytes.len() > MAX_RECORD_SIZE {
             return Err(P2PError::RecordTooLarge(bytes.len()));
@@ -617,8 +612,7 @@ impl DhtRecord {
             return Err(P2PError::RecordTooLarge(bytes.len()));
         }
 
-        bincode::deserialize(bytes)
-            .map_err(|e| P2PError::Serialization(e.to_string().into()))
+        bincode::deserialize(bytes).map_err(|e| P2PError::Serialization(e.to_string().into()))
     }
 
     /// Check if the record is still valid (not expired)
@@ -918,34 +912,38 @@ mod tests {
         let os_sig = OsSignature::current();
 
         // No addresses
-        assert!(NodeAd::new(
-            node_id,
-            vec![],
-            caps.clone(),
-            NatType::None,
-            12345,
-            os_sig.clone(),
-            [1u8; 16],
-            [2u8; 16],
-        )
-        .is_err());
+        assert!(
+            NodeAd::new(
+                node_id,
+                vec![],
+                caps.clone(),
+                NatType::None,
+                12345,
+                os_sig.clone(),
+                [1u8; 16],
+                [2u8; 16],
+            )
+            .is_err()
+        );
 
         // Too many addresses
         let many_addrs: Vec<SocketAddr> = (0..10)
             .map(|i| SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080 + i)))
             .collect();
 
-        assert!(NodeAd::new(
-            node_id,
-            many_addrs,
-            caps,
-            NatType::None,
-            12345,
-            os_sig,
-            [1u8; 16],
-            [2u8; 16],
-        )
-        .is_err());
+        assert!(
+            NodeAd::new(
+                node_id,
+                many_addrs,
+                caps,
+                NatType::None,
+                12345,
+                os_sig,
+                [1u8; 16],
+                [2u8; 16],
+            )
+            .is_err()
+        );
     }
 
     #[test]

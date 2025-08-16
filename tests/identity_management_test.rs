@@ -119,8 +119,8 @@ async fn test_node_identity_cryptography() -> Result<()> {
 
     // Node ID should be derived from public key
     let expected_node_id = NodeId::from_public_key(&public_key);
-        assert_eq!(
-            *node_id, expected_node_id,
+    assert_eq!(
+        *node_id, expected_node_id,
         "Node ID should match public key derivation"
     );
 
@@ -397,11 +397,11 @@ async fn test_identity_consistency() -> Result<()> {
         identity2.node_id(),
         "Same seed should produce same node ID"
     );
-        assert_eq!(
-            identity1.public_key().as_bytes(),
-            identity2.public_key().as_bytes(),
-            "Same seed should produce same public key"
-        );
+    assert_eq!(
+        identity1.public_key().as_bytes(),
+        identity2.public_key().as_bytes(),
+        "Same seed should produce same public key"
+    );
 
     // Test four-word address consistency
     let addr1 = FourWordAddress::from_node_id(&identity1.node_id());
@@ -726,7 +726,10 @@ async fn test_identity_system_integration() -> Result<()> {
 
         // Verify signature immediately
         assert!(
-            identity.public_key().verify(test_message, &signature).is_ok(),
+            identity
+                .public_key()
+                .verify(test_message, &signature)
+                .is_ok(),
             "Signature should verify for node: {}",
             addr
         );

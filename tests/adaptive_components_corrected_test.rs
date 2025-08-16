@@ -2,13 +2,11 @@
 //! Tests the actual exported adaptive features using real APIs
 
 use saorsa_core::adaptive::{
-    ContentHash, LearningContext, NetworkConditions, NodeId, Outcome,
+    ContentHash, ContentType, LearningContext, NetworkConditions, NodeId, Outcome, StrategyChoice,
     eviction::{CacheState, EvictionStrategy, EvictionStrategyType, LFUStrategy, LRUStrategy},
     hyperbolic::HyperbolicSpace,
     identity::NodeIdentity,
-    learning::{
-        ChurnPredictor, NodeEvent, NodeFeatures, QLearnCacheManager, ThompsonSampling,
-    },
+    learning::{ChurnPredictor, NodeEvent, NodeFeatures, QLearnCacheManager, ThompsonSampling},
     multi_armed_bandit::{MABConfig, MultiArmedBandit, RouteDecision, RouteId},
     q_learning_cache::{AccessInfo, CacheAction, StateVector},
     replication::{ReplicaInfo, ReplicationManager, ReplicationStrategy},
@@ -17,7 +15,6 @@ use saorsa_core::adaptive::{
     som::{GridSize, SelfOrganizingMap, SomConfig},
     storage::ReplicationConfig,
     trust::MockTrustProvider,
-    ContentType, StrategyChoice,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -349,7 +346,8 @@ async fn test_eviction_strategies_real_api() -> anyhow::Result<()> {
             *hash,
             AccessInfo {
                 count: (i + 1) as u64 * 10,
-                last_access_secs: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() - (i as u64 * 60),
+                last_access_secs: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs()
+                    - (i as u64 * 60),
                 size: 1024,
             },
         );

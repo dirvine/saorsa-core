@@ -13,8 +13,8 @@
 
 //! Identity encryption performance tests
 
-use saorsa_core::encrypted_key_storage::SecurityLevel;
 use saorsa_core::P2PError;
+use saorsa_core::encrypted_key_storage::SecurityLevel;
 use saorsa_core::identity_manager::{IdentityCreationParams, IdentityManager};
 use saorsa_core::secure_memory::SecureString;
 use std::time::{Duration, Instant};

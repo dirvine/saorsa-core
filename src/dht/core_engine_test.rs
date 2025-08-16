@@ -31,10 +31,7 @@ mod tests {
     #[tokio::test]
     async fn test_find_closest_nodes_no_peers() {
         let engine = DhtCoreEngine::new(NodeId::random()).unwrap();
-        let closest = engine
-            .find_nodes(&DhtKey::new(b"target"), 3)
-            .await
-            .unwrap();
+        let closest = engine.find_nodes(&DhtKey::new(b"target"), 3).await.unwrap();
         // With no peers added, the list should be empty and not exceed requested count
         assert!(closest.len() <= 3);
     }

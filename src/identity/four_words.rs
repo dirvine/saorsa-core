@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Four-word address integration: delegate to external crate API, keep our API facade
+use super::node_identity::NodeId;
 use crate::error::IdentityError;
 use crate::{P2PError, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use super::node_identity::NodeId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FourWordAddress(String);

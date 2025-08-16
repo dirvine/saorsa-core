@@ -266,7 +266,9 @@ impl IdentityCliHandler {
         let identity = NodeIdentity::load_from_file(&path).await?;
 
         // Verify components
-        let pow_valid = identity.proof_of_work().verify(identity.node_id(), identity.proof_of_work().difficulty);
+        let pow_valid = identity
+            .proof_of_work()
+            .verify(identity.node_id(), identity.proof_of_work().difficulty);
         let keys_valid = true; // Keys are valid if we can load them
         let address_matches = true; // Address is derived from node ID
 
@@ -322,13 +324,11 @@ impl IdentityCliHandler {
 
         let message_bytes = match message {
             MessageInput::Text(s) => s.into_bytes(),
-            MessageInput::File(p) => {
-                tokio::fs::read(&p).await.map_err(|e| {
-                    crate::P2PError::Identity(crate::error::IdentityError::InvalidFormat(
-                        format!("Failed to read message file: {}", e).into(),
-                    ))
-                })?
-            }
+            MessageInput::File(p) => tokio::fs::read(&p).await.map_err(|e| {
+                crate::P2PError::Identity(crate::error::IdentityError::InvalidFormat(
+                    format!("Failed to read message file: {}", e).into(),
+                ))
+            })?,
         };
 
         let signature = identity.sign(&message_bytes);
@@ -377,7 +377,11 @@ impl IdentityCommand {
                         i += 1;
                     }
                 }
-                Ok(IdentityCommand::Generate { difficulty, output: None, seed: None })
+                Ok(IdentityCommand::Generate {
+                    difficulty,
+                    output: None,
+                    seed: None,
+                })
             }
             "show" => {
                 let mut path = None;

@@ -15,8 +15,8 @@
 
 //! Test for new node identity implementation
 
-use saorsa_core::identity::{NodeId, NodeIdentity};
 use saorsa_core::Result;
+use saorsa_core::identity::{NodeId, NodeIdentity};
 
 #[test]
 fn test_node_identity_generation() -> Result<()> {
