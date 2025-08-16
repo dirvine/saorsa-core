@@ -467,6 +467,21 @@ impl DhtCoreEngine {
     }
 }
 
+// Manual Debug implementation to avoid cascade of Debug requirements
+impl std::fmt::Debug for DhtCoreEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DhtCoreEngine")
+            .field("node_id", &self.node_id)
+            .field("routing_table", &"Arc<RwLock<KademliaRoutingTable>>")
+            .field("data_store", &"Arc<RwLock<DataStore>>")
+            .field("replication_manager", &"Arc<RwLock<ReplicationManager>>")
+            .field("load_balancer", &"Arc<RwLock<LoadBalancer>>")
+            .field("witness_system", &"Arc<WitnessReceiptSystem>")
+            .field("reed_solomon", &"Arc<ReedSolomonEncoder>")
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

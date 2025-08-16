@@ -23,7 +23,7 @@ use crate::placement::{
 
 /// Core trait for placement strategies
 #[async_trait]
-pub trait PlacementStrategy: Send + Sync {
+pub trait PlacementStrategy: Send + Sync + std::fmt::Debug {
     /// Select optimal nodes for placement
     async fn select_nodes(
         &mut self,

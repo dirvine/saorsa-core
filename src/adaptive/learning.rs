@@ -863,6 +863,7 @@ impl FeatureHistory {
 }
 
 /// LSTM-based churn predictor
+#[derive(Debug)]
 pub struct ChurnPredictor {
     /// Prediction cache
     prediction_cache: Arc<tokio::sync::RwLock<HashMap<NodeId, ChurnPrediction>>>,

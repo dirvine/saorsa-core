@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// EigenTrust++ engine for reputation management
+#[derive(Debug)]
 pub struct EigenTrustEngine {
     /// Local trust scores between pairs of nodes
     local_trust: Arc<RwLock<HashMap<(NodeId, NodeId), LocalTrustData>>>,

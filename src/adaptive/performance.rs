@@ -429,6 +429,7 @@ impl ConcurrencyLimiter {
 }
 
 /// Performance monitoring and metrics
+#[derive(Debug)]
 pub struct PerformanceMonitor {
     operation_times: Arc<PLRwLock<HashMap<String, Vec<Duration>>>>,
     start_times: Arc<PLRwLock<HashMap<String, Instant>>>,

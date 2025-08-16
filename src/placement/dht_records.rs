@@ -45,6 +45,13 @@ impl From<SerializableHash> for blake3::Hash {
     }
 }
 
+impl SerializableHash {
+    /// Get the bytes of the hash
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
 impl From<[u8; 32]> for SerializableHash {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bytes)
@@ -621,7 +628,7 @@ impl DhtRecord {
     /// Serialize the record to bytes
     pub fn serialize(&self) -> P2pResult<Vec<u8>> {
         let bytes = bincode::serialize(self)
-            .map_err(|e| P2PError::SerializationError(e.to_string()))?;
+            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
 
         if bytes.len() > MAX_RECORD_SIZE {
             return Err(P2PError::RecordTooLarge(bytes.len()));
@@ -637,7 +644,7 @@ impl DhtRecord {
         }
 
         bincode::deserialize(bytes)
-            .map_err(|e| P2PError::SerializationError(e.to_string()))
+            .map_err(|e| P2PError::Serialization(e.to_string().into()))
     }
 
     /// Check if the record is still valid (not expired)
@@ -687,7 +694,7 @@ impl DhtRecord {
             let hash_value = u64::from_be_bytes(
                 hash.as_bytes()[..8]
                     .try_into()
-                    .map_err(|_| P2PError::InternalError("Hash conversion failed".to_string()))?,
+                    .map_err(|_| P2PError::Internal("Hash conversion failed".into()))?,
             );
 
             if hash_value < target_difficulty {
@@ -723,7 +730,7 @@ impl DhtRecord {
         let hash_value = u64::from_be_bytes(
             hash.as_bytes()[..8]
                 .try_into()
-                .map_err(|_| P2PError::InternalError("Hash conversion failed".to_string()))?,
+                .map_err(|_| P2PError::Internal("Hash conversion failed".into()))?,
         );
 
         Ok(hash_value < target_difficulty)
@@ -740,14 +747,14 @@ impl DhtRecord {
         record_copy.pow_nonce = None;
 
         let data_bytes = bincode::serialize(&record_copy.data)
-            .map_err(|e| P2PError::SerializationError(e.to_string()))?;
+            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
         hasher.update(&data_bytes);
 
         if let Some(nonce) = original_nonce {
             hasher.update(&nonce.to_be_bytes());
         }
 
-        Ok(hasher.finalize())
+        Ok(hasher.finalize().into())
     }
 
     /// Get the size of the serialized record
