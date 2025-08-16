@@ -1,6 +1,6 @@
 [package]
 name = "saorsa-core"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 authors = ["Saorsa Labs Limited <saorsalabs@gmail.com>"]
 license = "AGPL-3.0"
@@ -98,7 +98,7 @@ tower = { version = "0.4", features = ["util"] }
 num_cpus = "1.16"
 
 # Database dependencies for message persistence
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"] }
 
 # Media processing dependencies
 image = { version = "0.24", features = ["jpeg", "png", "webp", "gif"] }
