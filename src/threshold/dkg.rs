@@ -182,7 +182,7 @@ mod tests {
         let participants = vec![
             ParticipantInfo {
                 participant_id: ParticipantId(1),
-                public_key: MlDsaPublicKey(vec![1; 32]),
+                public_key: FrostPublicKey(vec![1; 32]),
                 frost_share_commitment: FrostCommitment(vec![1; 32]),
                 role: crate::threshold::ParticipantRole::Leader {
                     permissions: crate::threshold::LeaderPermissions::default(),
@@ -193,7 +193,7 @@ mod tests {
             },
             ParticipantInfo {
                 participant_id: ParticipantId(2),
-                public_key: MlDsaPublicKey(vec![2; 32]),
+                public_key: FrostPublicKey(vec![2; 32]),
                 frost_share_commitment: FrostCommitment(vec![2; 32]),
                 role: crate::threshold::ParticipantRole::Member {
                     permissions: crate::threshold::MemberPermissions::default(),

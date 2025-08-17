@@ -230,21 +230,39 @@ pub use threshold::{
     GroupMetadata, ParticipantInfo, ThresholdGroup, ThresholdGroupManager, ThresholdSignature,
 };
 
-// Quantum crypto exports for types used by threshold
-pub use quantum_crypto::types::{GroupId, ParticipantId};
-
-// Post-quantum cryptography exports from ant-quic integration
-pub use quantum_crypto::ant_quic_integration::{
-    create_default_pqc_config, create_pqc_only_config, generate_ml_dsa_keypair,
-    generate_ml_kem_keypair, ml_dsa_sign, ml_dsa_verify, ml_kem_encapsulate, ml_kem_decapsulate,
-    HybridPreference, PqcConfigBuilder, PqcMode,
+// Post-quantum cryptography exports (using ant-quic types exclusively)
+pub use quantum_crypto::{
+    // Core types and errors (compatibility layer only)
+    QuantumCryptoError, CryptoCapabilities, ProtocolVersion,
+    KemAlgorithm, SignatureAlgorithm, NegotiatedAlgorithms,
+    // Functions (compatibility layer only)
+    negotiate_algorithms,
 };
 
-// Re-export specific PQC types from ant-quic directly
-pub use ant_quic::crypto::pqc::{MlDsa65, MlKem768};
+// Ant-QUIC PQC exports (primary and only post-quantum crypto types)
+pub use quantum_crypto::ant_quic_integration::{
+    // Configuration
+    PqcConfig, PqcConfigBuilder, PqcMode, HybridPreference,
+    create_default_pqc_config, create_pqc_only_config,
+    
+    // ML-DSA (post-quantum signatures) from ant-quic - ONLY THESE
+    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature, MlDsa65,
+    generate_ml_dsa_keypair, ml_dsa_sign, ml_dsa_verify,
+    
+    // ML-KEM (post-quantum key encapsulation) from ant-quic - ONLY THESE
+    MlKemPublicKey, MlKemSecretKey, MlKemCiphertext, MlKem768,
+    PqcSharedSecret as SharedSecret, generate_ml_kem_keypair,
+    ml_kem_encapsulate, ml_kem_decapsulate,
+};
 
-// Re-export ant-quic PQC module for direct access
-pub use quantum_crypto::ant_quic_integration::pqc;
+// Additional quantum crypto types (from our types module for non-PQC compatibility)
+pub use quantum_crypto::types::{
+    GroupId, ParticipantId, PeerId as QuantumPeerId, SessionId,
+    QuantumPeerIdentity, SecureSession, SessionState, HandshakeParameters,
+    // Note: HybridSignature, PublicKeySet, PrivateKeySet removed to avoid conflicts with ant-quic
+    Ed25519PublicKey, Ed25519PrivateKey, Ed25519Signature,
+    FrostPublicKey, FrostGroupPublicKey, FrostKeyShare, FrostCommitment, FrostSignature,
+};
 
 // Placement system exports
 pub use placement::{

@@ -14,22 +14,30 @@
 
 use anyhow::Result;
 
-// Re-export ant-quic PQC module for applications
+// Re-export ant-quic PQC module and types for applications
 pub use ant_quic::crypto::pqc;
 
-/// Configuration builder for post-quantum cryptography
-pub type PqcConfigBuilder = pqc::PqcConfigBuilder;
+// Import PQC traits for operations
+use ant_quic::crypto::pqc::{MlDsaOperations, MlKemOperations};
 
-/// PQC mode enumeration
-pub type PqcMode = pqc::PqcMode;
+// Re-export key ant-quic PQC types from types module
+pub use ant_quic::crypto::pqc::types::{
+    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
+    MlKemPublicKey, MlKemSecretKey, MlKemCiphertext,
+    SharedSecret as PqcSharedSecret,
+};
 
-/// Hybrid preference for combining classical and post-quantum algorithms
-pub type HybridPreference = pqc::HybridPreference;
+// Re-export config types
+pub use ant_quic::crypto::pqc::{
+    PqcConfig, PqcConfigBuilder, PqcMode, HybridPreference,
+    MlDsa65, MlKem768,
+};
 
 /// Create a default PQC configuration with quantum-resistant algorithms enabled
-pub fn create_default_pqc_config() -> Result<pqc::PqcConfig> {
-    // For now, return a basic config - actual PQC API integration pending ant-quic API clarification
-    let config = PqcConfigBuilder::default()
+pub fn create_default_pqc_config() -> Result<PqcConfig> {
+    let config = PqcConfigBuilder::new()
+        .hybrid_preference(HybridPreference::PreferPqc)
+        .mode(PqcMode::Hybrid)
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build PQC config: {}", e))?;
     
@@ -37,58 +45,60 @@ pub fn create_default_pqc_config() -> Result<pqc::PqcConfig> {
 }
 
 /// Create a PQC-only configuration (no classical algorithms)
-pub fn create_pqc_only_config() -> Result<pqc::PqcConfig> {
-    // For now, return a basic config - actual PQC API integration pending ant-quic API clarification
-    let config = PqcConfigBuilder::default()
+pub fn create_pqc_only_config() -> Result<PqcConfig> {
+    let config = PqcConfigBuilder::new()
+        .hybrid_preference(HybridPreference::PreferPqc)
+        .mode(PqcMode::PqcOnly)
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build PQC-only config: {}", e))?;
     
     Ok(config)
 }
 
-/// Generate ML-DSA-65 key pair using fallback implementation
-/// Note: This is a placeholder until ant-quic's PQC API is properly accessible
-pub fn generate_ml_dsa_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
-    // Use our existing implementation as fallback
-    super::ml_dsa::generate_keypair()
-        .map_err(|e| anyhow::anyhow!("Failed to generate ML-DSA keypair: {}", e))
+/// Generate ML-DSA-65 key pair using ant-quic's implementation
+pub fn generate_ml_dsa_keypair() -> Result<(MlDsaPublicKey, MlDsaSecretKey)> {
+    let ml_dsa = MlDsa65::new();
+    let (public_key, secret_key) = ml_dsa.generate_keypair()
+        .map_err(|e| anyhow::anyhow!("Failed to generate ML-DSA keypair: {}", e))?;
+    Ok((public_key, secret_key))
 }
 
-/// Generate ML-KEM-768 key pair using fallback implementation
-/// Note: This is a placeholder until ant-quic's PQC API is properly accessible
-pub fn generate_ml_kem_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
-    // Use our existing implementation as fallback
-    super::ml_kem::generate_keypair()
-        .map_err(|e| anyhow::anyhow!("Failed to generate ML-KEM keypair: {}", e))
+/// Generate ML-KEM-768 key pair using ant-quic's implementation
+pub fn generate_ml_kem_keypair() -> Result<(MlKemPublicKey, MlKemSecretKey)> {
+    let ml_kem = MlKem768::new();
+    let (public_key, secret_key) = ml_kem.generate_keypair()
+        .map_err(|e| anyhow::anyhow!("Failed to generate ML-KEM keypair: {}", e))?;
+    Ok((public_key, secret_key))
 }
 
-/// Sign a message using ML-DSA-65
-pub fn ml_dsa_sign(private_key: &[u8], message: &[u8]) -> Result<Vec<u8>> {
-    super::ml_dsa::sign(private_key, message)
+/// Sign a message using ML-DSA-65 with ant-quic's implementation
+pub fn ml_dsa_sign(secret_key: &MlDsaSecretKey, message: &[u8]) -> Result<MlDsaSignature> {
+    let ml_dsa = MlDsa65::new();
+    ml_dsa.sign(secret_key, message)
         .map_err(|e| anyhow::anyhow!("Failed to sign with ML-DSA: {}", e))
 }
 
-/// Verify a signature using ML-DSA-65
-pub fn ml_dsa_verify(public_key: &[u8], message: &[u8], signature: &[u8]) -> Result<bool> {
-    super::ml_dsa::verify(public_key, message, signature)
-        .map(|_| true)
-        .or_else(|_| Ok(false))
+/// Verify a signature using ML-DSA-65 with ant-quic's implementation
+pub fn ml_dsa_verify(public_key: &MlDsaPublicKey, message: &[u8], signature: &MlDsaSignature) -> Result<bool> {
+    let ml_dsa = MlDsa65::new();
+    match ml_dsa.verify(public_key, message, signature) {
+        Ok(is_valid) => Ok(is_valid),
+        Err(e) => Err(anyhow::anyhow!("ML-DSA verification failed: {}", e)),
+    }
 }
 
-/// Encapsulate a shared secret using ML-KEM-768
-pub fn ml_kem_encapsulate(public_key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
-    let (ciphertext, shared_secret) = super::ml_kem::encapsulate(public_key)
-        .map_err(|e| anyhow::anyhow!("Failed to encapsulate with ML-KEM: {}", e))?;
-    
-    Ok((ciphertext, shared_secret.as_bytes().to_vec()))
+/// Encapsulate a shared secret using ML-KEM-768 with ant-quic's implementation
+pub fn ml_kem_encapsulate(public_key: &MlKemPublicKey) -> Result<(MlKemCiphertext, PqcSharedSecret)> {
+    let ml_kem = MlKem768::new();
+    ml_kem.encapsulate(public_key)
+        .map_err(|e| anyhow::anyhow!("Failed to encapsulate with ML-KEM: {}", e))
 }
 
-/// Decapsulate a shared secret using ML-KEM-768
-pub fn ml_kem_decapsulate(private_key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
-    let shared_secret = super::ml_kem::decapsulate(private_key, ciphertext)
-        .map_err(|e| anyhow::anyhow!("Failed to decapsulate with ML-KEM: {}", e))?;
-    
-    Ok(shared_secret.as_bytes().to_vec())
+/// Decapsulate a shared secret using ML-KEM-768 with ant-quic's implementation  
+pub fn ml_kem_decapsulate(secret_key: &MlKemSecretKey, ciphertext: &MlKemCiphertext) -> Result<PqcSharedSecret> {
+    let ml_kem = MlKem768::new();
+    ml_kem.decapsulate(secret_key, ciphertext)
+        .map_err(|e| anyhow::anyhow!("Failed to decapsulate with ML-KEM: {}", e))
 }
 
 #[cfg(test)]
@@ -106,37 +116,37 @@ mod tests {
 
     #[test]
     fn test_ml_dsa_roundtrip() {
-        let result = generate_ml_dsa_keypair();
-        assert!(result.is_ok(), "Should generate ML-DSA keypair");
+        let keypair = generate_ml_dsa_keypair();
+        assert!(keypair.is_ok(), "Should generate ML-DSA keypair");
 
-        let (public_key, private_key) = result.unwrap();
+        let (public_key, secret_key) = keypair.unwrap();
         let message = b"test message for ML-DSA";
 
-        let signature = ml_dsa_sign(&private_key, message);
+        let signature = ml_dsa_sign(&secret_key, message);
         assert!(signature.is_ok(), "Should sign message with ML-DSA");
 
-        let sig_bytes = signature.unwrap();
-        let verification = ml_dsa_verify(&public_key, message, &sig_bytes);
+        let sig = signature.unwrap();
+        let verification = ml_dsa_verify(&public_key, message, &sig);
         assert!(verification.is_ok(), "Should verify ML-DSA signature");
         assert!(verification.unwrap(), "Signature should be valid");
     }
 
     #[test]
     fn test_ml_kem_roundtrip() {
-        let result = generate_ml_kem_keypair();
-        assert!(result.is_ok(), "Should generate ML-KEM keypair");
+        let keypair = generate_ml_kem_keypair();
+        assert!(keypair.is_ok(), "Should generate ML-KEM keypair");
 
-        let (public_key, private_key) = result.unwrap();
+        let (public_key, secret_key) = keypair.unwrap();
 
         let encapsulation = ml_kem_encapsulate(&public_key);
         assert!(encapsulation.is_ok(), "Should encapsulate with ML-KEM");
 
         let (ciphertext, shared_secret1) = encapsulation.unwrap();
 
-        let decapsulation = ml_kem_decapsulate(&private_key, &ciphertext);
+        let decapsulation = ml_kem_decapsulate(&secret_key, &ciphertext);
         assert!(decapsulation.is_ok(), "Should decapsulate with ML-KEM");
 
         let shared_secret2 = decapsulation.unwrap();
-        assert_eq!(shared_secret1, shared_secret2, "Shared secrets should match");
+        assert_eq!(shared_secret1.0, shared_secret2.0, "Shared secrets should match");
     }
 }

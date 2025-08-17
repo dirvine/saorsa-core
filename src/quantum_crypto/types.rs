@@ -68,16 +68,20 @@ pub struct SessionId(pub [u8; 32]);
 ///
 /// Contains all cryptographic material needed for secure quantum-resistant
 /// communication including post-quantum signatures and key exchange.
+/// 
+/// NOTE: This now uses ant-quic PQC types exclusively
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuantumPeerIdentity {
     /// Unique identifier for the peer
     pub peer_id: PeerId,
 
     /// ML-DSA (FIPS 204) public key for post-quantum digital signatures
-    pub ml_dsa_public_key: MlDsaPublicKey,
+    /// Use ant-quic::crypto::pqc::types::MlDsaPublicKey
+    pub ml_dsa_public_key: Vec<u8>, // Serialized ant-quic MlDsaPublicKey
 
-    /// ML-KEM (FIPS 203) public key for quantum-safe key exchange
-    pub ml_kem_public_key: MlKemPublicKey,
+    /// ML-KEM (FIPS 203) public key for quantum-safe key exchange  
+    /// Use ant-quic::crypto::pqc::types::MlKemPublicKey
+    pub ml_kem_public_key: Vec<u8>, // Serialized ant-quic MlKemPublicKey
 
     /// Optional FROST public key for threshold operations
     pub frost_public_key: Option<FrostPublicKey>,
@@ -92,33 +96,9 @@ pub struct QuantumPeerIdentity {
     pub created_at: SystemTime,
 }
 
-/// ML-DSA public key wrapper
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MlDsaPublicKey(pub Vec<u8>);
-
-/// ML-DSA private key wrapper
-#[derive(Clone)]
-pub struct MlDsaPrivateKey(pub Vec<u8>);
-
-impl fmt::Debug for MlDsaPrivateKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("MlDsaPrivateKey").field(&"***").finish()
-    }
-}
-
-/// ML-KEM public key wrapper
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MlKemPublicKey(pub Vec<u8>);
-
-/// ML-KEM private key wrapper
-#[derive(Clone)]
-pub struct MlKemPrivateKey(pub Vec<u8>);
-
-impl fmt::Debug for MlKemPrivateKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("MlKemPrivateKey").field(&"***").finish()
-    }
-}
+// NOTE: ML-DSA and ML-KEM types removed - use ant-quic types exclusively
+// These were: MlDsaPublicKey, MlDsaPrivateKey, MlKemPublicKey, MlKemPrivateKey
+// Access these via: use saorsa_core::{MlDsaPublicKey, MlDsaSecretKey, MlKemPublicKey, MlKemSecretKey};
 
 /// FROST public key for threshold signatures
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,9 +142,7 @@ impl fmt::Debug for Ed25519PrivateKey {
     }
 }
 
-/// ML-DSA signature
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MlDsaSignature(pub Vec<u8>);
+// NOTE: MlDsaSignature removed - use ant-quic::crypto::pqc::types::MlDsaSignature
 
 /// FROST signature
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,31 +153,16 @@ pub struct FrostSignature(pub Vec<u8>);
 pub struct Ed25519Signature(#[serde(with = "serde_big_array::BigArray")] pub [u8; 64]);
 
 /// Combined signature for hybrid mode
+/// NOTE: Use ant-quic::crypto::pqc::HybridSignature instead
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSignature {
     pub classical: Ed25519Signature,
-    pub post_quantum: MlDsaSignature,
+    pub post_quantum: Vec<u8>, // Serialized ant-quic MlDsaSignature
 }
 
-/// ML-KEM ciphertext
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MlKemCiphertext(pub Vec<u8>);
+// NOTE: MlKemCiphertext removed - use ant-quic::crypto::pqc::types::MlKemCiphertext
 
-/// Shared secret derived from KEM
-#[derive(Clone)]
-pub struct SharedSecret(pub [u8; 32]);
-
-impl fmt::Debug for SharedSecret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("SharedSecret").field(&"***").finish()
-    }
-}
-
-impl SharedSecret {
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
+// NOTE: SharedSecret removed - use ant-quic::crypto::pqc::types::SharedSecret
 
 /// Quantum-safe secure session
 #[derive(Debug)]
@@ -263,41 +226,10 @@ pub enum KeyPurpose {
     KeyWrapping,
 }
 
-/// Set of public keys for hybrid cryptography
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PublicKeySet {
-    /// Ed25519 public key for classical signatures
-    pub ed25519: Option<Ed25519PublicKey>,
-    /// ML-DSA public key for post-quantum signatures
-    pub ml_dsa: Option<MlDsaPublicKey>,
-    /// ML-KEM public key for quantum-safe key exchange
-    pub ml_kem: Option<MlKemPublicKey>,
-    /// FROST public key for threshold operations
-    pub frost: Option<FrostPublicKey>,
-}
-
-/// Set of private keys for hybrid cryptography
-pub struct PrivateKeySet {
-    /// Ed25519 private key for classical signatures
-    pub ed25519: Option<Ed25519PrivateKey>,
-    /// ML-DSA private key for post-quantum signatures
-    pub ml_dsa: Option<MlDsaPrivateKey>,
-    /// ML-KEM private key for quantum-safe key exchange
-    pub ml_kem: Option<MlKemPrivateKey>,
-    /// FROST key share for threshold operations
-    pub frost: Option<FrostKeyShare>,
-}
-
-impl fmt::Debug for PrivateKeySet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PrivateKeySet")
-            .field("ed25519", &self.ed25519.as_ref().map(|_| "***"))
-            .field("ml_dsa", &self.ml_dsa.as_ref().map(|_| "***"))
-            .field("ml_kem", &self.ml_kem.as_ref().map(|_| "***"))
-            .field("frost", &self.frost.as_ref().map(|_| "***"))
-            .finish()
-    }
-}
+// NOTE: PublicKeySet and PrivateKeySet removed to avoid conflicts with ant-quic
+// Use ant-quic PQC types directly: MlDsaPublicKey, MlDsaSecretKey, MlKemPublicKey, MlKemSecretKey
+// For classical keys, use Ed25519PublicKey, Ed25519PrivateKey from this module
+// For threshold keys, use FrostPublicKey, FrostKeyShare from this module
 
 #[cfg(test)]
 mod tests {
@@ -311,7 +243,8 @@ mod tests {
 
     #[test]
     fn test_sensitive_debug() -> Result<(), Box<dyn std::error::Error>> {
-        let private_key = MlDsaPrivateKey(vec![0x42; 32]);
+        // Test with Ed25519PrivateKey since ML-DSA types are now from ant-quic
+        let private_key = Ed25519PrivateKey([0x42; 64]);
         let debug_str: String = format!("{:?}", private_key);
         assert!(!debug_str.contains("0x42"));
         assert!(debug_str.contains("***"));

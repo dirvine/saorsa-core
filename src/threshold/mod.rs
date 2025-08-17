@@ -108,8 +108,8 @@ pub struct ParticipantInfo {
     /// Unique participant identifier
     pub participant_id: ParticipantId,
 
-    /// ML-DSA public key for authentication
-    pub public_key: MlDsaPublicKey,
+    /// ML-DSA public key for authentication (serialized ant-quic type)
+    pub public_key: Vec<u8>, // Serialized ant_quic::crypto::pqc::types::MlDsaPublicKey
 
     /// FROST share commitment
     pub frost_share_commitment: FrostCommitment,
@@ -341,7 +341,7 @@ pub struct PendingOperation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParticipantApproval {
     pub participant_id: ParticipantId,
-    pub signature: MlDsaSignature,
+    pub signature: Vec<u8>, // Serialized ant_quic::crypto::pqc::types::MlDsaSignature
     pub timestamp: SystemTime,
 }
 
@@ -350,7 +350,7 @@ pub struct ParticipantApproval {
 pub struct ParticipantRejection {
     pub participant_id: ParticipantId,
     pub reason: String,
-    pub signature: MlDsaSignature,
+    pub signature: Vec<u8>, // Serialized ant_quic::crypto::pqc::types::MlDsaSignature
     pub timestamp: SystemTime,
 }
 
