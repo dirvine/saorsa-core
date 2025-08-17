@@ -34,6 +34,21 @@ pub use self::types::{
     FrostPublicKey, FrostGroupPublicKey, FrostKeyShare, FrostCommitment, FrostSignature,
 };
 
+// Re-export all ant-quic PQC functions for convenience
+pub use self::ant_quic_integration::{
+    // Configuration functions
+    create_default_pqc_config, create_pqc_only_config,
+    // ML-DSA functions
+    generate_ml_dsa_keypair, ml_dsa_sign, ml_dsa_verify,
+    // ML-KEM functions  
+    generate_ml_kem_keypair, ml_kem_encapsulate, ml_kem_decapsulate,
+    // Hybrid functions
+    generate_hybrid_kem_keypair, hybrid_kem_encapsulate, hybrid_kem_decapsulate,
+    generate_hybrid_signature_keypair, hybrid_sign, hybrid_verify,
+    // Performance optimization
+    create_pqc_memory_pool,
+};
+
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

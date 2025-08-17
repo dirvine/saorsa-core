@@ -17,20 +17,33 @@ use anyhow::Result;
 // Re-export ant-quic PQC module and types for applications
 pub use ant_quic::crypto::pqc;
 
-// Import PQC traits for operations
-use ant_quic::crypto::pqc::{MlDsaOperations, MlKemOperations};
-
 // Re-export key ant-quic PQC types from types module
 pub use ant_quic::crypto::pqc::types::{
     MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
     MlKemPublicKey, MlKemSecretKey, MlKemCiphertext,
     SharedSecret as PqcSharedSecret,
+    // Hybrid types for combined classical + post-quantum crypto
+    HybridKemCiphertext, HybridKemPublicKey, HybridKemSecretKey,
+    HybridSignaturePublicKey, HybridSignatureSecretKey, HybridSignatureValue,
+    // Error and result types
+    PqcError, PqcResult,
 };
 
-// Re-export config types
+// Re-export config types and algorithm implementations
 pub use ant_quic::crypto::pqc::{
     PqcConfig, PqcConfigBuilder, PqcMode, HybridPreference,
     MlDsa65, MlKem768,
+    // Additional enums and types
+    NamedGroup, SignatureScheme,
+    // Hybrid implementations
+    HybridKem, HybridSignature,
+    // Memory pool types for performance
+    PoolConfig, PqcMemoryPool,
+};
+
+// Re-export PQC traits for advanced users
+pub use ant_quic::crypto::pqc::{
+    MlDsaOperations, MlKemOperations, PqcProvider,
 };
 
 /// Create a default PQC configuration with quantum-resistant algorithms enabled
@@ -101,6 +114,55 @@ pub fn ml_kem_decapsulate(secret_key: &MlKemSecretKey, ciphertext: &MlKemCiphert
         .map_err(|e| anyhow::anyhow!("Failed to decapsulate with ML-KEM: {}", e))
 }
 
+/// Generate hybrid KEM key pair combining classical and post-quantum algorithms
+pub fn generate_hybrid_kem_keypair() -> Result<(HybridKemPublicKey, HybridKemSecretKey)> {
+    let hybrid_kem = HybridKem::new();
+    hybrid_kem.generate_keypair()
+        .map_err(|e| anyhow::anyhow!("Failed to generate hybrid KEM keypair: {}", e))
+}
+
+/// Encapsulate using hybrid KEM (classical + post-quantum)
+pub fn hybrid_kem_encapsulate(public_key: &HybridKemPublicKey) -> Result<(HybridKemCiphertext, PqcSharedSecret)> {
+    let hybrid_kem = HybridKem::new();
+    hybrid_kem.encapsulate(public_key)
+        .map_err(|e| anyhow::anyhow!("Failed to encapsulate with hybrid KEM: {}", e))
+}
+
+/// Decapsulate using hybrid KEM (classical + post-quantum)
+pub fn hybrid_kem_decapsulate(secret_key: &HybridKemSecretKey, ciphertext: &HybridKemCiphertext) -> Result<PqcSharedSecret> {
+    let hybrid_kem = HybridKem::new();
+    hybrid_kem.decapsulate(secret_key, ciphertext)
+        .map_err(|e| anyhow::anyhow!("Failed to decapsulate with hybrid KEM: {}", e))
+}
+
+/// Generate hybrid signature key pair combining classical and post-quantum signatures
+pub fn generate_hybrid_signature_keypair() -> Result<(HybridSignaturePublicKey, HybridSignatureSecretKey)> {
+    let hybrid_sig = HybridSignature::new();
+    hybrid_sig.generate_keypair()
+        .map_err(|e| anyhow::anyhow!("Failed to generate hybrid signature keypair: {}", e))
+}
+
+/// Sign using hybrid signatures (classical + post-quantum)
+pub fn hybrid_sign(secret_key: &HybridSignatureSecretKey, message: &[u8]) -> Result<HybridSignatureValue> {
+    let hybrid_sig = HybridSignature::new();
+    hybrid_sig.sign(secret_key, message)
+        .map_err(|e| anyhow::anyhow!("Failed to sign with hybrid signature: {}", e))
+}
+
+/// Verify hybrid signature (classical + post-quantum)
+pub fn hybrid_verify(public_key: &HybridSignaturePublicKey, message: &[u8], signature: &HybridSignatureValue) -> Result<bool> {
+    let hybrid_sig = HybridSignature::new();
+    match hybrid_sig.verify(public_key, message, signature) {
+        Ok(is_valid) => Ok(is_valid),
+        Err(e) => Err(anyhow::anyhow!("Hybrid signature verification failed: {}", e)),
+    }
+}
+
+/// Create a PQC memory pool for performance optimization
+pub fn create_pqc_memory_pool(config: PoolConfig) -> Result<PqcMemoryPool> {
+    Ok(PqcMemoryPool::new(config))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,5 +210,48 @@ mod tests {
 
         let shared_secret2 = decapsulation.unwrap();
         assert_eq!(shared_secret1.0, shared_secret2.0, "Shared secrets should match");
+    }
+
+    #[test]
+    fn test_hybrid_kem_roundtrip() {
+        let keypair = generate_hybrid_kem_keypair();
+        assert!(keypair.is_ok(), "Should generate hybrid KEM keypair");
+
+        let (public_key, secret_key) = keypair.unwrap();
+
+        let encapsulation = hybrid_kem_encapsulate(&public_key);
+        assert!(encapsulation.is_ok(), "Should encapsulate with hybrid KEM");
+
+        let (ciphertext, shared_secret1) = encapsulation.unwrap();
+
+        let decapsulation = hybrid_kem_decapsulate(&secret_key, &ciphertext);
+        assert!(decapsulation.is_ok(), "Should decapsulate with hybrid KEM");
+
+        let shared_secret2 = decapsulation.unwrap();
+        assert_eq!(shared_secret1.0, shared_secret2.0, "Hybrid shared secrets should match");
+    }
+
+    #[test]
+    fn test_hybrid_signature_roundtrip() {
+        let keypair = generate_hybrid_signature_keypair();
+        assert!(keypair.is_ok(), "Should generate hybrid signature keypair");
+
+        let (public_key, secret_key) = keypair.unwrap();
+        let message = b"test message for hybrid signatures";
+
+        let signature = hybrid_sign(&secret_key, message);
+        assert!(signature.is_ok(), "Should sign message with hybrid signature");
+
+        let sig = signature.unwrap();
+        let verification = hybrid_verify(&public_key, message, &sig);
+        assert!(verification.is_ok(), "Should verify hybrid signature");
+        assert!(verification.unwrap(), "Hybrid signature should be valid");
+    }
+
+    #[test]
+    fn test_pqc_memory_pool_creation() {
+        let pool_config = PoolConfig::default();
+        let pool = create_pqc_memory_pool(pool_config);
+        assert!(pool.is_ok(), "Should create PQC memory pool");
     }
 }
