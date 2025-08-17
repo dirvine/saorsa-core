@@ -47,7 +47,8 @@ jobs:
           libpulse-dev \
           libdbus-1-dev \
           portaudio19-dev \
-          build-essential
+          build-essential \
+          protobuf-compiler
 
     - name: Check formatting
       run: cargo fmt --all -- --check
@@ -99,7 +100,8 @@ jobs:
           libpulse-dev \
           libdbus-1-dev \
           portaudio19-dev \
-          build-essential
+          build-essential \
+          protobuf-compiler
 
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
@@ -131,7 +133,8 @@ jobs:
           libpulse-dev \
           libdbus-1-dev \
           portaudio19-dev \
-          build-essential
+          build-essential \
+          protobuf-compiler
 
     - name: Cache cargo
       uses: actions/cache@v4
@@ -161,6 +164,7 @@ jobs:
           libpulse-dev \
           libdbus-1-dev \
           portaudio19-dev \
-          build-essential
+          build-essential \
+          protobuf-compiler
     - run: cargo update -Z minimal-versions
     - run: cargo check --all-features
