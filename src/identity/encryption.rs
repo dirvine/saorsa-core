@@ -24,13 +24,11 @@ use argon2::{
     Algorithm, Argon2, Params, Version,
     password_hash::{PasswordHasher, SaltString, rand_core::RngCore},
 };
-use saorsa_pqc::{
-    ChaCha20Poly1305Cipher, SymmetricKey, SymmetricEncryptedMessage,
-};
+use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricEncryptedMessage, SymmetricKey};
 // TODO: Replace with saorsa-pqc HKDF once correct import path is found
 use hkdf::Hkdf;
-use sha2::Sha256;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 
 /// Size of ChaCha20Poly1305 key in bytes
 const CHACHA_KEY_SIZE: usize = 32;
@@ -93,21 +91,26 @@ pub fn decrypt_with_device_password(
 
     // Decrypt data
     let cipher = ChaCha20Poly1305Cipher::new(&symmetric_key);
-    let plaintext = cipher.decrypt(
-        &encrypted.encrypted_message.ciphertext,
-        &encrypted.encrypted_message.nonce,
-        None
-    ).map_err(|e| {
-        P2PError::Security(SecurityError::DecryptionFailed(
-            format!("ChaCha20Poly1305 decryption failed: {:?}", e).into(),
-        ))
-    })?;
+    let plaintext = cipher
+        .decrypt(
+            &encrypted.encrypted_message.ciphertext,
+            &encrypted.encrypted_message.nonce,
+            None,
+        )
+        .map_err(|e| {
+            P2PError::Security(SecurityError::DecryptionFailed(
+                format!("ChaCha20Poly1305 decryption failed: {:?}", e).into(),
+            ))
+        })?;
 
     Ok(plaintext)
 }
 
 /// Derive a ChaCha20Poly1305 key from a password using Argon2id
-fn derive_key_from_password(password: &str, salt: &[u8; SALT_SIZE]) -> Result<[u8; CHACHA_KEY_SIZE]> {
+fn derive_key_from_password(
+    password: &str,
+    salt: &[u8; SALT_SIZE],
+) -> Result<[u8; CHACHA_KEY_SIZE]> {
     // Configure Argon2id
     let argon2 = Argon2::new(
         Algorithm::Argon2id,
@@ -170,7 +173,7 @@ pub fn encrypt_with_shared_secret(
     let mut rng = rand::thread_rng();
     rng.fill_bytes(&mut salt);
 
-    // TODO: Use saorsa-pqc HKDF-SHA3 when available  
+    // TODO: Use saorsa-pqc HKDF-SHA3 when available
     let hkdf = Hkdf::<Sha256>::new(Some(&salt), shared_secret);
     let mut key_bytes = [0u8; CHACHA_KEY_SIZE];
     hkdf.expand(info, &mut key_bytes).map_err(|e| {
@@ -203,7 +206,7 @@ pub fn decrypt_with_shared_secret(
     shared_secret: &[u8; 32],
     info: &[u8],
 ) -> Result<Vec<u8>> {
-    // TODO: Use saorsa-pqc HKDF-SHA3 when available  
+    // TODO: Use saorsa-pqc HKDF-SHA3 when available
     let hkdf = Hkdf::<Sha256>::new(Some(&encrypted.salt), shared_secret);
     let mut key_bytes = [0u8; CHACHA_KEY_SIZE];
     hkdf.expand(info, &mut key_bytes).map_err(|e| {
@@ -216,15 +219,17 @@ pub fn decrypt_with_shared_secret(
 
     // Decrypt data
     let cipher = ChaCha20Poly1305Cipher::new(&symmetric_key);
-    let plaintext = cipher.decrypt(
-        &encrypted.encrypted_message.ciphertext,
-        &encrypted.encrypted_message.nonce,
-        None
-    ).map_err(|e| {
-        P2PError::Security(SecurityError::DecryptionFailed(
-            format!("ChaCha20Poly1305 decryption failed: {:?}", e).into(),
-        ))
-    })?;
+    let plaintext = cipher
+        .decrypt(
+            &encrypted.encrypted_message.ciphertext,
+            &encrypted.encrypted_message.nonce,
+            None,
+        )
+        .map_err(|e| {
+            P2PError::Security(SecurityError::DecryptionFailed(
+                format!("ChaCha20Poly1305 decryption failed: {:?}", e).into(),
+            ))
+        })?;
 
     Ok(plaintext)
 }

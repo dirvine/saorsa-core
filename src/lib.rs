@@ -232,9 +232,13 @@ pub use threshold::{
 
 // Post-quantum cryptography exports (using ant-quic types exclusively)
 pub use quantum_crypto::{
+    CryptoCapabilities,
+    KemAlgorithm,
+    NegotiatedAlgorithms,
+    ProtocolVersion,
     // Core types and errors (compatibility layer only)
-    QuantumCryptoError, CryptoCapabilities, ProtocolVersion,
-    KemAlgorithm, SignatureAlgorithm, NegotiatedAlgorithms,
+    QuantumCryptoError,
+    SignatureAlgorithm,
     // Functions (compatibility layer only)
     negotiate_algorithms,
 };
