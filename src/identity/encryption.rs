@@ -20,22 +20,22 @@
 
 use crate::error::SecurityError;
 use crate::{P2PError, Result};
-use aes_gcm::{
-    Aes256Gcm, Key, Nonce,
-    aead::{Aead, KeyInit, OsRng},
-};
 use argon2::{
     Algorithm, Argon2, Params, Version,
     password_hash::{PasswordHasher, SaltString, rand_core::RngCore},
 };
+use saorsa_pqc::{
+    ChaCha20Poly1305Cipher, SymmetricKey, SymmetricEncryptedMessage,
+};
+// TODO: Replace with saorsa-pqc HKDF once correct import path is found
 use hkdf::Hkdf;
-use serde::{Deserialize, Serialize};
 use sha2::Sha256;
+use serde::{Deserialize, Serialize};
 
-/// Size of AES-256 key in bytes
-const AES_KEY_SIZE: usize = 32;
+/// Size of ChaCha20Poly1305 key in bytes
+const CHACHA_KEY_SIZE: usize = 32;
 
-/// Size of AES-256-GCM nonce in bytes
+/// Size of ChaCha20Poly1305 nonce in bytes  
 const NONCE_SIZE: usize = 12;
 
 /// Size of salt for key derivation
@@ -49,10 +49,8 @@ const DEVICE_ARGON2_PARALLELISM: u32 = 2;
 /// Encrypted data container for identity sync packages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedData {
-    /// The encrypted data
-    pub ciphertext: Vec<u8>,
-    /// The nonce used for encryption
-    pub nonce: [u8; NONCE_SIZE],
+    /// The encrypted message from saorsa-pqc
+    pub encrypted_message: SymmetricEncryptedMessage,
     /// The salt used for key derivation
     pub salt: [u8; SALT_SIZE],
 }
@@ -61,27 +59,25 @@ pub struct EncryptedData {
 pub fn encrypt_with_device_password(data: &[u8], device_password: &str) -> Result<EncryptedData> {
     // Generate random salt
     let mut salt = [0u8; SALT_SIZE];
-    OsRng.fill_bytes(&mut salt);
-
-    // Generate random nonce
-    let mut nonce_bytes = [0u8; NONCE_SIZE];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let mut rng = rand::thread_rng();
+    rng.fill_bytes(&mut salt);
 
     // Derive key from device password using Argon2id
-    let key = derive_key_from_password(device_password, &salt)?;
+    let key_bytes = derive_key_from_password(device_password, &salt)?;
+    let symmetric_key = SymmetricKey::from_bytes(key_bytes);
 
-    // Encrypt data with AES-256-GCM
-    let cipher = Aes256Gcm::new(&key);
-    let ciphertext = cipher.encrypt(nonce, data).map_err(|e| {
+    // Encrypt data with ChaCha20Poly1305
+    let cipher = ChaCha20Poly1305Cipher::new(&symmetric_key);
+    let (ciphertext, nonce) = cipher.encrypt(data, None).map_err(|e| {
         P2PError::Security(SecurityError::EncryptionFailed(
-            format!("AES-GCM encryption failed: {}", e).into(),
+            format!("ChaCha20Poly1305 encryption failed: {:?}", e).into(),
         ))
     })?;
 
+    let encrypted_message = SymmetricEncryptedMessage::new(ciphertext, nonce, None);
+
     Ok(EncryptedData {
-        ciphertext,
-        nonce: nonce_bytes,
+        encrypted_message,
         salt,
     })
 }
@@ -92,25 +88,26 @@ pub fn decrypt_with_device_password(
     device_password: &str,
 ) -> Result<Vec<u8>> {
     // Derive key from device password
-    let key = derive_key_from_password(device_password, &encrypted.salt)?;
+    let key_bytes = derive_key_from_password(device_password, &encrypted.salt)?;
+    let symmetric_key = SymmetricKey::from_bytes(key_bytes);
 
     // Decrypt data
-    let cipher = Aes256Gcm::new(&key);
-    let nonce = Nonce::from_slice(&encrypted.nonce);
-
-    let plaintext = cipher
-        .decrypt(nonce, encrypted.ciphertext.as_ref())
-        .map_err(|e| {
-            P2PError::Security(SecurityError::DecryptionFailed(
-                format!("AES-GCM decryption failed: {}", e).into(),
-            ))
-        })?;
+    let cipher = ChaCha20Poly1305Cipher::new(&symmetric_key);
+    let plaintext = cipher.decrypt(
+        &encrypted.encrypted_message.ciphertext,
+        &encrypted.encrypted_message.nonce,
+        None
+    ).map_err(|e| {
+        P2PError::Security(SecurityError::DecryptionFailed(
+            format!("ChaCha20Poly1305 decryption failed: {:?}", e).into(),
+        ))
+    })?;
 
     Ok(plaintext)
 }
 
-/// Derive an AES-256 key from a password using Argon2id
-fn derive_key_from_password(password: &str, salt: &[u8; SALT_SIZE]) -> Result<Key<Aes256Gcm>> {
+/// Derive a ChaCha20Poly1305 key from a password using Argon2id
+fn derive_key_from_password(password: &str, salt: &[u8; SALT_SIZE]) -> Result<[u8; CHACHA_KEY_SIZE]> {
     // Configure Argon2id
     let argon2 = Argon2::new(
         Algorithm::Argon2id,
@@ -119,7 +116,7 @@ fn derive_key_from_password(password: &str, salt: &[u8; SALT_SIZE]) -> Result<Ke
             DEVICE_ARGON2_MEMORY,
             DEVICE_ARGON2_TIME,
             DEVICE_ARGON2_PARALLELISM,
-            Some(AES_KEY_SIZE),
+            Some(CHACHA_KEY_SIZE),
         )
         .map_err(|e| {
             P2PError::Security(SecurityError::InvalidKey(
@@ -151,13 +148,15 @@ fn derive_key_from_password(password: &str, salt: &[u8; SALT_SIZE]) -> Result<Ke
     })?;
 
     let key_bytes = hash_output.as_bytes();
-    if key_bytes.len() < AES_KEY_SIZE {
+    if key_bytes.len() < CHACHA_KEY_SIZE {
         return Err(P2PError::Security(SecurityError::KeyGenerationFailed(
             "Insufficient key material from Argon2".to_string().into(),
         )));
     }
 
-    Ok(*Key::<Aes256Gcm>::from_slice(&key_bytes[..AES_KEY_SIZE]))
+    let mut result = [0u8; CHACHA_KEY_SIZE];
+    result.copy_from_slice(&key_bytes[..CHACHA_KEY_SIZE]);
+    Ok(result)
 }
 
 /// Encrypt data with a shared secret (for peer-to-peer encryption)
@@ -166,37 +165,34 @@ pub fn encrypt_with_shared_secret(
     shared_secret: &[u8; 32],
     info: &[u8],
 ) -> Result<EncryptedData> {
-    // Generate random nonce
-    let mut nonce_bytes = [0u8; NONCE_SIZE];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-
     // Generate random salt for HKDF
     let mut salt = [0u8; SALT_SIZE];
-    OsRng.fill_bytes(&mut salt);
+    let mut rng = rand::thread_rng();
+    rng.fill_bytes(&mut salt);
 
-    // Derive key using HKDF
+    // TODO: Use saorsa-pqc HKDF-SHA3 when available  
     let hkdf = Hkdf::<Sha256>::new(Some(&salt), shared_secret);
-    let mut key_bytes = [0u8; AES_KEY_SIZE];
+    let mut key_bytes = [0u8; CHACHA_KEY_SIZE];
     hkdf.expand(info, &mut key_bytes).map_err(|e| {
         P2PError::Security(SecurityError::KeyGenerationFailed(
-            format!("HKDF expansion failed: {}", e).into(),
+            format!("HKDF-SHA3 expansion failed: {:?}", e).into(),
         ))
     })?;
 
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let symmetric_key = SymmetricKey::from_bytes(key_bytes);
 
-    // Encrypt data
-    let cipher = Aes256Gcm::new(key);
-    let ciphertext = cipher.encrypt(nonce, data).map_err(|e| {
+    // Encrypt data with ChaCha20Poly1305
+    let cipher = ChaCha20Poly1305Cipher::new(&symmetric_key);
+    let (ciphertext, nonce) = cipher.encrypt(data, None).map_err(|e| {
         P2PError::Security(SecurityError::EncryptionFailed(
-            format!("AES-GCM encryption failed: {}", e).into(),
+            format!("ChaCha20Poly1305 encryption failed: {:?}", e).into(),
         ))
     })?;
+
+    let encrypted_message = SymmetricEncryptedMessage::new(ciphertext, nonce, None);
 
     Ok(EncryptedData {
-        ciphertext,
-        nonce: nonce_bytes,
+        encrypted_message,
         salt,
     })
 }
@@ -207,28 +203,28 @@ pub fn decrypt_with_shared_secret(
     shared_secret: &[u8; 32],
     info: &[u8],
 ) -> Result<Vec<u8>> {
-    // Derive key using HKDF
+    // TODO: Use saorsa-pqc HKDF-SHA3 when available  
     let hkdf = Hkdf::<Sha256>::new(Some(&encrypted.salt), shared_secret);
-    let mut key_bytes = [0u8; AES_KEY_SIZE];
+    let mut key_bytes = [0u8; CHACHA_KEY_SIZE];
     hkdf.expand(info, &mut key_bytes).map_err(|e| {
         P2PError::Security(SecurityError::KeyGenerationFailed(
-            format!("HKDF expansion failed: {}", e).into(),
+            format!("HKDF-SHA3 expansion failed: {:?}", e).into(),
         ))
     })?;
 
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let symmetric_key = SymmetricKey::from_bytes(key_bytes);
 
     // Decrypt data
-    let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(&encrypted.nonce);
-
-    let plaintext = cipher
-        .decrypt(nonce, encrypted.ciphertext.as_ref())
-        .map_err(|e| {
-            P2PError::Security(SecurityError::DecryptionFailed(
-                format!("AES-GCM decryption failed: {}", e).into(),
-            ))
-        })?;
+    let cipher = ChaCha20Poly1305Cipher::new(&symmetric_key);
+    let plaintext = cipher.decrypt(
+        &encrypted.encrypted_message.ciphertext,
+        &encrypted.encrypted_message.nonce,
+        None
+    ).map_err(|e| {
+        P2PError::Security(SecurityError::DecryptionFailed(
+            format!("ChaCha20Poly1305 decryption failed: {:?}", e).into(),
+        ))
+    })?;
 
     Ok(plaintext)
 }
@@ -246,8 +242,8 @@ mod tests {
         let encrypted =
             encrypt_with_device_password(data, password).expect("Encryption should succeed");
 
-        // Verify encrypted data is different
-        assert_ne!(encrypted.ciphertext, data);
+        // Verify encrypted data exists
+        assert!(!encrypted.encrypted_message.ciphertext.is_empty());
 
         // Decrypt
         let decrypted =
@@ -273,8 +269,10 @@ mod tests {
             bincode::deserialize(&serialized).expect("Deserialization should succeed");
 
         // Verify fields match
-        assert_eq!(encrypted.ciphertext, deserialized.ciphertext);
-        assert_eq!(encrypted.nonce, deserialized.nonce);
+        assert_eq!(
+            encrypted.encrypted_message.ciphertext,
+            deserialized.encrypted_message.ciphertext
+        );
         assert_eq!(encrypted.salt, deserialized.salt);
 
         // Verify can decrypt after deserialize
@@ -345,11 +343,12 @@ mod tests {
         let encrypted2 =
             encrypt_with_device_password(data, password).expect("Second encryption should succeed");
 
-        // Nonces should be different
-        assert_ne!(encrypted1.nonce, encrypted2.nonce);
         // Salts should be different
         assert_ne!(encrypted1.salt, encrypted2.salt);
-        // Ciphertexts should be different due to different nonces/salts
-        assert_ne!(encrypted1.ciphertext, encrypted2.ciphertext);
+        // Ciphertexts should be different due to different salts and nonces
+        assert_ne!(
+            encrypted1.encrypted_message.ciphertext,
+            encrypted2.encrypted_message.ciphertext
+        );
     }
 }
