@@ -33,8 +33,6 @@ use sha2::Sha256;
 /// Size of ChaCha20Poly1305 key in bytes
 const CHACHA_KEY_SIZE: usize = 32;
 
-/// Size of ChaCha20Poly1305 nonce in bytes  
-const NONCE_SIZE: usize = 12;
 
 /// Size of salt for key derivation
 const SALT_SIZE: usize = 32;
