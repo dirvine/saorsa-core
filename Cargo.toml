@@ -103,7 +103,7 @@ tower = { version = "0.4", features = ["util"] }
 num_cpus = "1.16"
 
 # Database dependencies for message persistence
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"], default-features = false }
 
 # Media processing dependencies
 image = { version = "0.24", features = ["jpeg", "png", "webp", "gif"] }
@@ -111,17 +111,17 @@ blurhash = "0.2"
 symphonia = { version = "0.5", features = ["all"] }
 rodio = { version = "0.17", features = ["symphonia"] }
 
-# WebRTC dependencies for voice/video calling
-webrtc = "0.11"
-webrtc-ice = "0.10"
-webrtc-media = "0.7"
-webrtc-sctp = "0.9"
-webrtc-srtp = "0.13"
-webrtc-dtls = "0.8"
-webrtc-data = "0.8"
-interceptor = "0.10"
-rtcp = "0.11"
-rtp = "0.11"
+# WebRTC dependencies for voice/video calling - updated for security
+webrtc = "0.13"
+webrtc-ice = "0.13"
+webrtc-media = "0.10"
+webrtc-sctp = "0.12"
+webrtc-srtp = "0.15"
+webrtc-dtls = "0.12"
+webrtc-data = "0.11"
+interceptor = "0.14"
+rtcp = "0.13"
+rtp = "0.13"
 
 # CLI dependencies (needed for identity CLI types used in tests)
 clap = { version = "4.4", features = ["derive"] }
