@@ -164,13 +164,13 @@ impl HybridSigner {
     /// Verify hybrid signature
     #[deprecated(note = "Use ant-quic PQC verify functions directly")]
     pub fn verify_hybrid(
-        _public_keys: &(),  // Placeholder - use ant-quic PQC types directly
+        _public_keys: &(), // Placeholder - use ant-quic PQC types directly
         _message: &[u8],
         _signature: &HybridSignature,
     ) -> Result<()> {
         // NOTE: This method is deprecated - use ant-quic PQC verify functions directly
         Err(QuantumCryptoError::UnsupportedAlgorithm(
-            "verify_hybrid is deprecated - use ant-quic PQC verify functions directly".to_string()
+            "verify_hybrid is deprecated - use ant-quic PQC verify functions directly".to_string(),
         ))
     }
 }
@@ -182,15 +182,13 @@ pub mod migration {
 
     /// Upgrade Ed25519 identity to hybrid
     #[deprecated(note = "Use ant-quic PQC functions directly")]
-    pub fn upgrade_ed25519_identity(
-        _ed25519_public: &[u8],
-        _ed25519_private: &[u8],
-    ) -> Result<()> {
+    pub fn upgrade_ed25519_identity(_ed25519_public: &[u8], _ed25519_private: &[u8]) -> Result<()> {
         // NOTE: This method is deprecated - use ant-quic PQC functions directly:
         // - generate_ml_dsa_keypair() -> (MlDsaPublicKey, MlDsaSecretKey)
         // - generate_ml_kem_keypair() -> (MlKemPublicKey, MlKemSecretKey)
         Err(QuantumCryptoError::UnsupportedAlgorithm(
-            "upgrade_ed25519_identity is deprecated - use ant-quic PQC functions directly".to_string()
+            "upgrade_ed25519_identity is deprecated - use ant-quic PQC functions directly"
+                .to_string(),
         ))
     }
 
@@ -229,22 +227,22 @@ mod tests {
         // NOTE: Test deprecated - ML-KEM state is now placeholder
         // Use ant-quic PQC functions directly for key exchange:
         // - generate_ml_kem_keypair(), ml_kem_encapsulate(), ml_kem_decapsulate()
-        
+
         #[allow(deprecated)]
         let mut alice = HybridKeyExchange::new();
         #[allow(deprecated)]
         let mut bob = HybridKeyExchange::new();
-        
+
         // Generate placeholder keys
         let _alice_x25519_public = alice.generate_x25519_keypair().unwrap();
         let _bob_x25519_public = bob.generate_x25519_keypair().unwrap();
-        
+
         // Test that deprecated methods return placeholder values
         #[allow(deprecated)]
         let alice_secret = alice.derive_hybrid_secret().unwrap();
         #[allow(deprecated)]
         let bob_secret = bob.derive_hybrid_secret().unwrap();
-        
+
         assert_eq!(alice_secret, bob_secret); // Both return [0u8; 32]
     }
 

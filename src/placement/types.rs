@@ -687,7 +687,7 @@ mod tests {
     fn test_placement_decision() {
         let nodes = vec![
             crate::peer_record::UserId::from_bytes([1u8; 32]),
-            crate::peer_record::UserId::from_bytes([2u8; 32])
+            crate::peer_record::UserId::from_bytes([2u8; 32]),
         ];
 
         let decision = PlacementDecision::new(nodes.clone(), "test_strategy".to_string())
@@ -708,7 +708,10 @@ mod tests {
         let mut metrics = PlacementMetrics::new();
         assert_eq!(metrics.success_rate(), 0.0);
 
-        let decision = PlacementDecision::new(vec![crate::peer_record::UserId::from_bytes([1u8; 32])], "test".to_string());
+        let decision = PlacementDecision::new(
+            vec![crate::peer_record::UserId::from_bytes([1u8; 32])],
+            "test".to_string(),
+        );
 
         metrics.record_success(&decision, NetworkRegion::NorthAmerica);
         assert_eq!(metrics.success_rate(), 1.0);

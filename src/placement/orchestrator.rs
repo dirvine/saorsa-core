@@ -466,9 +466,10 @@ impl RepairSystem {
 
         for shard_id in shards_needing_repair {
             if self.should_repair_shard(&shard_id).await?
-                && let Err(e) = self.initiate_repair(&shard_id).await {
-                    tracing::error!("Failed to repair shard {}: {}", shard_id, e);
-                }
+                && let Err(e) = self.initiate_repair(&shard_id).await
+            {
+                tracing::error!("Failed to repair shard {}: {}", shard_id, e);
+            }
         }
 
         Ok(())
@@ -485,9 +486,10 @@ impl RepairSystem {
         // Check cooldown
         let active_repairs = self.active_repairs.read().await;
         if let Some(last_repair) = active_repairs.get(shard_id)
-            && last_repair.elapsed() < self.repair_cooldown {
-                return Ok(false);
-            }
+            && last_repair.elapsed() < self.repair_cooldown
+        {
+            return Ok(false);
+        }
 
         // Mock availability check
         let availability = 0.6; // Simulated low availability

@@ -232,40 +232,60 @@ pub use threshold::{
 
 // Post-quantum cryptography exports (using ant-quic types exclusively)
 pub use quantum_crypto::{
+    CryptoCapabilities,
+    KemAlgorithm,
+    NegotiatedAlgorithms,
+    ProtocolVersion,
     // Core types and errors (compatibility layer only)
-    QuantumCryptoError, CryptoCapabilities, ProtocolVersion,
-    KemAlgorithm, SignatureAlgorithm, NegotiatedAlgorithms,
+    QuantumCryptoError,
+    SignatureAlgorithm,
     // Functions (compatibility layer only)
     negotiate_algorithms,
 };
 
 // Saorsa-PQC exports (primary and only post-quantum crypto types)
 pub use quantum_crypto::{
-    // Core traits for operations
-    MlKemOperations, MlDsaOperations,
-    
-    // Algorithm implementations
-    MlKem768, MlDsa65,
-    
-    // Hybrid modes (classical + post-quantum)
-    HybridKem, HybridSignature, HybridPublicKeyEncryption,
-    
     // Symmetric encryption (quantum-resistant)
-    ChaCha20Poly1305Cipher, SymmetricKey,
-    
-    // Key types
-    MlKemPublicKey, MlKemSecretKey, MlKemCiphertext,
-    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
-    SharedSecret,
-    HybridKemPublicKey, HybridKemSecretKey, HybridKemCiphertext,
-    HybridSignaturePublicKey, HybridSignatureSecretKey, HybridSignatureValue,
-    
+    ChaCha20Poly1305Cipher,
     // Encrypted message types
-    EncryptedMessage, SymmetricEncryptedMessage,
-    
+    EncryptedMessage,
+    // Hybrid modes (classical + post-quantum)
+    HybridKem,
+    HybridKemCiphertext,
+    HybridKemPublicKey,
+    HybridKemSecretKey,
+    HybridPublicKeyEncryption,
+
+    HybridSignature,
+    HybridSignaturePublicKey,
+    HybridSignatureSecretKey,
+    HybridSignatureValue,
+
+    MlDsa65,
+
+    MlDsaOperations,
+
+    MlDsaPublicKey,
+    MlDsaSecretKey,
+    MlDsaSignature,
+    // Algorithm implementations
+    MlKem768,
+    MlKemCiphertext,
+    // Core traits for operations
+    MlKemOperations,
+    // Key types
+    MlKemPublicKey,
+    MlKemSecretKey,
     // Errors and results
-    PqcError, SymmetricError, SaorsaPqcResult,
-    
+    PqcError,
+    SaorsaPqcResult,
+
+    SharedSecret,
+    SymmetricEncryptedMessage,
+
+    SymmetricError,
+    SymmetricKey,
+
     // Library initialization
     saorsa_pqc_init,
 };
@@ -273,22 +293,33 @@ pub use quantum_crypto::{
 // Legacy ant-quic integration (for backward compatibility only)
 pub use quantum_crypto::ant_quic_integration::{
     // Configuration functions (deprecated - migrate to saorsa-pqc)
-    create_default_pqc_config, create_pqc_only_config,
+    create_default_pqc_config,
+    create_pqc_only_config,
 };
 
 // Legacy types (deprecated - migrate to saorsa-pqc equivalents)
 pub use quantum_crypto::types::{
-    // Session and group management types (still needed)
-    GroupId, ParticipantId, PeerId as QuantumPeerId, SessionId,
-    QuantumPeerIdentity, SecureSession, SessionState, HandshakeParameters,
-    
+    Ed25519PrivateKey, // DEPRECATED: Use saorsa-pqc types instead
     // Deprecated encryption types - migrate to saorsa-pqc
     Ed25519PublicKey, // DEPRECATED: Use saorsa-pqc types instead
-    Ed25519PrivateKey, // DEPRECATED: Use saorsa-pqc types instead
     Ed25519Signature, // DEPRECATED: Use saorsa-pqc types instead
-    
+
+    FrostCommitment,
+    FrostGroupPublicKey,
+    FrostKeyShare,
     // FROST threshold signatures (may need migration to saorsa-pqc later)
-    FrostPublicKey, FrostGroupPublicKey, FrostKeyShare, FrostCommitment, FrostSignature,
+    FrostPublicKey,
+    FrostSignature,
+    // Session and group management types (still needed)
+    GroupId,
+    HandshakeParameters,
+
+    ParticipantId,
+    PeerId as QuantumPeerId,
+    QuantumPeerIdentity,
+    SecureSession,
+    SessionId,
+    SessionState,
 };
 
 // Placement system exports

@@ -14,8 +14,10 @@
 //! Enhanced identity system with quantum threshold cryptography integration
 
 use crate::identity::manager::{IdentityManager, UserIdentity};
+use crate::quantum_crypto::ant_quic_integration::{
+    generate_ml_dsa_keypair, generate_ml_kem_keypair,
+};
 use crate::quantum_crypto::{CryptoCapabilities, QuantumPeerIdentity};
-use crate::quantum_crypto::ant_quic_integration::{generate_ml_dsa_keypair, generate_ml_kem_keypair};
 use crate::threshold::{ParticipantInfo, ParticipantRole, ThresholdGroupManager};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -303,8 +305,8 @@ impl EnhancedIdentityManager {
             // In production, implement proper serialization via ant-quic APIs
             ml_dsa_public_key: vec![0u8; 1952], // ML-DSA-65 public key size
             ml_kem_public_key: vec![0u8; 1184], // ML-KEM-768 public key size
-            frost_public_key: None, // Optional threshold key
-            legacy_key: None,       // Optional legacy key
+            frost_public_key: None,             // Optional threshold key
+            legacy_key: None,                   // Optional legacy key
             capabilities,
             created_at: SystemTime::now(),
         };

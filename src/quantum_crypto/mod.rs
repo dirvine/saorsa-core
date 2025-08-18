@@ -18,70 +18,80 @@
 //! - ML-DSA (Module-Lattice Digital Signature Algorithm) for signatures
 //! - Hybrid modes for gradual migration from classical algorithms
 
+pub mod ant_quic_integration;
 pub mod hybrid;
 pub mod types;
-pub mod ant_quic_integration;
 
 // NOTE: Not using wildcard import to avoid conflicts with ant-quic types
 // Selectively re-export only non-conflicting types from our types module
 pub use self::types::{
-    GroupId, ParticipantId, PeerId, SessionId, QuantumPeerIdentity, 
-    SecureSession, SessionState, HandshakeParameters,
-    Ed25519PublicKey, Ed25519PrivateKey, Ed25519Signature,
-    FrostPublicKey, FrostGroupPublicKey, FrostKeyShare, FrostCommitment, FrostSignature,
+    Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature, FrostCommitment, FrostGroupPublicKey,
+    FrostKeyShare, FrostPublicKey, FrostSignature, GroupId, HandshakeParameters, ParticipantId,
+    PeerId, QuantumPeerIdentity, SecureSession, SessionId, SessionState,
 };
 
 // Re-export all ant-quic PQC functions for convenience
 pub use self::ant_quic_integration::{
     // Configuration functions
-    create_default_pqc_config, create_pqc_only_config,
-    // ML-DSA functions
-    generate_ml_dsa_keypair, ml_dsa_sign, ml_dsa_verify,
-    // ML-KEM functions  
-    generate_ml_kem_keypair, ml_kem_encapsulate, ml_kem_decapsulate,
-    // Hybrid functions
-    generate_hybrid_kem_keypair, hybrid_kem_encapsulate, hybrid_kem_decapsulate,
-    generate_hybrid_signature_keypair, hybrid_sign, hybrid_verify,
+    create_default_pqc_config,
     // Performance optimization
     create_pqc_memory_pool,
+    create_pqc_only_config,
+    // Hybrid functions
+    generate_hybrid_kem_keypair,
+    generate_hybrid_signature_keypair,
+    // ML-DSA functions
+    generate_ml_dsa_keypair,
+    // ML-KEM functions
+    generate_ml_kem_keypair,
+    hybrid_kem_decapsulate,
+    hybrid_kem_encapsulate,
+    hybrid_sign,
+    hybrid_verify,
+    ml_dsa_sign,
+    ml_dsa_verify,
+    ml_kem_decapsulate,
+    ml_kem_encapsulate,
 };
-
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 // Primary post-quantum cryptography types from saorsa-pqc 0.3.0
 pub use saorsa_pqc::{
-    // Core traits for operations
-    MlKemOperations, MlDsaOperations,
-    
-    // Algorithm implementations
-    MlKem768, MlDsa65,
-    
-    // Hybrid modes (classical + post-quantum)
-    HybridKem, HybridSignature, HybridPublicKeyEncryption,
-    
     // Symmetric encryption (quantum-resistant)
-    ChaCha20Poly1305Cipher, SymmetricKey,
-    
-    // Types and results
-    pqc::types::{
-        PqcResult as SaorsaPqcResult, PqcError,
-        MlKemPublicKey, MlKemSecretKey, MlKemCiphertext,
-        MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
-        SharedSecret,
-        HybridKemPublicKey, HybridKemSecretKey, HybridKemCiphertext,
-        HybridSignaturePublicKey, HybridSignatureSecretKey, HybridSignatureValue,
-    },
-    
+    ChaCha20Poly1305Cipher,
     // Encrypted message types
-    EncryptedMessage, SymmetricEncryptedMessage,
-    
+    EncryptedMessage,
+    // Hybrid modes (classical + post-quantum)
+    HybridKem,
+    HybridPublicKeyEncryption,
+
+    HybridSignature,
+    MlDsa65,
+
+    MlDsaOperations,
+
+    // Algorithm implementations
+    MlKem768,
+    // Core traits for operations
+    MlKemOperations,
+    SymmetricEncryptedMessage,
+
     // Errors
     SymmetricError,
-    
+
+    SymmetricKey,
+
     // Library initialization
     init as saorsa_pqc_init,
+    // Types and results
+    pqc::types::{
+        HybridKemCiphertext, HybridKemPublicKey, HybridKemSecretKey, HybridSignaturePublicKey,
+        HybridSignatureSecretKey, HybridSignatureValue, MlDsaPublicKey, MlDsaSecretKey,
+        MlDsaSignature, MlKemCiphertext, MlKemPublicKey, MlKemSecretKey, PqcError,
+        PqcResult as SaorsaPqcResult, SharedSecret,
+    },
 };
 
 /// Quantum cryptography errors
@@ -178,7 +188,7 @@ impl SignatureScheme {
 // NOTE: KeyPair struct and generate_keypair function removed to avoid conflicts
 // Use ant-quic PQC functions directly:
 // - generate_ml_dsa_keypair() -> (MlDsaPublicKey, MlDsaSecretKey)
-// - generate_ml_kem_keypair() -> (MlKemPublicKey, MlKemSecretKey) 
+// - generate_ml_kem_keypair() -> (MlKemPublicKey, MlKemSecretKey)
 // - For Ed25519: generate_ed25519_keypair() below
 //
 // These functions are re-exported from ant_quic_integration module
@@ -271,7 +281,7 @@ mod tests {
         let _hybrid_kem = HybridKem::default();
         let _hybrid_sig = HybridSignature::default();
         let _hybrid_pke = HybridPublicKeyEncryption::default();
-        
+
         println!("✅ saorsa-pqc 0.3.0 types are available");
         println!("✅ Confirmed we are using saorsa-pqc effectively");
         println!("✅ ChaCha20Poly1305 integration ready for use");

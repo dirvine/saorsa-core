@@ -68,7 +68,7 @@ pub struct SessionId(pub [u8; 32]);
 ///
 /// Contains all cryptographic material needed for secure quantum-resistant
 /// communication including post-quantum signatures and key exchange.
-/// 
+///
 /// NOTE: This now uses ant-quic PQC types exclusively
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuantumPeerIdentity {
