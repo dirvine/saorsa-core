@@ -752,7 +752,7 @@ impl NetworkCoordinator {
     pub async fn get_node_info(&self) -> Result<NodeDescriptor> {
         Ok(NodeDescriptor {
             id: self.identity.node_id().clone(),
-            public_key: self.identity.public_key().clone(),
+            public_key: self.identity.public_key(),
             addresses: vec![],
             hyperbolic: None,
             som_position: None,

@@ -458,6 +458,12 @@ pub struct CompositeHealthChecker {
     checkers: Vec<(&'static str, Box<dyn ComponentChecker>)>,
 }
 
+impl Default for CompositeHealthChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CompositeHealthChecker {
     /// Create a new composite health checker
     pub fn new() -> Self {

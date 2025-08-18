@@ -244,12 +244,11 @@ impl PlacementEngine {
         );
 
         // Race placement against timeout
-        let mut decision = match tokio::select! {
+        let result = tokio::select! {
             result = placement_future => result?,
             timeout_result = timeout_future => timeout_result?,
-        } {
-            result => result,
         };
+        let mut decision = result;
 
         // Update timing information
         decision.selection_time = start_time.elapsed();

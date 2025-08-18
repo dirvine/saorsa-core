@@ -45,7 +45,7 @@ impl FourWordAddress {
     }
 
     /// Back-compat helper expected by tests
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn parse(s: &str) -> Result<Self> {
         Self::parse_str(s)
     }
 

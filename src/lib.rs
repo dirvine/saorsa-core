@@ -239,28 +239,55 @@ pub use quantum_crypto::{
     negotiate_algorithms,
 };
 
-// Ant-QUIC PQC exports (primary and only post-quantum crypto types)
-pub use quantum_crypto::ant_quic_integration::{
-    // Configuration
-    PqcConfig, PqcConfigBuilder, PqcMode, HybridPreference,
-    create_default_pqc_config, create_pqc_only_config,
+// Saorsa-PQC exports (primary and only post-quantum crypto types)
+pub use quantum_crypto::{
+    // Core traits for operations
+    MlKemOperations, MlDsaOperations,
     
-    // ML-DSA (post-quantum signatures) from ant-quic - ONLY THESE
-    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature, MlDsa65,
-    generate_ml_dsa_keypair, ml_dsa_sign, ml_dsa_verify,
+    // Algorithm implementations
+    MlKem768, MlDsa65,
     
-    // ML-KEM (post-quantum key encapsulation) from ant-quic - ONLY THESE
-    MlKemPublicKey, MlKemSecretKey, MlKemCiphertext, MlKem768,
-    PqcSharedSecret as SharedSecret, generate_ml_kem_keypair,
-    ml_kem_encapsulate, ml_kem_decapsulate,
+    // Hybrid modes (classical + post-quantum)
+    HybridKem, HybridSignature, HybridPublicKeyEncryption,
+    
+    // Symmetric encryption (quantum-resistant)
+    ChaCha20Poly1305Cipher, SymmetricKey,
+    
+    // Key types
+    MlKemPublicKey, MlKemSecretKey, MlKemCiphertext,
+    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
+    SharedSecret,
+    HybridKemPublicKey, HybridKemSecretKey, HybridKemCiphertext,
+    HybridSignaturePublicKey, HybridSignatureSecretKey, HybridSignatureValue,
+    
+    // Encrypted message types
+    EncryptedMessage, SymmetricEncryptedMessage,
+    
+    // Errors and results
+    PqcError, SymmetricError, SaorsaPqcResult,
+    
+    // Library initialization
+    saorsa_pqc_init,
 };
 
-// Additional quantum crypto types (from our types module for non-PQC compatibility)
+// Legacy ant-quic integration (for backward compatibility only)
+pub use quantum_crypto::ant_quic_integration::{
+    // Configuration functions (deprecated - migrate to saorsa-pqc)
+    create_default_pqc_config, create_pqc_only_config,
+};
+
+// Legacy types (deprecated - migrate to saorsa-pqc equivalents)
 pub use quantum_crypto::types::{
+    // Session and group management types (still needed)
     GroupId, ParticipantId, PeerId as QuantumPeerId, SessionId,
     QuantumPeerIdentity, SecureSession, SessionState, HandshakeParameters,
-    // Note: HybridSignature, PublicKeySet, PrivateKeySet removed to avoid conflicts with ant-quic
-    Ed25519PublicKey, Ed25519PrivateKey, Ed25519Signature,
+    
+    // Deprecated encryption types - migrate to saorsa-pqc
+    Ed25519PublicKey, // DEPRECATED: Use saorsa-pqc types instead
+    Ed25519PrivateKey, // DEPRECATED: Use saorsa-pqc types instead
+    Ed25519Signature, // DEPRECATED: Use saorsa-pqc types instead
+    
+    // FROST threshold signatures (may need migration to saorsa-pqc later)
     FrostPublicKey, FrostGroupPublicKey, FrostKeyShare, FrostCommitment, FrostSignature,
 };
 

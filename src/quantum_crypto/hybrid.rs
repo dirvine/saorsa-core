@@ -13,13 +13,15 @@
 
 //! Hybrid cryptography combining classical and post-quantum algorithms
 
+// Allow deprecated warnings since this whole module is being phased out
+#![allow(deprecated)]
+
 use super::{QuantumCryptoError, Result};
 use crate::quantum_crypto::types::*;
 // Legacy modules removed - use ant-quic PQC functions directly
 // use crate::quantum_crypto::{ml_dsa, ml_kem};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signer, SigningKey};
 use rand_core::OsRng;
-use sha2::Sha256;
 
 /// Hybrid key exchange state (deprecated)
 #[deprecated(note = "Use ant-quic PQC functions directly")]
@@ -34,6 +36,12 @@ pub struct HybridKeyExchange {
 
     /// Combined shared secret
     pub hybrid_secret: Option<[u8; 32]>,
+}
+
+impl Default for HybridKeyExchange {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HybridKeyExchange {
@@ -115,7 +123,7 @@ impl HybridSigner {
     #[deprecated(note = "Use ant-quic PQC functions directly")]
     pub fn generate_keypair(&mut self) -> Result<()> {
         // NOTE: ML-DSA keypair generation deprecated - use ant-quic PQC functions directly
-        let _ml_dsa_public = vec![0u8; 32]; // Placeholder
+        let _ml_dsa_public = [0u8; 32]; // Placeholder
 
         // Generate Ed25519 keypair
         let mut csprng = OsRng;

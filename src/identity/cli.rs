@@ -345,7 +345,7 @@ impl IdentityCliHandler {
         }
 
         let message_hash = hex::encode(sha2::Sha256::digest(&message_bytes));
-        Ok(format!("Signature: {}\nMessage hash: {}", sig_hex, message_hash).into())
+        Ok(format!("Signature: {}\nMessage hash: {}", sig_hex, message_hash))
     }
 }
 

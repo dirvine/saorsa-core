@@ -189,7 +189,7 @@ impl ByzantineTolerance {
             ByzantineTolerance::Custom {
                 total_nodes,
                 max_faults,
-            } => *max_faults < *total_nodes && *total_nodes >= 2 * max_faults + 1,
+            } => *max_faults < *total_nodes && *total_nodes > 2 * max_faults,
         }
     }
 }
@@ -443,31 +443,31 @@ impl NetworkRegion {
 
         match (lat, lon) {
             // North America
-            (lat, lon) if lat >= 15.0 && lat <= 72.0 && lon >= -168.0 && lon <= -52.0 => {
+            (lat, lon) if (15.0..=72.0).contains(&lat) && (-168.0..=-52.0).contains(&lon) => {
                 NetworkRegion::NorthAmerica
             }
             // South America
-            (lat, lon) if lat >= -56.0 && lat <= 15.0 && lon >= -82.0 && lon <= -30.0 => {
+            (lat, lon) if (-56.0..=15.0).contains(&lat) && (-82.0..=-30.0).contains(&lon) => {
                 NetworkRegion::SouthAmerica
             }
             // Europe
-            (lat, lon) if lat >= 35.0 && lat <= 72.0 && lon >= -10.0 && lon <= 40.0 => {
+            (lat, lon) if (35.0..=72.0).contains(&lat) && (-10.0..=40.0).contains(&lon) => {
                 NetworkRegion::Europe
             }
             // Asia Pacific
-            (lat, lon) if lat >= -47.0 && lat <= 77.0 && lon >= 40.0 && lon <= 180.0 => {
+            (lat, lon) if (-47.0..=77.0).contains(&lat) && (40.0..=180.0).contains(&lon) => {
                 NetworkRegion::AsiaPacific
             }
             // Africa
-            (lat, lon) if lat >= -35.0 && lat <= 37.0 && lon >= -20.0 && lon <= 52.0 => {
+            (lat, lon) if (-35.0..=37.0).contains(&lat) && (-20.0..=52.0).contains(&lon) => {
                 NetworkRegion::Africa
             }
             // Middle East
-            (lat, lon) if lat >= 12.0 && lat <= 42.0 && lon >= 26.0 && lon <= 75.0 => {
+            (lat, lon) if (12.0..=42.0).contains(&lat) && (26.0..=75.0).contains(&lon) => {
                 NetworkRegion::MiddleEast
             }
             // Oceania
-            (lat, lon) if lat >= -47.0 && lat <= -9.0 && lon >= 110.0 && lon <= 180.0 => {
+            (lat, lon) if (-47.0..=-9.0).contains(&lat) && (110.0..=180.0).contains(&lon) => {
                 NetworkRegion::Oceania
             }
             _ => NetworkRegion::Unknown,
@@ -685,7 +685,10 @@ mod tests {
 
     #[test]
     fn test_placement_decision() {
-        let nodes = vec![NodeId::from([1u8; 32]), NodeId::from([2u8; 32])];
+        let nodes = vec![
+            crate::peer_record::UserId::from_bytes([1u8; 32]),
+            crate::peer_record::UserId::from_bytes([2u8; 32])
+        ];
 
         let decision = PlacementDecision::new(nodes.clone(), "test_strategy".to_string())
             .with_diversity_score(0.8)
@@ -705,7 +708,7 @@ mod tests {
         let mut metrics = PlacementMetrics::new();
         assert_eq!(metrics.success_rate(), 0.0);
 
-        let decision = PlacementDecision::new(vec![NodeId::from([1u8; 32])], "test".to_string());
+        let decision = PlacementDecision::new(vec![crate::peer_record::UserId::from_bytes([1u8; 32])], "test".to_string());
 
         metrics.record_success(&decision, NetworkRegion::NorthAmerica);
         assert_eq!(metrics.success_rate(), 1.0);

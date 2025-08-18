@@ -290,8 +290,8 @@ impl EnhancedIdentityManager {
         // Generate quantum-resistant keys
         let capabilities = CryptoCapabilities::default();
         // Generate PQC keys using ant-quic directly
-        let (ml_dsa_pub, _ml_dsa_sec) = generate_ml_dsa_keypair()?;
-        let (ml_kem_pub, _ml_kem_sec) = generate_ml_kem_keypair()?;
+        let (_ml_dsa_pub, _ml_dsa_sec) = generate_ml_dsa_keypair()?;
+        let (_ml_kem_pub, _ml_kem_sec) = generate_ml_kem_keypair()?;
 
         // Create quantum peer identity
         let peer_id =

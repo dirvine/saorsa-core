@@ -324,9 +324,11 @@ impl NodeConfig {
                 NetworkError::InvalidAddress(e.to_string().into())
             })
             .map_err(P2PError::Network)?;
-        let mut cfg = NodeConfig::default();
-        cfg.listen_addr = listen_addr;
-        cfg.listen_addrs = vec![listen_addr];
+        let cfg = NodeConfig {
+            listen_addr,
+            listen_addrs: vec![listen_addr],
+            ..Default::default()
+        };
         Ok(cfg)
     }
 }

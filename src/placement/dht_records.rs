@@ -163,7 +163,7 @@ impl NodeCapabilities {
 }
 
 /// NAT type classification
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum NatType {
     /// No NAT (public IP)
     None = 0,
@@ -176,13 +176,8 @@ pub enum NatType {
     /// Symmetric NAT
     Symmetric = 4,
     /// Unknown NAT type
+    #[default]
     Unknown = 255,
-}
-
-impl Default for NatType {
-    fn default() -> Self {
-        NatType::Unknown
-    }
 }
 
 /// Operating system signature for node fingerprinting
@@ -883,13 +878,13 @@ mod tests {
 
     #[test]
     fn test_node_ad_creation() {
-        let node_id = NodeId::from([1u8; 32]);
+        let node_id = NodeId::from_bytes([1u8; 32]);
         let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
         let caps = NodeCapabilities::new(1000, 500, 50).unwrap();
         let os_sig = OsSignature::current();
 
         let node_ad = NodeAd::new(
-            node_id,
+            node_id.clone(),
             vec![addr],
             caps,
             NatType::None,
@@ -907,14 +902,14 @@ mod tests {
 
     #[test]
     fn test_node_ad_validation() {
-        let node_id = NodeId::from([1u8; 32]);
+        let node_id = NodeId::from_bytes([1u8; 32]);
         let caps = NodeCapabilities::new(1000, 500, 50).unwrap();
         let os_sig = OsSignature::current();
 
         // No addresses
         assert!(
             NodeAd::new(
-                node_id,
+                node_id.clone(),
                 vec![],
                 caps.clone(),
                 NatType::None,
@@ -951,9 +946,9 @@ mod tests {
         let group_id = SerializableHash([3u8; 32]);
         let policy = PlacementPolicy::default();
         let member_root = SerializableHash::from(blake3::hash(b"members"));
-        let guardians = vec![NodeId::from([4u8; 32]), NodeId::from([5u8; 32])];
+        let guardians = vec![NodeId::from_bytes([4u8; 32]), NodeId::from_bytes([5u8; 32])];
 
-        let beacon = GroupBeacon::new(group_id, policy, member_root, guardians).unwrap();
+        let beacon = GroupBeacon::new(group_id.clone(), policy, member_root, guardians).unwrap();
         assert_eq!(beacon.group_id, group_id);
         assert_eq!(beacon.guardians.len(), 2);
         assert!(beacon.is_valid());
@@ -963,12 +958,12 @@ mod tests {
     fn test_data_pointer_creation() {
         let cid = blake3::hash(b"test content");
         let ticket_ids = vec![
-            PlacementTicketId::from_bytes([6u8; 32]),
-            PlacementTicketId::from_bytes([7u8; 32]),
+            PlacementTicketId::from([6u8; 32]),
+            PlacementTicketId::from([7u8; 32]),
         ];
 
-        let pointer = DataPointer::new(cid, ticket_ids).unwrap();
-        assert_eq!(pointer.cid, cid);
+        let pointer = DataPointer::new(cid.into(), ticket_ids).unwrap();
+        assert_eq!(pointer.cid, cid.into());
         assert_eq!(pointer.placement_ticket_ids.len(), 2);
         assert!(pointer.is_valid());
     }
@@ -976,10 +971,10 @@ mod tests {
     #[test]
     fn test_data_pointer_operations() {
         let cid = blake3::hash(b"test content");
-        let ticket_id1 = PlacementTicketId::from_bytes([6u8; 32]);
-        let ticket_id2 = PlacementTicketId::from_bytes([7u8; 32]);
+        let ticket_id1 = PlacementTicketId::from([6u8; 32]);
+        let ticket_id2 = PlacementTicketId::from([7u8; 32]);
 
-        let mut pointer = DataPointer::new(cid, vec![ticket_id1]).unwrap();
+        let mut pointer = DataPointer::new(cid.into(), vec![ticket_id1.clone()]).unwrap();
 
         // Add ticket
         pointer.add_placement_ticket(ticket_id2).unwrap();
@@ -996,9 +991,9 @@ mod tests {
         let name_id = blake3::hash(b"test name");
         let root_ref = blake3::hash(b"content");
 
-        let pointer = RegisterPointer::new(name_id, root_ref, 1).unwrap();
-        assert_eq!(pointer.name_id, name_id);
-        assert_eq!(pointer.root_ref, root_ref);
+        let pointer = RegisterPointer::new(name_id.into(), root_ref.into(), 1).unwrap();
+        assert_eq!(pointer.name_id, name_id.into());
+        assert_eq!(pointer.root_ref, root_ref.into());
         assert_eq!(pointer.version, 1);
         assert!(pointer.is_valid());
     }
@@ -1009,20 +1004,20 @@ mod tests {
         let root_ref1 = blake3::hash(b"content v1");
         let root_ref2 = blake3::hash(b"content v2");
 
-        let mut pointer = RegisterPointer::new(name_id, root_ref1, 1).unwrap();
+        let mut pointer = RegisterPointer::new(name_id.into(), root_ref1.into(), 1).unwrap();
 
         // Update to higher version
-        pointer.update_version(root_ref2, 2).unwrap();
+        pointer.update_version(root_ref2.into(), 2).unwrap();
         assert_eq!(pointer.version, 2);
-        assert_eq!(pointer.root_ref, root_ref2);
+        assert_eq!(pointer.root_ref, root_ref2.into());
 
         // Cannot downgrade version
-        assert!(pointer.update_version(root_ref1, 1).is_err());
+        assert!(pointer.update_version(root_ref1.into(), 1).is_err());
     }
 
     #[test]
     fn test_dht_record_serialization() {
-        let node_id = NodeId::from([1u8; 32]);
+        let node_id = NodeId::from_bytes([1u8; 32]);
         let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
         let caps = NodeCapabilities::new(1000, 500, 50).unwrap();
         let os_sig = OsSignature::current();
@@ -1040,7 +1035,7 @@ mod tests {
         .unwrap();
 
         let key = blake3::hash(b"test key");
-        let record = DhtRecord::new(key, DhtRecordData::NodeAd(node_ad), None);
+        let record = DhtRecord::new(key.into(), DhtRecordData::NodeAd(node_ad), None);
 
         // Serialize
         let bytes = record.serialize().unwrap();
@@ -1056,10 +1051,10 @@ mod tests {
     fn test_dht_record_proof_of_work() {
         let key = blake3::hash(b"test key");
         let cid = blake3::hash(b"test content");
-        let ticket_ids = vec![PlacementTicketId::from_bytes([6u8; 32])];
-        let pointer = DataPointer::new(cid, ticket_ids).unwrap();
+        let ticket_ids = vec![PlacementTicketId::from([6u8; 32])];
+        let pointer = DataPointer::new(cid.into(), ticket_ids).unwrap();
 
-        let mut record = DhtRecord::new(key, DhtRecordData::DataPointer(pointer), None);
+        let mut record = DhtRecord::new(key.into(), DhtRecordData::DataPointer(pointer), None);
 
         // Compute PoW with low difficulty for testing
         record.compute_pow(8).unwrap();
@@ -1076,17 +1071,17 @@ mod tests {
     fn test_dht_record_builder() {
         let key = blake3::hash(b"test key");
         let cid = blake3::hash(b"test content");
-        let ticket_ids = vec![PlacementTicketId::from_bytes([6u8; 32])];
-        let pointer = DataPointer::new(cid, ticket_ids).unwrap();
+        let ticket_ids = vec![PlacementTicketId::from([6u8; 32])];
+        let pointer = DataPointer::new(cid.into(), ticket_ids).unwrap();
 
         let record = DhtRecordBuilder::new()
-            .key(key)
+            .key(key.into())
             .ttl(Duration::from_secs(1800))
             .pow_bits(8)
             .build_data_pointer(pointer)
             .unwrap();
 
-        assert_eq!(record.key, key);
+        assert_eq!(record.key, key.into());
         assert_eq!(record.ttl, 1800);
         assert!(record.pow_nonce.is_some());
         assert!(record.verify_pow(8).unwrap());
@@ -1095,7 +1090,7 @@ mod tests {
     #[test]
     fn test_record_size_limit() {
         // Create a record that would exceed size limit
-        let node_id = NodeId::from([1u8; 32]);
+        let node_id = NodeId::from_bytes([1u8; 32]);
         let many_addrs: Vec<SocketAddr> = (0..100)
             .map(|i| {
                 SocketAddr::V4(SocketAddrV4::new(

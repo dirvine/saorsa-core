@@ -129,10 +129,7 @@ pub enum AdaptiveNetworkError {
 
 impl From<anyhow::Error> for AdaptiveNetworkError {
     fn from(e: anyhow::Error) -> Self {
-        AdaptiveNetworkError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
+        AdaptiveNetworkError::Io(std::io::Error::other(e.to_string()))
     }
 }
 

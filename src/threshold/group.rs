@@ -399,7 +399,7 @@ mod tests {
     fn create_test_group() -> ThresholdGroup {
         let participant1 = ParticipantInfo {
             participant_id: ParticipantId(1),
-            public_key: FrostPublicKey(vec![1; 32]),
+            public_key: vec![1; 32],
             frost_share_commitment: FrostCommitment(vec![1; 32]),
             role: ParticipantRole::Leader {
                 permissions: LeaderPermissions::default(),
@@ -411,7 +411,7 @@ mod tests {
 
         let participant2 = ParticipantInfo {
             participant_id: ParticipantId(2),
-            public_key: FrostPublicKey(vec![2; 32]),
+            public_key: vec![2; 32],
             frost_share_commitment: FrostCommitment(vec![2; 32]),
             role: ParticipantRole::Member {
                 permissions: MemberPermissions::default(),
@@ -490,7 +490,7 @@ mod tests {
         // Add pending participant
         let new_participant = ParticipantInfo {
             participant_id: ParticipantId(3),
-            public_key: FrostPublicKey(vec![3; 32]),
+            public_key: vec![3; 32],
             frost_share_commitment: FrostCommitment(vec![3; 32]),
             role: ParticipantRole::Member {
                 permissions: MemberPermissions::default(),
@@ -506,7 +506,7 @@ mod tests {
         // Cannot add duplicate
         let duplicate = ParticipantInfo {
             participant_id: ParticipantId(1),
-            public_key: FrostPublicKey(vec![1; 32]),
+            public_key: vec![1; 32],
             frost_share_commitment: FrostCommitment(vec![1; 32]),
             role: ParticipantRole::Member {
                 permissions: MemberPermissions::default(),

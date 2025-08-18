@@ -42,6 +42,7 @@ pub struct PlacementOrchestrator {
     audit_system: Arc<AuditSystem>,
     repair_system: Arc<RepairSystem>,
     metrics: Arc<RwLock<PlacementMetrics>>,
+    #[allow(dead_code)]
     config: PlacementConfig,
 }
 
@@ -217,6 +218,7 @@ impl PlacementOrchestrator {
 /// Storage orchestrator for shard management
 #[derive(Debug)]
 pub struct StorageOrchestrator {
+    #[allow(dead_code)]
     dht_engine: Arc<DhtCoreEngine>,
     trust_system: Arc<EigenTrustEngine>,
     performance_monitor: Arc<PerformanceMonitor>,
@@ -315,6 +317,7 @@ impl StorageOrchestrator {
 /// Audit system for continuous shard verification
 #[derive(Debug)]
 pub struct AuditSystem {
+    #[allow(dead_code)]
     dht_engine: Arc<DhtCoreEngine>,
     trust_system: Arc<EigenTrustEngine>,
     churn_predictor: Arc<ChurnPredictor>,
@@ -413,8 +416,10 @@ impl AuditSystem {
 /// Repair system with hysteresis to prevent repair storms
 #[derive(Debug)]
 pub struct RepairSystem {
+    #[allow(dead_code)]
     dht_engine: Arc<DhtCoreEngine>,
     storage_orchestrator: Arc<StorageOrchestrator>,
+    #[allow(dead_code)]
     audit_system: Arc<AuditSystem>,
     repair_threshold: f64,
     repair_hysteresis: f64,
@@ -460,11 +465,10 @@ impl RepairSystem {
         let shards_needing_repair = self.identify_shards_needing_repair().await?;
 
         for shard_id in shards_needing_repair {
-            if self.should_repair_shard(&shard_id).await? {
-                if let Err(e) = self.initiate_repair(&shard_id).await {
+            if self.should_repair_shard(&shard_id).await?
+                && let Err(e) = self.initiate_repair(&shard_id).await {
                     tracing::error!("Failed to repair shard {}: {}", shard_id, e);
                 }
-            }
         }
 
         Ok(())
@@ -480,11 +484,10 @@ impl RepairSystem {
     async fn should_repair_shard(&self, shard_id: &str) -> PlacementResult<bool> {
         // Check cooldown
         let active_repairs = self.active_repairs.read().await;
-        if let Some(last_repair) = active_repairs.get(shard_id) {
-            if last_repair.elapsed() < self.repair_cooldown {
+        if let Some(last_repair) = active_repairs.get(shard_id)
+            && last_repair.elapsed() < self.repair_cooldown {
                 return Ok(false);
             }
-        }
 
         // Mock availability check
         let availability = 0.6; // Simulated low availability
@@ -578,7 +581,7 @@ mod tests {
     fn test_shard_info() {
         let shard_info = ShardInfo {
             shard_id: "test_shard".to_string(),
-            node_id: NodeId::from([1u8; 32]),
+            node_id: NodeId::from_bytes([1u8; 32]),
             data_size: 1024,
             created_at: 1234567890,
             last_verified: 0,

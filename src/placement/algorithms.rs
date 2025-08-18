@@ -27,13 +27,23 @@ use crate::placement::{
 #[derive(Debug, Clone)]
 pub struct WeightedSampler {
     /// Random number generator state
+    #[allow(dead_code)]
     rng_state: u64,
     /// Cached weights for performance
+    #[allow(dead_code)]
     weight_cache: HashMap<NodeId, f64>,
     /// Last update timestamp for cache invalidation
+    #[allow(dead_code)]
     cache_updated: Instant,
     /// Cache TTL
+    #[allow(dead_code)]
     cache_ttl: Duration,
+}
+
+impl Default for WeightedSampler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WeightedSampler {
@@ -66,7 +76,7 @@ impl WeightedSampler {
         gamma: f64,
     ) -> PlacementResult<f64> {
         // Validate inputs
-        if trust_score < 0.0 || trust_score > 1.0 {
+        if !(0.0..=1.0).contains(&trust_score) {
             return Err(PlacementError::InvalidWeight {
                 node_id: node_id.clone(),
                 weight: trust_score,
@@ -74,7 +84,7 @@ impl WeightedSampler {
             });
         }
 
-        if stability_score < 0.0 || stability_score > 1.0 {
+        if !(0.0..=1.0).contains(&stability_score) {
             return Err(PlacementError::InvalidWeight {
                 node_id: node_id.clone(),
                 weight: stability_score,
@@ -197,6 +207,12 @@ pub struct DiversityEnforcer {
     max_nodes_per_asn: usize,
     /// Penalty factor for diversity violations
     diversity_penalty: f64,
+}
+
+impl Default for DiversityEnforcer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DiversityEnforcer {
@@ -511,7 +527,7 @@ mod tests {
     #[test]
     fn test_weight_calculation() {
         let sampler = WeightedSampler::new();
-        let node_id = NodeId::from([1u8; 32]);
+        let node_id = NodeId::from_bytes([1u8; 32]);
 
         // Test normal case
         let weight = sampler
@@ -556,10 +572,10 @@ mod tests {
         let mut sampler = WeightedSampler::new();
 
         let candidates = vec![
-            (NodeId::from([1u8; 32]), 0.8),
-            (NodeId::from([2u8; 32]), 0.6),
-            (NodeId::from([3u8; 32]), 0.4),
-            (NodeId::from([4u8; 32]), 0.2),
+            (NodeId::from_bytes([1u8; 32]), 0.8),
+            (NodeId::from_bytes([2u8; 32]), 0.6),
+            (NodeId::from_bytes([3u8; 32]), 0.4),
+            (NodeId::from_bytes([4u8; 32]), 0.2),
         ];
 
         // Test normal sampling
@@ -574,8 +590,8 @@ mod tests {
 
         // Test with zero weights
         let bad_candidates = vec![
-            (NodeId::from([1u8; 32]), 0.0),
-            (NodeId::from([2u8; 32]), 0.5),
+            (NodeId::from_bytes([1u8; 32]), 0.0),
+            (NodeId::from_bytes([2u8; 32]), 0.5),
         ];
         assert!(sampler.sample_nodes(&bad_candidates, 1).is_err());
     }
@@ -583,7 +599,7 @@ mod tests {
     #[test]
     fn test_diversity_factor_calculation() {
         let enforcer = DiversityEnforcer::new();
-        let candidate_id = NodeId::from([1u8; 32]);
+        let candidate_id = NodeId::from_bytes([1u8; 32]);
         let candidate_location = create_test_location(40.7128, -74.0060); // NYC
         let candidate_asn = 12345;
         let candidate_region = NetworkRegion::NorthAmerica;
@@ -601,7 +617,7 @@ mod tests {
         // Test with nearby node
         let nearby_location = create_test_location(40.7589, -73.9851); // Manhattan
         let existing = vec![(
-            NodeId::from([2u8; 32]),
+            NodeId::from_bytes([2u8; 32]),
             nearby_location,
             54321,
             NetworkRegion::NorthAmerica,
@@ -619,7 +635,7 @@ mod tests {
         // Test with same ASN
         let far_location = create_test_location(34.0522, -118.2437); // LA
         let existing_same_asn = vec![(
-            NodeId::from([3u8; 32]),
+            NodeId::from_bytes([3u8; 32]),
             far_location,
             candidate_asn, // Same ASN
             NetworkRegion::NorthAmerica,
@@ -642,13 +658,13 @@ mod tests {
         // Test valid selection
         let valid_selection = vec![
             (
-                NodeId::from([1u8; 32]),
+                NodeId::from_bytes([1u8; 32]),
                 create_test_location(40.7128, -74.0060),
                 12345,
                 NetworkRegion::NorthAmerica,
             ), // NYC
             (
-                NodeId::from([2u8; 32]),
+                NodeId::from_bytes([2u8; 32]),
                 create_test_location(34.0522, -118.2437),
                 54321,
                 NetworkRegion::NorthAmerica,
@@ -659,13 +675,13 @@ mod tests {
         // Test too close selection
         let too_close_selection = vec![
             (
-                NodeId::from([1u8; 32]),
+                NodeId::from_bytes([1u8; 32]),
                 create_test_location(40.7128, -74.0060),
                 12345,
                 NetworkRegion::NorthAmerica,
             ), // NYC
             (
-                NodeId::from([2u8; 32]),
+                NodeId::from_bytes([2u8; 32]),
                 create_test_location(40.7589, -73.9851),
                 54321,
                 NetworkRegion::NorthAmerica,
