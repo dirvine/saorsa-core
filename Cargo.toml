@@ -1,6 +1,6 @@
 [package]
 name = "saorsa-core"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2024"
 authors = ["Saorsa Labs Limited <saorsalabs@gmail.com>"]
 license = "AGPL-3.0"
@@ -66,7 +66,7 @@ flate2 = "1.0"
 once_cell = "1.19"
 
 # Networking
-ant-quic = { version = "0.8.1", features = ["pqc"] }
+ant-quic = { version = "0.8.6", features = ["pqc"] }
 four-word-networking = { version = "2.3" }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 
@@ -81,9 +81,9 @@ jsonwebtoken = "9.2"
 bincode = "1.3"
 lru = "0.12"
 
-# DHT dependencies
-reed-solomon-erasure = "6.0"
-saorsa-rsps = "0.1.0"
+# DHT dependencies - using PQC-safe forward error correction
+saorsa-fec = { version = "0.4.2", default-features = false, features = ["pure-rust"] }
+saorsa-rsps = "0.2.0"
 
 # Monitoring (optional to avoid build script issues on docs.rs)
 prometheus = { version = "0.14", optional = true, default-features = false }
@@ -102,8 +102,9 @@ axum = "0.7"
 tower = { version = "0.4", features = ["util"] }
 num_cpus = "1.16"
 
-# Database dependencies for message persistence
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"], default-features = false }
+# Database dependencies for message persistence (SQLite only, replaced sqlx to avoid rsa vulnerability)
+deadpool-sqlite = "0.12.1"
+rusqlite = { version = "0.37", features = ["chrono", "serde_json", "uuid", "bundled"] }
 
 # Media processing dependencies
 image = { version = "0.24", features = ["jpeg", "png", "webp", "gif"] }
@@ -144,41 +145,41 @@ tokio-test = "0.4"
 
 # All features are now enabled by default - no feature flags needed
 
-[[bench]]
-name = "dht_benchmark"
-harness = false
+# [[bench]]
+# name = "dht_benchmark"
+# harness = false
 
-[[bench]]
-name = "security_benchmark"
-harness = false
+# [[bench]]
+# name = "security_benchmark"
+# harness = false
 
-[[bench]]
-name = "production_benchmark"
-harness = false
+# [[bench]]
+# name = "production_benchmark"
+# harness = false
 
-[[bench]]
-name = "multi_armed_bandit_bench"
-harness = false
+# [[bench]]
+# name = "multi_armed_bandit_bench"
+# harness = false
 
-[[bench]]
-name = "q_learning_cache_bench"
-harness = false
+# [[bench]]
+# name = "q_learning_cache_bench"
+# harness = false
 
-[[bench]]
-name = "eviction_bench"
-harness = false
+# [[bench]]
+# name = "eviction_bench"
+# harness = false
 
-[[bench]]
-name = "eigentrust_bench"
-harness = false
+# [[bench]]
+# name = "eigentrust_bench"
+# harness = false
 
-[[bench]]
-name = "validation_bench"
-harness = false
+# [[bench]]
+# name = "validation_bench"
+# harness = false
 
-[[bench]]
-name = "gossipsub_bench"
-harness = false
+# [[bench]]
+# name = "gossipsub_bench"
+# harness = false
 
 [[test]]
 name = "eigentrust_integration_test"
@@ -195,14 +196,14 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["memoryapi"] }
 
-[[bench]]
-name = "comprehensive_performance_test"
-harness = false
+# [[bench]]
+# name = "comprehensive_performance_test"
+# harness = false
 
-[[bench]]
-name = "load_testing_scenarios"
-harness = false
+# [[bench]]
+# name = "load_testing_scenarios"
+# harness = false
 
-[[bench]]
-name = "performance_monitor"
-harness = false
+# [[bench]]
+# name = "performance_monitor"
+# harness = false
