@@ -290,7 +290,7 @@ impl RspsDhtStorage {
                 ))))
             })?;
 
-        Ok(receipt)
+        receipt.map_err(|e| P2PError::Storage(StorageError::Database(std::borrow::Cow::Owned(format!("RSPS receipt creation failed: {}", e)))))
     }
 
     /// Batch generate receipts for multiple CIDs

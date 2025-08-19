@@ -79,7 +79,7 @@ async fn test_four_word_address_generation() -> Result<()> {
         }
 
         // Should be able to parse back
-        let parsed = FourWordAddress::from_str(&addr_string)?;
+        let parsed = FourWordAddress::parse_str(&addr_string)?;
         assert_eq!(parsed, four_word_addr, "Should parse back to same address");
 
         println!("  ✅ Seed {}: {} -> {}", seed, node_id, addr_string);
@@ -415,7 +415,7 @@ async fn test_identity_consistency() -> Result<()> {
     let original_node_id = identity1.node_id();
     let four_word_addr = FourWordAddress::from_node_id(&original_node_id);
     let addr_string = four_word_addr.to_string();
-    let parsed_addr = FourWordAddress::from_str(&addr_string)?;
+    let parsed_addr = FourWordAddress::parse_str(&addr_string)?;
 
     assert_eq!(
         four_word_addr, parsed_addr,
@@ -581,7 +581,7 @@ async fn test_identity_edge_cases() -> Result<()> {
     ];
 
     for addr_str in &valid_addresses {
-        let parsed = FourWordAddress::from_str(addr_str);
+        let parsed = FourWordAddress::parse_str(addr_str);
         assert!(parsed.is_ok(), "Should parse valid address: {}", addr_str);
 
         let addr = parsed.unwrap();
@@ -604,7 +604,7 @@ async fn test_identity_edge_cases() -> Result<()> {
     ];
 
     for addr_str in &invalid_addresses {
-        let result = FourWordAddress::from_str(addr_str);
+        let result = FourWordAddress::parse_str(addr_str);
         assert!(
             result.is_err(),
             "Should reject invalid address: {}",

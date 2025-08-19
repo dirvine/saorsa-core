@@ -52,7 +52,7 @@ mod tests {
         ];
 
         for invalid in invalid_addresses {
-            let result = FourWordAddress::from_str(invalid);
+            let result = FourWordAddress::parse_str(invalid);
             assert!(result.is_err(), "Should fail to parse: {}", invalid);
         }
     }

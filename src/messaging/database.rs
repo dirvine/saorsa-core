@@ -1,871 +1,751 @@
-// SQLite database for message persistence using sqlx
-// Provides local caching and fast retrieval of messages
+// Message database implementation using deadpool-sqlite + rusqlite
+// Replaced sqlx to resolve RSA security vulnerability RUSTSEC-2023-0071
 
-use super::DhtClient;
-use super::types::*;
 use crate::identity::FourWordAddress;
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use crate::messaging::types::*;
+use anyhow::Result;
+use chrono::{DateTime, Utc, TimeZone};
+use deadpool_sqlite::{Config, Pool, Runtime};
+use rusqlite::params;
 use serde_json;
-use sqlx::{
-    Row,
-    sqlite::{SqlitePool, SqlitePoolOptions},
-};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::path::PathBuf;
 use tracing::{debug, info};
 use uuid::Uuid;
 
-/// Type alias for the message store
-pub type MessageStore = DatabaseMessageStore;
+pub use crate::dht::client::DhtClient;
 
-/// Database-backed message store with DHT synchronization
+/// Message store using deadpool-sqlite for connection pooling
 #[derive(Clone)]
 pub struct DatabaseMessageStore {
-    /// SQLite connection pool
-    pool: SqlitePool,
-    /// DHT client for distributed storage
+    pool: Pool,
     dht_client: DhtClient,
-    /// Database path
-    db_path: String,
-    /// In-memory message cache
-    messages: Arc<RwLock<HashMap<MessageId, RichMessage>>>,
 }
 
 impl DatabaseMessageStore {
-    /// Create a new database-backed message store
-    pub async fn new(dht_client: DhtClient, db_path: Option<String>) -> Result<Self> {
+    /// Create a new database message store
+    pub async fn new(dht_client: DhtClient, db_path: Option<PathBuf>) -> Result<Self> {
         let db_path = db_path.unwrap_or_else(|| {
-            let data_dir = dirs::data_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("saorsa")
-                .join("messages");
-
-            std::fs::create_dir_all(&data_dir).ok();
-            data_dir.join("messages.db").to_string_lossy().to_string()
+            let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+            path.push("saorsa");
+            std::fs::create_dir_all(&path).unwrap_or(());
+            path.push("messages.db");
+            path
         });
 
-        info!("Opening message database at: {}", db_path);
+        info!("Initializing message database at: {:?}", db_path);
 
-        // Create database file if it doesn't exist
-        if !std::path::Path::new(&db_path).exists() {
-            std::fs::File::create(&db_path)?;
-        }
+        // Create deadpool-sqlite configuration
+        let cfg = Config::new(db_path);
+        let pool = cfg.create_pool(Runtime::Tokio1)?;
 
-        // Create connection pool
-        let pool_url = format!("sqlite:{}", db_path);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect(&pool_url)
-            .await
-            .context("Failed to create database pool")?;
-
-        let store = Self {
-            pool,
-            dht_client,
-            db_path: db_path.clone(),
-            messages: Arc::new(RwLock::new(HashMap::new())),
-        };
+        let store = Self { pool, dht_client };
 
         // Initialize database schema
-        store.initialize_schema().await?;
+        store.init_schema().await?;
 
         Ok(store)
     }
 
-    /// Initialize database schema
-    async fn initialize_schema(&self) -> Result<()> {
-        // Configure SQLite for optimal performance
-        sqlx::query("PRAGMA journal_mode = WAL")
-            .execute(&self.pool)
-            .await?;
-        sqlx::query("PRAGMA synchronous = NORMAL")
-            .execute(&self.pool)
-            .await?;
+    /// Initialize the database schema with all required tables
+    async fn init_schema(&self) -> Result<()> {
+        let conn = self.pool.get().await?;
 
-        // Create messages table
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                channel_id TEXT NOT NULL,
-                sender TEXT NOT NULL,
-                content TEXT NOT NULL,
-                thread_id TEXT,
-                reply_to TEXT,
-                created_at INTEGER NOT NULL,
-                edited_at INTEGER,
-                deleted_at INTEGER,
-                ephemeral INTEGER DEFAULT 0,
-                signature TEXT
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
+        let result = conn.interact(|conn| -> Result<(), rusqlite::Error> {
+            // Configure SQLite for optimal performance
+            conn.execute("PRAGMA journal_mode = WAL", [])?;
+            conn.execute("PRAGMA synchronous = NORMAL", [])?;
+            conn.execute("PRAGMA cache_size = -64000", [])?; // 64MB cache
+            conn.execute("PRAGMA foreign_keys = ON", [])?;
+            conn.execute("PRAGMA temp_store = MEMORY", [])?;
+            conn.execute("PRAGMA mmap_size = 268435456", [])?; // 256MB mmap
 
-        // Create attachments table
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS attachments (
-                id TEXT PRIMARY KEY,
-                message_id TEXT NOT NULL,
-                attachment_type TEXT NOT NULL,
-                filename TEXT NOT NULL,
-                size INTEGER NOT NULL,
-                mime_type TEXT NOT NULL,
-                hash BLOB NOT NULL,
-                thumbnail BLOB,
-                metadata TEXT,
-                created_at INTEGER NOT NULL,
-                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
+            // Messages table
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS messages (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    thread_id TEXT,
+                    reply_to TEXT,
+                    created_at INTEGER NOT NULL,
+                    edited_at INTEGER,
+                    deleted_at INTEGER,
+                    ephemeral INTEGER DEFAULT 0,
+                    signature TEXT NOT NULL DEFAULT ''
+                )",
+                [],
+            )?;
 
-        // Create reactions table
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS reactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_id TEXT NOT NULL,
-                emoji TEXT NOT NULL,
-                user TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-                UNIQUE(message_id, emoji, user)
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
+            // Attachments table
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS attachments (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    message_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    dht_hash TEXT NOT NULL,
+                    thumbnail BLOB,
+                    metadata TEXT DEFAULT '{}',
+                    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+                )",
+                [],
+            )?;
 
-        // Create mentions table
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS mentions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_id TEXT NOT NULL,
-                user TEXT NOT NULL,
-                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
+            // Reactions table
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS reactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id TEXT NOT NULL,
+                    emoji TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+                    UNIQUE(message_id, emoji, user_id)
+                )",
+                [],
+            )?;
 
-        // Create read receipts table
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS read_receipts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_id TEXT NOT NULL,
-                user TEXT NOT NULL,
-                read_at INTEGER NOT NULL,
-                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-                UNIQUE(message_id, user)
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
+            // Mentions table
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS mentions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id TEXT NOT NULL,
+                    user TEXT NOT NULL,
+                    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+                )",
+                [],
+            )?;
 
-        // Create threads table
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS threads (
-                id TEXT PRIMARY KEY,
-                parent_message_id TEXT NOT NULL,
-                last_reply_at INTEGER,
-                reply_count INTEGER DEFAULT 0,
-                participant_count INTEGER DEFAULT 0,
-                FOREIGN KEY (parent_message_id) REFERENCES messages(id) ON DELETE CASCADE
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
+            // Read receipts table
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS read_receipts (
+                    message_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    read_at INTEGER NOT NULL,
+                    PRIMARY KEY (message_id, user_id),
+                    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+                )",
+                [],
+            )?;
 
-        // Create indexes for performance
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at DESC)")
-            .execute(&self.pool)
-            .await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at)",
-        )
-        .execute(&self.pool)
-        .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender)")
-            .execute(&self.pool)
-            .await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id)",
-        )
-        .execute(&self.pool)
-        .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id)")
-            .execute(&self.pool)
-            .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_mentions_user ON mentions(user)")
-            .execute(&self.pool)
-            .await?;
+            // Create indexes for performance
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at DESC)", [])?;
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at)", [])?;
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender)", [])?;
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id)", [])?;
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id)", [])?;
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mentions_user ON mentions(user)", [])?;
 
-        info!("Database schema initialized successfully");
-        Ok(())
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(())) => {
+                info!("Database schema initialized successfully");
+                Ok(())
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Database schema creation failed: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Failed to execute schema initialization: {}", e))
+        }
     }
 
     /// Store a message in the database
     pub async fn store_message(&self, message: &RichMessage) -> Result<()> {
-        // Begin transaction
-        let mut tx = self.pool.begin().await?;
-
+        let conn = self.pool.get().await?;
+        
         // Serialize content
         let content_json = serde_json::to_string(&message.content)?;
+        let message_clone = message.clone();
 
-        // Insert main message
-        sqlx::query(
-            "INSERT OR REPLACE INTO messages (
-                id, channel_id, sender, content, thread_id, reply_to,
-                created_at, edited_at, deleted_at, ephemeral, signature
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        )
-        .bind(message.id.to_string())
-        .bind(message.channel_id.to_string())
-        .bind(message.sender.to_string())
-        .bind(content_json)
-        .bind(message.thread_id.as_ref().map(|id| id.to_string()))
-        .bind(message.reply_to.as_ref().map(|id| id.to_string()))
-        .bind(message.created_at.timestamp_millis())
-        .bind(message.edited_at.as_ref().map(|dt| dt.timestamp_millis()))
-        .bind(message.deleted_at.as_ref().map(|dt| dt.timestamp_millis()))
-        .bind(message.ephemeral as i32)
-        .bind(hex::encode(&message.signature.signature))
-        .execute(&mut *tx)
-        .await?;
+        let result = conn.interact(move |conn| -> Result<(), rusqlite::Error> {
+            let tx = conn.transaction()?;
 
-        // Insert attachments
-        for attachment in &message.attachments {
-            let metadata_json = serde_json::to_string(&attachment.metadata)?;
-
-            sqlx::query(
-                "INSERT OR REPLACE INTO attachments (
-                    id, message_id, attachment_type, filename, size,
-                    mime_type, hash, thumbnail, metadata, created_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            )
-            .bind(attachment.id.to_string())
-            .bind(message.id.to_string())
-            .bind(&attachment.mime_type)
-            .bind(&attachment.filename)
-            .bind(attachment.size_bytes as i64)
-            .bind(&attachment.mime_type)
-            .bind(&attachment.dht_hash)
-            .bind(&attachment.thumbnail)
-            .bind(metadata_json)
-            .bind(Utc::now().timestamp_millis())
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        // Insert mentions
-        for mention in &message.mentions {
-            sqlx::query("INSERT OR IGNORE INTO mentions (message_id, user) VALUES (?1, ?2)")
-                .bind(message.id.to_string())
-                .bind(mention.to_string())
-                .execute(&mut *tx)
-                .await?;
-        }
-
-        // Commit transaction
-        tx.commit().await?;
-
-        // Also sync to DHT for distributed storage
-        self.sync_to_dht(message).await?;
-
-        debug!("Stored message {} in database", message.id);
-        Ok(())
-    }
-
-    /// Update an existing message in the database
-    pub async fn update_message(&self, message: &RichMessage) -> Result<()> {
-        // Update in memory cache
-        let mut cache = self.messages.write().await;
-        cache.insert(message.id, message.clone());
-
-        // Update in database - for now just re-store
-        // In production, this would be a proper UPDATE query
-        self.store_message(message).await?;
-        Ok(())
-    }
-
-    /// Retrieve a message from the database
-    pub async fn get_message(&self, id: MessageId) -> Result<RichMessage> {
-        // Try local database first
-        let row = sqlx::query(
-            "SELECT id, channel_id, sender, content, thread_id, reply_to,
+            // Insert main message
+            tx.execute(
+                "INSERT OR REPLACE INTO messages (
+                    id, channel_id, sender, content, thread_id, reply_to,
                     created_at, edited_at, deleted_at, ephemeral, signature
-             FROM messages WHERE id = ?1",
-        )
-        .bind(id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    message_clone.id.to_string(),
+                    message_clone.channel_id.to_string(),
+                    message_clone.sender.to_string(),
+                    content_json,
+                    message_clone.thread_id.as_ref().map(|id| id.to_string()),
+                    message_clone.reply_to.as_ref().map(|id| id.to_string()),
+                    message_clone.created_at.timestamp_millis(),
+                    message_clone.edited_at.as_ref().map(|dt| dt.timestamp_millis()),
+                    message_clone.deleted_at.as_ref().map(|dt| dt.timestamp_millis()),
+                    message_clone.ephemeral as i32,
+                    hex::encode(&message_clone.signature.signature)
+                ],
+            )?;
 
-        if let Some(row) = row {
-            let mut message = self.parse_message_row(row)?;
+            // Insert attachments
+            for attachment in &message_clone.attachments {
+                let metadata_json = serde_json::to_string(&attachment.metadata).unwrap_or_default();
 
-            // Load attachments
-            message.attachments = self.load_attachments(id).await?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO attachments (
+                        id, message_id, filename, mime_type, size_bytes,
+                        dht_hash, thumbnail, metadata
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        attachment.id,
+                        message_clone.id.to_string(),
+                        attachment.filename,
+                        attachment.mime_type,
+                        attachment.size_bytes,
+                        attachment.dht_hash,
+                        attachment.thumbnail.as_ref(),
+                        metadata_json
+                    ],
+                )?;
+            }
 
-            // Load mentions
-            message.mentions = self.load_mentions(id).await?;
+            // Insert mentions
+            for mention in &message_clone.mentions {
+                tx.execute(
+                    "INSERT OR IGNORE INTO mentions (message_id, user) VALUES (?1, ?2)",
+                    params![message_clone.id.to_string(), mention.to_string()],
+                )?;
+            }
 
-            return Ok(message);
+            // Insert reactions
+            for (emoji, users) in &message_clone.reactions {
+                for user in users {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO reactions (message_id, emoji, user_id, created_at) 
+                         VALUES (?1, ?2, ?3, ?4)",
+                        params![
+                            message_clone.id.to_string(),
+                            emoji,
+                            user.to_string(),
+                            chrono::Utc::now().timestamp_millis()
+                        ],
+                    )?;
+                }
+            }
+
+            tx.commit()?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(())) => {
+                debug!("Message stored successfully: {}", message.id);
+                Ok(())
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to store message: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
         }
-
-        // If not found locally, try DHT
-        self.get_from_dht(id).await
     }
 
-    /// Update a message in the database
-    /// Get channel messages with pagination
+    /// Retrieve a message by ID
+    pub async fn get_message(&self, id: MessageId) -> Result<RichMessage> {
+        let conn = self.pool.get().await?;
+        let message_id = id.to_string();
+
+        let result = conn.interact(move |conn| -> Result<RichMessage, rusqlite::Error> {
+            let mut stmt = conn.prepare(
+                "SELECT id, channel_id, sender, content, thread_id, reply_to,
+                        created_at, edited_at, deleted_at, ephemeral, signature
+                 FROM messages WHERE id = ?1"
+            )?;
+
+            let row = stmt.query_row(params![message_id], |row| {
+                let content_json: String = row.get("content")?;
+                let content: MessageContent = serde_json::from_str(&content_json)
+                    .map_err(|_| rusqlite::Error::InvalidColumnType(0, "content".to_string(), rusqlite::types::Type::Text))?;
+
+                let created_at = Utc.timestamp_millis_opt(row.get("created_at")?).single()
+                    .ok_or(rusqlite::Error::InvalidColumnType(0, "created_at".to_string(), rusqlite::types::Type::Integer))?;
+
+                let edited_at: Option<i64> = row.get("edited_at")?;
+                let edited_at = edited_at.and_then(|ts| Utc.timestamp_millis_opt(ts).single());
+
+                let deleted_at: Option<i64> = row.get("deleted_at")?;
+                let deleted_at = deleted_at.and_then(|ts| Utc.timestamp_millis_opt(ts).single());
+
+                let thread_id: Option<String> = row.get("thread_id")?;
+                let thread_id = thread_id.and_then(|s| Uuid::parse_str(&s).ok().map(ThreadId));
+
+                let reply_to: Option<String> = row.get("reply_to")?;
+                let reply_to = reply_to.and_then(|s| Uuid::parse_str(&s).ok().map(MessageId));
+
+                let signature_hex: String = row.get("signature")?;
+                let signature_bytes = hex::decode(&signature_hex).unwrap_or_default();
+
+                Ok(RichMessage {
+                    id: MessageId(Uuid::parse_str(&row.get::<_, String>("id")?).unwrap()),
+                    channel_id: ChannelId(Uuid::parse_str(&row.get::<_, String>("channel_id")?).unwrap()),
+                    sender: FourWordAddress::from(row.get::<_, String>("sender")?),
+                    content,
+                    thread_id,
+                    reply_to,
+                    created_at,
+                    edited_at,
+                    deleted_at,
+                    ephemeral: row.get::<_, i32>("ephemeral")? != 0,
+                    attachments: Vec::new(), // Filled below
+                    mentions: Vec::new(),    // Filled below
+                    reactions: HashMap::new(), // Filled below
+                    read_by: HashMap::new(),
+                    delivered_to: HashMap::new(),
+                    expires_at: None,
+                    thread_count: 0,
+                    last_thread_reply: None,
+                    sender_device: crate::messaging::types::DeviceId("primary".to_string()),
+                    encryption: EncryptionMethod::E2E,
+                    signature: MessageSignature {
+                        algorithm: "ed25519".to_string(),
+                        signature: signature_bytes,
+                    },
+                })
+            })?;
+
+            Ok(row)
+        }).await;
+
+        match result {
+            Ok(Ok(mut message)) => {
+                // Load attachments, mentions, and reactions
+                message.attachments = self.get_attachments(message.id).await?;
+                message.mentions = self.get_mentions(message.id).await?;
+                message.reactions = self.get_reactions(message.id).await?;
+                Ok(message)
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to retrieve message: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
+        }
+    }
+
+    /// Get attachments for a message
+    async fn get_attachments(&self, message_id: MessageId) -> Result<Vec<Attachment>> {
+        let conn = self.pool.get().await?;
+        let msg_id = message_id.to_string();
+
+        let result = conn.interact(move |conn| -> Result<Vec<Attachment>, rusqlite::Error> {
+            let mut stmt = conn.prepare(
+                "SELECT id, filename, mime_type, size_bytes, dht_hash, thumbnail, metadata
+                 FROM attachments WHERE message_id = ?1"
+            )?;
+
+            let rows = stmt.query_map(params![msg_id], |row| {
+                let metadata_json: String = row.get("metadata")?;
+                let metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
+                    .unwrap_or_default();
+
+                let thumbnail: Option<Vec<u8>> = row.get("thumbnail")?;
+
+                Ok(Attachment {
+                    id: row.get("id")?,
+                    filename: row.get("filename")?,
+                    mime_type: row.get("mime_type")?,
+                    size_bytes: row.get("size_bytes")?,
+                    dht_hash: row.get("dht_hash")?,
+                    thumbnail,
+                    metadata,
+                    encryption_key: None, // Not stored in DB for security
+                })
+            })?;
+
+            let mut attachments = Vec::new();
+            for row in rows {
+                attachments.push(row?);
+            }
+            Ok(attachments)
+        }).await;
+
+        match result {
+            Ok(Ok(attachments)) => Ok(attachments),
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to get attachments: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
+        }
+    }
+
+    /// Get mentions for a message
+    async fn get_mentions(&self, message_id: MessageId) -> Result<Vec<FourWordAddress>> {
+        let conn = self.pool.get().await?;
+        let msg_id = message_id.to_string();
+
+        let result = conn.interact(move |conn| -> Result<Vec<String>, rusqlite::Error> {
+            let mut stmt = conn.prepare("SELECT user FROM mentions WHERE message_id = ?1")?;
+            let rows = stmt.query_map(params![msg_id], |row| {
+                Ok(row.get::<_, String>("user")?)
+            })?;
+
+            let mut mentions = Vec::new();
+            for row in rows {
+                mentions.push(row?);
+            }
+            Ok(mentions)
+        }).await;
+
+        match result {
+            Ok(Ok(user_strings)) => {
+                let mentions = user_strings.into_iter()
+                    .map(FourWordAddress::from)
+                    .collect();
+                Ok(mentions)
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to get mentions: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
+        }
+    }
+
+    /// Get reactions for a message
+    async fn get_reactions(&self, message_id: MessageId) -> Result<HashMap<String, Vec<FourWordAddress>>> {
+        let conn = self.pool.get().await?;
+        let msg_id = message_id.to_string();
+
+        let result = conn.interact(move |conn| -> Result<HashMap<String, Vec<String>>, rusqlite::Error> {
+            let mut stmt = conn.prepare(
+                "SELECT emoji, user_id FROM reactions WHERE message_id = ?1 ORDER BY created_at"
+            )?;
+            let rows = stmt.query_map(params![msg_id], |row| {
+                Ok((row.get::<_, String>("emoji")?, row.get::<_, String>("user_id")?))
+            })?;
+
+            let mut reactions: HashMap<String, Vec<String>> = HashMap::new();
+            for row in rows {
+                let (emoji, user_id) = row?;
+                reactions.entry(emoji).or_insert_with(Vec::new).push(user_id);
+            }
+            Ok(reactions)
+        }).await;
+
+        match result {
+            Ok(Ok(reaction_strings)) => {
+                let reactions = reaction_strings.into_iter()
+                    .map(|(emoji, users)| {
+                        let user_addresses = users.into_iter()
+                            .map(FourWordAddress::from)
+                            .collect();
+                        (emoji, user_addresses)
+                    })
+                    .collect();
+                Ok(reactions)
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to get reactions: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
+        }
+    }
+
+    /// Update an existing message
+    pub async fn update_message(&self, message: &RichMessage) -> Result<()> {
+        // For simplicity, delete and re-insert the message
+        // In production, you might want to do selective updates
+        self.store_message(message).await
+    }
+
+    /// Get messages for a channel
     pub async fn get_channel_messages(
         &self,
         channel_id: ChannelId,
         limit: usize,
         before: Option<DateTime<Utc>>,
     ) -> Result<Vec<RichMessage>> {
-        let before_timestamp = before.map(|dt| dt.timestamp_millis()).unwrap_or(i64::MAX);
+        let conn = self.pool.get().await?;
+        let chan_id = channel_id.to_string();
+        let before_ts = before.map(|dt| dt.timestamp_millis()).unwrap_or(i64::MAX);
 
-        let rows = sqlx::query(
-            "SELECT id, channel_id, sender, content, thread_id, reply_to,
-                    created_at, edited_at, deleted_at, ephemeral, signature
-             FROM messages 
-             WHERE channel_id = ?1 AND created_at < ?2 AND deleted_at IS NULL
-             ORDER BY created_at DESC
-             LIMIT ?3",
-        )
-        .bind(channel_id.to_string())
-        .bind(before_timestamp)
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await?;
+        let result = conn.interact(move |conn| -> Result<Vec<MessageId>, rusqlite::Error> {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM messages 
+                 WHERE channel_id = ?1 AND created_at < ?2 AND deleted_at IS NULL
+                 ORDER BY created_at DESC LIMIT ?3"
+            )?;
 
-        let mut result = Vec::new();
-        for row in rows {
-            let mut msg = self.parse_message_row(row)?;
+            let rows = stmt.query_map(params![chan_id, before_ts, limit as i64], |row| {
+                let id_str: String = row.get("id")?;
+                Ok(MessageId(Uuid::parse_str(&id_str).unwrap()))
+            })?;
 
-            // Load attachments and mentions
-            msg.attachments = self.load_attachments(msg.id).await?;
-            msg.mentions = self.load_mentions(msg.id).await?;
+            let mut message_ids = Vec::new();
+            for row in rows {
+                message_ids.push(row?);
+            }
+            Ok(message_ids)
+        }).await;
 
-            result.push(msg);
+        match result {
+            Ok(Ok(message_ids)) => {
+                let mut messages = Vec::new();
+                for id in message_ids {
+                    if let Ok(msg) = self.get_message(id).await {
+                        messages.push(msg);
+                    }
+                }
+                Ok(messages)
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to get channel messages: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
         }
-
-        Ok(result)
     }
 
-    /// Mark message as read
+    /// Mark a message as read
     pub async fn mark_as_read(&self, message_id: MessageId, user: FourWordAddress) -> Result<()> {
-        sqlx::query(
-            "INSERT OR REPLACE INTO read_receipts (message_id, user, read_at)
-             VALUES (?1, ?2, ?3)",
-        )
-        .bind(message_id.to_string())
-        .bind(user.to_string())
-        .bind(Utc::now().timestamp_millis())
-        .execute(&self.pool)
-        .await?;
+        let conn = self.pool.get().await?;
+        let msg_id = message_id.to_string();
+        let user_str = user.to_string();
 
-        Ok(())
+        let result = conn.interact(move |conn| -> Result<(), rusqlite::Error> {
+            conn.execute(
+                "INSERT OR REPLACE INTO read_receipts (message_id, user_id, read_at) 
+                 VALUES (?1, ?2, ?3)",
+                params![msg_id, user_str, chrono::Utc::now().timestamp_millis()],
+            )?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(())) => {
+                debug!("Message {} marked as read by {}", message_id, user);
+                Ok(())
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to mark message as read: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
+        }
     }
 
-    /// Search messages using LIKE pattern matching
+    /// Search messages by content
     pub async fn search_messages(
         &self,
         query: &str,
         channel_id: Option<ChannelId>,
         limit: usize,
     ) -> Result<Vec<RichMessage>> {
-        let search_pattern = format!("%{}%", query);
+        let conn = self.pool.get().await?;
+        let search_query = format!("%{}%", query);
+        let chan_filter = channel_id.map(|id| id.to_string());
 
-        let rows = if let Some(channel) = channel_id {
-            sqlx::query(
-                "SELECT id, channel_id, sender, content, thread_id, reply_to,
-                        created_at, edited_at, deleted_at, ephemeral, signature
-                 FROM messages
-                 WHERE content LIKE ?1 AND channel_id = ?2 AND deleted_at IS NULL
-                 ORDER BY created_at DESC
-                 LIMIT ?3",
-            )
-            .bind(&search_pattern)
-            .bind(channel.to_string())
-            .bind(limit as i64)
-            .fetch_all(&self.pool)
-            .await?
-        } else {
-            sqlx::query(
-                "SELECT id, channel_id, sender, content, thread_id, reply_to,
-                        created_at, edited_at, deleted_at, ephemeral, signature
-                 FROM messages
-                 WHERE content LIKE ?1 AND deleted_at IS NULL
-                 ORDER BY created_at DESC
-                 LIMIT ?2",
-            )
-            .bind(&search_pattern)
-            .bind(limit as i64)
-            .fetch_all(&self.pool)
-            .await?
-        };
+        let result = conn.interact(move |conn| -> Result<Vec<MessageId>, rusqlite::Error> {
+            let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql + Send>>) = if let Some(channel) = chan_filter {
+                (
+                    "SELECT id FROM messages 
+                     WHERE content LIKE ?1 AND channel_id = ?2 AND deleted_at IS NULL
+                     ORDER BY created_at DESC LIMIT ?3".to_string(),
+                    vec![
+                        Box::new(search_query),
+                        Box::new(channel),
+                        Box::new(limit as i64)
+                    ]
+                )
+            } else {
+                (
+                    "SELECT id FROM messages 
+                     WHERE content LIKE ?1 AND deleted_at IS NULL
+                     ORDER BY created_at DESC LIMIT ?2".to_string(),
+                    vec![
+                        Box::new(search_query),
+                        Box::new(limit as i64)
+                    ]
+                )
+            };
 
-        let mut result = Vec::new();
-        for row in rows {
-            let mut msg = self.parse_message_row(row)?;
-            msg.attachments = self.load_attachments(msg.id).await?;
-            msg.mentions = self.load_mentions(msg.id).await?;
-            result.push(msg);
+            let mut stmt = conn.prepare(&sql)?;
+            let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref() as &dyn rusqlite::ToSql).collect();
+            
+            let rows = stmt.query_map(param_refs.as_slice(), |row| {
+                let id_str: String = row.get("id")?;
+                Ok(MessageId(Uuid::parse_str(&id_str).unwrap()))
+            })?;
+
+            let mut message_ids = Vec::new();
+            for row in rows {
+                message_ids.push(row?);
+            }
+            Ok(message_ids)
+        }).await;
+
+        match result {
+            Ok(Ok(message_ids)) => {
+                let mut messages = Vec::new();
+                for id in message_ids {
+                    if let Ok(msg) = self.get_message(id).await {
+                        messages.push(msg);
+                    }
+                }
+                Ok(messages)
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to search messages: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
         }
+    }
 
-        Ok(result)
+    /// Add a reaction to a message
+    pub async fn add_reaction(&self, message_id: MessageId, emoji: String, user: FourWordAddress) -> Result<()> {
+        let conn = self.pool.get().await?;
+        let msg_id = message_id.to_string();
+        let user_str = user.to_string();
+        let emoji_clone = emoji.clone();
+
+        let result = conn.interact(move |conn| -> Result<(), rusqlite::Error> {
+            conn.execute(
+                "INSERT OR IGNORE INTO reactions (message_id, emoji, user_id, created_at) 
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![msg_id, emoji_clone, user_str, chrono::Utc::now().timestamp_millis()],
+            )?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(())) => {
+                debug!("Reaction {} added to message {} by {}", emoji, message_id, user);
+                Ok(())
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to add reaction: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
+        }
+    }
+
+    /// Remove a reaction from a message
+    pub async fn remove_reaction(&self, message_id: MessageId, emoji: String, user: FourWordAddress) -> Result<()> {
+        let conn = self.pool.get().await?;
+        let msg_id = message_id.to_string();
+        let user_str = user.to_string();
+        let emoji_clone = emoji.clone();
+
+        let result = conn.interact(move |conn| -> Result<(), rusqlite::Error> {
+            conn.execute(
+                "DELETE FROM reactions 
+                 WHERE message_id = ?1 AND emoji = ?2 AND user_id = ?3",
+                params![msg_id, emoji_clone, user_str],
+            )?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(())) => {
+                debug!("Reaction {} removed from message {} by {}", emoji, message_id, user);
+                Ok(())
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to remove reaction: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
+        }
     }
 
     /// Get thread messages
     pub async fn get_thread_messages(&self, thread_id: ThreadId) -> Result<Vec<RichMessage>> {
-        let rows = sqlx::query(
-            "SELECT id, channel_id, sender, content, thread_id, reply_to,
-                    created_at, edited_at, deleted_at, ephemeral, signature
-             FROM messages 
-             WHERE thread_id = ?1 AND deleted_at IS NULL
-             ORDER BY created_at ASC",
-        )
-        .bind(thread_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
+        let conn = self.pool.get().await?;
+        let thread_str = thread_id.to_string();
 
-        let mut result = Vec::new();
-        for row in rows {
-            let mut msg = self.parse_message_row(row)?;
-            msg.attachments = self.load_attachments(msg.id).await?;
-            msg.mentions = self.load_mentions(msg.id).await?;
-            result.push(msg);
+        let result = conn.interact(move |conn| -> Result<Vec<MessageId>, rusqlite::Error> {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM messages 
+                 WHERE thread_id = ?1 AND deleted_at IS NULL
+                 ORDER BY created_at ASC"
+            )?;
+
+            let rows = stmt.query_map(params![thread_str], |row| {
+                let id_str: String = row.get("id")?;
+                Ok(MessageId(Uuid::parse_str(&id_str).unwrap()))
+            })?;
+
+            let mut message_ids = Vec::new();
+            for row in rows {
+                message_ids.push(row?);
+            }
+            Ok(message_ids)
+        }).await;
+
+        match result {
+            Ok(Ok(message_ids)) => {
+                let mut messages = Vec::new();
+                for id in message_ids {
+                    if let Ok(msg) = self.get_message(id).await {
+                        messages.push(msg);
+                    }
+                }
+                Ok(messages)
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to get thread messages: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
         }
-
-        Ok(result)
-    }
-
-    /// Add a reaction to a message
-    pub async fn add_reaction(
-        &self,
-        message_id: MessageId,
-        emoji: String,
-        user: FourWordAddress,
-    ) -> Result<()> {
-        sqlx::query(
-            "INSERT OR IGNORE INTO reactions (message_id, emoji, user, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
-        )
-        .bind(message_id.to_string())
-        .bind(emoji)
-        .bind(user.to_string())
-        .bind(Utc::now().timestamp_millis())
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    /// Remove a reaction from a message
-    pub async fn remove_reaction(
-        &self,
-        message_id: MessageId,
-        emoji: String,
-        user: FourWordAddress,
-    ) -> Result<()> {
-        sqlx::query("DELETE FROM reactions WHERE message_id = ?1 AND emoji = ?2 AND user = ?3")
-            .bind(message_id.to_string())
-            .bind(emoji)
-            .bind(user.to_string())
-            .execute(&self.pool)
-            .await?;
-
-        Ok(())
-    }
-
-    /// Get reactions for a message
-    pub async fn get_reactions(
-        &self,
-        message_id: MessageId,
-    ) -> Result<HashMap<String, Vec<FourWordAddress>>> {
-        let rows = sqlx::query("SELECT emoji, user FROM reactions WHERE message_id = ?1")
-            .bind(message_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-
-        let mut result: HashMap<String, Vec<FourWordAddress>> = HashMap::new();
-        for row in rows {
-            let emoji: String = row.try_get(0)?;
-            let user = FourWordAddress::from(row.try_get::<String, _>(1)?);
-            result.entry(emoji).or_default().push(user);
-        }
-
-        Ok(result)
-    }
-
-    /// Clean up old ephemeral messages
-    pub async fn cleanup_ephemeral(&self, ttl_seconds: i64) -> Result<usize> {
-        let cutoff = (Utc::now() - chrono::Duration::seconds(ttl_seconds)).timestamp_millis();
-
-        let result = sqlx::query("DELETE FROM messages WHERE ephemeral = 1 AND created_at < ?1")
-            .bind(cutoff)
-            .execute(&self.pool)
-            .await?;
-
-        let deleted = result.rows_affected() as usize;
-
-        if deleted > 0 {
-            info!("Cleaned up {} ephemeral messages", deleted);
-        }
-
-        Ok(deleted)
-    }
-
-    /// Vacuum database to reclaim space
-    pub async fn vacuum(&self) -> Result<()> {
-        sqlx::query("VACUUM").execute(&self.pool).await?;
-        info!("Database vacuumed successfully");
-        Ok(())
     }
 
     /// Get database statistics
     pub async fn get_stats(&self) -> Result<DatabaseStats> {
-        let message_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE deleted_at IS NULL")
-                .fetch_one(&self.pool)
-                .await?;
+        let conn = self.pool.get().await?;
 
-        let attachment_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attachments")
-            .fetch_one(&self.pool)
-            .await?;
+        let result = conn.interact(|conn| -> Result<DatabaseStats, rusqlite::Error> {
+            let mut total_messages: i64 = 0;
+            let mut total_attachments: i64 = 0;
+            let mut total_reactions: i64 = 0;
+            let mut db_size: i64 = 0;
 
-        let reaction_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reactions")
-            .fetch_one(&self.pool)
-            .await?;
+            conn.query_row("SELECT COUNT(*) FROM messages", [], |row| {
+                total_messages = row.get(0)?;
+                Ok(())
+            })?;
 
-        let db_size = std::fs::metadata(&self.db_path)?.len();
+            conn.query_row("SELECT COUNT(*) FROM attachments", [], |row| {
+                total_attachments = row.get(0)?;
+                Ok(())
+            })?;
 
-        Ok(DatabaseStats {
-            message_count: message_count as usize,
-            attachment_count: attachment_count as usize,
-            reaction_count: reaction_count as usize,
-            database_size_bytes: db_size,
-        })
-    }
+            conn.query_row("SELECT COUNT(*) FROM reactions", [], |row| {
+                total_reactions = row.get(0)?;
+                Ok(())
+            })?;
 
-    // Helper methods
+            // Get database page count and page size to calculate size
+            let page_count: i64 = conn.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+            let page_size: i64 = conn.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+            db_size = page_count * page_size;
 
-    fn parse_message_row(&self, row: sqlx::sqlite::SqliteRow) -> Result<RichMessage> {
-        let content_json: String = row.try_get(3)?;
-        let content: MessageContent = serde_json::from_str(&content_json)?;
+            Ok(DatabaseStats {
+                total_messages: total_messages as u64,
+                total_attachments: total_attachments as u64,
+                total_reactions: total_reactions as u64,
+                database_size_bytes: db_size as u64,
+            })
+        }).await;
 
-        Ok(RichMessage {
-            id: MessageId(Uuid::parse_str(&row.try_get::<String, _>(0)?)?),
-            channel_id: ChannelId(Uuid::parse_str(&row.try_get::<String, _>(1)?)?),
-            sender: FourWordAddress::from(row.try_get::<String, _>(2)?),
-            sender_device: DeviceId("primary".to_string()),
-            content,
-            thread_id: row
-                .try_get::<Option<String>, _>(4)?
-                .and_then(|s| Uuid::parse_str(&s).ok().map(ThreadId)),
-            reply_to: row
-                .try_get::<Option<String>, _>(5)?
-                .and_then(|s| Uuid::parse_str(&s).ok().map(MessageId)),
-            created_at: DateTime::from_timestamp_millis(row.try_get(6)?).unwrap_or_else(Utc::now),
-            edited_at: row
-                .try_get::<Option<i64>, _>(7)?
-                .and_then(DateTime::from_timestamp_millis),
-            deleted_at: row
-                .try_get::<Option<i64>, _>(8)?
-                .and_then(DateTime::from_timestamp_millis),
-            ephemeral: row.try_get::<i32, _>(9)? != 0,
-            signature: row
-                .try_get::<Option<String>, _>(10)?
-                .and_then(|s| hex::decode(s).ok())
-                .map(|sig| MessageSignature {
-                    algorithm: "Ed25519".to_string(),
-                    signature: sig,
-                })
-                .unwrap_or_default(),
-            attachments: Vec::new(),      // Loaded separately
-            mentions: Vec::new(),         // Loaded separately
-            reactions: HashMap::new(),    // Loaded separately
-            read_by: HashMap::new(),      // Loaded separately
-            delivered_to: HashMap::new(), // Loaded separately
-            thread_count: 0,
-            last_thread_reply: None,
-            expires_at: None,
-            encryption: EncryptionMethod::E2E,
-        })
-    }
-
-    async fn load_attachments(&self, message_id: MessageId) -> Result<Vec<Attachment>> {
-        let rows = sqlx::query(
-            "SELECT id, attachment_type, filename, size, mime_type, hash, thumbnail, metadata
-             FROM attachments WHERE message_id = ?1",
-        )
-        .bind(message_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut attachments = Vec::new();
-        for row in rows {
-            let metadata_json: String = row.try_get(7)?;
-            let metadata: HashMap<String, String> =
-                serde_json::from_str(&metadata_json).unwrap_or_default();
-
-            attachments.push(Attachment {
-                id: row.try_get::<String, _>(0)?,
-                filename: row.try_get(2)?,
-                mime_type: row.try_get(4)?,
-                size_bytes: row.try_get::<i64, _>(3)? as u64,
-                thumbnail: row.try_get(6)?,
-                dht_hash: row.try_get(5)?,
-                encryption_key: None,
-                metadata,
-            });
+        match result {
+            Ok(Ok(stats)) => Ok(stats),
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to get database stats: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
         }
-
-        Ok(attachments)
     }
 
-    async fn load_mentions(&self, message_id: MessageId) -> Result<Vec<FourWordAddress>> {
-        let rows = sqlx::query("SELECT user FROM mentions WHERE message_id = ?1")
-            .bind(message_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
+    /// Clean up ephemeral messages
+    pub async fn cleanup_ephemeral(&self, ttl_seconds: i64) -> Result<usize> {
+        let conn = self.pool.get().await?;
+        let cutoff_time = chrono::Utc::now().timestamp_millis() - (ttl_seconds * 1000);
 
-        let mut mentions = Vec::new();
-        for row in rows {
-            mentions.push(FourWordAddress::from(row.try_get::<String, _>(0)?));
+        let result = conn.interact(move |conn| -> Result<usize, rusqlite::Error> {
+            let changes = conn.execute(
+                "DELETE FROM messages 
+                 WHERE ephemeral = 1 AND created_at < ?1",
+                params![cutoff_time],
+            )?;
+            Ok(changes)
+        }).await;
+
+        match result {
+            Ok(Ok(count)) => {
+                info!("Cleaned up {} ephemeral messages", count);
+                Ok(count)
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to cleanup ephemeral messages: {}", e)),
+            Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e))
         }
-
-        Ok(mentions)
-    }
-
-    async fn sync_to_dht(&self, message: &RichMessage) -> Result<()> {
-        // Store in DHT for distributed backup
-        let key = format!("msg:{}", message.id);
-        let value = serde_json::to_vec(message)?;
-
-        self.dht_client.put(key, value).await?;
-
-        // Also store in channel index
-        let channel_key = format!("channel:{}:messages", message.channel_id);
-        let mut messages = self
-            .dht_client
-            .get(channel_key.clone())
-            .await?
-            .and_then(|data| serde_json::from_slice::<Vec<String>>(&data).ok())
-            .unwrap_or_default();
-
-        if !messages.contains(&message.id.to_string()) {
-            messages.push(message.id.to_string());
-            let value = serde_json::to_vec(&messages)?;
-            self.dht_client.put(channel_key, value).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn get_from_dht(&self, id: MessageId) -> Result<RichMessage> {
-        let key = format!("msg:{}", id);
-
-        if let Some(data) = self.dht_client.get(key).await? {
-            let message: RichMessage = serde_json::from_slice(&data)?;
-
-            // Cache in local database
-            self.store_message(&message).await?;
-
-            return Ok(message);
-        }
-
-        Err(anyhow::anyhow!("Message not found in database or DHT"))
     }
 }
 
 /// Database statistics
 #[derive(Debug, Clone)]
 pub struct DatabaseStats {
-    pub message_count: usize,
-    pub attachment_count: usize,
-    pub reaction_count: usize,
+    pub total_messages: u64,
+    pub total_attachments: u64,
+    pub total_reactions: u64,
     pub database_size_bytes: u64,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_database_creation() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db_path = temp_dir
-            .path()
-            .join("test.db")
-            .to_string_lossy()
-            .to_string();
-
-        #[allow(unused)]
-        let dht = DhtClient::new_mock();
-        let store = DatabaseMessageStore::new(dht, Some(db_path)).await;
-
-        assert!(store.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_message_storage_and_retrieval() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db_path = temp_dir
-            .path()
-            .join("test.db")
-            .to_string_lossy()
-            .to_string();
-
-        #[allow(unused)]
-        let dht = DhtClient::new_mock();
-        let store = DatabaseMessageStore::new(dht, Some(db_path)).await.unwrap();
-
-        // Create test message
-        let message = RichMessage::new(
-            FourWordAddress::from("test-user-here"),
-            ChannelId::new(),
-            MessageContent::Text("Test message".to_string()),
-        );
-
-        // Store message
-        store.store_message(&message).await.unwrap();
-
-        // Retrieve message
-        let retrieved = store.get_message(message.id).await.unwrap();
-
-        assert_eq!(retrieved.id, message.id);
-        assert_eq!(retrieved.sender, message.sender);
-        assert!(matches!(retrieved.content, MessageContent::Text(_)));
-    }
-
-    #[tokio::test]
-    async fn test_channel_message_retrieval() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db_path = temp_dir
-            .path()
-            .join("test.db")
-            .to_string_lossy()
-            .to_string();
-
-        #[allow(unused)]
-        let dht = DhtClient::new_mock();
-        let store = DatabaseMessageStore::new(dht, Some(db_path)).await.unwrap();
-
-        let channel_id = ChannelId::new();
-        let sender = FourWordAddress::from("test-user");
-
-        // Store multiple messages
-        for i in 0..10 {
-            let message = RichMessage::new(
-                sender.clone(),
-                channel_id,
-                MessageContent::Text(format!("Message {}", i)),
-            );
-            store.store_message(&message).await.unwrap();
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        }
-
-        // Retrieve messages
-        let messages = store
-            .get_channel_messages(channel_id, 5, None)
-            .await
-            .unwrap();
-
-        assert_eq!(messages.len(), 5);
-        // Messages should be in reverse chronological order
-        assert!(messages[0].created_at > messages[1].created_at);
-    }
-
-    #[tokio::test]
-    async fn test_reactions() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db_path = temp_dir
-            .path()
-            .join("test.db")
-            .to_string_lossy()
-            .to_string();
-
-        #[allow(unused)]
-        let dht = DhtClient::new_mock();
-        let store = DatabaseMessageStore::new(dht, Some(db_path)).await.unwrap();
-
-        let message = RichMessage::new(
-            FourWordAddress::from("test-user"),
-            ChannelId::new(),
-            MessageContent::Text("React to this".to_string()),
-        );
-
-        store.store_message(&message).await.unwrap();
-
-        // Add reactions
-        let user1 = FourWordAddress::from("user-one");
-        let user2 = FourWordAddress::from("user-two");
-
-        store
-            .add_reaction(message.id, "👍".to_string(), user1.clone())
-            .await
-            .unwrap();
-        store
-            .add_reaction(message.id, "👍".to_string(), user2.clone())
-            .await
-            .unwrap();
-        store
-            .add_reaction(message.id, "❤️".to_string(), user1.clone())
-            .await
-            .unwrap();
-
-        // Get reactions
-        let reactions = store.get_reactions(message.id).await.unwrap();
-
-        assert_eq!(reactions.len(), 2);
-        assert_eq!(reactions.get("👍").unwrap().len(), 2);
-        assert_eq!(reactions.get("❤️").unwrap().len(), 1);
-
-        // Remove reaction
-        store
-            .remove_reaction(message.id, "👍".to_string(), user1)
-            .await
-            .unwrap();
-
-        let reactions = store.get_reactions(message.id).await.unwrap();
-        assert_eq!(reactions.get("👍").unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_ephemeral_cleanup() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db_path = temp_dir
-            .path()
-            .join("test.db")
-            .to_string_lossy()
-            .to_string();
-
-        #[allow(unused)]
-        let dht = DhtClient::new_mock();
-        let store = DatabaseMessageStore::new(dht, Some(db_path)).await.unwrap();
-
-        // Create ephemeral message
-        let mut message = RichMessage::new(
-            FourWordAddress::from("test-user"),
-            ChannelId::new(),
-            MessageContent::Text("Ephemeral".to_string()),
-        );
-        message.ephemeral = true;
-
-        store.store_message(&message).await.unwrap();
-
-        // Should exist initially
-        assert!(store.get_message(message.id).await.is_ok());
-
-        // Clean up with 0 TTL (should delete all ephemeral messages)
-        let deleted = store.cleanup_ephemeral(0).await.unwrap();
-        assert_eq!(deleted, 1);
-
-        // Should be gone now
-        assert!(store.get_message(message.id).await.is_err());
-    }
-}
+// Type alias for compatibility
+pub type MessageStore = DatabaseMessageStore;

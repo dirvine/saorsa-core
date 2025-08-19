@@ -1,9 +1,10 @@
-//! Reed-Solomon erasure coding for fault-tolerant DHT storage
+//! Post-quantum Reed-Solomon erasure coding for fault-tolerant DHT storage
 //!
 //! Provides configurable redundancy with dynamic adjustment based on network conditions.
+//! Uses saorsa-fec for post-quantum security.
 
 use anyhow::{Result, anyhow};
-use reed_solomon_erasure::galois_8::ReedSolomon;
+use saorsa_fec::{FecCodec, FecParams};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -46,15 +47,17 @@ impl RSConfig {
 /// Reed-Solomon encoder with configurable parameters
 pub struct ReedSolomonEncoder {
     pub(crate) config: RSConfig,
-    encoder: Arc<RwLock<ReedSolomon>>,
+    encoder: Arc<RwLock<FecCodec>>,
 }
 
 impl ReedSolomonEncoder {
     /// Create new encoder with specified configuration
     pub fn new(k: usize, m: usize) -> Result<Self> {
         let config = RSConfig::new(k, m)?;
-        let encoder = ReedSolomon::new(k, m)
-            .map_err(|e| anyhow!("Failed to create Reed-Solomon encoder: {:?}", e))?;
+        let fec_params = FecParams::new(k as u16, m as u16)
+            .map_err(|e| anyhow!("Failed to create FEC params: {:?}", e))?;
+        let encoder = FecCodec::new(fec_params)
+            .map_err(|e| anyhow!("Failed to create FEC encoder: {:?}", e))?;
 
         Ok(Self {
             config,
@@ -68,43 +71,17 @@ impl ReedSolomonEncoder {
             return Err(anyhow!("Cannot encode empty data"));
         }
 
-        // Split data into k chunks
-        let chunk_size = data.len().div_ceil(self.config.k);
-        if chunk_size > self.config.max_chunk_size {
-            return Err(anyhow!("Chunk size exceeds maximum"));
-        }
-
-        let mut shards = Vec::with_capacity(self.config.n());
-
-        // Create data shards
-        for (i, _) in (0..self.config.k).enumerate() {
-            let start = i * chunk_size;
-            let end = std::cmp::min(start + chunk_size, data.len());
-            let mut shard = data[start..end].to_vec();
-
-            // Pad last shard if necessary
-            if shard.len() < chunk_size {
-                shard.resize(chunk_size, 0);
-            }
-            shards.push(shard);
-        }
-
-        // Add parity shards
-        for _ in 0..self.config.m {
-            shards.push(vec![0u8; chunk_size]);
-        }
-
-        // Encode
-        let encoder = self.encoder.write().await;
-        encoder
-            .encode(&mut shards)
+        // saorsa-fec takes the raw data and handles chunking internally
+        let encoder = self.encoder.read().await;
+        let encoded_chunks = encoder
+            .encode(&data)
             .map_err(|e| anyhow!("Encoding failed: {:?}", e))?;
 
-        Ok(shards)
+        Ok(encoded_chunks)
     }
 
     /// Decode original data from available chunks
-    pub async fn decode(&self, mut chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>> {
+    pub async fn decode(&self, chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>> {
         if chunks.len() != self.config.n() {
             return Err(anyhow!("Invalid number of chunks"));
         }
@@ -119,26 +96,13 @@ impl ReedSolomonEncoder {
             ));
         }
 
-        // Reconstruct missing chunks
-        let encoder = self.encoder.write().await;
-        encoder
-            .reconstruct(&mut chunks)
-            .map_err(|e| anyhow!("Reconstruction failed: {:?}", e))?;
+        // Convert to the format expected by saorsa-fec
+        let encoder = self.encoder.read().await;
+        let decoded_data = encoder
+            .decode(&chunks)
+            .map_err(|e| anyhow!("Decoding failed: {:?}", e))?;
 
-        // Combine data chunks
-        let mut result = Vec::new();
-        for (i, maybe_chunk) in chunks.iter().take(self.config.k).enumerate() {
-            if let Some(chunk) = maybe_chunk {
-                result.extend_from_slice(chunk);
-            }
-        }
-
-        // Remove padding
-        while result.last() == Some(&0) {
-            result.pop();
-        }
-
-        Ok(result)
+        Ok(decoded_data)
     }
 
     /// Check if recovery is possible with available chunks
@@ -158,7 +122,9 @@ impl ReedSolomonEncoder {
 
         if new_k != self.config.k || new_m != self.config.m {
             self.config = RSConfig::new(new_k, new_m)?;
-            let new_encoder = ReedSolomon::new(new_k, new_m)
+            let fec_params = FecParams::new(new_k as u16, new_m as u16)
+                .map_err(|e| anyhow!("Failed to create FEC params: {:?}", e))?;
+            let new_encoder = FecCodec::new(fec_params)
                 .map_err(|e| anyhow!("Failed to adjust encoder: {:?}", e))?;
             *self.encoder.write().await = new_encoder;
         }
