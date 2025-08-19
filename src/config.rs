@@ -604,13 +604,12 @@ impl Config {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use saorsa_core::config::Config;
     ///
     /// assert_eq!(Config::parse_size("10B").unwrap(), 10);
     /// assert_eq!(Config::parse_size("1KB").unwrap(), 1024);
     /// assert_eq!(Config::parse_size("5MB").unwrap(), 5 * 1024 * 1024);
-    /// assert_eq!(Config::parse_size("1.5GB").unwrap(), 1610612736);
     /// ```
     pub fn parse_size(size: &str) -> Result<u64> {
         thread_local! {

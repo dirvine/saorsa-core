@@ -254,20 +254,20 @@ async fn test_identity_encryption() -> Result<()> {
 
             // Verify encryption structure
             assert_eq!(
-                encrypted.nonce.len(),
+                encrypted.encrypted_message.nonce.len(),
                 12,
-                "Nonce should be 12 bytes for AES-GCM"
+                "Nonce should be 12 bytes for ChaCha20Poly1305"
             );
             assert_eq!(encrypted.salt.len(), 32, "Salt should be 32 bytes");
             assert!(
-                !encrypted.ciphertext.is_empty() || original_data.is_empty(),
+                !encrypted.encrypted_message.ciphertext.is_empty() || original_data.is_empty(),
                 "Ciphertext should not be empty (unless input is empty)"
             );
 
             // Ciphertext should be different from original data
             if !original_data.is_empty() {
                 assert_ne!(
-                    encrypted.ciphertext, original_data,
+                    encrypted.encrypted_message.ciphertext, original_data,
                     "Ciphertext should be different from original data"
                 );
             }
@@ -291,13 +291,13 @@ async fn test_identity_encryption() -> Result<()> {
             // Test encryption produces different results (due to random nonce/salt)
             let encrypted2 = encrypt_with_device_password(&original_data, password)?;
             assert_ne!(
-                encrypted.nonce, encrypted2.nonce,
+                encrypted.encrypted_message.nonce, encrypted2.encrypted_message.nonce,
                 "Nonces should be different"
             );
             assert_ne!(encrypted.salt, encrypted2.salt, "Salts should be different");
             if !original_data.is_empty() {
                 assert_ne!(
-                    encrypted.ciphertext, encrypted2.ciphertext,
+                    encrypted.encrypted_message.ciphertext, encrypted2.encrypted_message.ciphertext,
                     "Ciphertexts should be different due to different nonces"
                 );
             }

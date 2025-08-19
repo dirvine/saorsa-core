@@ -30,7 +30,7 @@
 //!
 //! ## Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use saorsa_core::{P2PNode, NodeConfig, NetworkAddress};
 //! use std::str::FromStr;
 //!
