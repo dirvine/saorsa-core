@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::RwLock;
-use tokio::time::sleep;
+
 
 // Import security modules (these would need to be properly imported based on actual module structure)
 // For now, I'll create mock implementations for testing purposes
@@ -586,7 +586,7 @@ async fn test_secure_storage_security() -> Result<()> {
     // Test 2: Wrong password should fail
     println!("  Testing wrong password rejection...");
     let wrong_password = "wrong_password";
-    let result = storage.retrieve_decrypted(key, wrong_password).await;
+    let _result = storage.retrieve_decrypted(key, wrong_password).await;
     // Note: In a real implementation, this would fail due to decryption failure
     // For our mock, we're just testing the interface
     println!("    ✅ Wrong password handling tested");
@@ -1188,7 +1188,7 @@ async fn test_security_system_health() -> Result<()> {
     ];
 
     let mut security_score = 0;
-    for (test_name, payload) in &security_tests {
+    for (_test_name, payload) in &security_tests {
         if suite
             .input_validator
             .validate_message_content(payload)

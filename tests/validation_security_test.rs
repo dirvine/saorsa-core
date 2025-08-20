@@ -257,11 +257,7 @@ fn test_timing_attack_resistance() -> anyhow::Result<()> {
         invalid_times.iter().map(|d| d.as_nanos()).sum::<u128>() / invalid_times.len() as u128;
 
     // Times should be similar (constant-time validation)
-    let diff = if valid_avg > invalid_avg {
-        valid_avg - invalid_avg
-    } else {
-        invalid_avg - valid_avg
-    };
+    let diff = valid_avg.abs_diff(invalid_avg);
 
     // Allow up to 50% difference
     let max_diff = valid_avg.max(invalid_avg) / 2;

@@ -15,9 +15,9 @@
 //!
 //! Tests the command-line interface for identity management
 
-use saorsa_core::Result;
+
 use saorsa_core::identity::cli::{IdentityCliHandler, IdentityCommand, MessageInput};
-use std::path::PathBuf;
+
 use tempfile::TempDir;
 
 #[cfg(test)]

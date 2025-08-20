@@ -8,16 +8,16 @@
 //! - Cross-system identity consistency
 
 use anyhow::Result;
-use ed25519_dalek::{SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{SigningKey, Verifier};
 use rand::{RngCore, thread_rng};
 use saorsa_core::identity::{
-    encryption::{EncryptedData, decrypt_with_device_password, encrypt_with_device_password},
-    four_words::{FourWordAddress, WordEncoder},
+    encryption::{decrypt_with_device_password, encrypt_with_device_password},
+    four_words::{FourWordAddress},
     node_identity::{NodeId, NodeIdentity, ProofOfWork},
 };
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Helper to create deterministic test identity
 fn create_test_identity(seed: u64) -> NodeIdentity {

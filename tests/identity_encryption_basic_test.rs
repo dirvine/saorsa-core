@@ -20,7 +20,6 @@ use saorsa_core::encrypted_key_storage::SecurityLevel;
 use saorsa_core::{error::P2PError, identity_manager::*, secure_memory::SecureString};
 use std::collections::HashMap;
 use tempfile::TempDir;
-use tokio;
 
 /// Basic test that identity is encrypted when saved to disk
 #[tokio::test]
@@ -118,4 +117,4 @@ async fn test_basic_migration() -> Result<(), P2PError> {
     Ok(())
 }
 
-use serde::{Deserialize, Serialize};
+

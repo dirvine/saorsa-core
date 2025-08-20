@@ -1,9 +1,8 @@
 use anyhow::Result;
-use blake3;
-use saorsa_core::PeerId;
+
 use saorsa_core::dht::optimized_storage::OptimizedDHTStorage;
 use saorsa_core::dht::rsps_integration::{RspsDhtConfig as RspsConfig, RspsDhtStorage};
-use saorsa_rsps::{Cid, RootCid, WitnessReceipt};
+use saorsa_rsps::{Cid, RootCid};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time;
@@ -152,7 +151,7 @@ async fn test_ttl_extension_on_receipts() -> Result<()> {
     let provider = "provider-1".to_string();
 
     // Store provider with initial TTL
-    let initial_ttl = Duration::from_secs(3600);
+    let _initial_ttl = Duration::from_secs(3600);
     storage
         .store_provider(
             root_cid.clone(),
@@ -169,7 +168,7 @@ async fn test_ttl_extension_on_receipts() -> Result<()> {
         .await?;
 
     // Generate multiple receipts to trigger TTL extension
-    for i in 0..3 {
+    for _i in 0..3 {
         let content_cid = Cid::from(blake3::hash(b"content-idx").as_bytes().to_owned());
         let _ = storage.generate_receipt(&content_cid).await?;
 
@@ -261,7 +260,7 @@ async fn test_expired_entries_cleanup() -> Result<()> {
     time::sleep(Duration::from_millis(150)).await;
 
     // Trigger cleanup
-    storage.cleanup_expired().await;
+    let _ = storage.cleanup_expired().await;
 
     // Should no longer find provider
     let providers = storage.find_providers(&root_cid).await?;

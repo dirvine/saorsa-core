@@ -131,7 +131,7 @@ proptest! {
 
         let trust_scores = engine.get_global_trust();
         for (_, score) in trust_scores {
-            prop_assert!(score >= 0.0 && score <= 1.0);
+            prop_assert!((0.0..=1.0).contains(&score));
         }
     }
 
@@ -217,13 +217,7 @@ fn hyperbolic_distance(a: &HyperbolicCoordinate, b: &HyperbolicCoordinate) -> f6
     cosh_d.max(1.0).acosh()
 }
 
-fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| (x - y).powi(2))
-        .sum::<f64>()
-        .sqrt()
-}
+
 
 // Mock implementations for testing
 struct LRUCache {

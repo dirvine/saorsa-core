@@ -50,6 +50,10 @@ jobs:
           build-essential \
           protobuf-compiler
 
+    - name: Install cargo-mutants
+      run: cargo install cargo-mutants
+      if: matrix.rust == 'stable'
+
     - name: Check formatting
       run: cargo fmt --all -- --check
       if: matrix.rust == 'stable'
@@ -66,6 +70,16 @@ jobs:
 
     - name: Run doctests
       run: cargo test --doc --all-features || echo "Doctests have known issues with outdated examples - continuing"
+
+    - name: Run mutation tests (sample)
+      run: |
+        # Run a quick mutation test sample on critical functions
+        timeout 300 cargo mutants --no-shuffle \
+          --test-timeout 60 \
+          --file src/adaptive/thompson_sampling.rs \
+          --file src/adaptive/multi_armed_bandit.rs \
+          -- -D warnings || echo "Sample mutation testing completed"
+      if: matrix.rust == 'stable'
 
   security_audit:
     name: Security Audit

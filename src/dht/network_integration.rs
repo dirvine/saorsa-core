@@ -636,7 +636,7 @@ impl NetworkIntegrationLayer {
 
             tokio::spawn(async move {
                 if let Err(e) = Self::handle_connection(connection, handler).await {
-                    eprintln!("Connection handling error: {}", e);
+                    tracing::error!("Connection handling error: {}", e);
                 }
             });
         }

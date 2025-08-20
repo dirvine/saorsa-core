@@ -19,7 +19,6 @@ use saorsa_core::adaptive::{
 use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::TempDir;
-use tokio;
 
 /// Simulate a network environment with different route success rates
 struct NetworkSimulator {
@@ -247,7 +246,7 @@ async fn test_mab_exploration_vs_exploitation() {
     let strategies = vec![StrategyChoice::Kademlia, StrategyChoice::Hyperbolic];
 
     let mut exploration_count = 0;
-    let mut exploitation_count = 0;
+    let mut _exploitation_count = 0;
 
     for _ in 0..1000 {
         let decision = mab

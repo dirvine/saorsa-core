@@ -66,7 +66,6 @@ fn arb_operations(max_ops: usize) -> impl Strategy<Value = Vec<DHTOperation>> {
     )
 }
 
-/// Property: Cache size never exceeds configured bounds
 proptest! {
     #[test]
     fn prop_cache_size_bounded(
@@ -105,7 +104,6 @@ proptest! {
     }
 }
 
-/// Property: Publisher index consistency
 proptest! {
     #[test]
     fn prop_publisher_index_consistent(
@@ -154,7 +152,6 @@ proptest! {
     }
 }
 
-/// Property: Get operation returns what was stored (if not evicted or expired)
 proptest! {
     #[test]
     fn prop_store_get_consistency(
@@ -182,7 +179,6 @@ proptest! {
     }
 }
 
-/// Property: Memory usage tracking is consistent
 proptest! {
     #[test]
     fn prop_memory_tracking_consistent(
@@ -222,7 +218,6 @@ proptest! {
     }
 }
 
-/// Property: Expired records are not returned by get operations
 proptest! {
     #[test]
     fn prop_expired_records_not_returned(
@@ -272,7 +267,6 @@ proptest! {
     }
 }
 
-/// Property: LRU ordering is maintained
 proptest! {
     #[test]
     fn prop_lru_ordering_maintained(
@@ -318,7 +312,6 @@ proptest! {
     }
 }
 
-/// Property: Cleanup operation reduces expired record count
 proptest! {
     #[test]
     fn prop_cleanup_removes_expired(
@@ -365,7 +358,6 @@ proptest! {
     }
 }
 
-/// Integration property: System remains stable under arbitrary operations
 proptest! {
     #[test]
     fn prop_system_stability(

@@ -1,0 +1,15 @@
+# Build artifacts
+target/
+Cargo.lock
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

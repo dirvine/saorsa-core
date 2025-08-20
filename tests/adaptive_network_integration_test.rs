@@ -4,15 +4,9 @@
 
 use saorsa_core::{
     adaptive::{
-        ChurnPredictor, NetworkConfig, SecurityConfig, SecurityManager,
-        coordinator::NetworkCoordinator as AdaptiveCoordinator,
-        eviction::AdaptiveStrategy,
-        gossip::AdaptiveGossipSub,
         learning::ThompsonSampling,
         multi_armed_bandit::{MABConfig, MultiArmedBandit},
         q_learning_cache::QLearningConfig,
-        replication::ReplicationManager,
-        routing::AdaptiveRouter,
     },
     dht::Key,
 };
@@ -405,7 +399,7 @@ async fn test_adaptive_gossip_protocol() -> anyhow::Result<()> {
         delivered, propagation_time
     );
     assert!(
-        delivered >= (config.num_nodes / 2) + 1,
+        delivered > (config.num_nodes / 2),
         "Message should reach majority of nodes"
     );
 

@@ -108,10 +108,10 @@ impl SqliteStore {
 
         match result {
             Ok(Some(expires_at)) => {
-                let now = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64;
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| crate::error::P2PError::TimeError)?
+            .as_secs() as i64;
                 Ok(now > expires_at)
             }
             Ok(None) => Ok(false),
@@ -125,7 +125,7 @@ impl SqliteStore {
         
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .map_err(|_| crate::error::P2PError::TimeError)?
             .as_secs() as i64;
 
         let mut stmt = conn.prepare(

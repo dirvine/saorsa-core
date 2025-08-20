@@ -6,8 +6,15 @@
 use saorsa_core::PeerId;
 use saorsa_core::dht::{DHTConfig, Key, Record, optimized_storage::OptimizedDHTStorage};
 use std::collections::HashMap;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Instant;
 use tokio::sync::RwLock;
+
+// Default implementation for LegacyDHTStorage
+impl Default for LegacyDHTStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Legacy DHT storage for comparison
 pub struct LegacyDHTStorage {
@@ -20,6 +27,13 @@ impl LegacyDHTStorage {
             records: RwLock::new(HashMap::new()),
         }
     }
+}
+
+impl Default for LegacyDHTStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
     pub async fn store(&self, record: Record) -> anyhow::Result<()> {
         let mut records = self.records.write().await;

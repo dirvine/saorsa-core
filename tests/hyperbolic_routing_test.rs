@@ -76,8 +76,8 @@ proptest! {
 
     #[test]
     fn prop_greedy_routing_convergence(
-        seed: u64,
-        num_nodes in 10..50usize,
+        _seed: u64,
+        _num_nodes in 10..50usize,
     ) {
         // TODO: Implement property test for greedy routing convergence
         // This will require setting up a network topology
@@ -150,7 +150,7 @@ async fn test_coordinate_adjustment_with_hysteresis() {
 #[tokio::test]
 async fn test_greedy_routing_decisions() {
     let space = Arc::new(HyperbolicSpace::new());
-    let local_id = generate_test_node_id(0);
+    let _local_id = generate_test_node_id(0);
 
     // Create a network topology
     let mut topology = vec![];
@@ -428,17 +428,17 @@ mod simulation_tests {
                 let space = Arc::new(HyperbolicSpace::new());
 
                 // Set coordinate based on grid position
-                let r = 0.1
+                let _r = 0.1
                     + 0.8 * ((x * x + y * y) as f64).sqrt()
                         / ((grid_size * grid_size * 2) as f64).sqrt();
-                let theta = (y as f64).atan2(x as f64);
+                let _theta = (y as f64).atan2(x as f64);
 
                 // Add neighbors (4-connected grid)
                 for (dx, dy) in &[(0, 1), (1, 0), (0, -1), (-1, 0)] {
-                    let nx = x as i32 + dx;
-                    let ny = y as i32 + dy;
+                    let nx = x + dx;
+                    let ny = y + dy;
 
-                    if nx >= 0 && nx < grid_size as i32 && ny >= 0 && ny < grid_size as i32 {
+                    if nx >= 0 && nx < grid_size && ny >= 0 && ny < grid_size {
                         let neighbor_id =
                             generate_test_node_id((nx * grid_size as i32 + ny) as u64);
                         let neighbor_r = 0.1

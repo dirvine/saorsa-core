@@ -19,7 +19,6 @@ use saorsa_core::Result;
 use saorsa_core::error::{NetworkError, P2PError};
 use saorsa_core::network::{NodeConfig as P2PNodeConfig, P2PNode};
 use std::net::SocketAddr;
-use std::time::Duration;
 
 #[tokio::test]
 async fn test_invalid_address_parsing() {
@@ -48,7 +47,7 @@ async fn test_invalid_address_parsing() {
 #[tokio::test]
 async fn test_network_config_with_invalid_addresses() {
     // Test that config creation handles invalid addresses gracefully
-    let mut config = P2PNodeConfig::default();
+    let _config = P2PNodeConfig::default();
 
     // This should not panic
     let result = P2PNodeConfig::with_listen_addr("invalid:address");

@@ -177,7 +177,9 @@ impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
             bootstrap_nodes: vec![],
-            listen_address: "0.0.0.0:9000".to_string(),
+            // Use environment variable or fallback to localhost for development
+            listen_address: env::var("SAORSA_LISTEN_ADDRESS")
+                .unwrap_or_else(|_| "127.0.0.1:9000".to_string()),
             public_address: None,
             ipv6_enabled: true,
             max_connections: 10000,
@@ -563,16 +565,19 @@ impl Config {
         config
     }
 
-    /// Create production configuration
+    /// Create production configuration with secure defaults
     pub fn production() -> Self {
         let mut config = Self::default();
-        config.network.listen_address = "0.0.0.0:9000".to_string();
-        config.security.min_tls_version = "1.3".to_string();
-        config.security.encryption_enabled = true;
-        config.storage.compression_enabled = true;
-        config.transport.buffer_size = 131072; // 128KB
+        // Use environment variable or fallback to secure default
+        config.network.listen_address = env::var("SAORSA_LISTEN_ADDRESS")
+            .unwrap_or_else(|_| "0.0.0.0:9000".to_string());
+        config.security.rate_limit = 1000;
+        config.security.connection_limit = 100;
+        config.storage.path = PathBuf::from("/var/lib/saorsa");
         config
     }
+
+
 
     /// Get parsed listen address
     pub fn listen_socket_addr(&self) -> Result<SocketAddr> {

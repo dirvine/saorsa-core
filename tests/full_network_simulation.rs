@@ -23,7 +23,7 @@ use saorsa_core::adaptive::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+
 
 /// Simulated network environment
 struct NetworkSimulation {
@@ -107,7 +107,7 @@ impl NetworkSimulation {
             let node = self.nodes.values().nth((i + 2) % self.nodes.len()).unwrap();
 
             match node.retrieve(hash).await {
-                Ok(data) => println!("Retrieved data item {} successfully", i),
+                Ok(_data) => println!("Retrieved data item {} successfully", i),
                 Err(e) => eprintln!("Failed to retrieve data {}: {:?}", i, e),
             }
         }
