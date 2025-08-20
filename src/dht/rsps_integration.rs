@@ -436,7 +436,6 @@ pub struct CacheStats {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[tokio::test]
     async fn test_rsps_integration() {

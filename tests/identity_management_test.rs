@@ -45,7 +45,7 @@ async fn test_four_word_address_generation() -> Result<()> {
         (1000000u64, "alpha-alpha-chaos-dance"),
     ];
 
-    for (seed, expected_pattern) in &test_cases {
+    for (seed, _expected_pattern) in &test_cases {
         let identity = create_test_identity(*seed);
         let node_id = identity.node_id();
         let four_word_addr = FourWordAddress::from_node_id(&node_id);

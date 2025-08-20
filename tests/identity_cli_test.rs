@@ -195,7 +195,6 @@ mod cli_command_tests {
 
     #[test]
     fn test_cli_argument_parsing() {
-        use clap::Parser;
 
         // Test generate command parsing
         let args = vec!["identity", "generate", "--difficulty", "16"];
@@ -266,7 +265,6 @@ mod cli_command_tests {
 
 #[cfg(test)]
 mod cli_integration_tests {
-    use super::*;
     use std::process::Command;
 
     #[test]

@@ -518,8 +518,6 @@ impl PlacementStrategy for WeightedPlacementStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
-
     fn create_test_location(lat: f64, lon: f64) -> GeographicLocation {
         GeographicLocation::new(lat, lon).unwrap()
     }

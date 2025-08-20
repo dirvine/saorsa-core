@@ -38,8 +38,8 @@ pub fn create_mock_dht() -> Arc<tokio::sync::RwLock<crate::dht::core_engine::Dht
 
 /// Setup test environment with two WebRTC services
 pub async fn setup_test_pair() -> (WebRtcService, WebRtcService) {
-    let alice = FourWordAddress::from("alice-bob-charlie-delta");
-    let bob = FourWordAddress::from("eve-frank-grace-henry");
+    let _alice = FourWordAddress::from("alice-bob-charlie-delta");
+    let _bob = FourWordAddress::from("eve-frank-grace-henry");
 
     // For now, we'll skip the actual DHT setup
     // let dht_alice = create_mock_dht();
@@ -79,7 +79,7 @@ mod integration_tests {
         sleep(Duration::from_millis(100)).await;
 
         // Bob should receive incoming call
-        let bob_events = bob_service.subscribe_events();
+        let _bob_events = bob_service.subscribe_events();
         // Verify incoming call event
 
         // Bob accepts the call

@@ -199,7 +199,7 @@ async fn test_security_integration() {
 async fn test_concurrent_operations() {
     let identity = NodeIdentity::generate().unwrap();
     let config = NetworkConfig::default();
-    let coordinator = NetworkCoordinator::new(identity, config).await.unwrap();
+    let _coordinator = NetworkCoordinator::new(identity, config).await.unwrap();
 
     // Launch multiple concurrent operations
     let mut handles = vec![];

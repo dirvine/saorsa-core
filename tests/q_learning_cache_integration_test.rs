@@ -18,7 +18,6 @@ use saorsa_core::adaptive::{
 };
 use std::collections::HashMap;
 use std::time::Instant;
-use tokio;
 
 /// Simulate different workload patterns
 #[derive(Debug, Clone)]

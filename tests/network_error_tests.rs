@@ -37,7 +37,7 @@ async fn test_invalid_address_parsing() {
 
         assert!(result.is_err());
         if let Err(P2PError::Network(NetworkError::InvalidAddress(_))) = result {
-            assert!(true);
+            // Expected error occurred
         } else {
             panic!("Expected InvalidAddress error");
         }

@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::super::reed_solomon::ReedSolomonEncoder;
-    use super::super::reed_solomon::*;
 
     #[test]
     fn test_reed_solomon_creation() {

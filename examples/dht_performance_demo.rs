@@ -16,6 +16,13 @@ impl Default for LegacyDHTStorage {
     }
 }
 
+// Default implementation for LegacyDHTStorage
+impl Default for LegacyDHTStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Legacy DHT storage for comparison
 pub struct LegacyDHTStorage {
     records: RwLock<HashMap<Key, Record>>,
@@ -25,13 +32,6 @@ impl LegacyDHTStorage {
     pub fn new() -> Self {
         Self {
             records: RwLock::new(HashMap::new()),
-        }
-    }
-}
-
-impl Default for LegacyDHTStorage {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

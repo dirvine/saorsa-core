@@ -2,10 +2,7 @@
 // Verifies mesh and SFU architectures, participant management
 
 use super::*;
-use crate::messaging::webrtc::types::*;
-use crate::messaging::webrtc::{CallManager, WebRtcService};
-use std::sync::Arc;
-use tokio::time::{Duration, sleep};
+use crate::messaging::webrtc::WebRtcService;
 
 #[cfg(test)]
 mod tests {

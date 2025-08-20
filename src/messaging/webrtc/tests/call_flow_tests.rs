@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::messaging::webrtc::media::MediaStreamManager;
-use crate::messaging::webrtc::types::*;
 use crate::messaging::webrtc::{CallManager, SignalingHandler, WebRtcService};
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
@@ -201,8 +200,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_manager_state_transitions() {
-        let alice = FourWordAddress::from("alice-bob-charlie-delta");
-        let bob = FourWordAddress::from("eve-frank-grace-henry");
+        let _alice = FourWordAddress::from("alice-bob-charlie-delta");
+        let _bob = FourWordAddress::from("eve-frank-grace-henry");
 
         // Test call session state transitions
         let call_id = CallId::new();
@@ -239,9 +238,9 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_calls() {
         // Test handling multiple simultaneous calls
-        let alice = FourWordAddress::from("alice-bob-charlie-delta");
-        let bob = FourWordAddress::from("eve-frank-grace-henry");
-        let charlie = FourWordAddress::from("charlie-david-eve-frank");
+        let _alice = FourWordAddress::from("alice-bob-charlie-delta");
+        let _bob = FourWordAddress::from("eve-frank-grace-henry");
+        let _charlie = FourWordAddress::from("charlie-david-eve-frank");
 
         // Create call sessions
         let call_id_1 = CallId::new();

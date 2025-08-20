@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::super::content_addressing::*;
-    use blake3;
 
     #[test]
     fn test_content_hash_creation() {

@@ -157,7 +157,7 @@ impl NetworkSimulation {
     async fn collect_metrics(&self) {
         println!("\n=== Network Metrics ===");
 
-        for (i, (node_id, coordinator)) in self.nodes.iter().enumerate() {
+        for (i, (_node_id, coordinator)) in self.nodes.iter().enumerate() {
             let stats = coordinator.get_network_stats().await;
             println!(
                 "Node {}: peers={}, success_rate={:.2}%, cache_hit={:.2}%, churn={:.2}%",

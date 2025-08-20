@@ -2,14 +2,14 @@
 //! Tests the actual exported adaptive features using real APIs
 
 use saorsa_core::adaptive::{
-    ContentHash, ContentType, LearningContext, NetworkConditions, NodeId, Outcome, StrategyChoice,
-    eviction::{CacheState, EvictionStrategy, EvictionStrategyType, LFUStrategy, LRUStrategy},
+    ContentHash, ContentType, NodeId, Outcome, StrategyChoice,
+    eviction::{CacheState, EvictionStrategy, LFUStrategy, LRUStrategy},
     hyperbolic::HyperbolicSpace,
     identity::NodeIdentity,
     learning::{ChurnPredictor, NodeEvent, NodeFeatures, QLearnCacheManager, ThompsonSampling},
-    multi_armed_bandit::{MABConfig, MultiArmedBandit, RouteDecision, RouteId},
-    q_learning_cache::{AccessInfo, CacheAction, StateVector},
-    replication::{ReplicaInfo, ReplicationManager, ReplicationStrategy},
+    multi_armed_bandit::{MABConfig, MultiArmedBandit},
+    q_learning_cache::{AccessInfo, StateVector},
+    replication::{ReplicationManager},
     routing::AdaptiveRouter,
     security::{BlacklistReason, SecurityConfig, SecurityError, SecurityManager},
     som::{GridSize, SelfOrganizingMap, SomConfig},
@@ -17,7 +17,7 @@ use saorsa_core::adaptive::{
     trust::MockTrustProvider,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };

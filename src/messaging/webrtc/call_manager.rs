@@ -625,8 +625,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires mock DHT and signaling"]
     async fn test_call_manager_creation() {
-        let identity = FourWordAddress::from("alice-bob-charlie-david");
-        let dht = create_mock_dht();
+        let _identity = FourWordAddress::from("alice-bob-charlie-david");
+        let _dht = create_mock_dht();
 
         // This test would require proper mocking of signaling and media components
         // For now, we'll skip the actual implementation

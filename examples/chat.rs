@@ -131,9 +131,7 @@ async fn main() -> Result<()> {
     let stdin = io::stdin();
     let mut reader = io::BufReader::new(stdin).lines();
 
-    loop {
-        match reader.next_line().await? {
-            Some(line) => {
+    while let Some(line) = reader.next_line().await? {
                 match line.trim() {
                     "/quit" => {
                         info!("👋 Goodbye!");
@@ -165,8 +163,6 @@ async fn main() -> Result<()> {
                     }
                     _ => {}
                 }
-            }
-            None => break,
         }
     }
 

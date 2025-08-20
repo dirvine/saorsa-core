@@ -12,13 +12,12 @@ use saorsa_core::{
 };
 use std::{
     collections::HashMap,
-    net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
     sync::{Mutex, RwLock},
-    time::{sleep, timeout},
+    time::sleep,
 };
 
 /// Test configuration for adaptive network testing

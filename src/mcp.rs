@@ -3157,8 +3157,7 @@ mod tests {
                 if should_error {
                     return Err(P2PError::Mcp(crate::error::McpError::ToolExecutionFailed(
                         format!("{}: Test error", name).into(),
-                    ))
-                    .into());
+                    )));
                 }
 
                 // Echo back the arguments with a response marker
@@ -3174,8 +3173,7 @@ mod tests {
             if !arguments.is_object() {
                 return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
                     "Arguments must be an object".to_string().into(),
-                ))
-                .into());
+                )));
             }
             Ok(())
         }

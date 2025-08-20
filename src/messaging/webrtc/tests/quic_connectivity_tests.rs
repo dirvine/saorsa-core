@@ -2,10 +2,7 @@
 // Verifies DHT-based peer discovery and coordinator-based hole punching
 
 use super::*;
-use crate::messaging::webrtc::signaling::{SignalingHandler, SignalingState};
-use crate::messaging::webrtc::types::*;
-use std::sync::Arc;
-use tokio::time::{Duration, sleep};
+use crate::messaging::webrtc::signaling::SignalingHandler;
 
 #[cfg(test)]
 mod tests {

@@ -118,7 +118,7 @@ impl AdaptiveNetworkMonitor {
             print!("\x1B[2J\x1B[1;1H");
 
             let metrics = self.metrics.read().await;
-            let now = Instant::now();
+            let _now = Instant::now();
 
             println!("╔══════════════════════════════════════════════════════════════╗");
             println!("║          ADAPTIVE NETWORK MONITOR - LIVE DASHBOARD          ║");
@@ -211,8 +211,8 @@ impl AdaptiveNetworkMonitor {
 
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_millis(500));
-            let thompson = ThompsonSampling::new();
-            let mab = MultiArmedBandit::new(MABConfig::default()).await.unwrap();
+            let _thompson = ThompsonSampling::new();
+            let _mab = MultiArmedBandit::new(MABConfig::default()).await.unwrap();
             let cache = QLearningCache::new(QLearningConfig::default(), 1024);
 
             loop {
