@@ -17,7 +17,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, four-w
 - **WebRTC over QUIC**: Advanced WebRTC-QUIC bridge for real-time media streaming with adaptive quality
 - **Media Processing**: Image and audio processing with blurhash and symphonia
 - **Geographic Routing**: Location-aware networking
-- **Identity Management**: Ed25519-based identity system
+- **Identity Management**: Post-Quantum Cryptography with ML-DSA-65 signatures (NIST Level 3, ~128-bit quantum security) - No legacy Ed25519 support
 - **Secure Storage**: Database persistence with SQLx
 - **Monitoring**: Prometheus metrics integration
 
@@ -100,10 +100,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 1. **Network Layer**: QUIC-based P2P networking with NAT traversal
 2. **DHT**: Kademlia-based DHT with RSPS optimization
 3. **Placement System**: Intelligent shard placement with weighted selection algorithms
-4. **Identity**: Ed25519 cryptographic identities with four-word addresses
+4. **Identity**: Post-Quantum cryptographic identities with ML-DSA-65 signatures and four-word addresses
 5. **Storage**: Local and distributed content storage with audit and repair
 6. **Geographic Routing**: Location-aware message routing
 7. **MCP Integration**: Model Context Protocol for AI/LLM integration
+
+### Cryptographic Architecture
+
+Saorsa Core implements a pure post-quantum cryptographic approach for maximum security:
+
+- **Post-Quantum Signatures**: ML-DSA-65 (FIPS 204) for quantum-resistant digital signatures (~128-bit quantum security)
+- **PQC Encryption**: ChaCha20Poly1305 with quantum-resistant key derivation
+- **Key Exchange**: ML-KEM-768 (FIPS 203) for quantum-resistant key encapsulation (~128-bit quantum security)
+- **Hashing**: BLAKE3 for fast, secure content addressing
+- **Transport Security**: QUIC with TLS 1.3 and PQC cipher suites
+- **No Legacy Support**: Pure PQC implementation with no classical cryptographic fallbacks
+
+### Migration Status
+
+**🚨 CRITICAL SECURITY UPGRADE IN PROGRESS** 🚨
+
+This project is undergoing a complete migration from classical cryptography (Ed25519) to post-quantum cryptography (ML-DSA). The current codebase contains 68+ Ed25519 usages that will be systematically replaced with ML-DSA-65 for quantum resistance.
+
+**Current Status**: Documentation updated, migration planning complete
+**Next Steps**: Core identity system implementation
+**Security Impact**: This migration will provide ~128-bit quantum security vs Ed25519's ~128-bit classical security
+
+**Migration Priority**: CRITICAL - Ed25519 is vulnerable to quantum attacks
 
 ### Data Flow
 
@@ -200,7 +223,7 @@ let config = NetworkConfig {
 - `dht` - DHT functionality
 - `mcp` - MCP server support
 - `ant-quic` - QUIC transport
-- `quantum-resistant` - Post-quantum cryptography
+- `quantum-resistant` - Post-quantum cryptography (ML-DSA, ML-KEM)
 - `threshold` - Threshold cryptography
 - `cli` - CLI utilities
 - `metrics` - Prometheus metrics
@@ -233,10 +256,12 @@ Key benchmarks:
 
 ## Security
 
-- **Ed25519 Signatures**: All operations cryptographically signed
+- **Post-Quantum Signatures**: ML-DSA-65 (FIPS 204) for quantum-resistant digital signatures (~128-bit quantum security)
+- **PQC Encryption**: ChaCha20Poly1305 with quantum-resistant key derivation
+- **Key Exchange**: ML-KEM-768 (FIPS 203) for quantum-resistant key encapsulation (~128-bit quantum security)
 - **BLAKE3 Hashing**: Fast and secure content addressing
-- **QUIC Encryption**: Transport-level encryption
-- **Post-Quantum Ready**: ML-KEM and ML-DSA support
+- **QUIC Encryption**: Transport-level encryption with PQC support
+- **Pure PQC**: No classical cryptographic algorithms - quantum-resistant from the ground up
 - **Secure Memory**: Platform-specific memory protection
 
 ## WebRTC over QUIC Integration

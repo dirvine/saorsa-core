@@ -25,7 +25,7 @@ use super::four_words::FourWordAddress;
 use super::node_identity::{IdentityData, NodeId, ProofOfWork};
 use crate::error::IdentityError;
 use crate::{P2PError, Result};
-use ant_quic::crypto::pqc::types::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
+use saorsa_pqc::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 
@@ -159,7 +159,7 @@ impl SecureNodeIdentity {
 
     /// Verify a signature
     pub fn verify(&self, message: &[u8], signature: &MlDsaSignature) -> bool {
-        crate::quantum_crypto::ml_dsa_verify(&self.public_key, message, signature).is_ok()
+        saorsa_pqc::ml_dsa_verify(&self.public_key, message, signature).is_ok()
     }
 
     /// Get node ID

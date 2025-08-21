@@ -332,7 +332,7 @@ impl IdentityCliHandler {
         };
 
         let signature = identity.sign(&message_bytes);
-        let sig_hex = hex::encode(signature.to_bytes());
+        let sig_hex = hex::encode(signature.as_bytes());
 
         if let Some(output_path) = output {
             tokio::fs::write(&output_path, &sig_hex)
