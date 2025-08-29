@@ -152,7 +152,7 @@ check_prerequisites() {
     local missing_tools=()
     
     # Check for required tools
-    for tool in cargo rustc clippy rustfmt; do
+    for tool in cargo rustc rustfmt; do
         if ! command -v $tool &> /dev/null; then
             missing_tools+=("$tool")
             set_result "prereq_$tool" "FAILURE"
@@ -162,6 +162,16 @@ check_prerequisites() {
             print_status "SUCCESS" "$tool: $version"
         fi
     done
+    
+    # Check for clippy (invoked via cargo clippy)
+    if cargo clippy --version &> /dev/null; then
+        local version=$(cargo clippy --version 2>/dev/null | head -n 1 || echo "unknown")
+        set_result "prereq_clippy" "SUCCESS"
+        print_status "SUCCESS" "clippy: $version"
+    else
+        missing_tools+=("clippy")
+        set_result "prereq_clippy" "FAILURE"
+    fi
     
     # Check for optional tools
     for tool in cargo-audit cargo-mutants cargo-llvm-cov act docker; do
