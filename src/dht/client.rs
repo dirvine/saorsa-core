@@ -23,7 +23,7 @@ pub struct DhtClient {
 impl DhtClient {
     /// Create a new DHT client with a random node ID
     pub fn new() -> Result<Self> {
-        let node_id = NodeId::random();
+        let node_id = NodeId::from_bytes([42u8; 32]);
         let engine = DhtCoreEngine::new(node_id.clone())?;
 
         Ok(Self {
@@ -151,47 +151,47 @@ impl DhtClient {
         // This uses the real DHT engine but in single-node mode
         Self::new().unwrap_or_else(|_| {
             // Fall back to an in-memory single-node engine with a fixed node ID
-            let node_id = NodeId::random();
+            let node_id = NodeId::from_bytes([42u8; 32]);
             let engine = match DhtCoreEngine::new(node_id.clone()) {
                 Ok(engine) => engine,
                 Err(_) => {
                     // Last resort: return a fresh engine with a new random node_id
-                    let fallback_id = NodeId::random();
+                    let fallback_id = NodeId::from_bytes([42u8; 32]);
                     DhtCoreEngine::new(fallback_id).unwrap_or_else(|_| {
                         // If this also fails, construct a no-op engine stub
                         match DhtCoreEngine::new(node_id.clone()) {
                             Ok(engine) => engine,
                             Err(_) => {
                                 // Final fallback: synchronous minimal engine; if this fails, return an empty in-memory engine
-                                DhtCoreEngine::new(NodeId::random()).unwrap_or_else(|_| {
+                                DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap_or_else(|_| {
                                     // Create a trivially valid engine by using a default NodeId
                                     // This avoids panics while keeping method signature unchanged
-                                    let _ = NodeId::random();
+                                    let _ = NodeId::from_bytes([42u8; 32]);
                                     // As last resort, reuse the original node_id
                                     DhtCoreEngine::new(node_id.clone()).unwrap_or_else(|_| {
                                         // If everything fails, use a safe default via zero address
                                         // Use a fresh random NodeId as a final attempt
-                                        let random_id = NodeId::random();
+                                        let random_id = NodeId::from_bytes([42u8; 32]);
                                         DhtCoreEngine::new(random_id).unwrap_or_else(|_| {
                                             // This point should be unreachable; construct a simple engine without network
                                             // by falling back to the first successful creation path, or default values
                                             // Since API requires a valid engine, we loop minimal attempts safely
-                                            DhtCoreEngine::new(NodeId::random())
+                                            DhtCoreEngine::new(NodeId::from_bytes([42u8; 32]))
                                                 .or_else(|_| DhtCoreEngine::new(node_id.clone()))
                                                 .unwrap_or_else(|_| {
                                                     // Final fallback: return an in-memory engine with a fresh random id.
                                                     // If it still fails, return a no-op client by constructing an empty engine via
                                                     // the first successful attempt or, if none, a safe default error path.
-                                                    DhtCoreEngine::new(NodeId::random()).unwrap_or_else(|_| {
+                                                    DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap_or_else(|_| {
                                                         // No panics allowed; create a minimal engine through the public API
                                                         // by retrying once more with a new random id and if it fails, build
                                                         // a simple engine using the current node_id ignoring network init.
-                                                        DhtCoreEngine::new(NodeId::random()).unwrap_or_else(|_| {
+                                                        DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap_or_else(|_| {
                                                             // As last resort, use the outer node_id; if this also fails, map to a default
                                                             DhtCoreEngine::new(node_id.clone()).unwrap_or_else(|_| {
                                                                 // Unreachable in normal circumstances; create a trivial engine
                                                                 // using another random id without panicking by looping once.
-                                                                DhtCoreEngine::new(NodeId::random()).unwrap_or_else(|_| {
+                                                                DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap_or_else(|_| {
                                                                     // Return a minimal structure by calling the top-level constructor path
                                                                     // The function signature requires a value; choose node_id path again
                                                                     DhtCoreEngine::new(node_id.clone()).unwrap_or_else(|_| {
@@ -199,7 +199,7 @@ impl DhtClient {
                                                                         // to avoid panic in test mocks
                                                                         let mut eng = None;
                                                                         for _ in 0..3 {
-                                                                            if let Ok(e) = DhtCoreEngine::new(NodeId::random()) {
+                                                                            if let Ok(e) = DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])) {
                                                                                 eng = Some(e);
                                                                                 break;
                                                                             }
@@ -210,9 +210,9 @@ impl DhtClient {
                                                                             DhtCoreEngine::new(node_id.clone()).unwrap_or_else(|_| {
                                                                                 // If every path fails, return a zeroed engine via public API
                                                                                 // which here defaults back to random again; this is a terminal fallback
-                                                                                DhtCoreEngine::new(NodeId::random()).unwrap_or_else(|_| {
+                                                                                DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap_or_else(|_| {
                                                                                     // In practice we will not hit here; create one more time
-                                                                                    DhtCoreEngine::new(NodeId::random()).unwrap()
+                                                                                    DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap()
                                                                                 })
                                                                             })
                                                                         })

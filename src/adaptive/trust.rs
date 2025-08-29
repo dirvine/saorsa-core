@@ -603,7 +603,7 @@ mod tests {
 
         let mut hash = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut hash);
-        let node = NodeId { hash: hash };
+        let node = NodeId { hash };
 
         // Update node statistics
         engine

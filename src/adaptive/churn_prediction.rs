@@ -441,7 +441,10 @@ impl LSTMChurnPredictor {
         churn_detector: &ChurnDetector,
         network_size: usize,
         threshold: f64,
-    ) -> Vec<(NodeIdentity, ChurnPrediction)> {
+    ) -> Vec<(
+        crate::identity::node_identity::PublicNodeIdentity,
+        ChurnPrediction,
+    )> {
         let mut recommendations = Vec::new();
 
         for node in nodes {
@@ -454,7 +457,7 @@ impl LSTMChurnPredictor {
                     || prediction.hour_6 > threshold
                     || prediction.hour_24 > threshold
                 {
-                    recommendations.push((node.clone(), prediction));
+                    recommendations.push((node.to_public(), prediction));
                 }
             }
         }

@@ -250,10 +250,10 @@ impl HealthManager {
         // Check cache first
         {
             let cache = self.cached_response.read().await;
-            if let Some((cached_at, ref response)) = *cache
-                && cached_at.elapsed() < self.cache_duration
-            {
-                return Ok(response.clone());
+            if let Some((cached_at, ref response)) = *cache {
+                if cached_at.elapsed() < self.cache_duration {
+                    return Ok(response.clone());
+                }
             }
         }
 

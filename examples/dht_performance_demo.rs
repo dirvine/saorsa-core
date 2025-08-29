@@ -32,8 +32,8 @@ impl LegacyDHTStorage {
     pub fn new() -> Self {
         Self {
             records: RwLock::new(HashMap::new()),
+        }
     }
-}
 
     pub async fn store(&self, record: Record) -> anyhow::Result<()> {
         let mut records = self.records.write().await;

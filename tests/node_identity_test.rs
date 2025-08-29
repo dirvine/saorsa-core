@@ -81,8 +81,8 @@ fn test_persistence() {
 
     // Should be able to sign with restored identity
     let msg = b"Persistence test";
-    let sig = restored.sign(msg);
-    assert!(identity.verify(msg, &sig));
+    let sig = restored.sign(msg).unwrap();
+    assert!(identity.verify(msg, &sig).unwrap());
 }
 
 #[test]

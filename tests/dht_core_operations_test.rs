@@ -7,6 +7,7 @@
 use anyhow::Result;
 use saorsa_core::PeerId;
 use saorsa_core::dht::{DHTConfig, Key, Record, optimized_storage::OptimizedDHTStorage};
+use saorsa_core::identity::node_identity::NodeId;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -15,9 +16,17 @@ use tokio::task::JoinHandle;
 
 /// Test helper to create a test record
 fn create_test_record(key_suffix: &str, publisher: &str, value: &str) -> Record {
-    let key = Key::new(format!("test_key_{}", key_suffix).as_bytes());
+    let key = {
+        let bytes = format!("test_key_{}", key_suffix).into_bytes();
+        let mut key = [0u8; 32];
+        let len = bytes.len().min(32);
+        key[..len].copy_from_slice(&bytes[..len]);
+        key
+    };
     let value = value.as_bytes().to_vec();
-    let publisher = PeerId::from(publisher.to_string());
+    // Create NodeId from publisher string by hashing it
+    let publisher_bytes = blake3::hash(publisher.as_bytes()).as_bytes().clone();
+    let publisher = NodeId::from_bytes(publisher_bytes);
     Record::new(key, value, publisher)
 }
 
@@ -86,7 +95,13 @@ async fn test_basic_crud_operations() -> Result<()> {
     );
 
     // Test non-existent key
-    let non_existent_key = Key::new(b"non_existent");
+    let non_existent_key = {
+        let bytes = b"non_existent";
+        let mut key = [0u8; 32];
+        let len = bytes.len().min(32);
+        key[..len].copy_from_slice(&bytes[..len]);
+        key
+    };
     let result = storage.get(&non_existent_key).await;
     assert!(result.is_none(), "Non-existent key should return None");
 
@@ -215,24 +230,32 @@ async fn test_publisher_index_consistency() -> Result<()> {
     // Store records from multiple publishers
     let publishers = vec!["alice", "bob", "charlie"];
     let mut expected_counts = HashMap::new();
+    let mut publisher_node_ids = HashMap::new();
 
     for (i, record) in create_test_records(15, 3).into_iter().enumerate() {
-        let publisher = &publishers[i % 3];
+        let publisher_name = &publishers[i % 3];
         let mut record = record;
-        record.publisher = PeerId::from(publisher.to_string());
+        // Create NodeId from publisher string by hashing it
+        let publisher_bytes = blake3::hash(publisher_name.as_bytes()).as_bytes().clone();
+        let node_id = NodeId::from_bytes(publisher_bytes);
+        let node_id_str = node_id.to_string();
+        
+        // Track the mapping for later queries
+        publisher_node_ids.insert(publisher_name.to_string(), node_id_str.clone());
+        record.publisher = node_id;
 
         storage.store(record).await?;
-        *expected_counts.entry(publisher.to_string()).or_insert(0) += 1;
+        *expected_counts.entry(node_id_str).or_insert(0) += 1;
     }
 
     // Test publisher queries
-    for (publisher, expected_count) in &expected_counts {
-        let records = storage.get_records_by_publisher(publisher, None).await;
+    for (publisher_str, expected_count) in &expected_counts {
+        let records = storage.get_records_by_publisher(publisher_str, None).await;
         assert_eq!(
             records.len(),
             *expected_count,
             "Publisher {} should have {} records",
-            publisher,
+            publisher_str,
             expected_count
         );
 
@@ -240,14 +263,16 @@ async fn test_publisher_index_consistency() -> Result<()> {
         for record in &records {
             assert_eq!(
                 record.publisher.to_string(),
-                *publisher,
+                *publisher_str,
                 "All records should belong to queried publisher"
             );
         }
     }
 
     // Test publisher query with limit
-    let limited_records = storage.get_records_by_publisher("alice", Some(2)).await;
+    let default_string = String::new();
+    let alice_node_id = publisher_node_ids.get("alice").unwrap_or(&default_string);
+    let limited_records = storage.get_records_by_publisher(alice_node_id, Some(2)).await;
     assert!(
         limited_records.len() <= 2,
         "Limited query should respect limit"
@@ -314,7 +339,13 @@ async fn test_memory_bounds_enforcement() -> Result<()> {
 
     // Test that memory bounds are maintained under heavy access
     let test_keys: Vec<_> = (0..200)
-        .map(|i| Key::new(format!("access_test_{}", i).as_bytes()))
+        .map(|i| {
+            let bytes = format!("access_test_{}", i).into_bytes();
+            let mut key = [0u8; 32];
+            let len = bytes.len().min(32);
+            key[..len].copy_from_slice(&bytes[..len]);
+            key
+        })
         .collect();
 
     // Heavy access pattern that could cause memory issues
@@ -369,9 +400,12 @@ async fn test_concurrent_access_safety() -> Result<()> {
                     "Record should be immediately retrievable"
                 );
 
-                // Publisher query
+                // Publisher query - convert to NodeId string representation
+                let publisher_str = format!("task_{}", task_id);
+                let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+                let publisher_node_id = NodeId::from_bytes(publisher_bytes);
                 let publisher_records = storage_clone
-                    .get_records_by_publisher(&format!("task_{}", task_id), None)
+                    .get_records_by_publisher(&publisher_node_id.to_string(), None)
                     .await;
                 assert!(
                     !publisher_records.is_empty(),
@@ -405,8 +439,11 @@ async fn test_concurrent_access_safety() -> Result<()> {
 
     // Verify some records from each task exist
     for task_id in 0..10 {
+        let publisher_str = format!("task_{}", task_id);
+        let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+        let publisher_node_id = NodeId::from_bytes(publisher_bytes);
         let publisher_records = storage
-            .get_records_by_publisher(&format!("task_{}", task_id), None)
+            .get_records_by_publisher(&publisher_node_id.to_string(), None)
             .await;
         assert!(
             !publisher_records.is_empty(),
@@ -546,7 +583,13 @@ async fn test_performance_characteristics() -> Result<()> {
     let retrieval_time = retrieval_start.elapsed();
 
     // Measure publisher query performance (this should be O(1))
-    let test_publishers: Vec<_> = (0..10).map(|i| format!("publisher_{}", i)).collect();
+    // Note: create_test_records uses 5 publishers (publisher_0 through publisher_4)
+    let test_publishers: Vec<_> = (0..5).map(|i| {
+        let publisher_str = format!("publisher_{}", i);
+        let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+        let publisher_node_id = NodeId::from_bytes(publisher_bytes);
+        publisher_node_id.to_string()
+    }).collect();
     let query_start = Instant::now();
     let mut total_query_results = 0;
     for publisher in &test_publishers {
@@ -631,14 +674,19 @@ async fn test_stress_scenarios() -> Result<()> {
 
     // Stress test 2: Mixed workload (reads, writes, queries)
     println!("  Stress test 2: Mixed workload");
-    let test_publishers: Vec<_> = (0..20).map(|i| format!("stress_publisher_{}", i)).collect();
+    let test_publisher_names: Vec<_> = (0..20).map(|i| format!("stress_publisher_{}", i)).collect();
+    let test_publishers: Vec<_> = test_publisher_names.iter().map(|name| {
+        let publisher_bytes = blake3::hash(name.as_bytes()).as_bytes().clone();
+        let publisher_node_id = NodeId::from_bytes(publisher_bytes);
+        publisher_node_id.to_string()
+    }).collect();
 
     for round in 0..20 {
         // Write phase
         for i in 0..25 {
             let record = create_test_record(
                 &format!("stress_{}_{}", round, i),
-                &test_publishers[i % test_publishers.len()],
+                &test_publisher_names[i % test_publisher_names.len()],
                 &format!("stress_value_{}_{}", round, i),
             );
             storage.store(record).await?;
@@ -646,7 +694,13 @@ async fn test_stress_scenarios() -> Result<()> {
 
         // Read phase
         for i in 0..25 {
-            let key = Key::new(format!("stress_{}_{}", round, i).as_bytes());
+            let key = {
+                let bytes = format!("stress_{}_{}", round, i).into_bytes();
+                let mut k = [0u8; 32];
+                let len = bytes.len().min(32);
+                k[..len].copy_from_slice(&bytes[..len]);
+                k
+            };
             let _ = storage.get(&key).await;
         }
 
@@ -677,8 +731,11 @@ async fn test_stress_scenarios() -> Result<()> {
 
                 // Publisher query every 10 operations
                 if i % 10 == 0 {
+                    let publisher_str = format!("task_{}", task_id);
+                    let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+                    let publisher_node_id = NodeId::from_bytes(publisher_bytes);
                     let _ = storage_clone
-                        .get_records_by_publisher(&format!("task_{}", task_id), Some(5))
+                        .get_records_by_publisher(&publisher_node_id.to_string(), Some(5))
                         .await;
                 }
             }
@@ -770,9 +827,11 @@ async fn test_dht_system_integration() -> Result<()> {
             let target_node_idx = (node_idx + access_round + 1) % nodes.len();
             let target_node = &nodes[target_node_idx];
 
-            // Query for the target node's data
+            // Query for the target node's data - convert to NodeId string representation
+            let target_publisher_bytes = blake3::hash(target_node.id.as_bytes()).as_bytes().clone();
+            let target_publisher_node_id = NodeId::from_bytes(target_publisher_bytes);
             let target_records = storage
-                .get_records_by_publisher(&target_node.id, Some(5))
+                .get_records_by_publisher(&target_publisher_node_id.to_string(), Some(5))
                 .await;
 
             // Access some specific records
@@ -820,7 +879,10 @@ async fn test_dht_system_integration() -> Result<()> {
     // Verify data integrity across the network
     let mut total_node_records = 0;
     for node in &nodes {
-        let node_records = storage.get_records_by_publisher(&node.id, None).await;
+        // Convert node.id to NodeId string representation
+        let node_publisher_bytes = blake3::hash(node.id.as_bytes()).as_bytes().clone();
+        let node_publisher_node_id = NodeId::from_bytes(node_publisher_bytes);
+        let node_records = storage.get_records_by_publisher(&node_publisher_node_id.to_string(), None).await;
         total_node_records += node_records.len();
 
         // Each node should have some data

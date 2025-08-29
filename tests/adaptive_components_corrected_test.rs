@@ -9,7 +9,7 @@ use saorsa_core::adaptive::{
     learning::{ChurnPredictor, NodeEvent, NodeFeatures, QLearnCacheManager, ThompsonSampling},
     multi_armed_bandit::{MABConfig, MultiArmedBandit},
     q_learning_cache::{AccessInfo, StateVector},
-    replication::{ReplicationManager},
+    replication::ReplicationManager,
     routing::AdaptiveRouter,
     security::{BlacklistReason, SecurityConfig, SecurityError, SecurityManager},
     som::{GridSize, SelfOrganizingMap, SomConfig},

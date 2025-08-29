@@ -164,7 +164,14 @@ impl RspsDhtStorage {
         let dht_record = Record {
             key: key.clone(),
             value,
-            publisher: self.local_peer.to_string(),
+            publisher: {
+                // Convert PeerId (String) to NodeId
+                let peer_bytes = self.local_peer.as_bytes();
+                let mut node_id_bytes = [0u8; 32];
+                let len = peer_bytes.len().min(32);
+                node_id_bytes[..len].copy_from_slice(&peer_bytes[..len]);
+                crate::identity::node_identity::NodeId::from_bytes(node_id_bytes)
+            },
             expires_at: SystemTime::now() + self.config.summary_update_interval,
             created_at: SystemTime::now(),
             signature: Some(Vec::new()),
@@ -195,7 +202,7 @@ impl RspsDhtStorage {
             .await
             .iter()
             .filter_map(|record| {
-                let key_str = std::str::from_utf8(record.key.as_bytes()).ok()?;
+                let key_str = std::str::from_utf8(&record.key).ok()?;
                 if key_str.starts_with(&pattern) {
                     Some(record.clone())
                 } else {
@@ -407,7 +414,8 @@ impl RspsDhtStorage {
 
     fn provider_key(&self, root_cid: &RootCid, provider: &PeerId) -> Key {
         let key_str = format!("/rsps/provider/{}/{}", hex::encode(root_cid), provider);
-        Key::new(key_str.as_bytes())
+        let hash = blake3::hash(key_str.as_bytes());
+        *hash.as_bytes()
     }
 
     fn provider_key_pattern(&self, root_cid: &RootCid) -> String {

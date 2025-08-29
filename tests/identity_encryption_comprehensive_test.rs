@@ -328,5 +328,3 @@ async fn test_encryption_format_versioning() -> Result<(), P2PError> {
 
     Ok(())
 }
-
-

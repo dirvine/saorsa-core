@@ -465,10 +465,10 @@ impl RepairSystem {
         let shards_needing_repair = self.identify_shards_needing_repair().await?;
 
         for shard_id in shards_needing_repair {
-            if self.should_repair_shard(&shard_id).await?
-                && let Err(e) = self.initiate_repair(&shard_id).await
-            {
-                tracing::error!("Failed to repair shard {}: {}", shard_id, e);
+            if self.should_repair_shard(&shard_id).await? {
+                if let Err(e) = self.initiate_repair(&shard_id).await {
+                    tracing::error!("Failed to repair shard {}: {}", shard_id, e);
+                }
             }
         }
 
@@ -485,10 +485,10 @@ impl RepairSystem {
     async fn should_repair_shard(&self, shard_id: &str) -> PlacementResult<bool> {
         // Check cooldown
         let active_repairs = self.active_repairs.read().await;
-        if let Some(last_repair) = active_repairs.get(shard_id)
-            && last_repair.elapsed() < self.repair_cooldown
-        {
-            return Ok(false);
+        if let Some(last_repair) = active_repairs.get(shard_id) {
+            if last_repair.elapsed() < self.repair_cooldown {
+                return Ok(false);
+            }
         }
 
         // Mock availability check

@@ -240,10 +240,10 @@ impl SecureMessaging {
     async fn get_or_create_session_key(&self, peer: &FourWordAddress) -> Result<SessionKey> {
         let keys = self.session_keys.read().await;
 
-        if let Some(key) = keys.get(peer)
-            && key.expires_at > chrono::Utc::now()
-        {
-            return Ok(key.clone());
+        if let Some(key) = keys.get(peer) {
+            if key.expires_at > chrono::Utc::now() {
+                return Ok(key.clone());
+            }
         }
         drop(keys);
 

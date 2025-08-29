@@ -8,7 +8,6 @@ use crate::dht::{
     witness::{OperationId, WitnessReceipt},
 };
 use anyhow::{Result, anyhow};
-use bytes::Bytes;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -27,7 +26,7 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Message batch window
-const BATCH_WINDOW: Duration = Duration::from_millis(10);
+const _BATCH_WINDOW: Duration = Duration::from_millis(10);
 
 /// Maximum batch size
 const MAX_BATCH_SIZE: usize = 65536; // 64KB
@@ -175,7 +174,7 @@ pub trait ConnectionListener: Send + Sync {
 /// Connection wrapper with metadata
 struct ManagedConnection {
     connection: Box<dyn Connection>,
-    node_id: NodeId,
+    _node_id: NodeId,
     last_used: Instant,
     message_count: u64,
 }
@@ -184,7 +183,7 @@ impl ManagedConnection {
     fn new(connection: Box<dyn Connection>, node_id: NodeId) -> Self {
         Self {
             connection,
-            node_id,
+            _node_id: node_id,
             last_used: Instant::now(),
             message_count: 0,
         }
@@ -303,8 +302,8 @@ impl ConnectionPool {
 pub struct MessageRouter {
     high_priority: Arc<Mutex<VecDeque<(NodeId, DhtMessage)>>>,
     normal_priority: Arc<Mutex<VecDeque<(NodeId, DhtMessage)>>>,
-    batch_buffer: Arc<Mutex<Vec<(NodeId, DhtMessage)>>>,
-    last_batch_time: Arc<Mutex<Instant>>,
+    _batch_buffer: Arc<Mutex<Vec<(NodeId, DhtMessage)>>>,
+    _last_batch_time: Arc<Mutex<Instant>>,
 }
 
 impl Default for MessageRouter {
@@ -318,8 +317,8 @@ impl MessageRouter {
         Self {
             high_priority: Arc::new(Mutex::new(VecDeque::new())),
             normal_priority: Arc::new(Mutex::new(VecDeque::new())),
-            batch_buffer: Arc::new(Mutex::new(Vec::new())),
-            last_batch_time: Arc::new(Mutex::new(Instant::now())),
+            _batch_buffer: Arc::new(Mutex::new(Vec::new())),
+            _last_batch_time: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
@@ -372,7 +371,7 @@ impl MessageRouter {
 /// Peer manager for network peer management
 pub struct PeerManager {
     known_peers: Arc<RwLock<HashMap<NodeId, PeerInfo>>>,
-    bootstrap_nodes: Arc<RwLock<Vec<NodeInfo>>>,
+    _bootstrap_nodes: Arc<RwLock<Vec<NodeInfo>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -393,7 +392,7 @@ impl PeerManager {
     pub fn new() -> Self {
         Self {
             known_peers: Arc::new(RwLock::new(HashMap::new())),
-            bootstrap_nodes: Arc::new(RwLock::new(Vec::new())),
+            _bootstrap_nodes: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -449,16 +448,16 @@ impl PeerManager {
 /// DHT protocol handler
 pub struct DhtProtocolHandler {
     dht_engine: Arc<RwLock<DhtCoreEngine>>,
-    request_id_counter: Arc<Mutex<u64>>,
-    pending_requests: Arc<RwLock<HashMap<u64, mpsc::Sender<DhtResponse>>>>,
+    _request_id_counter: Arc<Mutex<u64>>,
+    _pending_requests: Arc<RwLock<HashMap<u64, mpsc::Sender<DhtResponse>>>>,
 }
 
 impl DhtProtocolHandler {
     pub fn new(dht_engine: Arc<RwLock<DhtCoreEngine>>) -> Self {
         Self {
             dht_engine,
-            request_id_counter: Arc::new(Mutex::new(0)),
-            pending_requests: Arc::new(RwLock::new(HashMap::new())),
+            _request_id_counter: Arc::new(Mutex::new(0)),
+            _pending_requests: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -559,7 +558,7 @@ impl NetworkIntegrationLayer {
                     self.peer_manager.update_peer_status(&target, true).await;
                     return Ok(response);
                 }
-                Err(e) if retries < MAX_RETRIES => {
+                Err(_e) if retries < MAX_RETRIES => {
                     self.peer_manager.update_peer_status(&target, false).await;
                     sleep(delay).await;
                     delay *= 2;
@@ -770,7 +769,7 @@ mod tests {
             let response = DhtResponse::Pong {
                 timestamp: 0,
                 node_info: NodeInfo {
-                    id: NodeId::random(),
+                    id: NodeId::from_bytes([42u8; 32]),
                     address: "mock".to_string(),
                     last_seen: SystemTime::now(),
                     capacity: NodeCapacity::default(),
@@ -806,7 +805,7 @@ mod tests {
     async fn test_connection_pool() -> Result<()> {
         let pool = ConnectionPool::new(10);
         let transport = MockTransport;
-        let node_id = NodeId::random();
+        let node_id = NodeId::from_bytes([42u8; 32]);
 
         let conn1 = pool
             .get_connection(node_id.clone(), &transport, "mock://test")
@@ -822,7 +821,7 @@ mod tests {
     #[tokio::test]
     async fn test_message_router() -> Result<()> {
         let router = MessageRouter::new();
-        let node_id = NodeId::random();
+        let node_id = NodeId::from_bytes([42u8; 32]);
 
         let message = DhtMessage::Ping {
             timestamp: 0,
@@ -852,7 +851,7 @@ mod tests {
         let manager = PeerManager::new();
 
         let node_info = NodeInfo {
-            id: NodeId::random(),
+            id: NodeId::from_bytes([42u8; 32]),
             address: "test".to_string(),
             last_seen: SystemTime::now(),
             capacity: NodeCapacity::default(),
@@ -870,11 +869,11 @@ mod tests {
     #[tokio::test]
     async fn test_network_integration_ping() -> Result<()> {
         let transport = Arc::new(MockTransport);
-        let dht_engine = Arc::new(RwLock::new(DhtCoreEngine::new(NodeId::random())?));
+        let dht_engine = Arc::new(RwLock::new(DhtCoreEngine::new(NodeId::from_bytes([42u8; 32]))?));
 
         let network = NetworkIntegrationLayer::new(transport, dht_engine);
 
-        let target = NodeId::random();
+        let target = NodeId::from_bytes([42u8; 32]);
         let peer_info = NodeInfo {
             id: target.clone(),
             address: "mock://test".to_string(),

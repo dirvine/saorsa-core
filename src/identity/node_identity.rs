@@ -167,8 +167,42 @@ impl ProofOfWork {
     }
 }
 
-/// Core node identity with cryptographic keys and four-word address
+/// Public node identity information (without secret keys) - safe to clone
 #[derive(Clone)]
+pub struct PublicNodeIdentity {
+    /// ML-DSA public key
+    public_key: MlDsaPublicKey,
+    /// Node ID derived from public key
+    node_id: NodeId,
+    /// Human-readable four-word address
+    word_address: FourWordAddress,
+    /// Proof of work for Sybil resistance
+    proof_of_work: ProofOfWork,
+}
+
+impl PublicNodeIdentity {
+    /// Get node ID
+    pub fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Get public key
+    pub fn public_key(&self) -> &MlDsaPublicKey {
+        &self.public_key
+    }
+
+    /// Get four-word address
+    pub fn word_address(&self) -> &str {
+        self.word_address.as_str()
+    }
+
+    /// Get proof of work
+    pub fn proof_of_work(&self) -> &ProofOfWork {
+        &self.proof_of_work
+    }
+}
+
+/// Core node identity with cryptographic keys and four-word address
 pub struct NodeIdentity {
     /// ML-DSA-65 secret key (private)
     secret_key: MlDsaSecretKey,
@@ -186,10 +220,12 @@ impl NodeIdentity {
     /// Generate new identity with proof of work
     pub fn generate(pow_difficulty: u32) -> Result<Self> {
         // Generate ML-DSA-65 key pair using ant-quic integration
-        let (public_key, secret_key) = crate::quantum_crypto::generate_ml_dsa_keypair()
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(
-                format!("Failed to generate ML-DSA key pair: {}", e).into()
-            )))?;
+        let (public_key, secret_key) =
+            crate::quantum_crypto::generate_ml_dsa_keypair().map_err(|e| {
+                P2PError::Identity(IdentityError::InvalidFormat(
+                    format!("Failed to generate ML-DSA key pair: {}", e).into(),
+                ))
+            })?;
 
         let node_id = NodeId::from_public_key(&public_key);
 
@@ -209,14 +245,16 @@ impl NodeIdentity {
     }
 
     /// Generate from seed (deterministic)
-    pub fn from_seed(seed: &[u8; 32], pow_difficulty: u32) -> Result<Self> {
+    pub fn from_seed(_seed: &[u8; 32], pow_difficulty: u32) -> Result<Self> {
         // For deterministic generation, we use the seed to generate ML-DSA keys
         // Note: ML-DSA doesn't directly support seed-based generation like Ed25519
         // For now, we'll generate random keys but use the seed for deterministic NodeId
-        let (public_key, secret_key) = crate::quantum_crypto::generate_ml_dsa_keypair()
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(
-                format!("Failed to generate ML-DSA key pair: {}", e).into()
-            )))?;
+        let (public_key, secret_key) =
+            crate::quantum_crypto::generate_ml_dsa_keypair().map_err(|e| {
+                P2PError::Identity(IdentityError::InvalidFormat(
+                    format!("Failed to generate ML-DSA key pair: {}", e).into(),
+                ))
+            })?;
 
         let node_id = NodeId::from_public_key(&public_key);
 
@@ -261,15 +299,31 @@ impl NodeIdentity {
     }
 
     /// Sign a message
-    pub fn sign(&self, message: &[u8]) -> MlDsaSignature {
-        crate::quantum_crypto::ml_dsa_sign(&self.secret_key, message)
-            .expect("ML-DSA signing should not fail")
+    pub fn sign(&self, message: &[u8]) -> Result<MlDsaSignature> {
+        crate::quantum_crypto::ml_dsa_sign(&self.secret_key, message).map_err(|e| {
+            P2PError::Identity(IdentityError::InvalidFormat(
+                format!("ML-DSA signing failed: {:?}", e).into(),
+            ))
+        })
     }
 
     /// Verify a signature
-    pub fn verify(&self, message: &[u8], signature: &MlDsaSignature) -> bool {
-        crate::quantum_crypto::ml_dsa_verify(&self.public_key, message, signature)
-            .unwrap_or(false)
+    pub fn verify(&self, message: &[u8], signature: &MlDsaSignature) -> Result<bool> {
+        crate::quantum_crypto::ml_dsa_verify(&self.public_key, message, signature).map_err(|e| {
+            P2PError::Identity(IdentityError::InvalidFormat(
+                format!("ML-DSA verification failed: {:?}", e).into(),
+            ))
+        })
+    }
+
+    /// Create a public version of this identity (safe to clone)
+    pub fn to_public(&self) -> PublicNodeIdentity {
+        PublicNodeIdentity {
+            public_key: self.public_key.clone(),
+            node_id: self.node_id.clone(),
+            word_address: self.word_address.clone(),
+            proof_of_work: self.proof_of_work.clone(),
+        }
     }
 }
 
@@ -279,7 +333,9 @@ impl NodeIdentity {
     /// This would require storing both keys together
     pub fn from_secret_key(_secret_key: MlDsaSecretKey) -> Result<Self> {
         Err(P2PError::Identity(IdentityError::InvalidFormat(
-            "Creating identity from secret key alone is not supported".to_string().into(),
+            "Creating identity from secret key alone is not supported"
+                .to_string()
+                .into(),
         )))
     }
 }
@@ -346,49 +402,16 @@ impl NodeIdentity {
     }
 
     /// Import identity from persisted data
-    /// Note: Currently requires both secret and public keys due to ant-quic API limitations
-    pub fn import(data: &IdentityData) -> Result<Self> {
-        // For now, we can't import from just secret key data
-        // This would need to be updated to store both keys
+    /// Note: Currently not implemented due to ant-quic API limitations
+    pub fn import(_data: &IdentityData) -> Result<Self> {
+        // TODO: Implement when ant-quic provides key import functionality
         Err(P2PError::Identity(IdentityError::InvalidFormat(
-            "Import from persisted data requires both keys - not yet implemented".to_string().into(),
+            "Import from persisted data not yet implemented"
+                .to_string()
+                .into(),
         )))
     }
-
-        let secret_key = MlDsaSecretKey::from_bytes(&data.secret_key).map_err(|e| {
-            P2PError::Identity(IdentityError::InvalidFormat(
-                format!("Invalid ML-DSA secret key: {:?}", e).into(),
-            ))
-        })?;
-
-        let public_key = ant_quic::crypto::pqc::ml_dsa_public_key_from_secret(&secret_key)
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(
-                format!("Failed to derive public key: {:?}", e).into(),
-            )))?;
-
-        let node_id = NodeId::from_public_key(&public_key);
-
-        // Verify proof of work
-        if !data
-            .proof_of_work
-            .verify(&node_id, data.proof_of_work.difficulty)
-        {
-            return Err(P2PError::Identity(IdentityError::VerificationFailed(
-                "Invalid proof of work".to_string().into(),
-            )));
-        }
-
-        // Generate four-word address from node ID
-        let word_address = WordEncoder::encode(node_id.to_bytes())?;
-
-        Ok(Self {
-            secret_key,
-            public_key,
-            node_id,
-            word_address,
-            proof_of_work: data.proof_of_work.clone(),
-        })
-    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -396,7 +419,7 @@ mod tests {
 
     #[test]
     fn test_node_id_generation() {
-        let (public_key, secret_key) = crate::quantum_crypto::generate_ml_dsa_keypair()
+        let (public_key, _secret_key) = crate::quantum_crypto::generate_ml_dsa_keypair()
             .expect("ML-DSA key generation should succeed");
         let node_id = NodeId::from_public_key(&public_key);
 
@@ -449,11 +472,11 @@ mod tests {
 
         // Test signing and verification
         let message = b"Hello, P2P!";
-        let signature = identity.sign(message);
-        assert!(identity.verify(message, &signature));
+        let signature = identity.sign(message).unwrap();
+        assert!(identity.verify(message, &signature).unwrap());
 
-        // Wrong message should fail
-        assert!(!identity.verify(b"Wrong message", &signature));
+        // Wrong message should fail with original signature
+        assert!(!identity.verify(b"Wrong message", &signature).unwrap());
     }
 
     #[test]
@@ -492,6 +515,6 @@ mod tests {
         // Should be able to sign with imported identity
         let message = b"Test message";
         let signature = imported.sign(message);
-        assert!(identity.verify(message, &signature));
+        assert!(identity.verify(message, &signature.unwrap()).unwrap());
     }
 }

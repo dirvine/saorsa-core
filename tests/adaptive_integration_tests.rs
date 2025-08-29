@@ -31,7 +31,9 @@ async fn test_full_adaptive_system_integration() -> anyhow::Result<()> {
     // Add test nodes
     let mut nodes = Vec::new();
     for i in 0..5 {
-        let node_id = NodeId { hash: [i as u8; 32] };
+        let node_id = NodeId {
+            hash: [i as u8; 32],
+        };
         let node = AdaptiveNode::new(node_id, system.clone()).await?;
         nodes.push(node);
     }
@@ -51,10 +53,13 @@ async fn test_full_adaptive_system_integration() -> anyhow::Result<()> {
             };
 
             // Record access
-            node.record_content_access(content_hash, access_info).await?;
+            node.record_content_access(content_hash, access_info)
+                .await?;
 
             // Make routing decision
-            let target_node = NodeId { hash: [(round % 5) as u8; 32] };
+            let target_node = NodeId {
+                hash: [(round % 5) as u8; 32],
+            };
             let route = node.select_route(target_node).await?;
             assert!(route.len() <= 3, "Route too long");
 
@@ -76,7 +81,10 @@ async fn test_full_adaptive_system_integration() -> anyhow::Result<()> {
 
     // Verify that the system has adapted
     assert!(metrics.total_decisions > 0, "No decisions made");
-    assert!(metrics.average_latency < Duration::from_millis(200), "Latency too high");
+    assert!(
+        metrics.average_latency < Duration::from_millis(200),
+        "Latency too high"
+    );
     assert!(metrics.success_rate > 0.7, "Success rate too low");
 
     println!("✅ Full adaptive system integration test passed");
@@ -152,13 +160,17 @@ async fn test_performance_regression_detection() -> anyhow::Result<()> {
     // Establish baseline performance
     for i in 0..10 {
         let latency = Duration::from_millis(50 + (i * 2) as u64);
-        monitor.record_operation_latency("test_operation", latency).await?;
+        monitor
+            .record_operation_latency("test_operation", latency)
+            .await?;
     }
 
     // Simulate normal performance
     for i in 0..20 {
         let latency = Duration::from_millis(50 + (i % 10) as u64);
-        monitor.record_operation_latency("test_operation", latency).await?;
+        monitor
+            .record_operation_latency("test_operation", latency)
+            .await?;
     }
 
     // Check for regression (should be false)
@@ -168,7 +180,9 @@ async fn test_performance_regression_detection() -> anyhow::Result<()> {
     // Simulate performance regression
     for i in 0..15 {
         let latency = Duration::from_millis(100 + (i * 5) as u64); // Much slower
-        monitor.record_operation_latency("test_operation", latency).await?;
+        monitor
+            .record_operation_latency("test_operation", latency)
+            .await?;
     }
 
     // Check for regression (should be true)
@@ -201,7 +215,10 @@ async fn test_chaos_engineering_resilience() -> anyhow::Result<()> {
 
     // Verify system resilience
     let health = system.get_health_status().await?;
-    assert!(health.overall_health > 0.5, "System health too low under chaos");
+    assert!(
+        health.overall_health > 0.5,
+        "System health too low under chaos"
+    );
 
     // Stop chaos
     chaos_engine.stop().await?;
@@ -209,7 +226,10 @@ async fn test_chaos_engineering_resilience() -> anyhow::Result<()> {
     // Verify recovery
     sleep(Duration::from_secs(2)).await;
     let final_health = system.get_health_status().await?;
-    assert!(final_health.overall_health > 0.8, "System did not recover properly");
+    assert!(
+        final_health.overall_health > 0.8,
+        "System did not recover properly"
+    );
 
     println!("✅ Chaos engineering resilience test passed");
     Ok(())
@@ -248,7 +268,9 @@ async fn test_adaptive_learning_convergence() -> anyhow::Result<()> {
         };
 
         // Train the model
-        learner.add_training_example(&features, optimal_action).await?;
+        learner
+            .add_training_example(&features, optimal_action)
+            .await?;
         learner.train_step().await?;
 
         // Test accuracy
@@ -267,7 +289,8 @@ async fn test_adaptive_learning_convergence() -> anyhow::Result<()> {
 
         // Check for convergence
         if (accuracy - previous_accuracy).abs() < learning_config.convergence_threshold {
-            if iteration > 10 { // Allow some initial training
+            if iteration > 10 {
+                // Allow some initial training
                 converged = true;
                 break;
             }
@@ -277,9 +300,16 @@ async fn test_adaptive_learning_convergence() -> anyhow::Result<()> {
     }
 
     assert!(converged, "Learning system did not converge");
-    assert!(previous_accuracy > 0.7, "Final accuracy too low: {}", previous_accuracy);
+    assert!(
+        previous_accuracy > 0.7,
+        "Final accuracy too low: {}",
+        previous_accuracy
+    );
 
-    println!("✅ Adaptive learning convergence test passed with accuracy: {:.2}%", previous_accuracy * 100.0);
+    println!(
+        "✅ Adaptive learning convergence test passed with accuracy: {:.2}%",
+        previous_accuracy * 100.0
+    );
     Ok(())
 }
 
@@ -293,14 +323,22 @@ async fn test_multi_node_adaptive_coordination() -> anyhow::Result<()> {
     // Create multiple adaptive systems
     for i in 0..3 {
         let config = AdaptiveConfig {
-            node_id: NodeId { hash: [i as u8; 32] },
+            node_id: NodeId {
+                hash: [i as u8; 32],
+            },
             ..Default::default()
         };
 
         let system = AdaptiveSystem::new(config).await?;
         systems.push(system.clone());
 
-        let node = AdaptiveNode::new(NodeId { hash: [i as u8; 32] }, system).await?;
+        let node = AdaptiveNode::new(
+            NodeId {
+                hash: [i as u8; 32],
+            },
+            system,
+        )
+        .await?;
         nodes.push(node);
     }
 
@@ -340,9 +378,15 @@ async fn test_multi_node_adaptive_coordination() -> anyhow::Result<()> {
     }
 
     let average_improvement = total_improvement / systems.len() as f64;
-    assert!(average_improvement > 0.1, "Coordination did not provide sufficient improvement");
+    assert!(
+        average_improvement > 0.1,
+        "Coordination did not provide sufficient improvement"
+    );
 
-    println!("✅ Multi-node adaptive coordination test passed with average improvement: {:.2}%", average_improvement * 100.0);
+    println!(
+        "✅ Multi-node adaptive coordination test passed with average improvement: {:.2}%",
+        average_improvement * 100.0
+    );
     Ok(())
 }
 
@@ -426,7 +470,11 @@ impl AdaptiveNode {
         Ok(Self { id, system })
     }
 
-    async fn record_content_access(&self, _hash: ContentHash, _info: AccessInfo) -> anyhow::Result<()> {
+    async fn record_content_access(
+        &self,
+        _hash: ContentHash,
+        _info: AccessInfo,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -434,11 +482,19 @@ impl AdaptiveNode {
         Ok(vec![self.id, _target])
     }
 
-    async fn simulate_network_request(&self, _route: Vec<NodeId>, _latency: Duration) -> anyhow::Result<bool> {
+    async fn simulate_network_request(
+        &self,
+        _route: Vec<NodeId>,
+        _latency: Duration,
+    ) -> anyhow::Result<bool> {
         Ok(random::<f64>() > 0.2) // 80% success rate
     }
 
-    async fn update_learning_systems(&self, _success: bool, _latency: Duration) -> anyhow::Result<()> {
+    async fn update_learning_systems(
+        &self,
+        _success: bool,
+        _latency: Duration,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -521,7 +577,11 @@ impl PerformanceMonitor {
         Self {}
     }
 
-    async fn record_operation_latency(&self, _operation: &str, _latency: Duration) -> anyhow::Result<()> {
+    async fn record_operation_latency(
+        &self,
+        _operation: &str,
+        _latency: Duration,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -530,7 +590,10 @@ impl PerformanceMonitor {
     }
 }
 
-fn random<T>() -> T where rand::distributions::Standard: rand::distributions::Distribution<T> {
+fn random<T>() -> T
+where
+    rand::distributions::Standard: rand::distributions::Distribution<T>,
+{
     use rand::Rng;
     rand::thread_rng().r#gen()
 }

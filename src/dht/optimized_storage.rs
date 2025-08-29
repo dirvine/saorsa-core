@@ -276,10 +276,10 @@ impl OptimizedDHTStorage {
             let take_count = limit.unwrap_or(keys.len());
 
             for key in keys.iter().take(take_count) {
-                if let Some(record) = records.peek(key)
-                    && !record.is_expired()
-                {
-                    results.push(record.clone());
+                if let Some(record) = records.peek(key) {
+                    if !record.is_expired() {
+                        results.push(record.clone());
+                    }
                 }
             }
             results
@@ -298,10 +298,11 @@ impl OptimizedDHTStorage {
 
         for (_, keys) in expiration_index.range(..target_time) {
             for key in keys {
-                if let Some(record) = records.peek(key)
-                    && !record.is_expired()
-                {
-                    results.push(record.clone());
+                if let Some(record) = records.peek(key) {
+
+                    if !record.is_expired() {
+                        results.push(record.clone());
+                    }
                 }
             }
         }
@@ -396,7 +397,6 @@ impl OptimizedDHTStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PeerId;
 
     #[tokio::test]
     async fn test_optimized_storage_basic_operations() {
@@ -404,9 +404,10 @@ mod tests {
         let storage = OptimizedDHTStorage::new(config);
 
         // Create test record
-        let key = Key::new(b"test_key");
+        let hash = blake3::hash(b"test_key");
+        let key = *hash.as_bytes();
         let value = b"test_value".to_vec();
-        let publisher = PeerId::from("test_peer".to_string());
+        let publisher = crate::identity::node_identity::NodeId::from_bytes([123u8; 32]);
         let record = Record::new(key.clone(), value.clone(), publisher);
 
         // Store and retrieve
@@ -424,9 +425,10 @@ mod tests {
 
         // Fill cache beyond capacity
         for i in 0..5 {
-            let key = Key::new(format!("key_{}", i).as_bytes());
+            let hash = blake3::hash(format!("key_{}", i).as_bytes());
+            let key = *hash.as_bytes();
             let value = format!("value_{}", i).into_bytes();
-            let publisher = PeerId::from(format!("peer_{}", i));
+            let publisher = crate::identity::node_identity::NodeId::from_bytes([i as u8; 32]);
             let record = Record::new(key, value, publisher);
             storage.store(record).await.unwrap();
         }
@@ -440,11 +442,12 @@ mod tests {
         let config = DHTConfig::default();
         let storage = OptimizedDHTStorage::new(config);
 
-        let publisher = PeerId::from("test_publisher".to_string());
+        let publisher = crate::identity::node_identity::NodeId::from_bytes([42u8; 32]);
 
         // Store multiple records from same publisher
         for i in 0..3 {
-            let key = Key::new(format!("key_{}", i).as_bytes());
+            let hash = blake3::hash(format!("key_{}", i).as_bytes());
+            let key = *hash.as_bytes();
             let value = format!("value_{}", i).into_bytes();
             let record = Record::new(key, value, publisher.clone());
             storage.store(record).await.unwrap();
@@ -463,9 +466,10 @@ mod tests {
         let storage = OptimizedDHTStorage::new(config);
 
         // Create expired record
-        let key = Key::new(b"expired_key");
+        let hash = blake3::hash(b"expired_key");
+        let key = *hash.as_bytes();
         let value = b"expired_value".to_vec();
-        let publisher = PeerId::from("test_peer".to_string());
+        let publisher = crate::identity::node_identity::NodeId::from_bytes([123u8; 32]);
         let mut record = Record::new(key.clone(), value, publisher);
 
         // Set expiration to past

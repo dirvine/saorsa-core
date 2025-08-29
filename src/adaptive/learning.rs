@@ -559,12 +559,14 @@ impl QLearnCacheManager {
             .min_by_key(|(_, content)| content.last_access)
             .map(|(k, _)| *k);
 
-        if let Some(key) = oldest
-            && let Some(value) = cache.remove(&key)
-        {
-            self.current_size
-                .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
-            return true;
+        if let Some(key) = oldest {
+
+
+            if let Some(value) = cache.remove(&key) {
+                self.current_size
+                    .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
+                return true;
+            }
         }
 
         false
@@ -708,12 +710,12 @@ impl QLearnCacheManager {
             .min_by_key(|(_, content)| content.access_count)
             .map(|(k, _)| *k);
 
-        if let Some(key) = least_frequent
-            && let Some(value) = cache.remove(&key)
-        {
-            self.current_size
-                .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
-            return true;
+        if let Some(key) = least_frequent {
+            if let Some(value) = cache.remove(&key) {
+                self.current_size
+                    .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
+                return true;
+            }
         }
         false
     }
@@ -1147,10 +1149,10 @@ impl ChurnPredictor {
         // Check cache first
         {
             let cache = self.prediction_cache.read().await;
-            if let Some(cached) = cache.get(node_id)
-                && cached.timestamp.elapsed() < std::time::Duration::from_secs(300)
-            {
-                return cached.clone();
+            if let Some(cached) = cache.get(node_id) {
+                if cached.timestamp.elapsed() < std::time::Duration::from_secs(300) {
+                    return cached.clone();
+                }
             }
         }
 
@@ -1301,13 +1303,13 @@ impl ChurnPredictor {
             }
             NodeEvent::Disconnected => {
                 // End current session
-                if let Some((start, end)) = node_history.sessions.last_mut()
-                    && end.is_none()
-                {
-                    let now = std::time::Instant::now();
-                    *end = Some(now);
-                    let session_length = now.duration_since(*start).as_secs();
-                    node_history.total_uptime += session_length;
+                if let Some((start, end)) = node_history.sessions.last_mut() {
+                    if end.is_none() {
+                        let now = std::time::Instant::now();
+                        *end = Some(now);
+                        let session_length = now.duration_since(*start).as_secs();
+                        node_history.total_uptime += session_length;
+                    }
                 }
             }
         }

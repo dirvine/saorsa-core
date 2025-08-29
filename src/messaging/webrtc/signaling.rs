@@ -484,11 +484,11 @@ impl SignalingHandler {
     /// Handle incoming call answer
     async fn _handle_incoming_answer(&self, answer: CallAnswer) -> Result<()> {
         // Validate incoming SDP (if call was accepted)
-        if answer.accepted
-            && let Err(e) = Self::validate_sdp(&answer.sdp)
-        {
-            error!("Rejecting call answer due to invalid SDP: {}", e);
-            return Err(e);
+        if answer.accepted {
+            if let Err(e) = Self::validate_sdp(&answer.sdp) {
+                error!("Rejecting call answer due to invalid SDP: {}", e);
+                return Err(e);
+            }
         }
 
         // Update session

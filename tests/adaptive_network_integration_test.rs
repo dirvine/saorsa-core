@@ -4,9 +4,11 @@
 
 use saorsa_core::{
     adaptive::{
-        learning::ThompsonSampling,
+        eviction::AdaptiveStrategy,
+        learning::{ChurnPredictor, ThompsonSampling},
         multi_armed_bandit::{MABConfig, MultiArmedBandit},
         q_learning_cache::QLearningConfig,
+        security::{SecurityConfig, SecurityManager},
     },
     dht::Key,
 };
@@ -177,7 +179,7 @@ async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
         .map(|i| {
             let mut k = [0u8; 32];
             k[0] = i as u8;
-            Key::new(&k)
+            k
         })
         .collect();
 
@@ -333,7 +335,7 @@ async fn test_adaptive_replication() -> anyhow::Result<()> {
 
     // Add data items with different importance levels
     for i in 0..50 {
-        let key = Key::new(&[i as u8; 32]);
+        let key = [i as u8; 32];
         let importance = if i < 10 {
             1.0 // Critical data
         } else if i < 30 {
@@ -666,7 +668,7 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
         let key = {
             let mut k = [0u8; 32];
             k[0] = rand::random::<u8>();
-            Key::new(&k)
+            k
         };
         let _ = key; // placeholder
         baseline_latencies.push(start.elapsed());
@@ -690,7 +692,7 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
         let key = {
             let mut k = [0u8; 32];
             k[0] = rand::random::<u8>();
-            Key::new(&k)
+            k
         };
         let _ = key; // placeholder
         optimized_latencies.push(start.elapsed());

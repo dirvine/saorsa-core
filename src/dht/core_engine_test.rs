@@ -4,7 +4,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dht_engine_creation() {
-        let engine = DhtCoreEngine::new(NodeId::random()).unwrap();
+        let engine = DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap();
         // Engine should be created successfully; initially we have no known peers
         let closest = engine
             .find_nodes(&DhtKey::new(b"init"), 3)
@@ -15,7 +15,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_store_and_retrieve() {
-        let mut engine = DhtCoreEngine::new(NodeId::random()).unwrap();
+        let mut engine = DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap();
         let data = b"Test DHT data".to_vec();
         let key = DhtKey::new(&data);
 
@@ -30,7 +30,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_closest_nodes_no_peers() {
-        let engine = DhtCoreEngine::new(NodeId::random()).unwrap();
+        let engine = DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap();
         let closest = engine.find_nodes(&DhtKey::new(b"target"), 3).await.unwrap();
         // With no peers added, the list should be empty and not exceed requested count
         assert!(closest.len() <= 3);
@@ -38,7 +38,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replication_receipt_success() {
-        let mut engine = DhtCoreEngine::new(NodeId::random()).unwrap();
+        let mut engine = DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap();
 
         let data = b"Replicated data".to_vec();
         let key = DhtKey::new(&data);
@@ -54,7 +54,7 @@ mod tests {
         use tokio::task;
 
         let engine = std::sync::Arc::new(tokio::sync::RwLock::new(
-            DhtCoreEngine::new(NodeId::random()).unwrap(),
+            DhtCoreEngine::new(NodeId::from_bytes([42u8; 32])).unwrap(),
         ));
 
         let mut handles = vec![];

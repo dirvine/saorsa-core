@@ -45,10 +45,10 @@ impl MessageSearch {
         // Fetch full messages
         let mut messages = Vec::new();
         for id in message_ids {
-            if let Ok(msg) = self.store.get_message(id).await
-                && self.matches_query(&msg, &query, &filters)
-            {
-                messages.push(msg);
+            if let Ok(msg) = self.store.get_message(id).await {
+                if self.matches_query(&msg, &query, &filters) {
+                    messages.push(msg);
+                }
             }
         }
 
@@ -324,24 +324,24 @@ impl MessageSearch {
         }
 
         // Check attachments
-        if let Some(has_attach) = filters.has_attachments
-            && has_attach == message.attachments.is_empty()
-        {
-            return false;
+        if let Some(has_attach) = filters.has_attachments {
+            if has_attach == message.attachments.is_empty() {
+                return false;
+            }
         }
 
         // Check reactions
-        if let Some(has_react) = filters.has_reactions
-            && has_react == message.reactions.is_empty()
-        {
-            return false;
+        if let Some(has_react) = filters.has_reactions {
+            if has_react == message.reactions.is_empty() {
+                return false;
+            }
         }
 
         // Check thread
-        if let Some(is_thread) = filters.is_thread
-            && is_thread != message.thread_id.is_some()
-        {
-            return false;
+        if let Some(is_thread) = filters.is_thread {
+            if is_thread != message.thread_id.is_some() {
+                return false;
+            }
         }
 
         // Check date range

@@ -201,7 +201,7 @@ mod tests {
     #[tokio::test]
     async fn test_call_manager_state_transitions() {
         let _alice = FourWordAddress::from("alice-bob-charlie-delta");
-        let _bob = FourWordAddress::from("eve-frank-grace-henry");
+        let bob = FourWordAddress::from("eve-frank-grace-henry");
 
         // Test call session state transitions
         let call_id = CallId::new();

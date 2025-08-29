@@ -569,15 +569,13 @@ impl Config {
     pub fn production() -> Self {
         let mut config = Self::default();
         // Use environment variable or fallback to secure default
-        config.network.listen_address = env::var("SAORSA_LISTEN_ADDRESS")
-            .unwrap_or_else(|_| "0.0.0.0:9000".to_string());
+        config.network.listen_address =
+            env::var("SAORSA_LISTEN_ADDRESS").unwrap_or_else(|_| "0.0.0.0:9000".to_string());
         config.security.rate_limit = 1000;
         config.security.connection_limit = 100;
         config.storage.path = PathBuf::from("/var/lib/saorsa");
         config
     }
-
-
 
     /// Get parsed listen address
     pub fn listen_socket_addr(&self) -> Result<SocketAddr> {

@@ -24,7 +24,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-
 /// Simulated network environment
 struct NetworkSimulation {
     nodes: HashMap<NodeId, Arc<NetworkCoordinator>>,

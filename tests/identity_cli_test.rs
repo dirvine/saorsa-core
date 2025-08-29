@@ -15,7 +15,6 @@
 //!
 //! Tests the command-line interface for identity management
 
-
 use saorsa_core::identity::cli::{IdentityCliHandler, IdentityCommand, MessageInput};
 
 use tempfile::TempDir;
@@ -195,7 +194,6 @@ mod cli_command_tests {
 
     #[test]
     fn test_cli_argument_parsing() {
-
         // Test generate command parsing
         let args = vec!["identity", "generate", "--difficulty", "16"];
         let parsed = IdentityCommand::try_parse_from(args);

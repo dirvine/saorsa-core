@@ -311,7 +311,8 @@ impl UserIdentity {
     /// # Returns
     /// DHT key for profile storage location
     pub fn get_profile_dht_key(&self) -> Key {
-        Key::new(format!("user_profile:{}", self.user_id).as_bytes())
+        let hash = blake3::hash(format!("user_profile:{}", self.user_id).as_bytes());
+        *hash.as_bytes()
     }
 }
 

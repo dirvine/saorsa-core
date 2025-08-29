@@ -230,15 +230,15 @@ impl MessageReactions {
 
     /// Remove a reaction
     pub fn remove_reaction(&mut self, emoji: &str, user: &FourWordAddress) {
-        if let Some(users) = self.reactions.get_mut(emoji)
-            && let Some(pos) = users.iter().position(|u| u == user)
-        {
-            users.remove(pos);
-            self.total_count = self.total_count.saturating_sub(1);
+        if let Some(users) = self.reactions.get_mut(emoji) {
+            if let Some(pos) = users.iter().position(|u| u == user) {
+                users.remove(pos);
+                self.total_count = self.total_count.saturating_sub(1);
 
-            // Remove emoji if no users left
-            if users.is_empty() {
-                self.reactions.remove(emoji);
+                // Remove emoji if no users left
+                if users.is_empty() {
+                    self.reactions.remove(emoji);
+                }
             }
         }
     }

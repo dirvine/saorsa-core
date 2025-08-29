@@ -522,14 +522,15 @@ impl SecureMemoryPool {
 
         // Try to get from pool
         {
-            if let Ok(mut available) = self.available.lock()
-                && let Some(memory) = available.pop_front()
-            {
+            if let Ok(mut available) = self.available.lock() {
+
+                if let Some(memory) = available.pop_front() {
                 if let Ok(mut stats) = self.stats.lock() {
                     stats.pool_hits += 1;
                     stats.total_allocations += 1;
                     stats.active_allocations += 1;
                     stats.current_bytes_in_use += memory.len() as u64;
+                }
                 }
                 return Ok(memory);
             }

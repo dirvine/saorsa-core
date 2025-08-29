@@ -37,6 +37,8 @@ pub mod dht_integration;
 pub mod eviction;
 pub mod gossip;
 pub mod hyperbolic;
+pub mod hyperbolic_enhanced;
+pub mod hyperbolic_greedy;
 pub mod identity;
 pub mod learning;
 pub mod monitoring;
@@ -65,6 +67,12 @@ pub use eviction::{
 };
 pub use gossip::AdaptiveGossipSub;
 pub use hyperbolic::{HyperbolicRoutingStrategy, HyperbolicSpace};
+pub use hyperbolic_enhanced::{
+    EnhancedHyperbolicCoordinate, EnhancedHyperbolicRoutingStrategy, EnhancedHyperbolicSpace,
+};
+pub use hyperbolic_greedy::{
+    Embedding, EmbeddingConfig, HyperbolicGreedyRouter, embed_snapshot, greedy_next,
+};
 pub use identity::{NodeIdentity, ProofOfWork, SignedMessage, StoredIdentity};
 pub use learning::{ChurnPredictor, QLearnCacheManager, ThompsonSampling};
 pub use monitoring::{

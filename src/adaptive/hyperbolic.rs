@@ -191,7 +191,7 @@ impl HyperbolicSpace {
 }
 
 /// Calculate the shortest angular difference between two angles
-fn angle_difference(a: f64, b: f64) -> f64 {
+pub fn angle_difference(a: f64, b: f64) -> f64 {
     let diff = a - b;
     if diff > std::f64::consts::PI {
         diff - 2.0 * std::f64::consts::PI

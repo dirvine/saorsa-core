@@ -591,10 +591,10 @@ mod tests {
         .await;
         assert!(service.is_ok());
 
-        let mut service = service.unwrap();
+        let service = service.unwrap();
 
         // Test sending a message
-        let request = SendMessageRequest {
+        let _request = SendMessageRequest {
             channel_id: ChannelId::new(),
             content: MessageContent::Text("Test with real DHT".to_string()),
             attachments: vec![],

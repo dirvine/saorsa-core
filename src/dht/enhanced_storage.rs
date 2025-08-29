@@ -190,7 +190,13 @@ mod tests {
     #[test]
     fn test_replication_result_health_check() {
         let result = ReplicationResult {
-            key: Key::new(&[1, 2, 3]),
+            key: {
+                let mut k = [0u8; 32];
+                k[0] = 1;
+                k[1] = 2;
+                k[2] = 3;
+                k
+            },
             successful_replicas: 6,
             failed_replicas: 2,
             target_replicas: 8,
@@ -207,7 +213,13 @@ mod tests {
     #[test]
     fn test_replication_result_success_rate() {
         let result = ReplicationResult {
-            key: Key::new(&[1, 2, 3]),
+            key: {
+                let mut k = [0u8; 32];
+                k[0] = 1;
+                k[1] = 2;
+                k[2] = 3;
+                k
+            },
             successful_replicas: 6,
             failed_replicas: 2,
             target_replicas: 8,

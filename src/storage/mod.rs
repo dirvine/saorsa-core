@@ -16,7 +16,7 @@
 //! All user data is stored in the DHT with proper encryption for privacy
 //! and multi-device access.
 
-use crate::dht::{DHT, Key};
+use crate::dht::{DHT, DhtKey};
 use crate::identity::enhanced::EnhancedIdentity;
 use aes_gcm::{
     Aes256Gcm, Key as AesKey, Nonce,
@@ -202,10 +202,11 @@ impl StorageManager {
         let wrapper_bytes = bincode::serialize(&wrapper)?;
 
         // Store in DHT
-        let dht_key = Key::new(key.as_bytes());
+        let hash = blake3::hash(key.as_bytes());
+        let dht_key = *hash.as_bytes();
 
         self.dht
-            .put(dht_key, wrapper_bytes)
+            .store(&DhtKey::from_bytes(dht_key), wrapper_bytes)
             .await
             .map_err(|e| StorageError::DhtError(e.to_string()))?;
 
@@ -215,15 +216,17 @@ impl StorageManager {
     /// Retrieve and decrypt data from DHT
     pub async fn get_encrypted<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Result<T> {
         // Get from DHT
-        let dht_key = Key::new(key.as_bytes());
-        let record = self
+        let hash = blake3::hash(key.as_bytes());
+        let dht_key = *hash.as_bytes();
+        let value = self
             .dht
-            .get(&dht_key)
+            .retrieve(&DhtKey::from_bytes(dht_key))
             .await
+            .map_err(|e| StorageError::DhtError(e.to_string()))?
             .ok_or_else(|| StorageError::KeyNotFound(key.to_string()))?;
 
         // Deserialize wrapper
-        let wrapper: EncryptedData = bincode::deserialize(&record.value)?;
+        let wrapper: EncryptedData = bincode::deserialize(&value)?;
 
         // Decrypt data
         let plaintext = self.decrypt(&wrapper.ciphertext, &wrapper.nonce)?;
@@ -243,10 +246,11 @@ impl StorageManager {
     ) -> Result<()> {
         let value = bincode::serialize(data)?;
 
-        let dht_key = Key::new(key.as_bytes());
+        let hash = blake3::hash(key.as_bytes());
+        let dht_key = *hash.as_bytes();
 
         self.dht
-            .put(dht_key, value)
+            .store(&DhtKey::from_bytes(dht_key), value)
             .await
             .map_err(|e| StorageError::DhtError(e.to_string()))?;
 
@@ -255,23 +259,26 @@ impl StorageManager {
 
     /// Get public data
     pub async fn get_public<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Result<T> {
-        let dht_key = Key::new(key.as_bytes());
-        let record = self
+        let hash = blake3::hash(key.as_bytes());
+        let dht_key = *hash.as_bytes();
+        let value = self
             .dht
-            .get(&dht_key)
+            .retrieve(&DhtKey::from_bytes(dht_key))
             .await
+            .map_err(|e| StorageError::DhtError(e.to_string()))?
             .ok_or_else(|| StorageError::KeyNotFound(key.to_string()))?;
 
-        let data = bincode::deserialize(&record.value)?;
+        let data = bincode::deserialize(&value)?;
         Ok(data)
     }
 
     /// Delete data from DHT
     pub async fn delete(&mut self, key: &str) -> Result<()> {
         // DHT doesn't expose direct delete method, so we'll put an empty value with immediate expiry
-        let dht_key = Key::new(key.as_bytes());
+        let hash = blake3::hash(key.as_bytes());
+        let dht_key = *hash.as_bytes();
         self.dht
-            .put(dht_key, vec![])
+            .store(&DhtKey::from_bytes(dht_key), vec![])
             .await
             .map_err(|e| StorageError::DhtError(e.to_string()))?;
         Ok(())

@@ -8,6 +8,7 @@ use anyhow::Result;
 use proptest::prelude::*;
 use saorsa_core::PeerId;
 use saorsa_core::dht::{DHTConfig, Key, Record, optimized_storage::OptimizedDHTStorage};
+use saorsa_core::identity::node_identity::NodeId;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 
@@ -15,12 +16,21 @@ use std::time::{Duration, SystemTime};
 fn arb_key() -> impl Strategy<Value = Key> {
     any::<Vec<u8>>()
         .prop_filter("Key cannot be empty", |v| !v.is_empty())
-        .prop_map(|bytes| Key::new(&bytes))
+        .prop_map(|bytes| {
+            let mut key = [0u8; 32];
+            let len = bytes.len().min(32);
+            key[..len].copy_from_slice(&bytes[..len]);
+            key
+        })
 }
 
-/// Strategy to generate random peer IDs
-fn arb_peer_id() -> impl Strategy<Value = PeerId> {
-    "[a-zA-Z0-9_-]{3,20}".prop_map(|s| PeerId::from(s))
+/// Strategy to generate random peer IDs (NodeId)
+fn arb_peer_id() -> impl Strategy<Value = NodeId> {
+    "[a-zA-Z0-9_-]{3,20}".prop_map(|s| {
+        // Create NodeId from string by hashing it
+        let hash_bytes = blake3::hash(s.as_bytes()).as_bytes().clone();
+        NodeId::from_bytes(hash_bytes)
+    })
 }
 
 /// Strategy to generate random values
@@ -431,9 +441,15 @@ mod deterministic_properties {
         // Example 1: Cache bounds property
         for i in 0..20 {
             let record = Record::new(
-                Key::new(format!("prop_test_{}", i).as_bytes()),
+                {
+                    let bytes = format!("prop_test_{}", i).into_bytes();
+                    let mut key = [0u8; 32];
+                    let len = bytes.len().min(32);
+                    key[..len].copy_from_slice(&bytes[..len]);
+                    key
+                },
                 format!("value_{}", i).into_bytes(),
-                PeerId::from(format!("publisher_{}", i % 3)),
+                NodeId::from_bytes(blake3::hash(format!("publisher_{}", i % 3).as_bytes()).as_bytes().clone()),
             );
             storage.store(record).await?;
 
@@ -448,9 +464,15 @@ mod deterministic_properties {
         let publishers = ["alice", "bob", "charlie"];
         for (i, publisher) in publishers.iter().enumerate() {
             let record = Record::new(
-                Key::new(format!("user_data_{}", i).as_bytes()),
+                {
+                    let bytes = format!("user_data_{}", i).into_bytes();
+                    let mut key = [0u8; 32];
+                    let len = bytes.len().min(32);
+                    key[..len].copy_from_slice(&bytes[..len]);
+                    key
+                },
                 format!("data_for_{}", publisher).into_bytes(),
-                PeerId::from(publisher.to_string()),
+                NodeId::from_bytes(blake3::hash(publisher.as_bytes()).as_bytes().clone()),
             );
             storage.store(record).await?;
         }
@@ -468,9 +490,15 @@ mod deterministic_properties {
 
         // Example 3: Expiration property
         let mut expired_record = Record::new(
-            Key::new(b"expired_test"),
+            {
+                let bytes = b"expired_test";
+                let mut key = [0u8; 32];
+                let len = bytes.len().min(32);
+                key[..len].copy_from_slice(&bytes[..len]);
+                key
+            },
             b"expired_data".to_vec(),
-            PeerId::from("expired_publisher".to_string()),
+            NodeId::from_bytes(blake3::hash(b"expired_publisher").as_bytes().clone()),
         );
         expired_record.expires_at = SystemTime::now() - Duration::from_secs(3600);
 

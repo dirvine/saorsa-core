@@ -60,6 +60,17 @@ impl NodeId {
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(DhtKey::from_bytes(bytes))
     }
+
+    /// Get the underlying bytes
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        self.0.as_bytes()
+    }
+}
+
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(self.as_bytes()))
+    }
 }
 
 /// Node information for routing
@@ -125,7 +136,7 @@ impl KBucket {
 pub struct KademliaRoutingTable {
     buckets: Vec<KBucket>,
     node_id: NodeId,
-    k_value: usize,
+    _k_value: usize,
 }
 
 impl KademliaRoutingTable {
@@ -138,7 +149,7 @@ impl KademliaRoutingTable {
         Self {
             buckets,
             node_id,
-            k_value,
+            _k_value: k_value,
         }
     }
 
@@ -222,8 +233,8 @@ struct DataStore {
 
 #[derive(Debug, Clone)]
 struct DataMetadata {
-    size: usize,
-    stored_at: SystemTime,
+    _size: usize,
+    _stored_at: SystemTime,
     access_count: u64,
     last_accessed: SystemTime,
 }
@@ -238,8 +249,8 @@ impl DataStore {
 
     fn put(&mut self, key: DhtKey, value: Vec<u8>) {
         let metadata = DataMetadata {
-            size: value.len(),
-            stored_at: SystemTime::now(),
+            _size: value.len(),
+            _stored_at: SystemTime::now(),
             access_count: 0,
             last_accessed: SystemTime::now(),
         };
@@ -257,7 +268,7 @@ impl DataStore {
         self.data.get(key).cloned()
     }
 
-    fn remove(&mut self, key: &DhtKey) -> Option<Vec<u8>> {
+    fn _remove(&mut self, key: &DhtKey) -> Option<Vec<u8>> {
         self.metadata.remove(key);
         self.data.remove(key)
     }
@@ -265,31 +276,31 @@ impl DataStore {
 
 /// Replication manager for maintaining data redundancy
 struct ReplicationManager {
-    replication_factor: usize,
-    consistency_level: ConsistencyLevel,
-    pending_repairs: Vec<DhtKey>,
+    _replication_factor: usize,
+    _consistency_level: ConsistencyLevel,
+    _pending_repairs: Vec<DhtKey>,
 }
 
 impl ReplicationManager {
     fn new(replication_factor: usize) -> Self {
         Self {
-            replication_factor,
-            consistency_level: ConsistencyLevel::Quorum,
-            pending_repairs: Vec::new(),
+            _replication_factor: replication_factor,
+            _consistency_level: ConsistencyLevel::Quorum,
+            _pending_repairs: Vec::new(),
         }
     }
 
-    fn required_replicas(&self) -> usize {
-        match self.consistency_level {
+    fn _required_replicas(&self) -> usize {
+        match self._consistency_level {
             ConsistencyLevel::One => 1,
-            ConsistencyLevel::Quorum => self.replication_factor.div_ceil(2),
-            ConsistencyLevel::All => self.replication_factor,
+            ConsistencyLevel::Quorum => self._replication_factor.div_ceil(2),
+            ConsistencyLevel::All => self._replication_factor,
         }
     }
 
-    fn schedule_repair(&mut self, key: DhtKey) {
-        if !self.pending_repairs.contains(&key) {
-            self.pending_repairs.push(key);
+    fn _schedule_repair(&mut self, key: DhtKey) {
+        if !self._pending_repairs.contains(&key) {
+            self._pending_repairs.push(key);
         }
     }
 }
@@ -297,18 +308,18 @@ impl ReplicationManager {
 /// Load balancer for intelligent data distribution
 struct LoadBalancer {
     node_loads: HashMap<NodeId, LoadMetric>,
-    rebalance_threshold: f64,
+    _rebalance_threshold: f64,
 }
 
 impl LoadBalancer {
     fn new() -> Self {
         Self {
             node_loads: HashMap::new(),
-            rebalance_threshold: 0.8,
+            _rebalance_threshold: 0.8,
         }
     }
 
-    fn update_load(&mut self, node_id: NodeId, load: LoadMetric) {
+    fn _update_load(&mut self, node_id: NodeId, load: LoadMetric) {
         self.node_loads.insert(node_id, load);
     }
 
@@ -331,10 +342,10 @@ impl LoadBalancer {
         sorted.into_iter().take(count).map(|(id, _)| id).collect()
     }
 
-    fn should_rebalance(&self) -> bool {
+    fn _should_rebalance(&self) -> bool {
         self.node_loads
             .values()
-            .any(|load| load.storage_used_percent > self.rebalance_threshold)
+            .any(|load| load.storage_used_percent > self._rebalance_threshold)
     }
 }
 
@@ -346,7 +357,7 @@ pub struct DhtCoreEngine {
     replication_manager: Arc<RwLock<ReplicationManager>>,
     load_balancer: Arc<RwLock<LoadBalancer>>,
     witness_system: Arc<WitnessReceiptSystem>,
-    reed_solomon: Arc<ReedSolomonEncoder>,
+    _reed_solomon: Arc<ReedSolomonEncoder>,
 }
 
 impl DhtCoreEngine {
@@ -359,7 +370,7 @@ impl DhtCoreEngine {
             replication_manager: Arc::new(RwLock::new(ReplicationManager::new(8))),
             load_balancer: Arc::new(RwLock::new(LoadBalancer::new())),
             witness_system: Arc::new(WitnessReceiptSystem::new()),
-            reed_solomon: Arc::new(ReedSolomonEncoder::new(6, 2)?),
+            _reed_solomon: Arc::new(ReedSolomonEncoder::new(6, 2)?),
         })
     }
 
@@ -417,7 +428,7 @@ impl DhtCoreEngine {
 
         // Find nodes that might have the data
         let routing = self.routing_table.read().await;
-        let closest_nodes = routing.find_closest_nodes(key, 8);
+        let _closest_nodes = routing.find_closest_nodes(key, 8);
 
         // In a real implementation, would query these nodes
         // For now, return None if not found locally
@@ -460,7 +471,7 @@ impl DhtCoreEngine {
         routing.remove_node(&failed_node);
 
         // Schedule repairs for affected data
-        let mut replication = self.replication_manager.write().await;
+        let _replication = self.replication_manager.write().await;
         // In real implementation, would identify affected keys and schedule repairs
 
         Ok(())
@@ -477,7 +488,7 @@ impl std::fmt::Debug for DhtCoreEngine {
             .field("replication_manager", &"Arc<RwLock<ReplicationManager>>")
             .field("load_balancer", &"Arc<RwLock<LoadBalancer>>")
             .field("witness_system", &"Arc<WitnessReceiptSystem>")
-            .field("reed_solomon", &"Arc<ReedSolomonEncoder>")
+            .field("_reed_solomon", &"Arc<ReedSolomonEncoder>")
             .finish()
     }
 }
@@ -488,7 +499,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_basic_store_retrieve() -> Result<()> {
-        let mut dht = DhtCoreEngine::new(NodeId::random())?;
+        let mut dht = DhtCoreEngine::new(NodeId::from_bytes([42u8; 32]))?;
         let key = DhtKey::new(b"test_key");
         let value = b"test_value".to_vec();
 

@@ -331,7 +331,7 @@ impl IdentityCliHandler {
             })?,
         };
 
-        let signature = identity.sign(&message_bytes);
+        let signature = identity.sign(&message_bytes)?;
         let sig_hex = hex::encode(signature.as_bytes());
 
         if let Some(output_path) = output {

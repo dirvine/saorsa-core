@@ -217,8 +217,6 @@ fn hyperbolic_distance(a: &HyperbolicCoordinate, b: &HyperbolicCoordinate) -> f6
     cosh_d.max(1.0).acosh()
 }
 
-
-
 // Mock implementations for testing
 struct LRUCache {
     capacity: usize,

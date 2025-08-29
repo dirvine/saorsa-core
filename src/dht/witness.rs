@@ -4,7 +4,6 @@
 
 use crate::dht::content_addressing::ContentAddress;
 use anyhow::{Result, anyhow};
-use blake3::Hasher as Blake3Hasher;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -69,7 +68,7 @@ impl MlKemSignature {
         }
     }
 
-    fn verify(&self, _data: &[u8], _public_key: &MlKemPublicKey) -> bool {
+    fn _verify(&self, _data: &[u8], _public_key: &MlKemPublicKey) -> bool {
         // Placeholder - always returns true for now
         true
     }
@@ -84,7 +83,7 @@ pub struct MlKemPublicKey {
 /// Placeholder for ML-KEM private key
 #[derive(Debug, Clone)]
 pub struct MlKemPrivateKey {
-    data: Vec<u8>,
+    _data: Vec<u8>,
 }
 
 impl MlKemPrivateKey {
@@ -185,7 +184,7 @@ impl ReceiptStorage {
         self.receipts.insert(operation_id, receipt);
     }
 
-    fn get(&self, operation_id: &OperationId) -> Option<&WitnessReceipt> {
+    fn _get(&self, operation_id: &OperationId) -> Option<&WitnessReceipt> {
         self.receipts.get(operation_id)
     }
 
@@ -200,7 +199,7 @@ impl ReceiptStorage {
 /// Witness receipt system for verifiable DHT operations
 pub struct WitnessReceiptSystem {
     signing_key: MlKemPrivateKey,
-    verification_keys: Arc<RwLock<HashMap<NodeId, MlKemPublicKey>>>,
+    _verification_keys: Arc<RwLock<HashMap<NodeId, MlKemPublicKey>>>,
     receipt_store: Arc<RwLock<ReceiptStorage>>,
 }
 
@@ -209,9 +208,9 @@ impl WitnessReceiptSystem {
     pub fn new() -> Self {
         Self {
             signing_key: MlKemPrivateKey {
-                data: vec![0u8; 32],
+                _data: vec![0u8; 32],
             },
-            verification_keys: Arc::new(RwLock::new(HashMap::new())),
+            _verification_keys: Arc::new(RwLock::new(HashMap::new())),
             receipt_store: Arc::new(RwLock::new(ReceiptStorage::new())),
         }
     }

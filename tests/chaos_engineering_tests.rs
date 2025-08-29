@@ -17,7 +17,9 @@ async fn test_node_failure_resilience() -> anyhow::Result<()> {
     // Create a network of 5 nodes
     let mut nodes = Vec::new();
     for i in 0..5 {
-        let node_id = NodeId { hash: [i as u8; 32] };
+        let node_id = NodeId {
+            hash: [i as u8; 32],
+        };
         let node = AdaptiveNode::new(node_id).await?;
         nodes.push(node);
     }
@@ -52,7 +54,10 @@ async fn test_node_failure_resilience() -> anyhow::Result<()> {
         }
 
         let connections = node.get_connection_count().await?;
-        assert!(connections >= 2, "Surviving node should maintain at least 2 connections");
+        assert!(
+            connections >= 2,
+            "Surviving node should maintain at least 2 connections"
+        );
     }
 
     // Test that the system can still route messages
@@ -61,10 +66,15 @@ async fn test_node_failure_resilience() -> anyhow::Result<()> {
 
     let success = timeout(
         Duration::from_secs(5),
-        source.send_message(destination.get_id(), b"test message")
-    ).await.is_ok();
+        source.send_message(destination.get_id(), b"test message"),
+    )
+    .await
+    .is_ok();
 
-    assert!(success, "System should still be able to route messages after node failures");
+    assert!(
+        success,
+        "System should still be able to route messages after node failures"
+    );
 
     println!("✅ Node failure resilience test passed");
     Ok(())
@@ -79,7 +89,9 @@ async fn test_network_partition_recovery() -> anyhow::Result<()> {
     let mut partition_b = Vec::new();
 
     for i in 0..6 {
-        let node_id = NodeId { hash: [i as u8; 32] };
+        let node_id = NodeId {
+            hash: [i as u8; 32],
+        };
         let node = AdaptiveNode::new(node_id).await?;
 
         if i < 3 {
@@ -138,10 +150,15 @@ async fn test_network_partition_recovery() -> anyhow::Result<()> {
 
     let success = timeout(
         Duration::from_secs(5),
-        node_a.send_message(node_b.get_id(), b"post-partition message")
-    ).await.is_ok();
+        node_a.send_message(node_b.get_id(), b"post-partition message"),
+    )
+    .await
+    .is_ok();
 
-    assert!(success, "Cross-partition communication should work after recovery");
+    assert!(
+        success,
+        "Cross-partition communication should work after recovery"
+    );
 
     println!("✅ Network partition recovery test passed");
     Ok(())
@@ -160,7 +177,8 @@ async fn test_latency_spike_resilience() -> anyhow::Result<()> {
         baseline_latencies.push(latency);
     }
 
-    let baseline_avg = baseline_latencies.iter().sum::<Duration>() / baseline_latencies.len() as u32;
+    let baseline_avg =
+        baseline_latencies.iter().sum::<Duration>() / baseline_latencies.len() as u32;
 
     // Inject latency spikes
     println!("📈 Injecting latency spikes...");
@@ -176,7 +194,10 @@ async fn test_latency_spike_resilience() -> anyhow::Result<()> {
     let spike_avg = spike_latencies.iter().sum::<Duration>() / spike_latencies.len() as u32;
 
     // Verify adaptive behavior
-    assert!(spike_avg > baseline_avg, "Latency spike should be detectable");
+    assert!(
+        spike_avg > baseline_avg,
+        "Latency spike should be detectable"
+    );
 
     // Wait for adaptation
     sleep(Duration::from_secs(3)).await;
@@ -191,13 +212,22 @@ async fn test_latency_spike_resilience() -> anyhow::Result<()> {
     let adapted_avg = adapted_latencies.iter().sum::<Duration>() / adapted_latencies.len() as u32;
 
     // Verify improvement
-    assert!(adapted_avg < spike_avg, "System should adapt to reduce latency");
+    assert!(
+        adapted_avg < spike_avg,
+        "System should adapt to reduce latency"
+    );
 
     // The adapted performance should be better than the spike but may not reach baseline immediately
     let improvement_ratio = (spike_avg - adapted_avg).as_secs_f64() / spike_avg.as_secs_f64();
-    assert!(improvement_ratio > 0.3, "Adaptation should provide at least 30% improvement");
+    assert!(
+        improvement_ratio > 0.3,
+        "Adaptation should provide at least 30% improvement"
+    );
 
-    println!("✅ Latency spike resilience test passed with {:.1}% improvement", improvement_ratio * 100.0);
+    println!(
+        "✅ Latency spike resilience test passed with {:.1}% improvement",
+        improvement_ratio * 100.0
+    );
     Ok(())
 }
 
@@ -223,12 +253,21 @@ async fn test_resource_exhaustion_resilience() -> anyhow::Result<()> {
     let degraded_connections = node.get_connection_count().await?;
 
     // System should have reduced resource usage
-    assert!(degraded_memory < initial_memory, "Memory usage should decrease under exhaustion");
-    assert!(degraded_connections <= initial_connections, "Connection count should not increase");
+    assert!(
+        degraded_memory < initial_memory,
+        "Memory usage should decrease under exhaustion"
+    );
+    assert!(
+        degraded_connections <= initial_connections,
+        "Connection count should not increase"
+    );
 
     // System should still be functional
     let still_operational = node.is_operational().await?;
-    assert!(still_operational, "System should remain operational under resource exhaustion");
+    assert!(
+        still_operational,
+        "System should remain operational under resource exhaustion"
+    );
 
     // Test recovery
     println!("🔄 Testing recovery from resource exhaustion...");
@@ -240,8 +279,14 @@ async fn test_resource_exhaustion_resilience() -> anyhow::Result<()> {
     let recovered_memory = node.get_memory_usage().await?;
     let recovered_connections = node.get_connection_count().await?;
 
-    assert!(recovered_memory >= degraded_memory, "Memory usage should improve after recovery");
-    assert!(recovered_connections >= degraded_connections, "Connections should recover");
+    assert!(
+        recovered_memory >= degraded_memory,
+        "Memory usage should improve after recovery"
+    );
+    assert!(
+        recovered_connections >= degraded_connections,
+        "Connections should recover"
+    );
 
     println!("✅ Resource exhaustion resilience test passed");
     Ok(())
@@ -254,7 +299,9 @@ async fn test_cascading_failure_prevention() -> anyhow::Result<()> {
     // Create a network with potential cascading failure points
     let mut nodes = Vec::new();
     for i in 0..8 {
-        let node_id = NodeId { hash: [i as u8; 32] };
+        let node_id = NodeId {
+            hash: [i as u8; 32],
+        };
         let node = AdaptiveNode::new(node_id).await?;
         nodes.push(node);
     }
@@ -286,12 +333,23 @@ async fn test_cascading_failure_prevention() -> anyhow::Result<()> {
     sleep(Duration::from_secs(3)).await;
 
     // Verify cascading failure prevention
-    let surviving_nodes = nodes.iter().filter(|node| node.is_operational().blocking_wait().unwrap_or(false)).count();
-    assert!(surviving_nodes >= 3, "Too many nodes failed - cascading failure occurred");
+    let mut surviving_nodes = 0;
+    for node in &nodes {
+        if node.is_operational().await.unwrap_or(false) {
+            surviving_nodes += 1;
+        }
+    }
+    assert!(
+        surviving_nodes >= 3,
+        "Too many nodes failed - cascading failure occurred"
+    );
 
     // Verify that the system has isolated the failure
     let stability_after_failure = AdaptiveNode::measure_network_stability(&nodes).await?;
-    assert!(stability_after_failure > 0.3, "Network stability too low after cascading failure");
+    assert!(
+        stability_after_failure > 0.3,
+        "Network stability too low after cascading failure"
+    );
 
     // Test recovery
     println!("🔧 Testing recovery from cascading failure...");
@@ -302,7 +360,10 @@ async fn test_cascading_failure_prevention() -> anyhow::Result<()> {
 
     // Verify recovery
     let final_stability = AdaptiveNode::measure_network_stability(&nodes).await?;
-    assert!(final_stability > 0.7, "Network did not recover properly from cascading failure");
+    assert!(
+        final_stability > 0.7,
+        "Network did not recover properly from cascading failure"
+    );
 
     println!("✅ Cascading failure prevention test passed");
     Ok(())
@@ -314,7 +375,9 @@ async fn test_byzantine_behavior_detection() -> anyhow::Result<()> {
 
     let mut nodes = Vec::new();
     for i in 0..5 {
-        let node_id = NodeId { hash: [i as u8; 32] };
+        let node_id = NodeId {
+            hash: [i as u8; 32],
+        };
         let node = AdaptiveNode::new(node_id).await?;
         nodes.push(node);
     }
@@ -346,12 +409,18 @@ async fn test_byzantine_behavior_detection() -> anyhow::Result<()> {
         }
 
         let trust_score = node.get_trust_score(byzantine_node.get_id()).await?;
-        assert!(trust_score < 0.3, "Byzantine node should have low trust score");
+        assert!(
+            trust_score < 0.3,
+            "Byzantine node should have low trust score"
+        );
     }
 
     // Verify system isolation of Byzantine node
     let byzantine_connections = byzantine_node.get_connection_count().await?;
-    assert!(byzantine_connections <= 1, "Byzantine node should be isolated");
+    assert!(
+        byzantine_connections <= 1,
+        "Byzantine node should be isolated"
+    );
 
     // Test that honest nodes can still communicate
     let honest_node1 = &nodes[0];
@@ -359,10 +428,15 @@ async fn test_byzantine_behavior_detection() -> anyhow::Result<()> {
 
     let communication_success = timeout(
         Duration::from_secs(3),
-        honest_node1.send_message(honest_node2.get_id(), b"honest message")
-    ).await.is_ok();
+        honest_node1.send_message(honest_node2.get_id(), b"honest message"),
+    )
+    .await
+    .is_ok();
 
-    assert!(communication_success, "Honest nodes should still be able to communicate");
+    assert!(
+        communication_success,
+        "Honest nodes should still be able to communicate"
+    );
 
     println!("✅ Byzantine behavior detection test passed");
     Ok(())
@@ -408,7 +482,10 @@ impl AdaptiveNode {
         Ok(*self.operational.read().await)
     }
 
-    async fn simulate_partition(nodes_a: &[AdaptiveNode], nodes_b: &[AdaptiveNode]) -> anyhow::Result<()> {
+    async fn simulate_partition(
+        nodes_a: &[AdaptiveNode],
+        nodes_b: &[AdaptiveNode],
+    ) -> anyhow::Result<()> {
         // Simulate network partition by marking cross-partition connections as down
         for node_a in nodes_a {
             for node_b in nodes_b {
@@ -419,7 +496,10 @@ impl AdaptiveNode {
         Ok(())
     }
 
-    async fn restore_connectivity(nodes_a: &[AdaptiveNode], nodes_b: &[AdaptiveNode]) -> anyhow::Result<()> {
+    async fn restore_connectivity(
+        nodes_a: &[AdaptiveNode],
+        nodes_b: &[AdaptiveNode],
+    ) -> anyhow::Result<()> {
         // Restore cross-partition connectivity
         for node_a in nodes_a {
             for node_b in nodes_b {
@@ -522,13 +602,16 @@ impl AdaptiveNode {
     }
 
     fn get_id(&self) -> NodeId {
-        self.id
+        self.id.clone()
     }
 
     async fn measure_network_stability(nodes: &[AdaptiveNode]) -> anyhow::Result<f64> {
-        let operational_count = nodes.iter()
-            .filter(|node| node.is_operational().blocking_wait().unwrap_or(false))
-            .count();
+        let mut operational_count = 0;
+        for node in nodes {
+            if node.is_operational().await.unwrap_or(false) {
+                operational_count += 1;
+            }
+        }
 
         Ok(operational_count as f64 / nodes.len() as f64)
     }

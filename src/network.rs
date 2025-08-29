@@ -585,7 +585,7 @@ impl P2PNode {
         // Initialize DHT if needed
         let dht = if true {
             // Always enable DHT for now
-            let dht_config = crate::dht::DHTConfig {
+            let _dht_config = crate::dht::DHTConfig {
                 replication_factor: config.dht_config.k_value,
                 bucket_size: config.dht_config.k_value,
                 alpha: config.dht_config.alpha_value,
@@ -594,8 +594,13 @@ impl P2PNode {
                 republish_interval: config.dht_config.refresh_interval,
                 max_distance: 160, // 160 bits for SHA-256
             };
-            let dht_key = crate::dht::Key::new(peer_id.as_bytes());
-            let dht_instance = DHT::new(dht_key, dht_config);
+            // Convert peer_id String to NodeId
+            let peer_bytes = peer_id.as_bytes();
+            let mut node_id_bytes = [0u8; 32];
+            let len = peer_bytes.len().min(32);
+            node_id_bytes[..len].copy_from_slice(&peer_bytes[..len]);
+            let node_id = crate::dht::core_engine::NodeId::from_bytes(node_id_bytes);
+            let dht_instance = DHT::new(node_id).map_err(|e| crate::error::P2PError::Dht(crate::error::DhtError::StoreFailed(e.to_string().into())))?;
             Some(Arc::new(RwLock::new(dht_instance)))
         } else {
             None
@@ -1616,14 +1621,15 @@ impl P2PNode {
         );
 
         // Check rate limits if resource manager is enabled
-        if let Some(ref resource_manager) = self.resource_manager
-            && !resource_manager
+        if let Some(ref resource_manager) = self.resource_manager {
+            if !resource_manager
                 .check_rate_limit(peer_id, "message")
                 .await?
-        {
-            return Err(P2PError::ResourceExhausted(
-                format!("Rate limit exceeded for peer {}", peer_id).into(),
-            ));
+            {
+                return Err(P2PError::ResourceExhausted(
+                    format!("Rate limit exceeded for peer {}", peer_id).into(),
+                ));
+            }
         }
 
         // Check if peer is connected
@@ -1785,14 +1791,15 @@ impl P2PNode {
     pub async fn call_mcp_tool(&self, tool_name: &str, arguments: Value) -> Result<Value> {
         if let Some(ref _mcp_server) = self.mcp_server {
             // Check rate limits if resource manager is enabled
-            if let Some(ref resource_manager) = self.resource_manager
-                && !resource_manager
+            if let Some(ref resource_manager) = self.resource_manager {
+                if !resource_manager
                     .check_rate_limit(&self.peer_id, "mcp")
                     .await?
-            {
-                return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                    "MCP rate limit exceeded".to_string().into(),
-                )));
+                {
+                    return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
+                        "MCP rate limit exceeded".to_string().into(),
+                    )));
+                }
             }
 
             let context = MCPCallContext {
@@ -2052,13 +2059,14 @@ impl P2PNode {
     /// Store a value in the DHT
     pub async fn dht_put(&self, key: crate::dht::Key, value: Vec<u8>) -> Result<()> {
         if let Some(ref dht) = self.dht {
-            let dht_instance = dht.write().await;
+            let mut dht_instance = dht.write().await;
+            let dht_key = crate::dht::DhtKey::from_bytes(key);
             dht_instance
-                .put(key.clone(), value.clone())
+                .store(&dht_key, value.clone())
                 .await
                 .map_err(|e| {
                     P2PError::Dht(crate::error::DhtError::StoreFailed(
-                        format!("{}: {e}", key).into(),
+                        format!("{:?}: {e}", key).into(),
                     ))
                 })?;
 
@@ -2073,12 +2081,16 @@ impl P2PNode {
     /// Retrieve a value from the DHT
     pub async fn dht_get(&self, key: crate::dht::Key) -> Result<Option<Vec<u8>>> {
         if let Some(ref dht) = self.dht {
-            let dht_instance = dht.write().await;
-            let record_result = dht_instance.get(&key).await;
+            let dht_instance = dht.read().await;
+            let dht_key = crate::dht::DhtKey::from_bytes(key);
+            let record_result = dht_instance.retrieve(&dht_key).await
+                .map_err(|e| {
+                    P2PError::Dht(crate::error::DhtError::StoreFailed(
+                        format!("Retrieve failed: {e}").into(),
+                    ))
+                })?;
 
-            let value = record_result.as_ref().map(|record| record.value.clone());
-
-            Ok(value)
+            Ok(record_result)
         } else {
             Err(P2PError::Dht(crate::error::DhtError::RoutingError(
                 "DHT not enabled".to_string().into(),
@@ -2158,10 +2170,10 @@ impl P2PNode {
 
     /// Get the number of cached bootstrap peers
     pub async fn cached_peer_count(&self) -> usize {
-        if let Some(ref _bootstrap_manager) = self.bootstrap_manager
-            && let Ok(Some(stats)) = self.get_bootstrap_cache_stats().await
-        {
-            return stats.total_contacts;
+        if let Some(ref _bootstrap_manager) = self.bootstrap_manager {
+            if let Ok(Some(stats)) = self.get_bootstrap_cache_stats().await {
+                return stats.total_contacts;
+            }
         }
         0
     }
@@ -2249,17 +2261,19 @@ impl P2PNode {
                         warn!("Failed to connect to bootstrap peer {}: {}", addr, e);
 
                         // Update bootstrap cache with failed connection
-                        if used_cache && let Some(ref bootstrap_manager) = self.bootstrap_manager {
-                            let mut manager = bootstrap_manager.write().await;
-                            let mut updated_contact = contact.clone();
-                            updated_contact.update_connection_result(
-                                false,
-                                None,
-                                Some(e.to_string()),
-                            );
+                        if used_cache {
+                            if let Some(ref bootstrap_manager) = self.bootstrap_manager {
+                                let mut manager = bootstrap_manager.write().await;
+                                let mut updated_contact = contact.clone();
+                                updated_contact.update_connection_result(
+                                    false,
+                                    None,
+                                    Some(e.to_string()),
+                                );
 
-                            if let Err(e) = manager.add_contact(updated_contact).await {
-                                warn!("Failed to update bootstrap cache: {}", e);
+                                if let Err(e) = manager.add_contact(updated_contact).await {
+                                    warn!("Failed to update bootstrap cache: {}", e);
+                                }
                             }
                         }
                     }

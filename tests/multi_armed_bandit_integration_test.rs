@@ -246,7 +246,7 @@ async fn test_mab_exploration_vs_exploitation() {
     let strategies = vec![StrategyChoice::Kademlia, StrategyChoice::Hyperbolic];
 
     let mut exploration_count = 0;
-    let mut _exploitation_count = 0;
+    let mut exploitation_count = 0;
 
     for _ in 0..1000 {
         let decision = mab

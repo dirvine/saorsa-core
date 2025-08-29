@@ -447,7 +447,11 @@ fn generate_random_features() -> Vec<f64> {
 
 fn generate_random_access_info() -> AccessInfo {
     AccessInfo {
-        access_pattern: if random::<bool>() { AccessPattern::Frequent } else { AccessPattern::Rare },
+        access_pattern: if random::<bool>() {
+            AccessPattern::Frequent
+        } else {
+            AccessPattern::Rare
+        },
         content_type: ContentType::DHTLookup,
         size_bytes: 1024 + random::<usize>() % 1024000, // 1KB to 1MB
         access_frequency: random::<f64>(),
