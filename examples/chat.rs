@@ -132,37 +132,36 @@ async fn main() -> Result<()> {
     let mut reader = io::BufReader::new(stdin).lines();
 
     while let Some(line) = reader.next_line().await? {
-                match line.trim() {
-                    "/quit" => {
-                        info!("👋 Goodbye!");
-                        break;
-                    }
-                    "/peers" => {
-                        let peers = node.connected_peers().await;
-                        info!("🔗 Connected peers: {}", peers.len());
-                        for peer in peers {
-                            info!("   • {}", peer);
-                        }
-                    }
-                    "/status" => match node.mcp_stats().await {
-                        Ok(stats) => {
-                            info!("📊 Network Status:");
-                            info!("   • Active sessions: {}", stats.active_sessions);
-                            info!("   • Total requests: {}", stats.total_requests);
-                            info!("   • Total responses: {}", stats.total_responses);
-                        }
-                        Err(e) => error!("Failed to get stats: {}", e),
-                    },
-                    msg if !msg.is_empty() => {
-                        // In a real chat app, we'd publish to a topic or send to specific peers
-                        // For now, just echo locally
-                        info!("[You]: {}", msg);
-
-                        // Here you would normally do something like:
-                        // node.publish("chat", msg.as_bytes()).await?;
-                    }
-                    _ => {}
+        match line.trim() {
+            "/quit" => {
+                info!("👋 Goodbye!");
+                break;
+            }
+            "/peers" => {
+                let peers = node.connected_peers().await;
+                info!("🔗 Connected peers: {}", peers.len());
+                for peer in peers {
+                    info!("   • {}", peer);
                 }
+            }
+            "/status" => match node.mcp_stats().await {
+                Ok(stats) => {
+                    info!("📊 Network Status:");
+                    info!("   • Active sessions: {}", stats.active_sessions);
+                    info!("   • Total requests: {}", stats.total_requests);
+                    info!("   • Total responses: {}", stats.total_responses);
+                }
+                Err(e) => error!("Failed to get stats: {}", e),
+            },
+            msg if !msg.is_empty() => {
+                // In a real chat app, we'd publish to a topic or send to specific peers
+                // For now, just echo locally
+                info!("[You]: {}", msg);
+
+                // Here you would normally do something like:
+                // node.publish("chat", msg.as_bytes()).await?;
+            }
+            _ => {}
         }
     }
 

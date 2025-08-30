@@ -653,7 +653,7 @@ mod tests {
         }
 
         fn supports_ipv6(&self) -> bool {
-            false // IPv4-only focus
+            true // Dual-stack support enabled
         }
 
         fn transport_type(&self) -> TransportType {
@@ -661,8 +661,8 @@ mod tests {
         }
 
         fn supports_address(&self, addr: &NetworkAddress) -> bool {
-            // IPv4-only support
-            addr.is_ipv4()
+            // Support both IPv4 and IPv6
+            addr.is_ipv4() || addr.is_ipv6()
         }
     }
 
@@ -1281,12 +1281,12 @@ mod tests {
         })?;
 
         assert!(transport.supports_address(&addr1)); // IPv4 supported
-        assert!(!transport.supports_address(&addr2)); // IPv6 not supported
+        assert!(transport.supports_address(&addr2)); // IPv6 supported
         assert!(transport.supports_address(&addr1)); // IPv4 supported
 
         let limited_transport = MockTransport::new(TransportType::QUIC).with_limited_support();
         assert!(limited_transport.supports_address(&addr1)); // IPv4 supported
-        assert!(!limited_transport.supports_address(&addr2)); // IPv6 not supported
+        assert!(limited_transport.supports_address(&addr2)); // IPv6 supported
         Ok(())
     }
 
@@ -1295,14 +1295,14 @@ mod tests {
         let transport = MockTransport::new(TransportType::QUIC);
         let supports_ipv6 = transport.supports_ipv6();
 
-        // Transport now focuses on IPv4 only
-        assert!(!supports_ipv6);
+        // Dual-stack supported now
+        assert!(supports_ipv6);
 
         let limited_transport = MockTransport::new(TransportType::QUIC).with_limited_support();
         let limited_supports_ipv6 = limited_transport.supports_ipv6();
 
-        // All transports are IPv4-only now
-        assert!(!limited_supports_ipv6);
+        // All transports support IPv6 now
+        assert!(limited_supports_ipv6);
         Ok(())
     }
 

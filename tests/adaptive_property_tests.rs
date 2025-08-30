@@ -37,14 +37,17 @@ fn network_config_strategy() -> impl Strategy<Value = NetworkConfig> {
 }
 
 // Strategy for generating cache configurations
-fn cache_config_strategy() -> impl Strategy<Value = CacheConfig> {
+fn cache_config_strategy() -> impl Strategy<Value = (QLearningConfig, u64)> {
     (10usize..1000, 1u64..3600, 0.1f64..1.0, 0.01f64..0.5).prop_map(
-        |(capacity, ttl, learning_rate, exploration_factor)| CacheConfig {
-            capacity,
-            default_ttl: Duration::from_secs(ttl),
-            learning_rate,
-            exploration_factor,
-            enable_ml: true,
+        |(capacity, _ttl, learning_rate, exploration_factor)| {
+            (
+                QLearningConfig {
+                    learning_rate,
+                    epsilon: exploration_factor,
+                    ..Default::default()
+                },
+                capacity as u64,
+            )
         },
     )
 }
@@ -158,31 +161,22 @@ proptest! {
     ) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let config = CacheConfig {
-                capacity: cache_size,
-                default_ttl: Duration::from_secs(3600),
-                learning_rate: 0.1,
-                exploration_factor: 0.1,
-                enable_ml: true,
-            };
-
-            let cache = QLearningCacheManager::new(config, cache_size).await.unwrap();
+            let config = QLearningConfig { learning_rate: 0.1, epsilon: 0.1, ..Default::default() };
+            let cache = QLearningCacheManager::new(config, cache_size as u64);
 
             // Perform random operations
             for i in 0..operations {
                 let key = ContentHash([i as u8; 32]);
-                let access_info = AccessInfo {
-                    access_pattern: if random::<bool>() { AccessPattern::Frequent } else { AccessPattern::Rare },
-                    content_type: ContentType::DHTLookup,
-                    size_bytes: 1024,
-                    access_frequency: random::<f64>(),
-                };
-
-                cache.record_access(key, access_info).await.unwrap();
+                let action = CacheAction::Cache(key);
+                // 1KB content, count as miss on first insert
+                cache
+                    .update_statistics(&action, &key, 1_024, false)
+                    .await
+                    .unwrap();
 
                 // Cache size should never exceed configured capacity
-                let current_size = cache.get_size().await;
-                prop_assert!(current_size <= cache_size, "Cache size {} exceeds capacity {}", current_size, cache_size);
+                let current_usage = cache.stats().await.usage;
+                prop_assert!(current_usage <= cache_size as u64, "Cache usage {} exceeds capacity {}", current_usage, cache_size);
             }
         });
     }
@@ -446,14 +440,13 @@ fn generate_random_features() -> Vec<f64> {
 }
 
 fn generate_random_access_info() -> AccessInfo {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     AccessInfo {
-        access_pattern: if random::<bool>() {
-            AccessPattern::Frequent
-        } else {
-            AccessPattern::Rare
-        },
-        content_type: ContentType::DHTLookup,
-        size_bytes: 1024 + random::<usize>() % 1024000, // 1KB to 1MB
-        access_frequency: random::<f64>(),
+        count: (random::<u8>() as u64 % 10) + 1,
+        last_access_secs: now.saturating_sub((random::<u32>() % 10_000) as u64),
+        size: 1_024 + (random::<u32>() as u64 % 1_000_000),
     }
 }

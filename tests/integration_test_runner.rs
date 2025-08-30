@@ -56,26 +56,89 @@ impl IntegrationTestRunner {
     /// Run all integration tests
     pub async fn run_all_tests(&mut self) -> Result<bool> {
         println!("🚀 Starting Comprehensive Integration Test Suite");
-        println!("=" * 60);
-
-        let test_categories = vec![
-            ("Network Integration", self.run_network_tests()),
-            ("Storage Integration", self.run_storage_tests()),
-            ("Security Integration", self.run_security_tests()),
-            ("End-to-End Scenarios", self.run_e2e_tests()),
-        ];
+        println!("{}", "=".repeat(60));
 
         let mut all_passed = true;
         let overall_start = Instant::now();
 
-        for (category, test_future) in test_categories {
+        // Run each category sequentially to avoid opaque future type issues
+        // Network
+        {
+            let category = "Network Integration";
             println!("\n📋 Running {} Tests...", category);
-            println!("-" * 40);
-
+            println!("{}", "-".repeat(40));
             let category_start = Instant::now();
-            let category_passed = test_future.await?;
+            let category_passed = self.run_network_tests().await?;
             let category_duration = category_start.elapsed();
-
+            if category_passed {
+                println!(
+                    "✅ {} tests PASSED ({:.2}s)",
+                    category,
+                    category_duration.as_secs_f64()
+                );
+            } else {
+                println!(
+                    "❌ {} tests FAILED ({:.2}s)",
+                    category,
+                    category_duration.as_secs_f64()
+                );
+                all_passed = false;
+            }
+        }
+        // Storage
+        {
+            let category = "Storage Integration";
+            println!("\n📋 Running {} Tests...", category);
+            println!("{}", "-".repeat(40));
+            let category_start = Instant::now();
+            let category_passed = self.run_storage_tests().await?;
+            let category_duration = category_start.elapsed();
+            if category_passed {
+                println!(
+                    "✅ {} tests PASSED ({:.2}s)",
+                    category,
+                    category_duration.as_secs_f64()
+                );
+            } else {
+                println!(
+                    "❌ {} tests FAILED ({:.2}s)",
+                    category,
+                    category_duration.as_secs_f64()
+                );
+                all_passed = false;
+            }
+        }
+        // Security
+        {
+            let category = "Security Integration";
+            println!("\n📋 Running {} Tests...", category);
+            println!("{}", "-".repeat(40));
+            let category_start = Instant::now();
+            let category_passed = self.run_security_tests().await?;
+            let category_duration = category_start.elapsed();
+            if category_passed {
+                println!(
+                    "✅ {} tests PASSED ({:.2}s)",
+                    category,
+                    category_duration.as_secs_f64()
+                );
+            } else {
+                println!(
+                    "❌ {} tests FAILED ({:.2}s)",
+                    category,
+                    category_duration.as_secs_f64()
+                );
+                all_passed = false;
+            }
+        }
+        // E2E
+        {
+            let category = "End-to-End Scenarios";
+            println!("\n📋 Running {} Tests...", category);
+            println!("{}", "-".repeat(40));
+            let category_start = Instant::now();
+            let category_passed = self.run_e2e_tests().await?;
+            let category_duration = category_start.elapsed();
             if category_passed {
                 println!(
                     "✅ {} tests PASSED ({:.2}s)",
@@ -94,7 +157,7 @@ impl IntegrationTestRunner {
 
         let total_duration = overall_start.elapsed();
 
-        println!("\n" + "=" * 60);
+        println!("\n{}", "=".repeat(60));
         if all_passed {
             println!("🎉 ALL INTEGRATION TESTS PASSED!");
         } else {

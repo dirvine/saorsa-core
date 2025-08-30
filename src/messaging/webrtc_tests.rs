@@ -143,6 +143,8 @@ mod tests {
             call_id: CallId::new(),
             caller: FourWordAddress::from("alice-bob-charlie-david"),
             callee: FourWordAddress::from("eve-frank-grace-henry"),
+            caller_handle: None,
+            callee_handle: None,
             sdp: "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n...".to_string(),
             media_types: vec![MediaType::Audio, MediaType::Video],
             timestamp: chrono::Utc::now(),

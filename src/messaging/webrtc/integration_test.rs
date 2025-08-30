@@ -158,6 +158,8 @@ impl WebRtcQuicTestRunner {
             call_id,
             caller: alice.clone(),
             callee: bob.clone(),
+            caller_handle: None,
+            callee_handle: None,
             sdp: "v=0\\r\\n...".to_string(),
             media_types: vec![MediaType::Audio, MediaType::Video],
             timestamp: chrono::Utc::now(),
@@ -300,22 +302,22 @@ impl WebRtcQuicTestRunner {
         let alice = FourWordAddress::from("alice-bob-charlie-david");
         let bob = FourWordAddress::from("eve-frank-grace-henry");
         
-        session.add_participant(alice.clone());
-        session.add_participant(bob.clone());
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(alice.to_string()));
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(bob.to_string()));
         
         if session.participants.len() != 2 {
             return Err("Participant addition failed".to_string());
         }
         
         // Test duplicate participant
-        session.add_participant(alice.clone());
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(alice.to_string()));
         if session.participants.len() != 2 {
             return Err("Duplicate participant was added".to_string());
         }
         
         // Test participant removal
-        session.remove_participant(&alice);
-        if session.participants.len() != 1 || session.participants.contains(&alice) {
+        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(alice.to_string()));
+        if session.participants.len() != 1 || session.participants.contains(&crate::messaging::user_handle::UserHandle::from(alice.to_string())) {
             return Err("Participant removal failed".to_string());
         }
         
@@ -353,10 +355,10 @@ impl WebRtcQuicTestRunner {
     
     async fn test_recording_consent() -> Result<(), String> {
         let call_id = CallId::new();
-        let alice = FourWordAddress::from("alice-bob-charlie-david");
+        let alice = crate::messaging::user_handle::UserHandle::from("alice-bob-charlie-david");
         let participants = vec![
-            FourWordAddress::from("bob-charlie-david-eve"),
-            FourWordAddress::from("charlie-david-eve-frank"),
+            crate::messaging::user_handle::UserHandle::from("bob-charlie-david-eve"),
+            crate::messaging::user_handle::UserHandle::from("charlie-david-eve-frank"),
         ];
         
         let consent = RecordingConsent {

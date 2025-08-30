@@ -2,7 +2,7 @@
 
 use super::DhtClient;
 use super::types::*;
-use crate::identity::FourWordAddress;
+use super::user_handle::UserHandle;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ pub struct RealtimeSync {
     /// Active subscriptions
     subscriptions: Arc<RwLock<HashMap<ChannelId, Subscription>>>,
     /// Presence tracker
-    presence: Arc<RwLock<HashMap<FourWordAddress, UserPresence>>>,
+    presence: Arc<RwLock<HashMap<UserHandle, UserPresence>>>,
     /// Typing indicators
     typing: Arc<RwLock<HashMap<ChannelId, Vec<TypingUser>>>>,
 }
@@ -132,18 +132,21 @@ impl RealtimeSync {
     }
 
     /// Broadcast typing indicator
-    pub async fn broadcast_typing(&self, channel_id: ChannelId, is_typing: bool) -> Result<()> {
+    pub async fn broadcast_typing(
+        &self,
+        channel_id: ChannelId,
+        user: UserHandle,
+        is_typing: bool,
+    ) -> Result<()> {
         let mut typing = self.typing.write().await;
         let channel_typing = typing.entry(channel_id).or_insert_with(Vec::new);
 
-        // Current user identity would come from context
-        let user = FourWordAddress::from("current-user-id-here");
-
         if is_typing {
             // Add to typing list
+            let handle = user.clone();
             if !channel_typing.iter().any(|t| t.user == user) {
                 channel_typing.push(TypingUser {
-                    user: user.clone(),
+                    user: handle,
                     started_at: Utc::now(),
                 });
             }
@@ -176,9 +179,7 @@ impl RealtimeSync {
     }
 
     /// Update user presence
-    pub async fn update_presence(&self, status: PresenceStatus) -> Result<()> {
-        let user = FourWordAddress::from("current-user-id-here");
-
+    pub async fn update_presence(&self, user: UserHandle, status: PresenceStatus) -> Result<()> {
         let mut presence = self.presence.write().await;
         presence.insert(
             user.clone(),
@@ -206,13 +207,13 @@ impl RealtimeSync {
     /// Get current presence for users
     pub async fn get_presence(
         &self,
-        users: Vec<FourWordAddress>,
-    ) -> HashMap<FourWordAddress, UserPresence> {
+        users: Vec<UserHandle>,
+    ) -> HashMap<UserHandle, UserPresence> {
         let presence = self.presence.read().await;
 
         users
             .into_iter()
-            .filter_map(|user| presence.get(&user).map(|p| (user, p.clone())))
+            .filter_map(|handle| presence.get(&handle).map(|p| (handle, p.clone())))
             .collect()
     }
 
@@ -319,7 +320,7 @@ pub enum SyncEvent {
     },
     TypingIndicator {
         channel_id: ChannelId,
-        user: FourWordAddress,
+        user: UserHandle,
         is_typing: bool,
         timestamp: DateTime<Utc>,
     },
@@ -328,7 +329,7 @@ pub enum SyncEvent {
         timestamp: DateTime<Utc>,
     },
     PresenceUpdate {
-        user: FourWordAddress,
+        user: UserHandle,
         status: PresenceStatus,
         timestamp: DateTime<Utc>,
     },
@@ -345,7 +346,7 @@ struct Subscription {
 /// Typing user
 #[derive(Debug, Clone)]
 struct TypingUser {
-    user: FourWordAddress,
+    user: UserHandle,
     started_at: DateTime<Utc>,
 }
 
@@ -396,7 +397,10 @@ mod tests {
         let channel = ChannelId::new();
 
         // Start typing
-        sync.broadcast_typing(channel, true).await.unwrap();
+        sync
+            .broadcast_typing(channel, UserHandle::from("alice"), true)
+            .await
+            .unwrap();
 
         let typing = sync.typing.read().await;
         assert!(typing.get(&channel).is_some());
@@ -407,9 +411,12 @@ mod tests {
         let dht = super::DhtClient::new_mock();
         let sync = RealtimeSync::new(dht).await.unwrap();
 
-        sync.update_presence(PresenceStatus::Online).await.unwrap();
+        sync
+            .update_presence(UserHandle::from("alice"), PresenceStatus::Online)
+            .await
+            .unwrap();
 
-        let user = FourWordAddress::from("current-user-id-here");
+        let user = UserHandle::from("alice");
         let presence = sync.get_presence(vec![user.clone()]).await;
 
         assert!(presence.contains_key(&user));

@@ -17,8 +17,8 @@
 //! with Kademlia fallback. It uses HyperMap/Mercator-style background embedding
 //! with drift detection and partial re-fitting.
 
-use crate::dht::core_engine::{DhtCoreEngine, NodeId};
 use crate::dht::DhtKey;
+use crate::dht::core_engine::{DhtCoreEngine, NodeId};
 use crate::{P2PError, PeerId, Result};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -242,6 +242,15 @@ pub struct RoutingMetrics {
     _stretch_count: usize,
 }
 
+impl RoutingMetrics {
+    pub fn greedy_success(&self) -> usize {
+        self.greedy_success
+    }
+    pub fn greedy_failures(&self) -> usize {
+        self.greedy_failures
+    }
+}
+
 impl HyperbolicGreedyRouter {
     /// Create a new hyperbolic greedy router
     pub fn new(local_id: PeerId, dht_engine: Arc<DhtCoreEngine>) -> Self {
@@ -256,6 +265,16 @@ impl HyperbolicGreedyRouter {
         }
     }
 
+    /// Replace the current embedding (useful for tests)
+    pub async fn set_embedding(&self, embedding: Embedding) {
+        *self.embedding.write().await = Some(embedding);
+    }
+
+    /// Update embedding configuration
+    pub fn set_config(&mut self, config: EmbeddingConfig) {
+        self.config = config;
+    }
+
     /// Embed a snapshot of peers using HyperMap/Mercator-style approach
     pub async fn embed_snapshot(&self, peers: &[PeerId]) -> Result<Embedding> {
         if peers.len() < self.config.min_peers {
@@ -264,7 +283,8 @@ impl HyperbolicGreedyRouter {
                     "Insufficient peers for embedding: required {}, available {}",
                     self.config.min_peers,
                     peers.len()
-                ).into()
+                )
+                .into(),
             ));
         }
 
@@ -433,20 +453,17 @@ impl HyperbolicGreedyRouter {
             }
 
             if best_neighbor.is_some() {
-                // Update metrics
+                // Update metrics and return
                 let mut metrics = self.metrics.write().await;
                 metrics.greedy_success += 1;
                 return best_neighbor;
             }
         }
 
-        // Fall back to Kademlia routing
+        // No hyperbolic route found - count failure, let caller decide fallback
         let mut metrics = self.metrics.write().await;
         metrics.greedy_failures += 1;
-        drop(metrics);
-
-        // Use DHT for fallback
-        self.kad_fallback(&target).await
+        None
     }
 
     /// Kademlia fallback routing
@@ -543,7 +560,9 @@ pub async fn embed_snapshot(peers: &[PeerId]) -> Result<Embedding> {
     node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
     let node_id = NodeId::from_bytes(node_id_bytes);
 
-    let dht = Arc::new(DhtCoreEngine::new(node_id).map_err(|e| P2PError::Internal(e.to_string().into()))?);
+    let dht = Arc::new(
+        DhtCoreEngine::new(node_id).map_err(|e| P2PError::Internal(e.to_string().into()))?,
+    );
 
     let router = HyperbolicGreedyRouter::new(local_id, dht);
     router.embed_snapshot(peers).await
@@ -626,14 +645,14 @@ mod tests {
     #[tokio::test]
     async fn test_embedding_creation() {
         let local_id = format!("test_peer_{}", rand::random::<u64>());
-        
+
         // Convert PeerId to NodeId for DHT
         let mut node_id_bytes = [0u8; 32];
         let id_bytes = local_id.as_bytes();
         let len = id_bytes.len().min(32);
         node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
         let node_id = NodeId::from_bytes(node_id_bytes);
-        
+
         let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
 
         let router = HyperbolicGreedyRouter::new(local_id, dht);
@@ -668,14 +687,14 @@ mod tests {
     #[tokio::test]
     async fn test_greedy_routing() {
         let local_id = format!("local_{}", rand::random::<u64>());
-        
+
         // Convert PeerId to NodeId for DHT
         let mut node_id_bytes = [0u8; 32];
         let id_bytes = local_id.as_bytes();
         let len = id_bytes.len().min(32);
         node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
         let node_id = NodeId::from_bytes(node_id_bytes);
-        
+
         let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
 
         let router = HyperbolicGreedyRouter::new(local_id.clone(), dht);
@@ -717,14 +736,14 @@ mod tests {
     #[tokio::test]
     async fn test_partial_refit() {
         let local_id = format!("refit_test_{}", rand::random::<u64>());
-        
+
         // Convert PeerId to NodeId for DHT
         let mut node_id_bytes = [0u8; 32];
         let id_bytes = local_id.as_bytes();
         let len = id_bytes.len().min(32);
         node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
         let node_id = NodeId::from_bytes(node_id_bytes);
-        
+
         let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
 
         let router = HyperbolicGreedyRouter::new(local_id, dht);

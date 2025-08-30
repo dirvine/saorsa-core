@@ -23,7 +23,7 @@ use std::str::FromStr;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use four_word_networking::FourWordEncoder;
+use four_word_networking::FourWordAdaptiveEncoder;
 
 /// Network address that can be represented as IP:port or four-word format
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -35,7 +35,8 @@ pub struct NetworkAddress {
 }
 
 impl NetworkAddress {
-    /// Create a new NetworkAddress from a SocketAddr
+    /// Create a new `NetworkAddress` from a `SocketAddr`
+    #[must_use]
     pub fn new(socket_addr: SocketAddr) -> Self {
         let four_words = Self::encode_four_words(&socket_addr);
         Self {
@@ -44,23 +45,27 @@ impl NetworkAddress {
         }
     }
 
-    /// Create a NetworkAddress from an IP address and port
+    /// Create a `NetworkAddress` from an IP address and port
+    #[must_use]
     pub fn from_ip_port(ip: IpAddr, port: u16) -> Self {
         let socket_addr = SocketAddr::new(ip, port);
         Self::new(socket_addr)
     }
 
-    /// Create a NetworkAddress from IPv4 address and port
+    /// Create a `NetworkAddress` from IPv4 address and port
+    #[must_use]
     pub fn from_ipv4(ip: Ipv4Addr, port: u16) -> Self {
         Self::from_ip_port(IpAddr::V4(ip), port)
     }
 
-    /// Create a NetworkAddress from IPv6 address and port
+    /// Create a `NetworkAddress` from IPv6 address and port
+    #[must_use]
     pub fn from_ipv6(ip: Ipv6Addr, port: u16) -> Self {
         Self::from_ip_port(IpAddr::V6(ip), port)
     }
 
     /// Get the IP address
+    #[must_use]
     pub fn ip(&self) -> IpAddr {
         self.socket_addr.ip()
     }
@@ -87,9 +92,10 @@ impl NetworkAddress {
 
     /// Encode a SocketAddr to four-word format using four-word-networking
     fn encode_four_words(addr: &SocketAddr) -> Option<String> {
-        let encoder = FourWordEncoder::new();
-        match encoder.encode(*addr) {
-            Ok(encoding) => Some(encoding.to_string()),
+        match FourWordAdaptiveEncoder::new()
+            .and_then(|enc| enc.encode(&addr.to_string()))
+        {
+            Ok(s) => Some(s.replace(' ', "-")),
             Err(e) => {
                 log::warn!("Failed to encode address {addr}: {e}");
                 None
@@ -99,8 +105,9 @@ impl NetworkAddress {
 
     /// Decode four-word format to NetworkAddress using four-word-networking
     pub fn from_four_words(words: &str) -> Result<Self> {
-        let encoder = FourWordEncoder::new();
-        let socket_addr = encoder.decode(words)?;
+        let enc = FourWordAdaptiveEncoder::new()?;
+        let decoded = enc.decode(words)?; // returns a normalized address string
+        let socket_addr: SocketAddr = decoded.parse()?; // must include port
         Ok(Self::new(socket_addr))
     }
 

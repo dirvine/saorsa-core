@@ -30,9 +30,12 @@ mod tests {
 
         assert_eq!(multi_call.architecture, CallArchitecture::Mesh);
         assert_eq!(multi_call.participants.len(), 3); // Alice + 2 others
-        assert!(multi_call.participants.contains(&alice));
-        assert!(multi_call.participants.contains(&bob));
-        assert!(multi_call.participants.contains(&charlie));
+        let alice_h = crate::messaging::user_handle::UserHandle::from(alice.to_string());
+        let bob_h = crate::messaging::user_handle::UserHandle::from(bob.to_string());
+        let charlie_h = crate::messaging::user_handle::UserHandle::from(charlie.to_string());
+        assert!(multi_call.participants.contains(&alice_h));
+        assert!(multi_call.participants.contains(&bob_h));
+        assert!(multi_call.participants.contains(&charlie_h));
     }
 
     #[tokio::test]
@@ -61,10 +64,12 @@ mod tests {
 
         assert_eq!(multi_call.architecture, CallArchitecture::SFU);
         assert_eq!(multi_call.participants.len(), 6); // Alice + 5 others
-        assert!(multi_call.participants.contains(&alice));
+        let alice_h = crate::messaging::user_handle::UserHandle::from(alice.to_string());
+        assert!(multi_call.participants.contains(&alice_h));
 
         for participant in participants {
-            assert!(multi_call.participants.contains(&participant));
+            let ph = crate::messaging::user_handle::UserHandle::from(participant.to_string());
+            assert!(multi_call.participants.contains(&ph));
         }
     }
 
@@ -138,7 +143,10 @@ mod tests {
 
         let multi_call = MultiPartyCall {
             call_id,
-            participants,
+            participants: participants
+                .into_iter()
+                .map(|p| crate::messaging::user_handle::UserHandle::from(p.to_string()))
+                .collect(),
             architecture: CallArchitecture::Mesh,
             created_at: chrono::Utc::now(),
         };
@@ -175,8 +183,11 @@ mod tests {
         // Request recording consent
         let consent = RecordingConsent {
             call_id,
-            requester: alice.clone(),
-            participants: participants.clone(),
+            requester: crate::messaging::user_handle::UserHandle::from(alice.to_string()),
+            participants: participants
+                .into_iter()
+                .map(|p| crate::messaging::user_handle::UserHandle::from(p.to_string()))
+                .collect(),
         };
 
         let result = alice_service
@@ -206,10 +217,10 @@ mod tests {
     #[test]
     fn test_recording_consent_serialization() {
         let call_id = CallId::new();
-        let alice = FourWordAddress::from("alice-bob-charlie-delta");
+        let alice = crate::messaging::user_handle::UserHandle::from("alice-bob-charlie-delta");
         let participants = vec![
-            FourWordAddress::from("bob-charlie-david-eve"),
-            FourWordAddress::from("charlie-david-eve-frank"),
+            crate::messaging::user_handle::UserHandle::from("bob-charlie-david-eve"),
+            crate::messaging::user_handle::UserHandle::from("charlie-david-eve-frank"),
         ];
 
         let consent = RecordingConsent {
@@ -286,29 +297,32 @@ mod tests {
         assert!(session.participants.is_empty());
 
         // Add participants
-        session.add_participant(alice.clone());
-        session.add_participant(bob.clone());
-        session.add_participant(charlie.clone());
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(alice.to_string()));
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(bob.to_string()));
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(charlie.to_string()));
 
         assert_eq!(session.participants.len(), 3);
-        assert!(session.participants.contains(&alice));
-        assert!(session.participants.contains(&bob));
-        assert!(session.participants.contains(&charlie));
+        let alice_h = crate::messaging::user_handle::UserHandle::from(alice.to_string());
+        let bob_h = crate::messaging::user_handle::UserHandle::from(bob.to_string());
+        let charlie_h = crate::messaging::user_handle::UserHandle::from(charlie.to_string());
+        assert!(session.participants.contains(&alice_h));
+        assert!(session.participants.contains(&bob_h));
+        assert!(session.participants.contains(&charlie_h));
 
         // Try to add duplicate participant
-        session.add_participant(alice.clone());
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(alice.to_string()));
         assert_eq!(session.participants.len(), 3); // Should not duplicate
 
         // Remove participant
-        session.remove_participant(&bob);
+        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(bob.to_string()));
         assert_eq!(session.participants.len(), 2);
-        assert!(!session.participants.contains(&bob));
-        assert!(session.participants.contains(&alice));
-        assert!(session.participants.contains(&charlie));
+        assert!(!session.participants.contains(&bob_h));
+        assert!(session.participants.contains(&alice_h));
+        assert!(session.participants.contains(&charlie_h));
 
         // Remove non-existent participant
         let david = FourWordAddress::from("david-eve-frank-grace");
-        session.remove_participant(&david);
+        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(david.to_string()));
         assert_eq!(session.participants.len(), 2); // Should not change
     }
 
@@ -331,14 +345,14 @@ mod tests {
         let mut session = CallSession::new(call_id, MediaConstraints::video_call());
 
         for participant in &participants {
-            session.add_participant(participant.clone());
+            session.add_participant(crate::messaging::user_handle::UserHandle::from(participant.to_string()));
         }
 
         assert_eq!(session.participants.len(), 20);
 
         // Remove some participants
         for i in (15..20).rev() {
-            session.remove_participant(&participants[i]);
+            session.remove_participant(&crate::messaging::user_handle::UserHandle::from(participants[i].to_string()));
         }
 
         assert_eq!(session.participants.len(), 15);

@@ -54,7 +54,7 @@ const MAX_DERIVATION_DEPTH: usize = 10;
 const PATH_INDEX_SIZE: usize = 4;
 
 /// Hardened derivation marker (BIP32 style)
-const HARDENED_OFFSET: u32 = 0x80000000;
+const HARDENED_OFFSET: u32 = 0x8000_0000;
 
 /// Master seed for deterministic key derivation
 pub struct MasterSeed {

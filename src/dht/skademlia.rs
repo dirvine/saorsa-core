@@ -18,7 +18,7 @@
 //! and cryptographic verification mechanisms to resist various attacks on the DHT.
 
 use crate::PeerId;
-use crate::dht::{DHTNode, Key, DhtKey};
+use crate::dht::{DHTNode, DhtKey, Key};
 use crate::error::{P2PError, P2pResult as Result};
 use crate::security::ReputationManager;
 use serde::{Deserialize, Serialize};
@@ -316,7 +316,10 @@ impl DisjointPathLookup {
         // Get next unqueried node
         let mut next_node = None;
         while let Some(node) = self.path_states[path_id].to_query.pop_front() {
-            if !self.path_states[path_id].queried.contains(&node.id.to_string()) {
+            if !self.path_states[path_id]
+                .queried
+                .contains(&node.id.to_string())
+            {
                 // Check if using this node would violate disjointness
                 if self.would_violate_disjointness(path_id, &node.id.to_string()) {
                     continue;
@@ -363,7 +366,7 @@ impl DisjointPathLookup {
             return;
         }
 
-        let target = self.target.clone();
+        let target = self.target;
         for node in nodes {
             // Add to results if close to target
             let node_key = DhtKey::from_bytes(*node.id.as_bytes());
@@ -374,7 +377,10 @@ impl DisjointPathLookup {
             }
 
             // Add to query queue if not already queried
-            if !self.path_states[path_id].queried.contains(&node.id.to_string()) {
+            if !self.path_states[path_id]
+                .queried
+                .contains(&node.id.to_string())
+            {
                 self.path_states[path_id].to_query.push_back(node);
             }
         }
@@ -457,19 +463,19 @@ impl DisjointPathLookup {
                 let node_key = DhtKey::from_bytes(*node.id.as_bytes());
                 let target_key = DhtKey::from_bytes(self.target);
                 {
-                let dist = node_key.distance(&target_key);
-                // Count leading zero bits in the distance
-                let mut leading_zeros = 0u32;
-                for byte in dist.iter() {
-                    if *byte == 0 {
-                        leading_zeros += 8;
-                    } else {
-                        leading_zeros += byte.leading_zeros();
-                        break;
+                    let dist = node_key.distance(&target_key);
+                    // Count leading zero bits in the distance
+                    let mut leading_zeros = 0u32;
+                    for byte in dist.iter() {
+                        if *byte == 0 {
+                            leading_zeros += 8;
+                        } else {
+                            leading_zeros += byte.leading_zeros();
+                            break;
+                        }
                     }
+                    leading_zeros
                 }
-                leading_zeros
-            }
             });
             path_results.push(sorted_results);
         }
@@ -522,30 +528,30 @@ impl SiblingList {
     /// Add or update a node in the sibling list
     pub fn add_node(&mut self, node: DHTNode) {
         // Remove if already exists
-        self.siblings.retain(|n| n.id.to_string() != node.id.to_string());
+        self.siblings
+            .retain(|n| n.id.to_string() != node.id.to_string());
 
         // Add new node
         self.siblings.push(node);
 
         // Sort by distance to local node
-        self.siblings
-            .sort_by_key(|n| {
-                // Compute distance from node id to local_id
-                let node_key = DhtKey::from_bytes(*n.id.as_bytes());
-                let local_key = DhtKey::from_bytes(self.local_id);
-                let dist = node_key.distance(&local_key);
-                // Count leading zero bits
-                let mut leading_zeros = 0u32;
-                for byte in dist.iter() {
-                    if *byte == 0 {
-                        leading_zeros += 8;
-                    } else {
-                        leading_zeros += byte.leading_zeros();
-                        break;
-                    }
+        self.siblings.sort_by_key(|n| {
+            // Compute distance from node id to local_id
+            let node_key = DhtKey::from_bytes(*n.id.as_bytes());
+            let local_key = DhtKey::from_bytes(self.local_id);
+            let dist = node_key.distance(&local_key);
+            // Count leading zero bits
+            let mut leading_zeros = 0u32;
+            for byte in dist.iter() {
+                if *byte == 0 {
+                    leading_zeros += 8;
+                } else {
+                    leading_zeros += byte.leading_zeros();
+                    break;
                 }
-                leading_zeros
-            });
+            }
+            leading_zeros
+        });
 
         // Trim to max size
         if self.siblings.len() > self.max_size {
@@ -571,7 +577,7 @@ impl SiblingList {
             // NodeInfo has id field of type NodeId
             // Get the underlying bytes from the NodeId
             let proposed_id = *proposed.id.as_bytes();
-            
+
             let proposed_key = DhtKey::from_bytes(proposed_id);
             let proposed_distance = target_key.distance(&proposed_key);
 
@@ -610,7 +616,7 @@ impl SiblingList {
             let should_know = self.siblings.iter().any(|sibling| {
                 // Compute sibling distance using its ID
                 let sibling_key = DhtKey::from_bytes(*sibling.id.as_bytes());
-                
+
                 let sibling_to_target = target_key.distance(&sibling_key);
                 let sibling_to_proposed = proposed_key.distance(&sibling_key);
 
@@ -644,7 +650,10 @@ impl SiblingList {
             });
 
             if !should_know {
-                debug!("No sibling knows about proposed node: {}", proposed.id.to_string());
+                debug!(
+                    "No sibling knows about proposed node: {}",
+                    proposed.id.to_string()
+                );
                 // This might be suspicious but not necessarily invalid
             }
         }
@@ -667,7 +676,8 @@ impl SecurityBucket {
     /// Add a trusted node to the security bucket
     pub fn add_trusted_node(&mut self, node: DHTNode) {
         // Remove if already exists
-        self.trusted_nodes.retain(|n| n.id.to_string() != node.id.to_string());
+        self.trusted_nodes
+            .retain(|n| n.id.to_string() != node.id.to_string());
 
         // Add new node
         self.trusted_nodes.push(node);
@@ -725,7 +735,7 @@ impl SKademlia {
 
         // Create disjoint path lookup
         let mut lookup = DisjointPathLookup::new(
-            target.clone(),
+            target,
             self.config.disjoint_path_count,
             self.config.max_shared_nodes,
         );
@@ -739,7 +749,7 @@ impl SKademlia {
         }
 
         // Store active lookup
-        self.active_lookups.insert(target.clone(), lookup);
+        self.active_lookups.insert(target, lookup);
 
         // TODO: Implement actual network queries across paths
         // This would involve querying nodes in each path and building results
@@ -758,7 +768,7 @@ impl SKademlia {
     pub fn update_sibling_list(&mut self, key: Key, nodes: Vec<DHTNode>) {
         let sibling_list = self
             .sibling_lists
-            .entry(key.clone())
+            .entry(key)
             .or_insert_with(|| SiblingList::new(key, self.config.sibling_list_size));
 
         for node in nodes {
@@ -769,7 +779,7 @@ impl SKademlia {
     /// Get or create security bucket for a key range
     pub fn get_security_bucket(&mut self, key: &Key) -> &mut SecurityBucket {
         self.security_buckets
-            .entry(key.clone())
+            .entry(*key)
             .or_insert_with(|| SecurityBucket::new(self.config.security_bucket_size))
     }
 
@@ -780,7 +790,7 @@ impl SKademlia {
 
         let challenge = DistanceChallenge {
             challenger: target.clone(), // This should be our peer ID
-            target_key: key.clone(),
+            target_key: *key,
             expected_distance: {
                 let target_bytes = target.as_bytes();
                 let mut target_key = [0u8; 32];
@@ -809,7 +819,7 @@ impl SKademlia {
 
         let challenge = EnhancedDistanceChallenge {
             challenger: target.clone(),
-            target_key: key.clone(),
+            target_key: *key,
             expected_distance: {
                 let target_bytes = target.as_bytes();
                 let mut target_key = [0u8; 32];
@@ -828,8 +838,8 @@ impl SKademlia {
             target.clone(),
             DistanceChallenge {
                 challenger: challenge.challenger.clone(),
-                target_key: challenge.target_key.clone(),
-                expected_distance: challenge.expected_distance.clone(),
+                target_key: challenge.target_key,
+                expected_distance: challenge.expected_distance,
                 nonce: challenge.nonce,
                 timestamp: challenge.timestamp,
             },
@@ -857,7 +867,7 @@ impl SKademlia {
             let mut challenger_key = [0u8; 32];
             let len = challenger_bytes.len().min(32);
             challenger_key[..len].copy_from_slice(&challenger_bytes[..len]);
-            
+
             DhtKey::from_bytes(proof.challenge.target_key)
                 .distance(&DhtKey::from_bytes(challenger_key))
         };
@@ -902,7 +912,8 @@ impl SKademlia {
                 key[..len].copy_from_slice(&bytes[..len]);
                 key
             };
-            let simulated_distance = DhtKey::from_bytes(*target_key).distance(&DhtKey::from_bytes(target_node_key));
+            let simulated_distance =
+                DhtKey::from_bytes(*target_key).distance(&DhtKey::from_bytes(target_node_key));
             let response_time = start_time.elapsed();
 
             // Calculate confidence based on witness reputation and response time
@@ -914,7 +925,7 @@ impl SKademlia {
 
             let measurement = DistanceMeasurement {
                 witness: witness.clone(),
-                distance: simulated_distance.clone(),
+                distance: simulated_distance,
                 confidence,
                 response_time,
             };
@@ -939,7 +950,7 @@ impl SKademlia {
         };
 
         Ok(DistanceConsensus {
-            target_key: target_key.clone(),
+            target_key: *target_key,
             target_node: target_node.clone(),
             consensus_distance,
             measurements,
@@ -970,7 +981,7 @@ impl SKademlia {
                 ))
             })?;
 
-        Ok(best_measurement.distance.clone())
+        Ok(best_measurement.distance)
     }
 
     /// Verify distance using multi-round challenge protocol
@@ -1012,7 +1023,8 @@ impl SKademlia {
 
             let zero_key = [0u8; 32];
             // Compare distance bytes directly
-            let dist_bytes = DhtKey::from_bytes(distance_diff).distance(&DhtKey::from_bytes(zero_key));
+            let dist_bytes =
+                DhtKey::from_bytes(distance_diff).distance(&DhtKey::from_bytes(zero_key));
             if dist_bytes <= tolerance {
                 successful_rounds += 1;
             }
@@ -1051,7 +1063,7 @@ impl SKademlia {
 
         EnhancedDistanceChallenge {
             challenger: target.clone(),
-            target_key: key.clone(),
+            target_key: *key,
             expected_distance: {
                 let target_bytes = target.as_bytes();
                 let mut target_key = [0u8; 32];
@@ -1077,7 +1089,9 @@ impl SKademlia {
 
         for node in nodes {
             // Check reputation
-            if let Some(reputation) = self.reputation_manager.get_reputation(&hex::encode(node.id.as_bytes()))
+            if let Some(reputation) = self
+                .reputation_manager
+                .get_reputation(&hex::encode(node.id.as_bytes()))
                 && reputation.response_rate < self.config.min_routing_reputation
             {
                 inconsistencies += 1;
@@ -1167,12 +1181,14 @@ impl SKademlia {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dht::core_engine::{NodeInfo, NodeCapacity};
+    use crate::dht::core_engine::{NodeCapacity, NodeInfo};
     use std::time::SystemTime;
 
     fn create_test_dht_node(peer_id: &str, _distance_bytes: [u8; 32]) -> NodeInfo {
         NodeInfo {
-            id: crate::dht::core_engine::NodeId::from_key(crate::dht::core_engine::DhtKey::new(&[42u8; 32])),
+            id: crate::dht::core_engine::NodeId::from_key(crate::dht::core_engine::DhtKey::new(
+                &[42u8; 32],
+            )),
             address: peer_id.to_string(),
             last_seen: std::time::SystemTime::now(),
             capacity: NodeCapacity::default(),
@@ -1477,7 +1493,10 @@ mod tests {
         security_bucket.add_trusted_node(node.clone());
 
         assert_eq!(security_bucket.trusted_nodes.len(), 1);
-        assert_eq!(security_bucket.trusted_nodes[0].id.to_string(), node.id.to_string());
+        assert_eq!(
+            security_bucket.trusted_nodes[0].id.to_string(),
+            node.id.to_string()
+        );
     }
 
     #[test]

@@ -141,6 +141,7 @@ impl BetaDistribution {
 }
 
 /// Sample from Gamma distribution using Marsaglia and Tsang's method
+#[allow(clippy::many_single_char_names)]
 fn sample_gamma<R: Rng>(shape: f64, rng: &mut R) -> f64 {
     if shape < 1.0 {
         // Use Johnk's algorithm for shape < 1

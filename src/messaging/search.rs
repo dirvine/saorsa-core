@@ -2,7 +2,7 @@
 
 use super::MessageStore;
 use super::types::*;
-use crate::identity::FourWordAddress;
+use super::user_handle::UserHandle;
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -45,10 +45,10 @@ impl MessageSearch {
         // Fetch full messages
         let mut messages = Vec::new();
         for id in message_ids {
-            if let Ok(msg) = self.store.get_message(id).await {
-                if self.matches_query(&msg, &query, &filters) {
-                    messages.push(msg);
-                }
+            if let Ok(msg) = self.store.get_message(id).await
+                && self.matches_query(&msg, &query, &filters)
+            {
+                messages.push(msg);
             }
         }
 
@@ -101,7 +101,7 @@ impl MessageSearch {
     /// Search messages from specific users
     pub async fn search_from_users(
         &self,
-        users: Vec<FourWordAddress>,
+        users: Vec<UserHandle>,
         text: Option<String>,
         limit: usize,
     ) -> Result<Vec<RichMessage>> {
@@ -314,7 +314,9 @@ impl MessageSearch {
         }
 
         // Check sender
-        if !filters.from_users.is_empty() && !filters.from_users.contains(&message.sender) {
+        if !filters.from_users.is_empty()
+            && !filters.from_users.contains(&message.sender)
+        {
             return false;
         }
 
@@ -324,24 +326,24 @@ impl MessageSearch {
         }
 
         // Check attachments
-        if let Some(has_attach) = filters.has_attachments {
-            if has_attach == message.attachments.is_empty() {
-                return false;
-            }
+        if let Some(has_attach) = filters.has_attachments
+            && has_attach == message.attachments.is_empty()
+        {
+            return false;
         }
 
         // Check reactions
-        if let Some(has_react) = filters.has_reactions {
-            if has_react == message.reactions.is_empty() {
-                return false;
-            }
+        if let Some(has_react) = filters.has_reactions
+            && has_react == message.reactions.is_empty()
+        {
+            return false;
         }
 
         // Check thread
-        if let Some(is_thread) = filters.is_thread {
-            if is_thread != message.thread_id.is_some() {
-                return false;
-            }
+        if let Some(is_thread) = filters.is_thread
+            && is_thread != message.thread_id.is_some()
+        {
+            return false;
         }
 
         // Check date range
@@ -374,7 +376,7 @@ struct SearchIndex {
     /// Text to message IDs mapping
     text_index: HashMap<String, HashSet<MessageId>>,
     /// Known users for suggestions
-    known_users: HashSet<FourWordAddress>,
+    known_users: HashSet<UserHandle>,
     /// Known channels for suggestions
     known_channels: HashSet<ChannelId>,
 }
@@ -411,7 +413,7 @@ impl SearchIndex {
 /// Search filters
 struct SearchFilters {
     text_tokens: Vec<String>,
-    from_users: Vec<FourWordAddress>,
+    from_users: Vec<UserHandle>,
     channels: Vec<ChannelId>,
     has_attachments: Option<bool>,
     has_reactions: Option<bool>,

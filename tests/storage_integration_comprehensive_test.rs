@@ -11,9 +11,7 @@ use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
 
 use saorsa_core::{
-    config::Config,
-    adaptive::replication::ReplicationManager,
-    storage::StorageManager,
+    adaptive::replication::ReplicationManager, config::Config, storage::StorageManager,
 };
 
 /// Test framework for storage scenarios

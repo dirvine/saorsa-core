@@ -21,8 +21,7 @@
 //! This module provides enhanced security features for the NodeIdentity
 //! including secure key handling with automatic zeroization.
 
-use super::four_words::FourWordAddress;
-use super::node_identity::{IdentityData, NodeId, ProofOfWork};
+use super::node_identity::{IdentityData, NodeId};
 use crate::error::IdentityError;
 use crate::{P2PError, Result};
 use ant_quic::crypto::pqc::types::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
@@ -40,16 +39,12 @@ pub struct SecureNodeIdentity {
     /// Node ID derived from public key
     node_id: NodeId,
 
-    /// Human-readable four-word address
-    word_address: FourWordAddress,
 
-    /// Proof of work for Sybil resistance
-    proof_of_work: ProofOfWork,
 }
 
 impl SecureNodeIdentity {
-    /// Generate a new identity with proof of work
-    pub fn generate(difficulty: u32) -> Result<Self> {
+    /// Generate a new identity (no proof-of-work)
+    pub fn generate() -> Result<Self> {
         // Validate entropy before key generation
         validate_system_entropy()?;
 
@@ -63,23 +58,15 @@ impl SecureNodeIdentity {
         // Derive node ID from public key
         let node_id = NodeId::from_public_key(&public_key);
 
-        // Generate four-word address
-        let word_address = FourWordAddress::from_bytes(node_id.to_bytes())?;
-
-        // Compute proof of work
-        let proof_of_work = ProofOfWork::solve(&node_id, difficulty)?;
-
         Ok(Self {
             secret_key,
             public_key,
             node_id,
-            word_address,
-            proof_of_work,
         })
     }
 
     /// Generate from a seed with enhanced security
-    pub fn from_seed(seed: &[u8; 32], difficulty: u32) -> Result<Self> {
+    pub fn from_seed(seed: &[u8; 32]) -> Result<Self> {
         // Validate entropy
         validate_seed_entropy(seed)?;
 
@@ -95,18 +82,10 @@ impl SecureNodeIdentity {
         // Derive node ID from public key
         let node_id = NodeId::from_public_key(&public_key);
 
-        // Generate four-word address
-        let word_address = FourWordAddress::from_bytes(node_id.to_bytes())?;
-
-        // Compute proof of work
-        let proof_of_work = ProofOfWork::solve(&node_id, difficulty)?;
-
         Ok(Self {
             secret_key,
             public_key,
             node_id,
-            word_address,
-            proof_of_work,
         })
     }
 
@@ -114,7 +93,6 @@ impl SecureNodeIdentity {
     pub fn export(&self) -> IdentityData {
         IdentityData {
             secret_key: self.secret_key.as_bytes().to_vec(),
-            proof_of_work: self.proof_of_work.clone(),
         }
     }
 
@@ -152,20 +130,13 @@ impl SecureNodeIdentity {
         &self.node_id
     }
 
-    /// Get four-word address
-    pub fn word_address(&self) -> &FourWordAddress {
-        &self.word_address
-    }
+    // No four-word address embedded; see bootstrap/transport layers
 
     /// Get public key
     pub fn public_key(&self) -> &MlDsaPublicKey {
         &self.public_key
     }
 
-    /// Get proof of work
-    pub fn proof_of_work(&self) -> &ProofOfWork {
-        &self.proof_of_work
-    }
 }
 
 /// Validate system entropy is sufficient for key generation
@@ -218,31 +189,31 @@ mod tests {
 
     #[test]
     fn test_secure_identity_generation() {
-        let identity = SecureNodeIdentity::generate(8).unwrap();
-        assert!(identity.proof_of_work.verify(identity.node_id(), 8));
+        let identity = SecureNodeIdentity::generate().unwrap();
+        assert_eq!(identity.node_id().to_string().len() > 0, true);
     }
 
     #[test]
     fn test_entropy_validation() {
         // Should reject all-zero seed
         let weak_seed = [0u8; 32];
-        assert!(SecureNodeIdentity::from_seed(&weak_seed, 8).is_err());
+        assert!(SecureNodeIdentity::from_seed(&weak_seed).is_err());
 
         // Should reject all-ones seed
         let weak_seed = [0xFFu8; 32];
-        assert!(SecureNodeIdentity::from_seed(&weak_seed, 8).is_err());
+        assert!(SecureNodeIdentity::from_seed(&weak_seed).is_err());
 
         // Should accept good seed
         let mut good_seed = [0u8; 32];
         for (i, byte) in good_seed.iter_mut().enumerate() {
             *byte = i as u8;
         }
-        assert!(SecureNodeIdentity::from_seed(&good_seed, 8).is_ok());
+        assert!(SecureNodeIdentity::from_seed(&good_seed).is_ok());
     }
 
     #[test]
     fn test_key_zeroization() {
-        let identity = SecureNodeIdentity::generate(8).unwrap();
+        let identity = SecureNodeIdentity::generate().unwrap();
         let _signing_key_bytes = identity.secret_key.as_bytes();
 
         // Identity will be dropped here, signing key should be zeroized

@@ -322,10 +322,10 @@ impl IPDiversityEnforcer {
         }
 
         // Check ASN limit
-        if let Some(asn) = ip_analysis.asn {
-
-            if let Some(&count) = self.asn_counts.get(&asn)
-            && count >= limit_asn {
+        if let Some(asn) = ip_analysis.asn
+            && let Some(&count) = self.asn_counts.get(&asn)
+            && count >= limit_asn
+        {
             return false;
         }
 
@@ -386,22 +386,21 @@ impl IPDiversityEnforcer {
             }
         }
 
-        if let Some(asn) = ip_analysis.asn {
-            if let Some(count) = self.asn_counts.get_mut(&asn) {
-                *count = count.saturating_sub(1);
-                if *count == 0 {
-                    self.asn_counts.remove(&asn);
-                }
-            }
+        if let Some(asn) = ip_analysis.asn
+            && let Some(count) = self.asn_counts.get_mut(&asn)
+        {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.asn_counts.remove(&asn);
             }
         }
 
-        if let Some(ref country) = ip_analysis.country {
-            if let Some(count) = self.country_counts.get_mut(country) {
-                *count = count.saturating_sub(1);
-                if *count == 0 {
-                    self.country_counts.remove(country);
-                }
+        if let Some(ref country) = ip_analysis.country
+            && let Some(count) = self.country_counts.get_mut(country)
+        {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.country_counts.remove(country);
             }
         }
     }

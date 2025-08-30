@@ -11,10 +11,12 @@
 // distributed under these licenses is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
-// Enforce no unwrap/expect in production code to prevent panics
-#![warn(clippy::unwrap_used)]
-#![warn(clippy::expect_used)]
-#![warn(clippy::panic)]
+// Enforce no unwrap/expect/panic in production code only (tests can use them)
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
+#![cfg_attr(not(test), warn(clippy::expect_used))]
+#![cfg_attr(not(test), warn(clippy::panic))]
+// Allow unused_async as many functions are async for API consistency
+#![allow(clippy::unused_async)]
 
 //! # Saorsa Core
 //!

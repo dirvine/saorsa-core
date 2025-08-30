@@ -219,9 +219,8 @@ impl KeyExchange {
         if let Some(established) = keys.get(peer) {
             if established.expires_at > Utc::now() {
                 return Ok(established.encryption_key.clone());
-            } else {
-                warn!("Session key for {} has expired", peer);
             }
+            warn!("Session key for {} has expired", peer);
         }
 
         Err(anyhow::anyhow!("No established session with {}", peer))

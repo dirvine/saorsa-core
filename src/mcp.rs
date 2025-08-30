@@ -1113,9 +1113,11 @@ impl MCPServer {
         dht_guard
             .store(&DhtKey::from_bytes(key), serde_json::to_vec(&service_info)?)
             .await
-            .map_err(|e| P2PError::Dht(crate::error::DhtError::StoreFailed(
-                format!("Failed to register service: {e}").into()
-            )))?;
+            .map_err(|e| {
+                P2PError::Dht(crate::error::DhtError::StoreFailed(
+                    format!("Failed to register service: {e}").into(),
+                ))
+            })?;
 
         Ok(())
     }
@@ -1331,23 +1333,23 @@ impl MCPServer {
     /// Check if resource requirements can be met
     async fn check_resource_requirements(&self, requirements: &ToolRequirements) -> Result<()> {
         // Check memory limit
-        if let Some(max_memory) = requirements.max_memory {
-            if max_memory > self.config.tool_memory_limit {
-                return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                    "Tool memory requirement exceeds limit".to_string().into(),
-                )));
-            }
+        if let Some(max_memory) = requirements.max_memory
+            && max_memory > self.config.tool_memory_limit
+        {
+            return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
+                "Tool memory requirement exceeds limit".to_string().into(),
+            )));
         }
 
         // Check execution time limit
-        if let Some(max_execution_time) = requirements.max_execution_time {
-            if max_execution_time > self.config.max_tool_execution_time {
-                return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                    "Tool execution time requirement exceeds limit"
-                        .to_string()
-                        .into(),
-                )));
-            }
+        if let Some(max_execution_time) = requirements.max_execution_time
+            && max_execution_time > self.config.max_tool_execution_time
+        {
+            return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
+                "Tool execution time requirement exceeds limit"
+                    .to_string()
+                    .into(),
+            )));
         }
 
         // TODO: Check other requirements (capabilities, network, filesystem)
@@ -1773,24 +1775,23 @@ impl MCPServer {
         let mut health_guard = service_health.write().await;
 
         for (service_id, health) in health_guard.iter_mut() {
-            if let Some(last_heartbeat) = health.last_heartbeat {
-                if let Ok(duration) = now.duration_since(last_heartbeat) {
-                    if duration > config.heartbeat_timeout {
-                        let previous_status = health.status;
-                        health.status = ServiceHealthStatus::Unhealthy;
-                        health.error_message = Some("Heartbeat timeout".to_string());
+            if let Some(last_heartbeat) = health.last_heartbeat
+                && let Ok(duration) = now.duration_since(last_heartbeat)
+                && duration > config.heartbeat_timeout
+            {
+                let previous_status = health.status;
+                health.status = ServiceHealthStatus::Unhealthy;
+                health.error_message = Some("Heartbeat timeout".to_string());
 
-                        // Send timeout event if status changed
-                        if previous_status != ServiceHealthStatus::Unhealthy {
-                            let event = HealthEvent::HeartbeatTimeout {
-                                service_id: service_id.clone(),
-                                peer_id: PeerId::from("unknown".to_string()), // TODO: Store peer ID in health
-                            };
+                // Send timeout event if status changed
+                if previous_status != ServiceHealthStatus::Unhealthy {
+                    let event = HealthEvent::HeartbeatTimeout {
+                        service_id: service_id.clone(),
+                        peer_id: PeerId::from("unknown".to_string()), // TODO: Store peer ID in health
+                    };
 
-                            if let Err(e) = health_event_tx.send(event) {
-                                debug!("Failed to send timeout event: {}", e);
-                            }
-                        }
+                    if let Err(e) = health_event_tx.send(event) {
+                        debug!("Failed to send timeout event: {}", e);
                     }
                 }
             }
@@ -2637,11 +2638,12 @@ impl MCPServer {
 
         // Also add to services index
         let hash = blake3::hash(b"mcp:services:index");
-        let services_key: Key = *hash.as_bytes();
-        let mut service_ids = match dht_guard.retrieve(&DhtKey::from_bytes(services_key)).await {
-            Ok(Some(value)) => {
-                serde_json::from_slice::<Vec<String>>(&value).unwrap_or_default()
-            }
+        let services_index_key: Key = *hash.as_bytes();
+        let mut service_ids = match dht_guard
+            .retrieve(&DhtKey::from_bytes(services_index_key))
+            .await
+        {
+            Ok(Some(value)) => serde_json::from_slice::<Vec<String>>(&value).unwrap_or_default(),
             Ok(None) | Err(_) => Vec::new(),
         };
 
@@ -2652,7 +2654,7 @@ impl MCPServer {
                 .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
 
             dht_guard
-                .store(&DhtKey::from_bytes(services_key), index_data)
+                .store(&DhtKey::from_bytes(services_index_key), index_data)
                 .await
                 .map_err(|e| {
                     P2PError::Dht(crate::error::DhtError::StoreFailed(
@@ -2711,10 +2713,13 @@ impl MCPServer {
     pub async fn discover_remote_services(&self) -> Result<Vec<MCPService>> {
         if let Some(dht) = &self.dht {
             let hash = blake3::hash(b"mcp:services:index");
-        let services_key: Key = *hash.as_bytes();
+            let services_index_key: Key = *hash.as_bytes();
             let dht_guard = dht.read().await;
 
-            let service_ids = match dht_guard.retrieve(&DhtKey::from_bytes(services_key)).await {
+            let service_ids = match dht_guard
+                .retrieve(&DhtKey::from_bytes(services_index_key))
+                .await
+            {
                 Ok(Some(value)) => {
                     serde_json::from_slice::<Vec<String>>(&value).unwrap_or_default()
                 }
@@ -2730,7 +2735,8 @@ impl MCPServer {
                 let hash = blake3::hash(format!("mcp:service:{service_id}").as_bytes());
                 let service_key: Key = *hash.as_bytes();
 
-                if let Ok(Some(value)) = dht_guard.retrieve(&DhtKey::from_bytes(service_key)).await {
+                if let Ok(Some(value)) = dht_guard.retrieve(&DhtKey::from_bytes(service_key)).await
+                {
                     match serde_json::from_slice::<MCPService>(&value) {
                         Ok(service) => {
                             // Don't include our own service

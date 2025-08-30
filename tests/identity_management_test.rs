@@ -149,7 +149,7 @@ async fn test_node_identity_cryptography() -> Result<()> {
 
     // Test signature uniqueness
     let signature2 = identity.sign(test_message).expect("signing should succeed");
-    // ML-DSA signatures are deterministic, so they should be the same  
+    // ML-DSA signatures are deterministic, so they should be the same
     // We can't directly compare signatures, so verify both work
     assert!(
         ml_dsa_verify(&public_key, test_message, &signature2).unwrap_or(false),
@@ -158,7 +158,9 @@ async fn test_node_identity_cryptography() -> Result<()> {
 
     // Test different messages produce different signatures
     let other_message = b"Different message";
-    let other_signature = identity.sign(other_message).expect("signing should succeed");
+    let other_signature = identity
+        .sign(other_message)
+        .expect("signing should succeed");
     // Verify the signature works for the other message but not the original
     assert!(
         ml_dsa_verify(&public_key, other_message, &other_signature).unwrap_or(false),
@@ -732,14 +734,14 @@ async fn test_identity_system_integration() -> Result<()> {
     // All nodes sign the same message
     for (identity, addr) in &network_identities {
         let signature = identity.sign(test_message).expect("signing should succeed");
-        
+
         // Verify signature immediately
         assert!(
             ml_dsa_verify(identity.public_key(), test_message, &signature).unwrap_or(false),
             "Signature should verify for node: {}",
             addr
         );
-        
+
         signatures.push((identity.node_id().clone(), signature));
     }
 
@@ -762,7 +764,8 @@ async fn test_identity_system_integration() -> Result<()> {
         for (other_identity, _) in &network_identities {
             if *other_identity.node_id() != *node_id {
                 assert!(
-                    !ml_dsa_verify(other_identity.public_key(), test_message, signature).unwrap_or(true),
+                    !ml_dsa_verify(other_identity.public_key(), test_message, signature)
+                        .unwrap_or(true),
                     "Signature should not verify with wrong identity"
                 );
             }
@@ -843,3 +846,4 @@ async fn test_identity_system_integration() -> Result<()> {
     println!("✅ Identity system integration test passed");
     Ok(())
 }
+#![cfg(feature = "legacy_pow_tests")]

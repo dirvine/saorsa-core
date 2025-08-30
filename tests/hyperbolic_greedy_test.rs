@@ -13,8 +13,8 @@ use saorsa_core::PeerId;
 use saorsa_core::adaptive::hyperbolic_greedy::{
     Embedding, EmbeddingConfig, HyperbolicGreedyRouter, embed_snapshot, greedy_next,
 };
+use saorsa_core::dht::DhtNodeId as NodeId;
 use saorsa_core::dht::core_engine::DhtCoreEngine;
-use saorsa_core::identity::NodeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -67,7 +67,7 @@ async fn calculate_success_ratio(embedding: &Embedding, test_pairs: &[(PeerId, P
         let target_bytes = target.as_bytes();
         let len = target_bytes.len().min(32);
         node_id_bytes[..len].copy_from_slice(&target_bytes[..len]);
-        let target_node = NodeId(node_id_bytes);
+        let target_node = NodeId::from_bytes(node_id_bytes);
 
         // Try greedy routing
         if let Some(_next_hop) = greedy_next(target_node, source.clone(), embedding).await {
@@ -126,7 +126,7 @@ async fn calculate_stretch(
         let target_bytes = target.as_bytes();
         let len = target_bytes.len().min(32);
         node_id_bytes[..len].copy_from_slice(&target_bytes[..len]);
-        let target_node = NodeId(node_id_bytes);
+        let target_node = NodeId::from_bytes(node_id_bytes);
 
         match greedy_next(target_node, current.clone(), embedding).await {
             Some(next) if !visited_greedy.contains(&next) => {
@@ -233,14 +233,14 @@ async fn test_stretch_on_scale_free_graph() {
 async fn test_fallback_correctness() {
     // Create a router with DHT for fallback testing
     let local_id = format!("fallback_test_{}", rand::random::<u64>());
-    
+
     // Convert PeerId to NodeId for DHT
     let mut node_id_bytes = [0u8; 32];
     let id_bytes = local_id.as_bytes();
     let len = id_bytes.len().min(32);
     node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
     let node_id = NodeId(node_id_bytes);
-    
+
     let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
 
     let router = HyperbolicGreedyRouter::new(local_id.clone(), dht);
@@ -250,7 +250,7 @@ async fn test_fallback_correctness() {
     let embedding = router.embed_snapshot(&nodes).await.unwrap();
 
     // Store embedding
-    *router.embedding.write().await = Some(embedding.clone());
+    router.set_embedding(embedding.clone()).await;
 
     // Test with a target not in the embedding (should fall back to Kad)
     let unknown_target = NodeId([99u8; 32]);
@@ -266,14 +266,14 @@ async fn test_fallback_correctness() {
 #[tokio::test]
 async fn test_drift_detection() {
     let local_id = format!("drift_test_{}", rand::random::<u64>());
-    
+
     // Convert PeerId to NodeId for DHT
     let mut node_id_bytes = [0u8; 32];
     let id_bytes = local_id.as_bytes();
     let len = id_bytes.len().min(32);
     node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
-    let node_id = NodeId(node_id_bytes);
-    
+    let node_id = NodeId::from_bytes(node_id_bytes);
+
     let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
 
     let router = HyperbolicGreedyRouter::new(local_id, dht);
@@ -303,14 +303,14 @@ async fn test_drift_detection() {
 #[tokio::test]
 async fn test_partial_refit_performance() {
     let local_id = format!("refit_perf_{}", rand::random::<u64>());
-    
+
     // Convert PeerId to NodeId for DHT
     let mut node_id_bytes = [0u8; 32];
     let id_bytes = local_id.as_bytes();
     let len = id_bytes.len().min(32);
     node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
     let node_id = NodeId(node_id_bytes);
-    
+
     let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
 
     let router = HyperbolicGreedyRouter::new(local_id, dht);
@@ -318,7 +318,7 @@ async fn test_partial_refit_performance() {
     // Create initial embedding
     let initial_nodes: Vec<PeerId> = (0..20).map(|i| format!("init_{}", i)).collect();
     let embedding = router.embed_snapshot(&initial_nodes).await.unwrap();
-    *router.embedding.write().await = Some(embedding);
+    router.set_embedding(embedding).await;
 
     // Measure partial refit time
     let new_nodes: Vec<PeerId> = (0..5).map(|i| format!("new_{}", i)).collect();
@@ -362,17 +362,17 @@ async fn test_embedding_convergence() {
 
     // Create router with custom config
     let local_id = nodes[0].clone();
-    
+
     // Convert PeerId to NodeId for DHT
     let mut node_id_bytes = [0u8; 32];
     let id_bytes = local_id.as_bytes();
     let len = id_bytes.len().min(32);
     node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
-    let node_id = NodeId(node_id_bytes);
-    
+    let node_id = NodeId::from_bytes(node_id_bytes);
+
     let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
     let mut router = HyperbolicGreedyRouter::new(local_id, dht);
-    router.config = config;
+    router.set_config(config);
 
     let emb2 = router.embed_snapshot(&nodes).await.unwrap();
 
@@ -387,14 +387,14 @@ async fn test_embedding_convergence() {
 #[tokio::test]
 async fn test_routing_metrics() {
     let local_id = format!("metrics_{}", rand::random::<u64>());
-    
+
     // Convert PeerId to NodeId for DHT
     let mut node_id_bytes = [0u8; 32];
     let id_bytes = local_id.as_bytes();
     let len = id_bytes.len().min(32);
     node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
     let node_id = NodeId(node_id_bytes);
-    
+
     let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
 
     let router = HyperbolicGreedyRouter::new(local_id.clone(), dht);
@@ -402,7 +402,7 @@ async fn test_routing_metrics() {
     // Create embedding
     let nodes: Vec<PeerId> = (0..10).map(|i| format!("m_node_{}", i)).collect();
     let embedding = router.embed_snapshot(&nodes).await.unwrap();
-    *router.embedding.write().await = Some(embedding.clone());
+    router.set_embedding(embedding.clone()).await;
 
     // Perform several routing attempts
     for i in 0..10 {
@@ -420,10 +420,10 @@ async fn test_routing_metrics() {
 
     // Check metrics
     let metrics = router.get_metrics().await;
-
-    assert!(metrics.greedy_success + metrics.greedy_failures > 0);
+    assert!(metrics.greedy_success() + metrics.greedy_failures() > 0);
     println!(
         "Routing metrics - Success: {}, Failures: {}",
-        metrics.greedy_success, metrics.greedy_failures
+        metrics.greedy_success(),
+        metrics.greedy_failures()
     );
 }

@@ -226,7 +226,7 @@ enum MessageType {
 type MessageHandler = Box<dyn Fn(NetworkMessage) -> BoxFuture<'static, Result<()>> + Send + Sync>;
 
 /// System-wide metrics
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct SystemMetrics {
     /// Total messages routed
     messages_routed: u64,

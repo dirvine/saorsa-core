@@ -177,10 +177,6 @@ pub enum P2PError {
     #[error("Record too large: {0} bytes (max 512)")]
     RecordTooLarge(usize),
 
-    // Proof of work computation failed
-    #[error("Proof of work computation failed")]
-    ProofOfWorkFailed,
-
     // Time-related error
     #[error("Time error")]
     TimeError,
@@ -295,8 +291,6 @@ pub enum IdentityError {
     #[error("System time error: {0}")]
     SystemTime(Cow<'static, str>),
 
-    #[error("Invalid proof of work")]
-    InvalidProofOfWork,
 
     #[error("Not found: {0}")]
     NotFound(Cow<'static, str>),
@@ -805,7 +799,6 @@ fn error_type_name(error: &P2PError) -> &'static str {
         P2PError::Bootstrap(_) => "Bootstrap",
         P2PError::Encoding(_) => "Encoding",
         P2PError::RecordTooLarge(_) => "RecordTooLarge",
-        P2PError::ProofOfWorkFailed => "ProofOfWorkFailed",
         P2PError::TimeError => "TimeError",
         P2PError::InvalidInput(_) => "InvalidInput",
         P2PError::WebRtcError(_) => "WebRTC",

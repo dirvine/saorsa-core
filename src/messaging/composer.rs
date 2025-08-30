@@ -2,7 +2,7 @@
 
 use super::SendMessageRequest;
 use super::types::*;
-use crate::identity::FourWordAddress;
+use super::user_handle::UserHandle;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ pub struct MessageComposer {
     /// Draft messages by channel
     drafts: HashMap<ChannelId, DraftMessage>,
     /// Mention suggestions
-    mention_cache: Vec<FourWordAddress>,
+    mention_cache: Vec<UserHandle>,
     /// Emoji shortcuts
     emoji_shortcuts: HashMap<String, String>,
 }
@@ -63,7 +63,7 @@ impl MessageComposer {
     }
 
     /// Add mention to draft
-    pub fn add_mention(&mut self, channel_id: ChannelId, user: FourWordAddress) {
+    pub fn add_mention(&mut self, channel_id: ChannelId, user: UserHandle) {
         let draft = self.start_draft(channel_id);
         draft.mentions.push(user.clone());
 
@@ -106,11 +106,11 @@ impl MessageComposer {
     }
 
     /// Get mention suggestions
-    pub fn get_mention_suggestions(&self, partial: &str) -> Vec<FourWordAddress> {
+    pub fn get_mention_suggestions(&self, partial: &str) -> Vec<UserHandle> {
         self.mention_cache
             .iter()
             .filter(|user| {
-                user.to_string()
+                user.as_str()
                     .to_lowercase()
                     .contains(&partial.to_lowercase())
             })
@@ -119,7 +119,7 @@ impl MessageComposer {
     }
 
     /// Update mention cache
-    pub fn update_mention_cache(&mut self, users: Vec<FourWordAddress>) {
+    pub fn update_mention_cache(&mut self, users: Vec<UserHandle>) {
         self.mention_cache = users;
     }
 
@@ -203,7 +203,6 @@ impl MessageComposer {
     pub fn build_message(
         &self,
         channel_id: ChannelId,
-        _sender: FourWordAddress,
     ) -> Result<SendMessageRequest> {
         let draft = self
             .drafts
@@ -243,7 +242,7 @@ pub struct DraftMessage {
     pub channel_id: ChannelId,
     pub text: String,
     pub formatted_text: Option<String>,
-    pub mentions: Vec<FourWordAddress>,
+    pub mentions: Vec<UserHandle>,
     pub attachments: Vec<DraftAttachment>,
     pub reply_to: Option<MessageId>,
     pub thread_id: Option<ThreadId>,
@@ -336,7 +335,7 @@ pub struct AutocompleteSuggestion {
 /// Autocomplete action
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AutocompleteAction {
-    InsertMention(FourWordAddress),
+    InsertMention(UserHandle),
     InsertEmoji(String),
     InsertCommand(String),
     InsertChannel(ChannelId),
@@ -361,13 +360,13 @@ mod tests {
     fn test_mention_addition() {
         let mut composer = MessageComposer::new();
         let channel = ChannelId::new();
-        let user = FourWordAddress::from("alice-bob-charlie-david");
+        let user = UserHandle::from("alice");
 
         composer.add_mention(channel, user.clone());
 
         let draft = composer.get_draft(channel).unwrap();
         assert!(draft.mentions.contains(&user));
-        assert!(draft.text.contains("@alice-bob-charlie-david"));
+        assert!(draft.text.contains("@alice"));
     }
 
     #[test]

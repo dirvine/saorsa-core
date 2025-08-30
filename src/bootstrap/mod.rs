@@ -32,6 +32,7 @@ pub use discovery::{BootstrapConfig, BootstrapDiscovery, ConfigurableBootstrapDi
 pub use merge::{MergeCoordinator, MergeResult};
 // Use real four-word-networking crate types behind a thin facade
 pub use four_word_networking as fourwords;
+use four_word_networking::FourWordAdaptiveEncoder;
 
 /// Minimal facade around external four-word types
 #[derive(Debug, Clone)]
@@ -86,50 +87,35 @@ impl WordEncoder {
     }
 
     pub fn decode_to_socket_addr(&self, words: &FourWordAddress) -> Result<std::net::SocketAddr> {
-        let parts: Vec<&str> = words.0.split(['.', '-']).collect();
-        if parts.len() != 4 {
-            return Err(P2PError::Bootstrap(
-                crate::error::BootstrapError::InvalidData(
-                    "Invalid four-word address".to_string().into(),
-                ),
-            ));
-        }
-        let encoding = four_word_networking::FourWordEncoding::new(
-            parts[0].to_string(),
-            parts[1].to_string(),
-            parts[2].to_string(),
-            parts[3].to_string(),
-        );
-        if let Ok((ip, port)) = four_word_networking::FourWordEncoder::new().decode_ipv4(&encoding)
-        {
-            Ok(std::net::SocketAddr::from((ip, port)))
-        } else {
-            Err(P2PError::Bootstrap(
-                crate::error::BootstrapError::InvalidData(
-                    "Decoding four-word address failed".to_string().into(),
-                ),
+        let encoder = FourWordAdaptiveEncoder::new().map_err(|e| {
+            P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                format!("Encoder init failed: {e}").into(),
             ))
-        }
+        })?;
+        // Accept hyphens, spaces or dots; normalize then call adaptive decoder
+        let normalized = words.0.replace(' ', "-");
+        let decoded = encoder.decode(&normalized).map_err(|e| {
+            P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                format!("Failed to decode four-word address: {e}").into(),
+            ))
+        })?;
+        decoded.parse::<std::net::SocketAddr>().map_err(|_| {
+            P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                "Decoded address missing port".to_string().into(),
+            ))
+        })
     }
 
     pub fn encode_socket_addr(&self, addr: &std::net::SocketAddr) -> Result<FourWordAddress> {
-        match addr {
-            std::net::SocketAddr::V4(v4) => {
-                let enc = four_word_networking::FourWordEncoder::new()
-                    .encode_ipv4(*v4.ip(), v4.port())
-                    .map_err(|e| {
-                        P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
-                            format!("{e}").into(),
-                        ))
-                    })?;
-                Ok(FourWordAddress(enc.to_string().replace(' ', "-")))
-            }
-            std::net::SocketAddr::V6(_) => Err(P2PError::Bootstrap(
-                crate::error::BootstrapError::InvalidData(
-                    "IPv6 not supported by four-word encoder".to_string().into(),
-                ),
-            )),
-        }
+        let encoder = FourWordAdaptiveEncoder::new().map_err(|e| {
+            P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                format!("Encoder init failed: {e}").into(),
+            ))
+        })?;
+        let encoded = encoder
+            .encode(&addr.to_string())
+            .map_err(|e| P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(format!("{e}").into())))?;
+        Ok(FourWordAddress(encoded.replace(' ', "-")))
     }
 }
 

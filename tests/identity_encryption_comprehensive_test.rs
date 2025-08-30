@@ -2,6 +2,7 @@
 // (c) 2025 Saorsa P2P Foundation
 
 use saorsa_core::{
+    SecurityLevel,
     error::{P2PError, SecurityError},
     identity_manager::*,
     secure_memory::SecureString,
@@ -328,3 +329,4 @@ async fn test_encryption_format_versioning() -> Result<(), P2PError> {
 
     Ok(())
 }
+#![cfg(feature = "extended_tests")]

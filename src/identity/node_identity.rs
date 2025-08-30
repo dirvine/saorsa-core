@@ -16,12 +16,11 @@
 // Copyright 2024 P2P Foundation
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Node Identity with Four-Word Addresses
+//! Node Identity (no embedded word address)
 //!
 //! Implements the core identity system for P2P nodes with:
 //! - ML-DSA-65 post-quantum cryptographic keys
 //! - Four-word human-readable addresses
-//! - Proof-of-work for Sybil resistance
 //! - Deterministic generation from seeds
 
 use crate::error::IdentityError;
@@ -29,13 +28,11 @@ use crate::{P2PError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::time::{Duration, Instant};
 
 // Import PQC types from ant_quic via quantum_crypto module
 use ant_quic::crypto::pqc::types::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
 
-// Import our four-word implementation
-use super::four_words::{FourWordAddress, WordEncoder};
+// No four-word address tied to identity; addressing is handled elsewhere.
 
 /// Node ID derived from public key (256-bit)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -95,78 +92,6 @@ impl fmt::Display for NodeId {
     }
 }
 
-/// Proof of Work for Sybil resistance
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProofOfWork {
-    /// The nonce that satisfies the difficulty
-    pub nonce: u64,
-    /// The difficulty level used
-    pub difficulty: u32,
-    /// Time taken to compute
-    pub computation_time: Duration,
-}
-
-impl ProofOfWork {
-    /// Verify the proof of work
-    pub fn verify(&self, node_id: &NodeId, difficulty: u32) -> bool {
-        if self.difficulty != difficulty {
-            return false;
-        }
-
-        Self::check_pow(node_id, self.nonce, difficulty)
-    }
-
-    /// Check if a nonce satisfies the difficulty
-    fn check_pow(node_id: &NodeId, nonce: u64, difficulty: u32) -> bool {
-        let mut hasher = Sha256::new();
-        hasher.update(node_id.to_bytes());
-        hasher.update(nonce.to_le_bytes());
-        let hash = hasher.finalize();
-
-        // Count leading zero bits
-        let mut zero_bits = 0;
-        for byte in hash.iter() {
-            if *byte == 0 {
-                zero_bits += 8;
-            } else {
-                zero_bits += byte.leading_zeros();
-                break;
-            }
-        }
-
-        zero_bits >= difficulty
-    }
-
-    /// Solve proof of work puzzle
-    pub fn solve(node_id: &NodeId, difficulty: u32) -> Result<Self> {
-        let start = Instant::now();
-        let mut nonce = 0u64;
-
-        loop {
-            if Self::check_pow(node_id, nonce, difficulty) {
-                return Ok(ProofOfWork {
-                    nonce,
-                    difficulty,
-                    computation_time: start.elapsed(),
-                });
-            }
-
-            nonce = nonce.checked_add(1).ok_or_else(|| {
-                P2PError::Identity(IdentityError::InvalidFormat(
-                    "PoW nonce overflow".to_string().into(),
-                ))
-            })?;
-
-            // Timeout after 5 minutes
-            if start.elapsed() > Duration::from_secs(300) {
-                return Err(P2PError::Identity(IdentityError::InvalidFormat(
-                    "PoW timeout".to_string().into(),
-                )));
-            }
-        }
-    }
-}
-
 /// Public node identity information (without secret keys) - safe to clone
 #[derive(Clone)]
 pub struct PublicNodeIdentity {
@@ -174,10 +99,6 @@ pub struct PublicNodeIdentity {
     public_key: MlDsaPublicKey,
     /// Node ID derived from public key
     node_id: NodeId,
-    /// Human-readable four-word address
-    word_address: FourWordAddress,
-    /// Proof of work for Sybil resistance
-    proof_of_work: ProofOfWork,
 }
 
 impl PublicNodeIdentity {
@@ -191,15 +112,8 @@ impl PublicNodeIdentity {
         &self.public_key
     }
 
-    /// Get four-word address
-    pub fn word_address(&self) -> &str {
-        self.word_address.as_str()
-    }
-
-    /// Get proof of work
-    pub fn proof_of_work(&self) -> &ProofOfWork {
-        &self.proof_of_work
-    }
+    // Word addresses are not part of identity; use bootstrap/transport layers
+    
 }
 
 /// Core node identity with cryptographic keys and four-word address
@@ -210,15 +124,11 @@ pub struct NodeIdentity {
     public_key: MlDsaPublicKey,
     /// Node ID derived from public key
     node_id: NodeId,
-    /// Four-word address for human-readable identification
-    word_address: FourWordAddress,
-    /// Proof of work for Sybil resistance
-    proof_of_work: ProofOfWork,
 }
 
 impl NodeIdentity {
-    /// Generate new identity with proof of work
-    pub fn generate(pow_difficulty: u32) -> Result<Self> {
+    /// Generate new identity
+    pub fn generate() -> Result<Self> {
         // Generate ML-DSA-65 key pair using ant-quic integration
         let (public_key, secret_key) =
             crate::quantum_crypto::generate_ml_dsa_keypair().map_err(|e| {
@@ -229,23 +139,15 @@ impl NodeIdentity {
 
         let node_id = NodeId::from_public_key(&public_key);
 
-        // Solve proof of work
-        let proof_of_work = ProofOfWork::solve(&node_id, pow_difficulty)?;
-
-        // Generate four-word address from node ID
-        let word_address = WordEncoder::encode(node_id.to_bytes())?;
-
         Ok(Self {
             secret_key,
             public_key,
             node_id,
-            word_address,
-            proof_of_work,
         })
     }
 
     /// Generate from seed (deterministic)
-    pub fn from_seed(_seed: &[u8; 32], pow_difficulty: u32) -> Result<Self> {
+    pub fn from_seed(_seed: &[u8; 32]) -> Result<Self> {
         // For deterministic generation, we use the seed to generate ML-DSA keys
         // Note: ML-DSA doesn't directly support seed-based generation like Ed25519
         // For now, we'll generate random keys but use the seed for deterministic NodeId
@@ -258,18 +160,10 @@ impl NodeIdentity {
 
         let node_id = NodeId::from_public_key(&public_key);
 
-        // Solve proof of work
-        let proof_of_work = ProofOfWork::solve(&node_id, pow_difficulty)?;
-
-        // Generate four-word address from node ID
-        let word_address = WordEncoder::encode(node_id.to_bytes())?;
-
         Ok(Self {
             secret_key,
             public_key,
             node_id,
-            word_address,
-            proof_of_work,
         })
     }
 
@@ -283,15 +177,7 @@ impl NodeIdentity {
         &self.public_key
     }
 
-    /// Get four-word address
-    pub fn word_address(&self) -> &str {
-        self.word_address.as_str()
-    }
-
-    /// Get proof of work
-    pub fn proof_of_work(&self) -> &ProofOfWork {
-        &self.proof_of_work
-    }
+    // No Proof-of-Work in this crate
 
     /// Get secret key bytes (for raw key authentication)
     pub fn secret_key_bytes(&self) -> &[u8] {
@@ -321,8 +207,6 @@ impl NodeIdentity {
         PublicNodeIdentity {
             public_key: self.public_key.clone(),
             node_id: self.node_id.clone(),
-            word_address: self.word_address.clone(),
-            proof_of_work: self.proof_of_work.clone(),
         }
     }
 }
@@ -388,8 +272,6 @@ impl NodeIdentity {
 pub struct IdentityData {
     /// ML-DSA secret key bytes (4032 bytes for ML-DSA-65)
     pub secret_key: Vec<u8>,
-    /// Proof of work
-    pub proof_of_work: ProofOfWork,
 }
 
 impl NodeIdentity {
@@ -397,7 +279,6 @@ impl NodeIdentity {
     pub fn export(&self) -> IdentityData {
         IdentityData {
             secret_key: self.secret_key.as_bytes().to_vec(),
-            proof_of_work: self.proof_of_work.clone(),
         }
     }
 
@@ -447,28 +328,12 @@ mod tests {
 
     #[test]
     fn test_proof_of_work() {
-        let node_id = NodeId([0x42; 32]);
-        let difficulty = 8; // 8 leading zero bits (easy for testing)
-
-        let pow = ProofOfWork::solve(&node_id, difficulty)
-            .expect("Proof of work should succeed with low difficulty");
-        assert!(pow.verify(&node_id, difficulty));
-        assert_eq!(pow.difficulty, difficulty);
-
-        // Wrong difficulty should fail
-        assert!(!pow.verify(&node_id, difficulty + 1));
-
-        // Wrong node ID should fail
-        let wrong_id = NodeId([0x43; 32]);
-        assert!(!pow.verify(&wrong_id, difficulty));
+        // PoW removed: this test no longer applicable
     }
 
     #[test]
     fn test_identity_generation() {
-        let identity = NodeIdentity::generate(8).expect("Identity generation should succeed");
-
-        // Verify proof of work
-        assert!(identity.proof_of_work.verify(&identity.node_id, 8));
+        let identity = NodeIdentity::generate().expect("Identity generation should succeed");
 
         // Test signing and verification
         let message = b"Hello, P2P!";
@@ -482,10 +347,8 @@ mod tests {
     #[test]
     fn test_deterministic_generation() {
         let seed = [0x42; 32];
-        let identity1 =
-            NodeIdentity::from_seed(&seed, 8).expect("Identity from seed should succeed");
-        let identity2 =
-            NodeIdentity::from_seed(&seed, 8).expect("Identity from seed should succeed");
+        let identity1 = NodeIdentity::from_seed(&seed).expect("Identity from seed should succeed");
+        let identity2 = NodeIdentity::from_seed(&seed).expect("Identity from seed should succeed");
 
         // Should generate same identity
         assert_eq!(identity1.node_id, identity2.node_id);
@@ -497,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_identity_persistence() {
-        let identity = NodeIdentity::generate(8).expect("Identity generation should succeed");
+        let identity = NodeIdentity::generate().expect("Identity generation should succeed");
 
         // Export
         let data = identity.export();

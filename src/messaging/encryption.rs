@@ -3,6 +3,7 @@
 use super::key_exchange::KeyExchange;
 use super::types::*;
 use crate::identity::FourWordAddress;
+use crate::messaging::user_handle::UserHandle;
 use anyhow::Result;
 use blake3::Hasher;
 use chacha20poly1305::{
@@ -74,7 +75,7 @@ impl SecureMessaging {
         Ok(EncryptedMessage {
             id: message.id,
             channel_id: message.channel_id,
-            sender: message.sender.clone(),
+            sender: self.identity.clone(),
             ciphertext,
             nonce: nonce.to_vec(),
             key_id: self.identity.to_string(),
@@ -240,10 +241,10 @@ impl SecureMessaging {
     async fn get_or_create_session_key(&self, peer: &FourWordAddress) -> Result<SessionKey> {
         let keys = self.session_keys.read().await;
 
-        if let Some(key) = keys.get(peer) {
-            if key.expires_at > chrono::Utc::now() {
-                return Ok(key.clone());
-            }
+        if let Some(key) = keys.get(peer)
+            && key.expires_at > chrono::Utc::now()
+        {
+            return Ok(key.clone());
         }
         drop(keys);
 
@@ -268,7 +269,7 @@ impl SecureMessaging {
         Ok(EncryptedMessage {
             id: message.id,
             channel_id: message.channel_id,
-            sender: message.sender.clone(),
+            sender: self.identity.clone(),
             ciphertext,
             nonce: nonce.to_vec(),
             key_id: self.identity.to_string(),
@@ -343,7 +344,7 @@ mod tests {
         let secure = SecureMessaging::new(identity.clone()).unwrap();
 
         let message = RichMessage::new(
-            identity,
+            UserHandle::from(identity.to_string()),
             ChannelId::new(),
             MessageContent::Text("Secret message".to_string()),
         );
@@ -359,7 +360,7 @@ mod tests {
         let secure = SecureMessaging::new(identity.clone()).unwrap();
 
         let message = RichMessage::new(
-            identity,
+            UserHandle::from(identity.to_string()),
             ChannelId::new(),
             MessageContent::Text("Sign me".to_string()),
         );

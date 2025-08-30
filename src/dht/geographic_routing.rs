@@ -318,12 +318,12 @@ impl RegionalBucket {
             })
             .map(|(id, metrics)| (id.clone(), metrics.get_reliability_score()));
 
-        if let Some((worst_peer_id, worst_score)) = worst_peer {
-            if new_metrics.get_reliability_score() > worst_score {
-                self.peers.remove(&worst_peer_id);
-                self.peers.insert(new_peer_id, new_metrics);
-                return true;
-            }
+        if let Some((worst_peer_id, worst_score)) = worst_peer
+            && new_metrics.get_reliability_score() > worst_score
+        {
+            self.peers.remove(&worst_peer_id);
+            self.peers.insert(new_peer_id, new_metrics);
+            return true;
         }
 
         false

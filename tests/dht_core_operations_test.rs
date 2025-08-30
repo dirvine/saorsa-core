@@ -239,7 +239,7 @@ async fn test_publisher_index_consistency() -> Result<()> {
         let publisher_bytes = blake3::hash(publisher_name.as_bytes()).as_bytes().clone();
         let node_id = NodeId::from_bytes(publisher_bytes);
         let node_id_str = node_id.to_string();
-        
+
         // Track the mapping for later queries
         publisher_node_ids.insert(publisher_name.to_string(), node_id_str.clone());
         record.publisher = node_id;
@@ -272,7 +272,9 @@ async fn test_publisher_index_consistency() -> Result<()> {
     // Test publisher query with limit
     let default_string = String::new();
     let alice_node_id = publisher_node_ids.get("alice").unwrap_or(&default_string);
-    let limited_records = storage.get_records_by_publisher(alice_node_id, Some(2)).await;
+    let limited_records = storage
+        .get_records_by_publisher(alice_node_id, Some(2))
+        .await;
     assert!(
         limited_records.len() <= 2,
         "Limited query should respect limit"
@@ -584,12 +586,14 @@ async fn test_performance_characteristics() -> Result<()> {
 
     // Measure publisher query performance (this should be O(1))
     // Note: create_test_records uses 5 publishers (publisher_0 through publisher_4)
-    let test_publishers: Vec<_> = (0..5).map(|i| {
-        let publisher_str = format!("publisher_{}", i);
-        let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
-        let publisher_node_id = NodeId::from_bytes(publisher_bytes);
-        publisher_node_id.to_string()
-    }).collect();
+    let test_publishers: Vec<_> = (0..5)
+        .map(|i| {
+            let publisher_str = format!("publisher_{}", i);
+            let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+            let publisher_node_id = NodeId::from_bytes(publisher_bytes);
+            publisher_node_id.to_string()
+        })
+        .collect();
     let query_start = Instant::now();
     let mut total_query_results = 0;
     for publisher in &test_publishers {
@@ -675,11 +679,14 @@ async fn test_stress_scenarios() -> Result<()> {
     // Stress test 2: Mixed workload (reads, writes, queries)
     println!("  Stress test 2: Mixed workload");
     let test_publisher_names: Vec<_> = (0..20).map(|i| format!("stress_publisher_{}", i)).collect();
-    let test_publishers: Vec<_> = test_publisher_names.iter().map(|name| {
-        let publisher_bytes = blake3::hash(name.as_bytes()).as_bytes().clone();
-        let publisher_node_id = NodeId::from_bytes(publisher_bytes);
-        publisher_node_id.to_string()
-    }).collect();
+    let test_publishers: Vec<_> = test_publisher_names
+        .iter()
+        .map(|name| {
+            let publisher_bytes = blake3::hash(name.as_bytes()).as_bytes().clone();
+            let publisher_node_id = NodeId::from_bytes(publisher_bytes);
+            publisher_node_id.to_string()
+        })
+        .collect();
 
     for round in 0..20 {
         // Write phase
@@ -882,7 +889,9 @@ async fn test_dht_system_integration() -> Result<()> {
         // Convert node.id to NodeId string representation
         let node_publisher_bytes = blake3::hash(node.id.as_bytes()).as_bytes().clone();
         let node_publisher_node_id = NodeId::from_bytes(node_publisher_bytes);
-        let node_records = storage.get_records_by_publisher(&node_publisher_node_id.to_string(), None).await;
+        let node_records = storage
+            .get_records_by_publisher(&node_publisher_node_id.to_string(), None)
+            .await;
         total_node_records += node_records.len();
 
         // Each node should have some data

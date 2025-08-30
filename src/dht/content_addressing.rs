@@ -104,9 +104,9 @@ pub struct ChunkingConfig {
 impl Default for ChunkingConfig {
     fn default() -> Self {
         Self {
-            min_chunk_size: 1024,     // 1KB
-            target_chunk_size: 65536, // 64KB
-            max_chunk_size: 1048576,  // 1MB
+            min_chunk_size: 1024,      // 1KB
+            target_chunk_size: 65536,  // 64KB
+            max_chunk_size: 1_048_576, // 1MB
             window_size: 48,
         }
     }
@@ -200,8 +200,8 @@ impl ContentDefinedChunker {
 /// Reference to a stored chunk
 #[derive(Debug, Clone)]
 struct ChunkRef {
-    size: u32,
-    created_at: SystemTime,
+    _size: u32,
+    _created_at: SystemTime,
     access_count: u32,
     reference_count: u32,
 }
@@ -273,8 +273,8 @@ impl DedupIndex {
             refs.insert(
                 *hash,
                 ChunkRef {
-                    size,
-                    created_at: SystemTime::now(),
+                    _size: size,
+                    _created_at: SystemTime::now(),
                     access_count: 1,
                     reference_count: 1,
                 },

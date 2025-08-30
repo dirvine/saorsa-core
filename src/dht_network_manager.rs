@@ -20,8 +20,8 @@
 
 use crate::{
     Multiaddr, P2PError, PeerId, Result,
-    dht::{DhtCoreEngine, DhtNodeId, DhtKey, Key, DHTConfig},
-    error::{NetworkError, DhtError},
+    dht::{DHTConfig, DhtCoreEngine, DhtKey, DhtNodeId, Key},
+    error::{DhtError, NetworkError},
     network::{NodeConfig, P2PNode},
 };
 use serde::{Deserialize, Serialize};
@@ -287,9 +287,9 @@ impl DhtNetworkManager {
         };
         // Convert the key to NodeId
         let node_id = DhtNodeId::from_bytes(dht_key);
-        let dht = Arc::new(RwLock::new(
-            DhtCoreEngine::new(node_id).map_err(|e| P2PError::Dht(DhtError::StorageFailed(e.to_string().into())))?
-        ));
+        let dht = Arc::new(RwLock::new(DhtCoreEngine::new(node_id).map_err(|e| {
+            P2PError::Dht(DhtError::StorageFailed(e.to_string().into()))
+        })?));
 
         // Create P2P node
         let node = Arc::new(P2PNode::new(config.node_config.clone()).await?);
@@ -354,7 +354,7 @@ impl DhtNetworkManager {
         );
 
         let operation = DhtNetworkOperation::Put {
-            key: key.clone(),
+            key,
             value: value.clone(),
         };
 
@@ -372,7 +372,7 @@ impl DhtNetworkManager {
             self.dht
                 .write()
                 .await
-                .store(&crate::dht::DhtKey::from_bytes(key.clone()), value)
+                .store(&crate::dht::DhtKey::from_bytes(key), value)
                 .await
                 .map_err(|e| {
                     P2PError::Dht(crate::error::DhtError::StoreFailed(
@@ -390,7 +390,7 @@ impl DhtNetworkManager {
         self.dht
             .write()
             .await
-            .store(&DhtKey::from_bytes(key.clone()), value.clone())
+            .store(&DhtKey::from_bytes(key), value.clone())
             .await
             .map_err(|e| {
                 P2PError::Dht(crate::error::DhtError::StoreFailed(
@@ -410,7 +410,10 @@ impl DhtNetworkManager {
                     debug!("Successfully replicated to peer: {}", &node.peer_id);
                 }
                 Ok(result) => {
-                    warn!("Unexpected result from peer {}: {:?}", &node.peer_id, result);
+                    warn!(
+                        "Unexpected result from peer {}: {:?}",
+                        &node.peer_id, result
+                    );
                 }
                 Err(e) => {
                     warn!("Failed to replicate to peer {}: {}", &node.peer_id, e);
@@ -436,23 +439,29 @@ impl DhtNetworkManager {
         info!("Getting value for key: {}", hex::encode(key));
 
         // Check local storage first
-        if let Ok(Some(value)) = self.dht.read().await.retrieve(&DhtKey::from_bytes(*key)).await {
+        if let Ok(Some(value)) = self
+            .dht
+            .read()
+            .await
+            .retrieve(&DhtKey::from_bytes(*key))
+            .await
+        {
             info!("Found value locally for key: {}", hex::encode(key));
             return Ok(DhtNetworkResult::GetSuccess {
-                key: key.clone(),
+                key: *key,
                 value,
                 source: self.config.local_peer_id.clone(),
             });
         }
 
         // Query remote nodes
-        let operation = DhtNetworkOperation::Get { key: key.clone() };
+        let operation = DhtNetworkOperation::Get { key: *key };
         let closest_nodes = self
             .find_closest_nodes(key, self.config.replication_factor)
             .await?;
 
         if closest_nodes.is_empty() {
-            return Ok(DhtNetworkResult::GetNotFound { key: key.clone() });
+            return Ok(DhtNetworkResult::GetNotFound { key: *key });
         }
 
         // Query nodes until we find the value
@@ -462,16 +471,23 @@ impl DhtNetworkManager {
                 .await
             {
                 Ok(DhtNetworkResult::GetSuccess { value, source, .. }) => {
-                    info!("Found value for key {} from peer: {}", hex::encode(key), source);
+                    info!(
+                        "Found value for key {} from peer: {}",
+                        hex::encode(key),
+                        source
+                    );
 
                     // Cache locally for future requests
                     let mut dht_guard = self.dht.write().await;
-                    if let Err(e) = dht_guard.store(&DhtKey::from_bytes(*key), value.clone()).await {
+                    if let Err(e) = dht_guard
+                        .store(&DhtKey::from_bytes(*key), value.clone())
+                        .await
+                    {
                         warn!("Failed to cache retrieved value: {}", e);
                     }
 
                     return Ok(DhtNetworkResult::GetSuccess {
-                        key: key.clone(),
+                        key: *key,
                         value,
                         source,
                     });
@@ -484,7 +500,10 @@ impl DhtNetworkManager {
                     );
                 }
                 Ok(result) => {
-                    warn!("Unexpected result from peer {}: {:?}", &node.peer_id, result);
+                    warn!(
+                        "Unexpected result from peer {}: {:?}",
+                        &node.peer_id, result
+                    );
                 }
                 Err(e) => {
                     warn!("Failed to query peer {}: {}", node.peer_id.clone(), e);
@@ -493,7 +512,7 @@ impl DhtNetworkManager {
         }
 
         info!("Value not found for key: {}", hex::encode(key));
-        Ok(DhtNetworkResult::GetNotFound { key: key.clone() })
+        Ok(DhtNetworkResult::GetNotFound { key: *key })
     }
 
     /// Find nodes closest to a key
@@ -503,10 +522,7 @@ impl DhtNetworkManager {
         let closest_nodes = self
             .find_closest_nodes(key, self.config.replication_factor * 2)
             .await?;
-        let serializable_nodes: Vec<SerializableDHTNode> = closest_nodes
-            .into_iter()
-            .map(|node| node)
-            .collect();
+        let serializable_nodes: Vec<SerializableDHTNode> = closest_nodes.into_iter().collect();
 
         info!(
             "Found {} nodes closest to key: {}",
@@ -514,7 +530,7 @@ impl DhtNetworkManager {
             hex::encode(key)
         );
         Ok(DhtNetworkResult::NodesFound {
-            key: key.clone(),
+            key: *key,
             nodes: serializable_nodes,
         })
     }
@@ -576,13 +592,15 @@ impl DhtNetworkManager {
                 Ok(result) => {
                     warn!(
                         "Unexpected join result from {}: {:?}",
-                        bootstrap_node.peer_id.to_string(), result
+                        bootstrap_node.peer_id.to_string(),
+                        result
                     );
                 }
                 Err(e) => {
                     warn!(
                         "Failed to join via bootstrap node {}: {}",
-                        bootstrap_node.peer_id.to_string(), e
+                        bootstrap_node.peer_id.to_string(),
+                        e
                     );
                 }
             }
@@ -628,31 +646,45 @@ impl DhtNetworkManager {
 
     /// Find closest nodes to a key using local routing table and network queries
     async fn find_closest_nodes(&self, key: &Key, count: usize) -> Result<Vec<DHTNode>> {
-        debug!("Finding {} closest nodes to key: {}", count, hex::encode(key));
+        debug!(
+            "Finding {} closest nodes to key: {}",
+            count,
+            hex::encode(key)
+        );
 
         // Start with local routing table
         let local_nodes = {
             let dht_guard = self.dht.read().await;
-            dht_guard.find_nodes(&DhtKey::from_bytes(*key), 8).await.unwrap_or_else(|_| Vec::new())
+            dht_guard
+                .find_nodes(&DhtKey::from_bytes(*key), 8)
+                .await
+                .unwrap_or_else(|_| Vec::new())
         };
 
         if local_nodes.len() >= count {
-            return Ok(local_nodes.into_iter().take(count).map(|node| DHTNode {
+            return Ok(local_nodes
+                .into_iter()
+                .take(count)
+                .map(|node| DHTNode {
+                    peer_id: node.id.to_string(),
+                    address: node.address,
+                    distance: None,
+                    reliability: node.capacity.reliability_score,
+                })
+                .collect());
+        }
+
+        // Query network for more nodes if needed
+        let mut all_nodes: Vec<DHTNode> = local_nodes
+            .into_iter()
+            .map(|node| DHTNode {
                 peer_id: node.id.to_string(),
                 address: node.address,
                 distance: None,
                 reliability: node.capacity.reliability_score,
-            }).collect());
-        }
-
-        // Query network for more nodes if needed
-        let mut all_nodes: Vec<DHTNode> = local_nodes.into_iter().map(|node| DHTNode {
-            peer_id: node.id.to_string(),
-            address: node.address,
-            distance: None,
-            reliability: node.capacity.reliability_score,
-        }).collect();
-        let find_operation = DhtNetworkOperation::FindNode { key: key.clone() };
+            })
+            .collect();
+        let find_operation = DhtNetworkOperation::FindNode { key: *key };
 
         // Query known peers for additional nodes
         let known_peers: Vec<PeerId> = {
@@ -687,17 +719,21 @@ impl DhtNetworkManager {
         all_nodes.sort_by(|a, b| {
             let a_id_bytes = hex::decode(&a.peer_id).unwrap_or_else(|_| vec![0u8; 32]);
             let b_id_bytes = hex::decode(&b.peer_id).unwrap_or_else(|_| vec![0u8; 32]);
-            
+
             let mut a_key = [0u8; 32];
             let mut b_key = [0u8; 32];
-            a_key[..a_id_bytes.len().min(32)].copy_from_slice(&a_id_bytes[..a_id_bytes.len().min(32)]);
-            b_key[..b_id_bytes.len().min(32)].copy_from_slice(&b_id_bytes[..b_id_bytes.len().min(32)]);
-            
+            a_key[..a_id_bytes.len().min(32)]
+                .copy_from_slice(&a_id_bytes[..a_id_bytes.len().min(32)]);
+            b_key[..b_id_bytes.len().min(32)]
+                .copy_from_slice(&b_id_bytes[..b_id_bytes.len().min(32)]);
+
             let a_dht_key = DhtKey::from_bytes(a_key);
             let b_dht_key = DhtKey::from_bytes(b_key);
             let target_key = DhtKey::from_bytes(*key);
-            
-            a_dht_key.distance(&target_key).cmp(&b_dht_key.distance(&target_key))
+
+            a_dht_key
+                .distance(&target_key)
+                .cmp(&b_dht_key.distance(&target_key))
         });
         Ok(all_nodes.into_iter().take(count).collect())
     }
@@ -808,11 +844,17 @@ impl DhtNetworkManager {
             match &context.operation {
                 DhtNetworkOperation::Get { key } => {
                     // Try local DHT as fallback
-                    if let Ok(Some(value)) = self.dht.read().await.retrieve(&DhtKey::from_bytes(*key)).await {
+                    if let Ok(Some(value)) = self
+                        .dht
+                        .read()
+                        .await
+                        .retrieve(&DhtKey::from_bytes(*key))
+                        .await
+                    {
                         // Remove the operation as we found a result
                         self.active_operations.write().await.remove(message_id);
                         return Some(DhtNetworkResult::GetSuccess {
-                            key: key.clone(),
+                            key: *key,
                             value,
                             source: context.peer_id.clone(),
                         });
@@ -820,7 +862,13 @@ impl DhtNetworkManager {
                 }
                 DhtNetworkOperation::FindNode { key } => {
                     // Try local node lookup as fallback
-                    let nodes = self.dht.read().await.find_nodes(&DhtKey::from_bytes(*key), 8).await.unwrap_or_else(|_| Vec::new());
+                    let nodes = self
+                        .dht
+                        .read()
+                        .await
+                        .find_nodes(&DhtKey::from_bytes(*key), 8)
+                        .await
+                        .unwrap_or_else(|_| Vec::new());
                     if !nodes.is_empty() {
                         self.active_operations.write().await.remove(message_id);
                         let serializable_nodes: Vec<SerializableDHTNode> = nodes
@@ -834,7 +882,7 @@ impl DhtNetworkManager {
                             })
                             .collect();
                         return Some(DhtNetworkResult::NodesFound {
-                            key: key.clone(),
+                            key: *key,
                             nodes: serializable_nodes,
                         });
                     }
@@ -877,7 +925,13 @@ impl DhtNetworkManager {
             match context.operation {
                 DhtNetworkOperation::Put { key, value } => {
                     // Attempt to store locally as fallback
-                    if let Err(e) = self.dht.write().await.store(&DhtKey::from_bytes(key), value).await {
+                    if let Err(e) = self
+                        .dht
+                        .write()
+                        .await
+                        .store(&DhtKey::from_bytes(key), value)
+                        .await
+                    {
                         warn!("Failed to store DHT record locally: {}", e);
                     }
                     Ok(DhtNetworkResult::PutSuccess {
@@ -887,7 +941,13 @@ impl DhtNetworkManager {
                 }
                 DhtNetworkOperation::Get { key } => {
                     // Check if we have the value locally (simulated remote storage)
-                    if let Ok(Some(value)) = self.dht.read().await.retrieve(&DhtKey::from_bytes(key)).await {
+                    if let Ok(Some(value)) = self
+                        .dht
+                        .read()
+                        .await
+                        .retrieve(&DhtKey::from_bytes(key))
+                        .await
+                    {
                         Ok(DhtNetworkResult::GetSuccess {
                             key,
                             value,
@@ -899,7 +959,10 @@ impl DhtNetworkManager {
                 }
                 DhtNetworkOperation::FindNode { key } => {
                     let dht_guard = self.dht.read().await;
-                    let nodes = dht_guard.find_nodes(&DhtKey::from_bytes(key), 8).await.unwrap_or_else(|_| Vec::new());
+                    let nodes = dht_guard
+                        .find_nodes(&DhtKey::from_bytes(key), 8)
+                        .await
+                        .unwrap_or_else(|_| Vec::new());
                     let serializable_nodes: Vec<SerializableDHTNode> = nodes
                         .into_iter()
                         .take(3)
@@ -916,7 +979,13 @@ impl DhtNetworkManager {
                     })
                 }
                 DhtNetworkOperation::FindValue { key } => {
-                    if let Ok(Some(value)) = self.dht.read().await.retrieve(&DhtKey::from_bytes(key)).await {
+                    if let Ok(Some(value)) = self
+                        .dht
+                        .read()
+                        .await
+                        .retrieve(&DhtKey::from_bytes(key))
+                        .await
+                    {
                         Ok(DhtNetworkResult::ValueFound {
                             key,
                             value,
@@ -924,7 +993,10 @@ impl DhtNetworkManager {
                         })
                     } else {
                         let dht_guard = self.dht.read().await;
-                        let nodes = dht_guard.find_nodes(&DhtKey::from_bytes(key), 8).await.unwrap_or_else(|_| Vec::new());
+                        let nodes = dht_guard
+                            .find_nodes(&DhtKey::from_bytes(key), 8)
+                            .await
+                            .unwrap_or_else(|_| Vec::new());
                         let serializable_nodes: Vec<SerializableDHTNode> = nodes
                             .into_iter()
                             .take(3)
@@ -1011,7 +1083,7 @@ impl DhtNetworkManager {
                 self.dht
                     .write()
                     .await
-                    .store(&DhtKey::from_bytes(key.clone()), value.clone())
+                    .store(&DhtKey::from_bytes(*key), value.clone())
                     .await
                     .map_err(|e| {
                         P2PError::Dht(crate::error::DhtError::StoreFailed(
@@ -1019,26 +1091,35 @@ impl DhtNetworkManager {
                         ))
                     })?;
                 Ok(DhtNetworkResult::PutSuccess {
-                    key: key.clone(),
+                    key: *key,
                     replicated_to: 1,
                 })
             }
             DhtNetworkOperation::Get { key } => {
                 info!("Handling GET request for key: {}", hex::encode(key));
-                if let Ok(Some(record)) = self.dht.read().await.retrieve(&DhtKey::from_bytes(*key)).await {
+                if let Ok(Some(record)) = self
+                    .dht
+                    .read()
+                    .await
+                    .retrieve(&DhtKey::from_bytes(*key))
+                    .await
+                {
                     Ok(DhtNetworkResult::GetSuccess {
-                        key: key.clone(),
+                        key: *key,
                         value: record,
                         source: self.config.local_peer_id.clone(),
                     })
                 } else {
-                    Ok(DhtNetworkResult::GetNotFound { key: key.clone() })
+                    Ok(DhtNetworkResult::GetNotFound { key: *key })
                 }
             }
             DhtNetworkOperation::FindNode { key } => {
                 info!("Handling FIND_NODE request for key: {}", hex::encode(key));
                 let dht_guard = self.dht.read().await;
-                let nodes = dht_guard.find_nodes(&DhtKey::from_bytes(*key), 8).await.unwrap_or_else(|_| Vec::new());
+                let nodes = dht_guard
+                    .find_nodes(&DhtKey::from_bytes(*key), 8)
+                    .await
+                    .unwrap_or_else(|_| Vec::new());
                 let serializable_nodes: Vec<SerializableDHTNode> = nodes
                     .into_iter()
                     .take(8)
@@ -1050,21 +1131,30 @@ impl DhtNetworkManager {
                     })
                     .collect();
                 Ok(DhtNetworkResult::NodesFound {
-                    key: key.clone(),
+                    key: *key,
                     nodes: serializable_nodes,
                 })
             }
             DhtNetworkOperation::FindValue { key } => {
                 info!("Handling FIND_VALUE request for key: {}", hex::encode(key));
-                if let Ok(Some(record)) = self.dht.read().await.retrieve(&DhtKey::from_bytes(*key)).await {
+                if let Ok(Some(record)) = self
+                    .dht
+                    .read()
+                    .await
+                    .retrieve(&DhtKey::from_bytes(*key))
+                    .await
+                {
                     Ok(DhtNetworkResult::ValueFound {
-                        key: key.clone(),
+                        key: *key,
                         value: record,
                         source: self.config.local_peer_id.clone(),
                     })
                 } else {
                     let dht_guard = self.dht.read().await;
-                    let nodes = dht_guard.find_nodes(&DhtKey::from_bytes(*key), 8).await.unwrap_or_else(|_| Vec::new());
+                    let nodes = dht_guard
+                        .find_nodes(&DhtKey::from_bytes(*key), 8)
+                        .await
+                        .unwrap_or_else(|_| Vec::new());
                     let serializable_nodes: Vec<SerializableDHTNode> = nodes
                         .into_iter()
                         .take(8)
@@ -1076,7 +1166,7 @@ impl DhtNetworkManager {
                         })
                         .collect();
                     Ok(DhtNetworkResult::NodesFound {
-                        key: key.clone(),
+                        key: *key,
                         nodes: serializable_nodes,
                     })
                 }
@@ -1195,7 +1285,7 @@ impl DhtNetworkManager {
         let peer_info = peers.entry(peer_id.clone()).or_insert_with(|| {
             DhtPeerInfo {
                 peer_id: peer_id.clone(),
-                dht_key: dht_key.clone(),
+                dht_key,
                 addresses: vec![], // Would be populated from network layer
                 last_seen: Instant::now(),
                 is_connected: true,
@@ -1210,7 +1300,9 @@ impl DhtNetworkManager {
         // Update DHT routing table
         let _node = DHTNode {
             peer_id: peer_id.clone(),
-            address: peer_info.addresses.first()
+            address: peer_info
+                .addresses
+                .first()
                 .map(|addr| addr.to_string())
                 .unwrap_or_else(|| "127.0.0.1:0".to_string()),
             distance: Some(dht_key.to_vec()),
@@ -1235,9 +1327,9 @@ impl DhtNetworkManager {
                     crate::network::P2PEvent::PeerConnected(peer_id) => {
                         info!("DHT peer connected: {}", peer_id);
                         let peer_bytes = peer_id.as_bytes();
-        let mut dht_key = [0u8; 32];
-        let len = peer_bytes.len().min(32);
-        dht_key[..len].copy_from_slice(&peer_bytes[..len]);
+                        let mut dht_key = [0u8; 32];
+                        let len = peer_bytes.len().min(32);
+                        dht_key[..len].copy_from_slice(&peer_bytes[..len]);
 
                         // Add to DHT peers
                         {
@@ -1246,7 +1338,7 @@ impl DhtNetworkManager {
                                 peer_id.clone(),
                                 DhtPeerInfo {
                                     peer_id: peer_id.clone(),
-                                    dht_key: dht_key.clone(),
+                                    dht_key,
                                     addresses: vec![],
                                     last_seen: Instant::now(),
                                     is_connected: true,
@@ -1305,16 +1397,13 @@ impl DhtNetworkManager {
                         connected_count += 1;
 
                         // Add to DHT peers
-                        let dht_key = bootstrap_node
-                            .dht_key
-                            .clone()
-                            .unwrap_or_else(|| {
-                                let bytes = bootstrap_node.peer_id.to_string().into_bytes();
-                                let mut key = [0u8; 32];
-                                let len = bytes.len().min(32);
-                                key[..len].copy_from_slice(&bytes[..len]);
-                                key
-                            });
+                        let dht_key = bootstrap_node.dht_key.unwrap_or_else(|| {
+                            let bytes = bootstrap_node.peer_id.to_string().into_bytes();
+                            let mut key = [0u8; 32];
+                            let len = bytes.len().min(32);
+                            key[..len].copy_from_slice(&bytes[..len]);
+                            key
+                        });
 
                         let mut peers = self.dht_peers.write().await;
                         peers.insert(
@@ -1335,7 +1424,9 @@ impl DhtNetworkManager {
                     Err(e) => {
                         warn!(
                             "Failed to connect to bootstrap node {} at {}: {}",
-                            bootstrap_node.peer_id.to_string(), address, e
+                            bootstrap_node.peer_id.to_string(),
+                            address,
+                            e
                         );
                     }
                 }

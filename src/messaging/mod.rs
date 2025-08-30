@@ -6,6 +6,8 @@ pub mod database;
 pub mod encryption;
 pub mod key_exchange;
 pub mod media;
+pub mod user_handle;
+pub mod user_resolver;
 pub mod mocks;
 pub mod quic_media_streams;
 pub mod reactions;
@@ -18,7 +20,7 @@ pub mod types;
 pub mod webrtc;
 pub mod webrtc_quic_bridge;
 
-use crate::identity::FourWordAddress;
+use user_handle::UserHandle;
 // Removed unused imports
 // use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -53,7 +55,7 @@ pub struct SendMessageRequest {
     pub attachments: Vec<Vec<u8>>,
     pub thread_id: Option<ThreadId>,
     pub reply_to: Option<MessageId>,
-    pub mentions: Vec<FourWordAddress>,
+    pub mentions: Vec<UserHandle>,
     pub ephemeral: bool,
 }
 
@@ -308,7 +310,7 @@ impl MessagingService {
         self.reactions.add_reaction(
             message_id,
             emoji.clone(),
-            self.identity.clone(),
+            crate::messaging::user_resolver::resolve_handle(&self.identity),
         ).await?;
 
         // Sync reaction
@@ -322,7 +324,7 @@ impl MessagingService {
         self.reactions.remove_reaction(
             message_id,
             emoji.clone(),
-            self.identity.clone(),
+            crate::messaging::user_resolver::resolve_handle(&self.identity),
         ).await?;
 
         // Sync reaction removal
@@ -407,7 +409,10 @@ impl MessagingService {
     /// Mark messages as read
     pub async fn mark_as_read(&mut self, message_ids: Vec<MessageId>) -> Result<()> {
         for message_id in message_ids {
-            self.store.mark_as_read(message_id, self.identity.clone()).await?;
+            self.store.mark_as_read(
+                message_id,
+                crate::messaging::user_resolver::resolve_handle(&self.identity),
+            ).await?;
             self.sync.broadcast_read_receipt(message_id).await?;
         }
         Ok(())
@@ -415,12 +420,24 @@ impl MessagingService {
 
     /// Start typing indicator
     pub async fn start_typing(&mut self, channel_id: ChannelId) -> Result<()> {
-        self.sync.broadcast_typing(channel_id, true).await
+        self.sync
+            .broadcast_typing(
+                channel_id,
+                crate::messaging::user_handle::UserHandle::from(self.identity.to_string()),
+                true,
+            )
+            .await
     }
 
     /// Stop typing indicator
     pub async fn stop_typing(&mut self, channel_id: ChannelId) -> Result<()> {
-        self.sync.broadcast_typing(channel_id, false).await
+        self.sync
+            .broadcast_typing(
+                channel_id,
+                crate::messaging::user_handle::UserHandle::from(self.identity.to_string()),
+                false,
+            )
+            .await
     }
 
     /// Initiate key exchange with a peer
@@ -541,12 +558,12 @@ impl MessageStore {
     }
 
     /// Add reaction
-    pub async fn add_reaction(&self, message_id: MessageId, emoji: String, user: FourWordAddress) -> Result<()> {
+    pub async fn add_reaction(&self, message_id: MessageId, emoji: String, user: crate::messaging::user_handle::UserHandle) -> Result<()> {
         self.inner.add_reaction(message_id, emoji, user).await
     }
 
     /// Remove reaction
-    pub async fn remove_reaction(&self, message_id: MessageId, emoji: String, user: FourWordAddress) -> Result<()> {
+    pub async fn remove_reaction(&self, message_id: MessageId, emoji: String, user: crate::messaging::user_handle::UserHandle) -> Result<()> {
         self.inner.remove_reaction(message_id, emoji, user).await
     }
 
@@ -565,10 +582,11 @@ impl MessageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::identity::FourWordAddress;
 
     #[tokio::test]
     async fn test_message_creation() {
-        let identity = FourWordAddress::from("ocean-forest-moon-star");
+        let identity = crate::messaging::user_handle::UserHandle::from("ocean-forest-moon-star");
         let channel = ChannelId::new();
         let content = MessageContent::Text("Hello, world!".to_string());
 

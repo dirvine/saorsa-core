@@ -237,17 +237,14 @@ impl AdaptiveNetworkMonitor {
 
                 // Simulate cache operations
                 use saorsa_core::adaptive::coordinator_extensions::QLearningCacheExtensions;
-                let key = saorsa_core::dht::Key::new(&[0u8; 32]);
-                if cache
-                    .get(&saorsa_core::adaptive::ContentHash(key.hash_bytes()))
-                    .await
-                    .is_some()
-                {
+                let key: saorsa_core::dht::Key = [0u8; 32];
+                let h = saorsa_core::adaptive::ContentHash(key);
+                if cache.get(&h).await.is_some() {
                     m.cache_hits += 1;
                 } else {
                     m.cache_misses += 1;
                     // simulate insert by updating statistics directly
-                    let h = saorsa_core::adaptive::ContentHash(key.hash_bytes());
+                    let h = saorsa_core::adaptive::ContentHash(key);
                     let _ = cache
                         .update_statistics(
                             &saorsa_core::adaptive::CacheAction::Cache(h),

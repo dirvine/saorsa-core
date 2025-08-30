@@ -4,21 +4,26 @@
 [![Crates.io](https://img.shields.io/crates/v/saorsa-core.svg)](https://crates.io/crates/saorsa-core)
 [![Documentation](https://docs.rs/saorsa-core/badge.svg)](https://docs.rs/saorsa-core)
 
-Core P2P networking library for Saorsa platform with DHT, QUIC transport, four-word addresses, and MCP integration.
+Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-stack endpoints (IPv6+IPv4), four-word endpoint encoding, and MCP integration.
+
+## Guides
+
+- Contributor guide: see [AGENTS.md](AGENTS.md)
+- Architecture overview: see [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Features
 
 - **DHT (Distributed Hash Table)**: Advanced DHT implementation with RSPS (Root-Scoped Provider Summaries)
 - **Placement System**: Intelligent shard placement with EigenTrust integration and Byzantine fault tolerance
 - **QUIC Transport**: High-performance networking with ant-quic
-- **Four-Word Addresses**: Human-readable network addresses
+- **Four-Word Endpoints**: Human‑readable network endpoints via `four-word-networking` (IPv4 encodes to 4 words; IPv6 word count decided by the crate); decode requires an explicit port (no defaults).
 - **MCP Integration**: Model Context Protocol support
 - **Post-Quantum Cryptography**: Future-ready cryptographic algorithms
 - **WebRTC over QUIC**: Advanced WebRTC-QUIC bridge for real-time media streaming with adaptive quality
 - **Media Processing**: Image and audio processing with blurhash and symphonia
 - **Geographic Routing**: Location-aware networking
-- **Identity Management**: Post-Quantum Cryptography with ML-DSA-65 signatures (NIST Level 3, ~128-bit quantum security) - No legacy Ed25519 support
-- **Secure Storage**: Database persistence with SQLx
+- **Identity Management**: Post-quantum ML-DSA-65 signatures (NIST Level 3). No PoW; identities hold only required keys (no embedded word address).
+- **Secure Storage**: Database persistence with deadpool-sqlite + rusqlite
 - **Monitoring**: Prometheus metrics integration
 
 ## Quick Start
@@ -59,22 +64,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Four-Word Addresses
+### Four-Word Endpoints
 
-```rust
-use saorsa_core::NetworkAddress;
-
-// Create from IP:port
-let addr = NetworkAddress::from_ipv4("192.168.1.1".parse()?, 9000);
-
-// Get four-word representation
-if let Some(words) = addr.four_words() {
-    println!("Address: {}", words);
-}
-
-// Parse from four-word format
-let addr = NetworkAddress::from_four_words("alpha-beta-gamma-delta")?;
-```
+- Endpoints are encoded/decoded using the `four-word-networking` crate’s adaptive API.
+- IPv4 → 4 words; IPv6 → word count is crate‑defined; decoding requires a port (no implicit defaults).
+- Four‑words are reserved strictly for network endpoints; user identities in messaging are separate handles.
 
 ### MCP Server
 
@@ -100,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 1. **Network Layer**: QUIC-based P2P networking with NAT traversal
 2. **DHT**: Kademlia-based DHT with RSPS optimization
 3. **Placement System**: Intelligent shard placement with weighted selection algorithms
-4. **Identity**: Post-Quantum cryptographic identities with ML-DSA-65 signatures and four-word addresses
+4. **Identity**: Post‑quantum cryptographic identities with ML‑DSA‑65 signatures (no PoW; no embedded four‑word address)
 5. **Storage**: Local and distributed content storage with audit and repair
 6. **Geographic Routing**: Location-aware message routing
 7. **MCP Integration**: Model Context Protocol for AI/LLM integration
@@ -109,24 +103,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Saorsa Core implements a pure post-quantum cryptographic approach for maximum security:
 
-- **Post-Quantum Signatures**: ML-DSA-65 (FIPS 204) for quantum-resistant digital signatures (~128-bit quantum security)
+- **Post‑quantum signatures**: ML‑DSA‑65 (FIPS 204) for quantum‑resistant digital signatures (~128‑bit quantum security)
 - **PQC Encryption**: ChaCha20Poly1305 with quantum-resistant key derivation
 - **Key Exchange**: ML-KEM-768 (FIPS 203) for quantum-resistant key encapsulation (~128-bit quantum security)
 - **Hashing**: BLAKE3 for fast, secure content addressing
 - **Transport Security**: QUIC with TLS 1.3 and PQC cipher suites
 - **No Legacy Support**: Pure PQC implementation with no classical cryptographic fallbacks
 
-### Migration Status
+### Recent Changes
 
-**🚨 CRITICAL SECURITY UPGRADE IN PROGRESS** 🚨
-
-This project is undergoing a complete migration from classical cryptography (Ed25519) to post-quantum cryptography (ML-DSA). The current codebase contains 68+ Ed25519 usages that will be systematically replaced with ML-DSA-65 for quantum resistance.
-
-**Current Status**: Documentation updated, migration planning complete
-**Next Steps**: Core identity system implementation
-**Security Impact**: This migration will provide ~128-bit quantum security vs Ed25519's ~128-bit classical security
-
-**Migration Priority**: CRITICAL - Ed25519 is vulnerable to quantum attacks
+- Removed all Proof‑of‑Work (PoW) usage (identity, adaptive, placement/DHT, error types, CLI).
+- Adopted `four-word-networking` adaptive API; four‑words reserved for endpoints only.
+- Implemented dual‑stack listeners (IPv6 + IPv4) and Happy Eyeballs dialing.
+- Introduced `UserHandle` for messaging identities; migrated mentions, presence, participants, search, reactions, and read/delivered receipts to use it.
 
 ### Data Flow
 

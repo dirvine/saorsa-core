@@ -10,32 +10,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::info;
 
-/// Generate a new identity with proof of work
-pub fn generate_identity(difficulty: u32) -> Result<()> {
-    info!(
-        "Generating new P2P identity with proof-of-work (difficulty: {})...",
-        difficulty
-    );
-    info!("This may take a moment...");
-
+/// Generate a new identity (no proof-of-work)
+pub fn generate_identity() -> Result<()> {
     let start = std::time::Instant::now();
-    let identity = NodeIdentity::generate(difficulty)?;
+    let identity = NodeIdentity::generate()?;
     let elapsed = start.elapsed();
 
-    info!("✅ Identity generated successfully!");
+    info!("✅ Identity generated successfully (no PoW)");
     info!("⏱️  Generation time: {:?}", elapsed);
     info!("📋 Identity Details:");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("Node ID:      {}", identity.node_id());
-    info!("Word Address: {}", identity.word_address());
     info!(
         "Public Key:   {}",
         hex::encode(identity.public_key().as_bytes())
-    );
-    info!("PoW Nonce:    {}", identity.proof_of_work().nonce);
-    info!(
-        "PoW Time:     {:?}",
-        identity.proof_of_work().computation_time
     );
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
@@ -79,7 +67,6 @@ pub fn load_identity(path: &Path) -> Result<NodeIdentity> {
 
     info!("✅ Identity loaded from: {}", path.display());
     info!("Node ID: {}", identity.node_id());
-    info!("Word Address: {}", identity.word_address());
 
     Ok(identity)
 }
@@ -89,17 +76,9 @@ pub fn show_identity(identity: &NodeIdentity) -> Result<()> {
     info!("🆔 P2P Identity Information");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("Node ID:       {}", identity.node_id());
-    info!("Word Address:  {}", identity.word_address());
     info!(
         "Public Key:    {}",
         hex::encode(identity.public_key().as_bytes())
-    );
-    info!("Proof of Work:");
-    info!("  Difficulty:  {}", identity.proof_of_work().difficulty);
-    info!("  Nonce:       {}", identity.proof_of_work().nonce);
-    info!(
-        "  Comp. Time:  {:?}",
-        identity.proof_of_work().computation_time
     );
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
@@ -112,9 +91,6 @@ pub fn show_identity(identity: &NodeIdentity) -> Result<()> {
 pub enum IdentityCommand {
     /// Generate a new identity
     Generate {
-        /// Proof of work difficulty
-        difficulty: Option<u32>,
-
         /// Output file path
         output: Option<PathBuf>,
 
@@ -184,10 +160,9 @@ impl IdentityCliHandler {
     pub async fn execute(&self, command: IdentityCommand) -> Result<String> {
         match command {
             IdentityCommand::Generate {
-                difficulty,
                 output,
                 seed,
-            } => self.handle_generate(difficulty, output, seed).await,
+            } => self.handle_generate(output, seed).await,
             IdentityCommand::Show { path } => self.handle_show(path).await,
             IdentityCommand::Verify { path } => self.handle_verify(path).await,
             IdentityCommand::Export {
@@ -205,11 +180,9 @@ impl IdentityCliHandler {
 
     async fn handle_generate(
         &self,
-        difficulty: Option<u32>,
         output: Option<PathBuf>,
         seed: Option<String>,
     ) -> Result<String> {
-        let difficulty = difficulty.unwrap_or(16);
         let output_path = output
             .or_else(|| self.default_path.clone())
             .ok_or_else(|| {
@@ -223,17 +196,16 @@ impl IdentityCliHandler {
             let mut seed_bytes = [0u8; 32];
             let seed_hash = sha2::Sha256::digest(seed_str.as_bytes());
             seed_bytes.copy_from_slice(&seed_hash);
-            NodeIdentity::from_seed(&seed_bytes, difficulty)?
+            NodeIdentity::from_seed(&seed_bytes)?
         } else {
-            NodeIdentity::generate(difficulty)?
+            NodeIdentity::generate()?
         };
 
         identity.save_to_file(&output_path).await?;
 
         Ok(format!(
-            "Generated new identity\nNode ID: {}\nWord Address: {}\nSaved to: {}",
+            "Generated new identity\nNode ID: {}\nSaved to: {}",
             identity.node_id(),
-            identity.word_address(),
             output_path.display()
         ))
     }
@@ -248,11 +220,9 @@ impl IdentityCliHandler {
         let identity = NodeIdentity::load_from_file(&path).await?;
 
         Ok(format!(
-            "Identity Information\nNode ID: {}\nWord Address: {}\nPublic Key: {}\nPoW Difficulty: {}",
+            "Identity Information\nNode ID: {}\nPublic Key: {}",
             identity.node_id(),
-            identity.word_address(),
-            hex::encode(identity.public_key().as_bytes()),
-            identity.proof_of_work().difficulty
+            hex::encode(identity.public_key().as_bytes())
         ))
     }
 
@@ -266,14 +236,9 @@ impl IdentityCliHandler {
         let identity = NodeIdentity::load_from_file(&path).await?;
 
         // Verify components
-        let pow_valid = identity
-            .proof_of_work()
-            .verify(identity.node_id(), identity.proof_of_work().difficulty);
         let keys_valid = true; // Keys are valid if we can load them
-        let address_matches = true; // Address is derived from node ID
-
-        if pow_valid && keys_valid && address_matches {
-            Ok("Identity is valid\n✓ Proof of Work: Valid\n✓ Cryptographic keys: Valid\n✓ Word address: Matches".to_string())
+        if keys_valid {
+            Ok("Identity is valid\n✓ Cryptographic keys: Valid".to_string())
         } else {
             Ok("Identity validation failed".to_string())
         }
@@ -370,18 +335,11 @@ impl IdentityCommand {
 
         match args[1].as_str() {
             "generate" => {
-                let mut difficulty = None;
                 let mut i = 2;
                 while i < args.len() {
-                    if args[i] == "--difficulty" && i + 1 < args.len() {
-                        difficulty = args[i + 1].parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
+                    i += 1;
                 }
                 Ok(IdentityCommand::Generate {
-                    difficulty,
                     output: None,
                     seed: None,
                 })
@@ -415,7 +373,7 @@ mod tests {
         let identity_path = temp_dir.path().join("test_identity.json");
 
         // Generate identity
-        let identity = NodeIdentity::generate(8).expect("Should generate identity in test");
+        let identity = NodeIdentity::generate().expect("Should generate identity in test");
         let original_id = identity.node_id().clone();
 
         // Save
@@ -426,6 +384,5 @@ mod tests {
 
         // Verify
         assert_eq!(loaded.node_id(), &original_id);
-        assert_eq!(loaded.word_address(), identity.word_address());
     }
 }

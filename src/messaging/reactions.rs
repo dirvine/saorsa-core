@@ -2,7 +2,7 @@
 
 use super::MessageStore;
 use super::types::*;
-use crate::identity::FourWordAddress;
+use super::user_handle::UserHandle;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -41,7 +41,7 @@ impl ReactionManager {
         &self,
         message_id: MessageId,
         emoji: String,
-        user: FourWordAddress,
+        user: UserHandle,
     ) -> Result<()> {
         // Validate emoji
         if !self.is_valid_emoji(&emoji) {
@@ -50,7 +50,7 @@ impl ReactionManager {
 
         // Use database store directly
         self.store
-            .add_reaction(message_id, emoji.clone(), user.clone())
+            .add_reaction(message_id, emoji.clone(), UserHandle::from(user.as_str().to_string()))
             .await?;
 
         // Update cache
@@ -71,11 +71,11 @@ impl ReactionManager {
         &self,
         message_id: MessageId,
         emoji: String,
-        user: FourWordAddress,
+        user: UserHandle,
     ) -> Result<()> {
         // Use database store directly
         self.store
-            .remove_reaction(message_id, emoji.clone(), user.clone())
+            .remove_reaction(message_id, emoji.clone(), UserHandle::from(user.as_str().to_string()))
             .await?;
 
         // Update cache
@@ -117,7 +117,7 @@ impl ReactionManager {
         &self,
         message_id: MessageId,
         emoji: &str,
-        user: &FourWordAddress,
+        user: &UserHandle,
     ) -> Result<bool> {
         let reactions = self.get_reactions(message_id).await?;
         Ok(reactions.has_user_reacted(emoji, user))
@@ -148,7 +148,7 @@ impl ReactionManager {
         &self,
         message_id: MessageId,
         emoji: String,
-        user: FourWordAddress,
+        user: UserHandle,
     ) -> Result<bool> {
         let has_reacted = self.has_user_reacted(message_id, &emoji, &user).await?;
 
@@ -204,7 +204,7 @@ impl ReactionManager {
 pub struct MessageReactions {
     pub message_id: MessageId,
     /// Map of emoji to users who reacted
-    pub reactions: HashMap<String, Vec<FourWordAddress>>,
+    pub reactions: HashMap<String, Vec<UserHandle>>,
     /// Total reaction count
     pub total_count: u32,
 }
@@ -220,7 +220,7 @@ impl MessageReactions {
     }
 
     /// Add a reaction
-    pub fn add_reaction(&mut self, emoji: String, user: FourWordAddress) {
+    pub fn add_reaction(&mut self, emoji: String, user: UserHandle) {
         let users = self.reactions.entry(emoji).or_default();
         if !users.contains(&user) {
             users.push(user);
@@ -229,22 +229,22 @@ impl MessageReactions {
     }
 
     /// Remove a reaction
-    pub fn remove_reaction(&mut self, emoji: &str, user: &FourWordAddress) {
-        if let Some(users) = self.reactions.get_mut(emoji) {
-            if let Some(pos) = users.iter().position(|u| u == user) {
-                users.remove(pos);
-                self.total_count = self.total_count.saturating_sub(1);
+    pub fn remove_reaction(&mut self, emoji: &str, user: &UserHandle) {
+        if let Some(users) = self.reactions.get_mut(emoji)
+            && let Some(pos) = users.iter().position(|u| u == user)
+        {
+            users.remove(pos);
+            self.total_count = self.total_count.saturating_sub(1);
 
-                // Remove emoji if no users left
-                if users.is_empty() {
-                    self.reactions.remove(emoji);
-                }
+            // Remove emoji if no users left
+            if users.is_empty() {
+                self.reactions.remove(emoji);
             }
         }
     }
 
     /// Check if user has reacted with emoji
-    pub fn has_user_reacted(&self, emoji: &str, user: &FourWordAddress) -> bool {
+    pub fn has_user_reacted(&self, emoji: &str, user: &UserHandle) -> bool {
         self.reactions
             .get(emoji)
             .map(|users| users.contains(user))
@@ -294,7 +294,7 @@ pub struct CustomEmoji {
 pub struct ReactionEvent {
     pub message_id: MessageId,
     pub emoji: String,
-    pub user: FourWordAddress,
+    pub user: UserHandle,
     pub action: ReactionAction,
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
@@ -322,7 +322,7 @@ mod tests {
         let manager = ReactionManager::new(store);
 
         let message_id = MessageId::new();
-        let user = FourWordAddress::from("alice-bob-charlie-david");
+        let user = UserHandle::from("alice");
 
         manager
             .add_reaction(message_id, "👍".to_string(), user.clone())
@@ -346,7 +346,7 @@ mod tests {
         let manager = ReactionManager::new(store);
 
         let message_id = MessageId::new();
-        let user = FourWordAddress::from("alice-bob-charlie-david");
+        let user = UserHandle::from("alice");
         let emoji = "❤️".to_string();
 
         // First toggle - add
@@ -379,8 +379,8 @@ mod tests {
         let manager = ReactionManager::new(store);
 
         let message_id = MessageId::new();
-        let user1 = FourWordAddress::from("alice-bob-charlie-david");
-        let user2 = FourWordAddress::from("eve-frank-grace-henry");
+        let user1 = UserHandle::from("alice");
+        let user2 = UserHandle::from("eve");
 
         manager
             .add_reaction(message_id, "👍".to_string(), user1.clone())

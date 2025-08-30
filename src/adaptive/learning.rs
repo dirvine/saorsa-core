@@ -488,14 +488,14 @@ impl QLearnCacheManager {
 
                 // Calculate size bucket (logarithmic scale)
                 let size_bucket = match stat.content_size {
-                    0..=1024 => 0,               // 1KB
-                    1025..=10240 => 1,           // 10KB
-                    10241..=102400 => 2,         // 100KB
-                    102401..=1048576 => 3,       // 1MB
-                    1048577..=10485760 => 4,     // 10MB
-                    10485761..=104857600 => 5,   // 100MB
-                    104857601..=1073741824 => 6, // 1GB
-                    _ => 7,                      // >1GB
+                    0..=1_024 => 0,                   // 1KB
+                    1_025..=10_240 => 1,              // 10KB
+                    10_241..=102_400 => 2,            // 100KB
+                    102_401..=1_048_576 => 3,         // 1MB
+                    1_048_577..=10_485_760 => 4,      // 10MB
+                    10_485_761..=104_857_600 => 5,    // 100MB
+                    104_857_601..=1_073_741_824 => 6, // 1GB
+                    _ => 7,                           // >1GB
                 };
 
                 (hourly_rate as u8, popularity, size_bucket)
@@ -559,14 +559,12 @@ impl QLearnCacheManager {
             .min_by_key(|(_, content)| content.last_access)
             .map(|(k, _)| *k);
 
-        if let Some(key) = oldest {
-
-
-            if let Some(value) = cache.remove(&key) {
-                self.current_size
-                    .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
-                return true;
-            }
+        if let Some(key) = oldest
+            && let Some(value) = cache.remove(&key)
+        {
+            self.current_size
+                .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
+            return true;
         }
 
         false
@@ -710,12 +708,12 @@ impl QLearnCacheManager {
             .min_by_key(|(_, content)| content.access_count)
             .map(|(k, _)| *k);
 
-        if let Some(key) = least_frequent {
-            if let Some(value) = cache.remove(&key) {
-                self.current_size
-                    .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
-                return true;
-            }
+        if let Some(key) = least_frequent
+            && let Some(value) = cache.remove(&key)
+        {
+            self.current_size
+                .fetch_sub(value.data.len(), std::sync::atomic::Ordering::Relaxed);
+            return true;
         }
         false
     }
@@ -1149,10 +1147,10 @@ impl ChurnPredictor {
         // Check cache first
         {
             let cache = self.prediction_cache.read().await;
-            if let Some(cached) = cache.get(node_id) {
-                if cached.timestamp.elapsed() < std::time::Duration::from_secs(300) {
-                    return cached.clone();
-                }
+            if let Some(cached) = cache.get(node_id)
+                && cached.timestamp.elapsed() < std::time::Duration::from_secs(300)
+            {
+                return cached.clone();
             }
         }
 
@@ -1303,13 +1301,13 @@ impl ChurnPredictor {
             }
             NodeEvent::Disconnected => {
                 // End current session
-                if let Some((start, end)) = node_history.sessions.last_mut() {
-                    if end.is_none() {
-                        let now = std::time::Instant::now();
-                        *end = Some(now);
-                        let session_length = now.duration_since(*start).as_secs();
-                        node_history.total_uptime += session_length;
-                    }
+                if let Some((start, end)) = node_history.sessions.last_mut()
+                    && end.is_none()
+                {
+                    let now = std::time::Instant::now();
+                    *end = Some(now);
+                    let session_length = now.duration_since(*start).as_secs();
+                    node_history.total_uptime += session_length;
                 }
             }
         }

@@ -197,11 +197,10 @@ impl PeerMetricsCache {
 
     /// Evict least recently used entry
     fn evict_lru(&mut self) {
-        if let Some(peer_id) = self.access_order.pop_front() {
-
-            if let Some(entry) = self.entries.remove(&peer_id) {
-                self.remove_from_regional_index(&entry.peer_id);
-            }
+        if let Some(peer_id) = self.access_order.pop_front()
+            && let Some(entry) = self.entries.remove(&peer_id)
+        {
+            self.remove_from_regional_index(&entry.peer_id);
         }
     }
 

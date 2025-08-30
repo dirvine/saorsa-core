@@ -29,5 +29,5 @@ mod four_words_error_tests;
 pub use enhanced::*;
 pub use four_words::{FourWordAddress, WordEncoder};
 pub use manager::*;
-pub use node_identity::{IdentityData, NodeId, NodeIdentity, ProofOfWork};
+pub use node_identity::{IdentityData, NodeId, NodeIdentity};
 pub use secure_node_identity::SecureNodeIdentity;

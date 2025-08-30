@@ -212,10 +212,10 @@ on_routing_failure(|failure| {
 ## Security Considerations
 
 ### 1. Sybil Attack Resistance
-- **Proof of Work**: Computational cost for identity creation
-- **Trust Networks**: Reputation-based filtering
+- **Trust Networks**: Reputation-based filtering (EigenTrust)
 - **Resource Testing**: Bandwidth and storage verification
 - **Social Graph Analysis**: Detect abnormal connection patterns
+- Note: Proof‑of‑Work has been removed from the design and implementation.
 
 ### 2. Eclipse Attack Prevention
 - **Diverse Peer Selection**: Multiple routing strategies
@@ -225,7 +225,7 @@ on_routing_failure(|failure| {
 
 ### 3. Data Integrity
 - **Content Addressing**: BLAKE3 hash verification
-- **Signature Verification**: Ed25519/ML-DSA signatures
+- **Signature Verification**: ML-DSA signatures (post‑quantum)
 - **Merkle Trees**: Efficient large file verification
 - **Byzantine Fault Tolerance**: Handle malicious nodes
 
@@ -285,8 +285,9 @@ The system automatically adjusts operational parameters:
 ### Production Ready ✅
 - Kademlia DHT with K=8 replication
 - QUIC transport with NAT traversal
-- Three-word addressing system
-- Ed25519 cryptographic identity
+- Dual‑stack listeners (IPv6 + IPv4) with Happy Eyeballs dialing
+- Four‑word endpoint encoding via `four-word-networking` (endpoints only)
+- ML‑DSA cryptographic identity (post‑quantum)
 - Basic caching and storage
 
 ### Beta Features 🔧
@@ -328,8 +329,8 @@ Each entity (personal, organization, project, group, channel) has an associated 
 #### 2. Collaborative File System
 - **Shared Files**: Files outside `web/` directory are collaboratively editable
 - **Real-time Collaboration**: Multiple users can edit markdown files simultaneously
-- **Identity Integration**: Uses four-word identities for user attribution
-- **Display Names**: Users have readable display names while system tracks four-word IDs
+- **Identity Integration**: Uses `UserHandle` for user attribution in messaging and collaboration
+- **Display Names**: Users have readable handles while the system uses four‑word endpoints strictly for network addressing
 - **Version Control**: Git-like versioning for all collaborative documents
 
 #### 3. Reed-Solomon Distribution
@@ -397,7 +398,7 @@ Each entity (personal, organization, project, group, channel) has an associated 
 - **File-Level Encryption**: Each file encrypted with its own derived key
 - **Key Derivation**: BLAKE3 hash of file content as password
 - **Shard Protection**: XOR with file hash before encryption
-- **Identity-Based Access**: Four-word identity controls access rights
+- **Identity-Based Access**: Messaging/user features use `UserHandle` for access control; four‑word endpoints are network addresses only
 
 #### Privacy Protection
 - **Local Metadata**: Reconstruction data kept locally

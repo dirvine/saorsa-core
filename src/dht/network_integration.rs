@@ -235,9 +235,8 @@ impl ConnectionPool {
                     conn.touch();
                     // For now, just return error - this is a mock implementation
                     return Err(anyhow!("Connection already exists"));
-                } else {
-                    active.remove(&node_id);
                 }
+                active.remove(&node_id);
             }
         }
 
@@ -869,7 +868,9 @@ mod tests {
     #[tokio::test]
     async fn test_network_integration_ping() -> Result<()> {
         let transport = Arc::new(MockTransport);
-        let dht_engine = Arc::new(RwLock::new(DhtCoreEngine::new(NodeId::from_bytes([42u8; 32]))?));
+        let dht_engine = Arc::new(RwLock::new(DhtCoreEngine::new(NodeId::from_bytes(
+            [42u8; 32],
+        ))?));
 
         let network = NetworkIntegrationLayer::new(transport, dht_engine);
 

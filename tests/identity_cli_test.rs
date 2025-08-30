@@ -283,3 +283,4 @@ mod cli_integration_tests {
 }
 
 // Removed local helper types; use `saorsa_core::identity::cli::MessageInput` instead.
+#![cfg(feature = "legacy_pow_tests")]

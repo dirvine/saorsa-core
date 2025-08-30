@@ -17,7 +17,6 @@
 //! All records support:
 //! - Compact binary serialization (≤512 bytes)
 //! - TTL management (60 minutes)
-//! - Proof of Work validation (≈18 bits for high-churn keys)
 //! - Cryptographic signatures where needed
 
 use crate::error::{P2PError, P2pResult};
@@ -97,8 +96,8 @@ pub const MAX_RECORD_SIZE: usize = 512;
 /// Default TTL for DHT records (60 minutes)
 pub const DEFAULT_TTL: Duration = Duration::from_secs(3600);
 
-/// Minimum proof of work bits for high-churn keys
-pub const MIN_POW_BITS: u8 = 18;
+// Proof of Work has been removed. Records are validated and rate-limited via
+// authentication, reputation, and network-level controls.
 
 /// Node identifier for compatibility with existing saorsa-core
 pub use crate::adaptive::NodeId;
@@ -557,8 +556,6 @@ pub struct DhtRecord {
     pub key: Hash,
     /// Record data
     pub data: DhtRecordData,
-    /// Proof of work nonce (for high-churn keys)
-    pub pow_nonce: Option<u64>,
     /// Time to live in seconds
     pub ttl: u64,
 }
@@ -584,7 +581,6 @@ impl DhtRecord {
         Self {
             key,
             data,
-            pow_nonce: None,
             ttl: ttl_secs,
         }
     }
@@ -637,88 +633,7 @@ impl DhtRecord {
         record_valid && ttl_valid
     }
 
-    /// Compute proof of work for high-churn keys
-    pub fn compute_pow(&mut self, target_bits: u8) -> P2pResult<()> {
-        if target_bits == 0 {
-            self.pow_nonce = None;
-            return Ok(());
-        }
-
-        let target_difficulty = if target_bits >= 64 {
-            0
-        } else {
-            u64::MAX >> target_bits
-        };
-
-        for nonce in 0..u64::MAX {
-            self.pow_nonce = Some(nonce);
-
-            let hash = self.compute_pow_hash()?;
-            let hash_value = u64::from_be_bytes(
-                hash.as_bytes()[..8]
-                    .try_into()
-                    .map_err(|_| P2PError::Internal("Hash conversion failed".into()))?,
-            );
-
-            if hash_value < target_difficulty {
-                return Ok(());
-            }
-
-            // Prevent infinite loops
-            if nonce % 1_000_000 == 0 {
-                return Err(P2PError::ProofOfWorkFailed);
-            }
-        }
-
-        Err(P2PError::ProofOfWorkFailed)
-    }
-
-    /// Verify proof of work
-    pub fn verify_pow(&self, target_bits: u8) -> P2pResult<bool> {
-        if target_bits == 0 {
-            return Ok(self.pow_nonce.is_none());
-        }
-
-        let _nonce = self
-            .pow_nonce
-            .ok_or_else(|| P2PError::InvalidInput("No proof of work nonce".to_string()))?;
-
-        let target_difficulty = if target_bits >= 64 {
-            0
-        } else {
-            u64::MAX >> target_bits
-        };
-
-        let hash = self.compute_pow_hash()?;
-        let hash_value = u64::from_be_bytes(
-            hash.as_bytes()[..8]
-                .try_into()
-                .map_err(|_| P2PError::Internal("Hash conversion failed".into()))?,
-        );
-
-        Ok(hash_value < target_difficulty)
-    }
-
-    /// Compute hash for proof of work
-    fn compute_pow_hash(&self) -> P2pResult<Hash> {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(self.key.as_bytes());
-
-        // Serialize record data without PoW nonce for consistent hashing
-        let mut record_copy = self.clone();
-        let original_nonce = record_copy.pow_nonce;
-        record_copy.pow_nonce = None;
-
-        let data_bytes = bincode::serialize(&record_copy.data)
-            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
-        hasher.update(&data_bytes);
-
-        if let Some(nonce) = original_nonce {
-            hasher.update(&nonce.to_be_bytes());
-        }
-
-        Ok(hasher.finalize().into())
-    }
+    // Records are authenticated and rate-limited elsewhere
 
     /// Get the size of the serialized record
     pub fn size(&self) -> P2pResult<usize> {
@@ -741,7 +656,6 @@ impl DhtRecord {
 pub struct DhtRecordBuilder {
     key: Option<Hash>,
     ttl: Option<Duration>,
-    pow_bits: Option<u8>,
 }
 
 impl DhtRecordBuilder {
@@ -750,7 +664,6 @@ impl DhtRecordBuilder {
         Self {
             key: None,
             ttl: None,
-            pow_bits: None,
         }
     }
 
@@ -766,11 +679,7 @@ impl DhtRecordBuilder {
         self
     }
 
-    /// Set proof of work difficulty
-    pub fn pow_bits(mut self, bits: u8) -> Self {
-        self.pow_bits = Some(bits);
-        self
-    }
+    // No additional proof-of-work configuration
 
     /// Build a DHT record with node advertisement data
     pub fn build_node_ad(self, node_ad: NodeAd) -> P2pResult<DhtRecord> {
@@ -778,12 +687,7 @@ impl DhtRecordBuilder {
             .key
             .ok_or_else(|| P2PError::InvalidInput("Key is required".to_string()))?;
 
-        let mut record = DhtRecord::new(key, DhtRecordData::NodeAd(node_ad), self.ttl);
-
-        if let Some(bits) = self.pow_bits {
-            record.compute_pow(bits)?;
-        }
-
+        let record = DhtRecord::new(key, DhtRecordData::NodeAd(node_ad), self.ttl);
         Ok(record)
     }
 
@@ -793,12 +697,7 @@ impl DhtRecordBuilder {
             .key
             .ok_or_else(|| P2PError::InvalidInput("Key is required".to_string()))?;
 
-        let mut record = DhtRecord::new(key, DhtRecordData::GroupBeacon(group_beacon), self.ttl);
-
-        if let Some(bits) = self.pow_bits {
-            record.compute_pow(bits)?;
-        }
-
+        let record = DhtRecord::new(key, DhtRecordData::GroupBeacon(group_beacon), self.ttl);
         Ok(record)
     }
 
@@ -808,12 +707,7 @@ impl DhtRecordBuilder {
             .key
             .ok_or_else(|| P2PError::InvalidInput("Key is required".to_string()))?;
 
-        let mut record = DhtRecord::new(key, DhtRecordData::DataPointer(data_pointer), self.ttl);
-
-        if let Some(bits) = self.pow_bits {
-            record.compute_pow(bits)?;
-        }
-
+        let record = DhtRecord::new(key, DhtRecordData::DataPointer(data_pointer), self.ttl);
         Ok(record)
     }
 
@@ -823,16 +717,11 @@ impl DhtRecordBuilder {
             .key
             .ok_or_else(|| P2PError::InvalidInput("Key is required".to_string()))?;
 
-        let mut record = DhtRecord::new(
+        let record = DhtRecord::new(
             key,
             DhtRecordData::RegisterPointer(register_pointer),
             self.ttl,
         );
-
-        if let Some(bits) = self.pow_bits {
-            record.compute_pow(bits)?;
-        }
-
         Ok(record)
     }
 }
@@ -1049,22 +938,13 @@ mod tests {
 
     #[test]
     fn test_dht_record_proof_of_work() {
+        // Ensure record creation works with required validation
         let key = blake3::hash(b"test key");
         let cid = blake3::hash(b"test content");
         let ticket_ids = vec![PlacementTicketId::from([6u8; 32])];
         let pointer = DataPointer::new(cid.into(), ticket_ids).unwrap();
-
-        let mut record = DhtRecord::new(key.into(), DhtRecordData::DataPointer(pointer), None);
-
-        // Compute PoW with low difficulty for testing
-        record.compute_pow(8).unwrap();
-        assert!(record.pow_nonce.is_some());
-
-        // Verify PoW
-        assert!(record.verify_pow(8).unwrap());
-
-        // Wrong difficulty should fail
-        assert!(!record.verify_pow(16).unwrap());
+        let record = DhtRecord::new(key.into(), DhtRecordData::DataPointer(pointer), None);
+        assert!(record.is_valid());
     }
 
     #[test]
@@ -1077,14 +957,12 @@ mod tests {
         let record = DhtRecordBuilder::new()
             .key(key.into())
             .ttl(Duration::from_secs(1800))
-            .pow_bits(8)
             .build_data_pointer(pointer)
             .unwrap();
 
         assert_eq!(record.key, key.into());
         assert_eq!(record.ttl, 1800);
-        assert!(record.pow_nonce.is_some());
-        assert!(record.verify_pow(8).unwrap());
+        assert!(record.is_valid());
     }
 
     #[test]

@@ -48,7 +48,7 @@ Efficient record types with ≤512B serialization:
 - **DATA_POINTER**: Content location information
 - **REGISTER_POINTER**: Mutable data references
 
-All records include proof-of-work (~18 bits) and TTL (60 minutes).
+Records include appropriate validation and TTLs. Proof‑of‑Work has been removed.
 
 ### 4. Storage Orchestrator (`src/placement/orchestrator.rs`)
 
@@ -234,13 +234,10 @@ impl PlacementStrategy for CustomStrategy {
 - Byzantine node detection through failed audits
 - Trust transitivity for new node evaluation
 
-### Proof of Work
+### Rate Limiting & Abuse Prevention
 
-DHT records include computational proof-of-work:
-- Difficulty: ~18 bits (adjustable)
-- Purpose: Rate limiting and spam prevention
-- Verification: O(1) constant time
-- Storage: 8 bytes per record
+- Defensive measures rely on validation, reputation (EigenTrust), and network‑level throttling.
+- Proof‑of‑Work is no longer used in placement/DHT records.
 
 ### Data Integrity
 

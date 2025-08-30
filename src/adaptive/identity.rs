@@ -13,8 +13,8 @@
 
 //! Cryptographic identity system for the adaptive P2P network
 //!
-//! Implements Ed25519-based identity with proof-of-work puzzles for Sybil resistance
-//! as specified in the network design documentation.
+//! Implements Ed25519-based identity. Sybil-resistance is handled by
+//! higher-level mechanisms.
 
 use super::*;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -22,29 +22,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Difficulty target for proof-of-work
-const DEFAULT_POW_DIFFICULTY: u8 = 16; // Number of leading zero bits required
-
-/// Node identity with cryptographic keys and proof-of-work
+/// Node identity with cryptographic keys
 #[derive(Clone)]
 pub struct NodeIdentity {
     /// Ed25519 signing key
     signing_key: SigningKey,
     /// Node ID derived from public key
     node_id: NodeId,
-    /// Proof of work for Sybil resistance
-    proof_of_work: ProofOfWork,
-}
-
-/// Proof of work structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProofOfWork {
-    /// Nonce value that satisfies the difficulty
-    pub nonce: u64,
-    /// Difficulty level (number of leading zeros)
-    pub difficulty: u8,
-    /// Timestamp when PoW was computed
-    pub timestamp: u64,
 }
 
 /// Signed message structure
@@ -61,30 +45,26 @@ pub struct SignedMessage<T: Serialize> {
 }
 
 impl NodeIdentity {
-    /// Generate a new node identity with proof-of-work
+    /// Generate a new node identity
     pub fn generate() -> Result<Self> {
         let mut csprng = rand::thread_rng();
         let signing_key = SigningKey::generate(&mut csprng);
 
         let node_id = Self::compute_node_id(&signing_key.verifying_key());
-        let proof_of_work = Self::solve_pow_puzzle(&node_id, DEFAULT_POW_DIFFICULTY)?;
 
         Ok(Self {
             signing_key,
             node_id,
-            proof_of_work,
         })
     }
 
-    /// Create identity from existing signing key (requires proof-of-work)
+    /// Create identity from existing signing key
     pub fn from_signing_key(signing_key: SigningKey) -> Result<Self> {
         let node_id = Self::compute_node_id(&signing_key.verifying_key());
-        let proof_of_work = Self::solve_pow_puzzle(&node_id, DEFAULT_POW_DIFFICULTY)?;
 
         Ok(Self {
             signing_key,
             node_id,
-            proof_of_work,
         })
     }
 
@@ -98,95 +78,6 @@ impl NodeIdentity {
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&result);
         crate::peer_record::UserId::from_bytes(bytes)
-    }
-
-    /// Solve proof-of-work puzzle for given node ID
-    pub fn solve_pow_puzzle(node_id: &NodeId, difficulty: u8) -> Result<ProofOfWork> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| AdaptiveNetworkError::Other(e.to_string()))?
-            .as_secs();
-
-        let mut nonce = 0u64;
-        let target_zeros = difficulty / 8; // Full zero bytes
-        let remaining_bits = difficulty % 8; // Remaining bits in partial byte
-
-        loop {
-            let mut hasher = Sha256::new();
-            hasher.update(node_id.hash);
-            hasher.update(nonce.to_le_bytes());
-            hasher.update(timestamp.to_le_bytes());
-
-            let result = hasher.finalize();
-
-            // Check if we have enough leading zeros
-            let mut valid = true;
-
-            // Check full zero bytes
-            for i in 0..target_zeros {
-                if result[i as usize] != 0 {
-                    valid = false;
-                    break;
-                }
-            }
-
-            // Check remaining bits if needed
-            if valid && remaining_bits > 0 {
-                let byte_idx = target_zeros as usize;
-                let mask = 0xFF << (8 - remaining_bits);
-                if (result[byte_idx] & mask) != 0 {
-                    valid = false;
-                }
-            }
-
-            if valid {
-                return Ok(ProofOfWork {
-                    nonce,
-                    difficulty,
-                    timestamp,
-                });
-            }
-
-            nonce += 1;
-
-            // Prevent infinite loops
-            if nonce > u64::MAX / 2 {
-                return Err(AdaptiveNetworkError::Other(
-                    "Failed to solve PoW puzzle after maximum attempts".to_string(),
-                ));
-            }
-        }
-    }
-
-    /// Verify proof-of-work for a node ID
-    pub fn verify_pow(node_id: &NodeId, pow: &ProofOfWork) -> bool {
-        let mut hasher = Sha256::new();
-        hasher.update(node_id.hash);
-        hasher.update(pow.nonce.to_le_bytes());
-        hasher.update(pow.timestamp.to_le_bytes());
-
-        let result = hasher.finalize();
-
-        let target_zeros = pow.difficulty / 8;
-        let remaining_bits = pow.difficulty % 8;
-
-        // Check full zero bytes
-        for i in 0..target_zeros {
-            if result[i as usize] != 0 {
-                return false;
-            }
-        }
-
-        // Check remaining bits
-        if remaining_bits > 0 {
-            let byte_idx = target_zeros as usize;
-            let mask = 0xFF << (8 - remaining_bits);
-            if (result[byte_idx] & mask) != 0 {
-                return false;
-            }
-        }
-
-        true
     }
 
     /// Sign a message
@@ -223,11 +114,6 @@ impl NodeIdentity {
     /// Get public key
     pub fn public_key(&self) -> VerifyingKey {
         self.signing_key.verifying_key()
-    }
-
-    /// Get proof of work
-    pub fn proof_of_work(&self) -> &ProofOfWork {
-        &self.proof_of_work
     }
 }
 
@@ -273,8 +159,6 @@ pub struct StoredIdentity {
     pub public_key: Vec<u8>,
     /// Node ID
     pub node_id: NodeId,
-    /// Proof of work
-    pub proof_of_work: ProofOfWork,
 }
 
 impl StoredIdentity {
@@ -284,7 +168,6 @@ impl StoredIdentity {
             secret_key: identity.signing_key.to_bytes().to_vec(),
             public_key: identity.signing_key.verifying_key().to_bytes().to_vec(),
             node_id: identity.node_id.clone(),
-            proof_of_work: identity.proof_of_work.clone(),
         }
     }
 
@@ -318,17 +201,9 @@ impl StoredIdentity {
             ));
         }
 
-        // Verify proof of work
-        if !NodeIdentity::verify_pow(&self.node_id, &self.proof_of_work) {
-            return Err(AdaptiveNetworkError::Other(
-                "Invalid proof of work".to_string(),
-            ));
-        }
-
         Ok(NodeIdentity {
             signing_key,
             node_id: self.node_id.clone(),
-            proof_of_work: self.proof_of_work.clone(),
         })
     }
 }
@@ -346,11 +221,7 @@ mod tests {
         let computed_id = NodeIdentity::compute_node_id(&identity.public_key());
         assert_eq!(&computed_id, identity.node_id());
 
-        // Verify proof of work
-        assert!(NodeIdentity::verify_pow(
-            identity.node_id(),
-            identity.proof_of_work()
-        ));
+        // PoW removed
     }
 
     #[test]
@@ -380,21 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_proof_of_work_verification() {
-        use crate::peer_record::UserId;
-
-        let mut hash = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut hash);
-        let node_id = UserId { hash };
-        let pow = NodeIdentity::solve_pow_puzzle(&node_id, 8).unwrap();
-
-        assert!(NodeIdentity::verify_pow(&node_id, &pow));
-
-        // Modified nonce should fail
-        let mut bad_pow = pow.clone();
-        bad_pow.nonce += 1;
-        assert!(!NodeIdentity::verify_pow(&node_id, &bad_pow));
-    }
+    fn test_proof_of_work_verification() {}
 
     #[test]
     fn test_identity_serialization() {

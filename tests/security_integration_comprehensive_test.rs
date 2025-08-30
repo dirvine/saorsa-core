@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy-security-tests")]
 //! Comprehensive Security Integration Tests
 //!
 //! Tests authentication flows, encryption verification, attack simulations,

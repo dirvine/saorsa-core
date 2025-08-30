@@ -108,7 +108,7 @@ impl OptimizedDHTStorage {
         let mut memory_usage = self.memory_usage.write().await;
         let mut stats = self.stats.write().await;
 
-        let key = record.key.clone();
+        let key = record.key;
         let expires_at = record.expires_at;
         let publisher_id = record.publisher.to_string();
         let record_size = self.estimate_record_size(&record);
@@ -129,7 +129,7 @@ impl OptimizedDHTStorage {
         }
 
         // Store record (LRU will handle eviction if needed)
-        if let Some(evicted) = records.put(key.clone(), record) {
+        if let Some(evicted) = records.put(key, record) {
             // Update indexes for evicted record
             let evicted_size = self.estimate_record_size(&evicted);
             size_delta -= evicted_size as i64;
@@ -150,7 +150,7 @@ impl OptimizedDHTStorage {
         expiration_index
             .entry(expires_at)
             .or_insert_with(Vec::new)
-            .push(key.clone());
+            .push(key);
 
         publisher_index
             .entry(publisher_id)
@@ -276,10 +276,10 @@ impl OptimizedDHTStorage {
             let take_count = limit.unwrap_or(keys.len());
 
             for key in keys.iter().take(take_count) {
-                if let Some(record) = records.peek(key) {
-                    if !record.is_expired() {
-                        results.push(record.clone());
-                    }
+                if let Some(record) = records.peek(key)
+                    && !record.is_expired()
+                {
+                    results.push(record.clone());
                 }
             }
             results
@@ -298,11 +298,10 @@ impl OptimizedDHTStorage {
 
         for (_, keys) in expiration_index.range(..target_time) {
             for key in keys {
-                if let Some(record) = records.peek(key) {
-
-                    if !record.is_expired() {
-                        results.push(record.clone());
-                    }
+                if let Some(record) = records.peek(key)
+                    && !record.is_expired()
+                {
+                    results.push(record.clone());
                 }
             }
         }

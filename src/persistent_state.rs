@@ -854,9 +854,9 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
 
         for snapshot_path in snapshots.iter().rev() {
             match self.load_snapshot(snapshot_path).await {
-                Ok((header, state)) => {
+                Ok((header, loaded_state)) => {
                     // Verify checksum
-                    let data = bincode::serialize(&state).map_err(|e| {
+                    let data = bincode::serialize(&loaded_state).map_err(|e| {
                         P2PError::Storage(StorageError::Database(
                             format!("Failed to serialize for checksum: {e}").into(),
                         ))
@@ -883,7 +883,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
                                 "write lock failed".to_string().into(),
                             ))
                         })?;
-                        *current_state = state;
+                        *current_state = loaded_state;
                     }
 
                     // Update transaction counter
@@ -1006,12 +1006,12 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
                     if let Some(value_data) = entry.value {
                         match bincode::deserialize::<T>(&value_data) {
                             Ok(value) => {
-                                let mut state = self.state.write().map_err(|_| {
+                                let mut state_guard = self.state.write().map_err(|_| {
                                     P2PError::Storage(StorageError::LockPoisoned(
                                         "write lock failed".to_string().into(),
                                     ))
                                 })?;
-                                state.insert(entry.key, value);
+                                state_guard.insert(entry.key, value);
                                 entries_recovered += 1;
                             }
                             Err(_) => {
@@ -1021,12 +1021,12 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
                     }
                 }
                 TransactionType::Delete => {
-                    let mut state = self.state.write().map_err(|_| {
+                    let mut state_guard = self.state.write().map_err(|_| {
                         P2PError::Storage(StorageError::LockPoisoned(
                             "write lock failed".to_string().into(),
                         ))
                     })?;
-                    state.remove(&entry.key);
+                    state_guard.remove(&entry.key);
                     entries_recovered += 1;
                 }
                 TransactionType::Checkpoint => {

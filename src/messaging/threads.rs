@@ -2,7 +2,7 @@
 
 use super::MessageStore;
 use super::types::*;
-use crate::identity::FourWordAddress;
+use super::user_handle::UserHandle;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -166,7 +166,7 @@ impl ThreadManager {
         // For now, return a mock thread
         Ok(ThreadView {
             parent_message: RichMessage::new(
-                FourWordAddress::from("system-thread-mock-user"),
+                UserHandle::from("system-thread-mock-user"),
                 ChannelId::new(),
                 MessageContent::Text("Mock thread parent".to_string()),
             ),
@@ -251,7 +251,7 @@ mod tests {
         let manager = ThreadManager::new(store);
 
         let parent = RichMessage::new(
-            FourWordAddress::from("alice-bob-charlie-david"),
+            UserHandle::from("alice"),
             ChannelId::new(),
             MessageContent::Text("Start a thread".to_string()),
         );
@@ -277,7 +277,7 @@ mod tests {
         let manager = ThreadManager::new(store);
 
         let parent = RichMessage::new(
-            FourWordAddress::from("alice-bob-charlie-david"),
+            UserHandle::from("alice"),
             ChannelId::new(),
             MessageContent::Text("Start a thread".to_string()),
         );
@@ -285,7 +285,7 @@ mod tests {
         let thread_id = manager.create_thread(&parent).await.unwrap();
 
         let reply = RichMessage::new(
-            FourWordAddress::from("eve-frank-grace-henry"),
+            UserHandle::from("eve"),
             parent.channel_id,
             MessageContent::Text("Reply to thread".to_string()),
         );

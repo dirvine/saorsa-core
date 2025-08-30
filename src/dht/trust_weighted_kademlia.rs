@@ -301,7 +301,12 @@ impl TrustWeightedKademlia {
 /// DHT trait implementation
 #[async_trait::async_trait]
 impl super::Dht for TrustWeightedKademlia {
-    async fn put(&self, key: super::Key, value: Bytes, policy: super::PutPolicy) -> Result<super::PutReceipt> {
+    async fn put(
+        &self,
+        key: super::Key,
+        value: Bytes,
+        policy: super::PutPolicy,
+    ) -> Result<super::PutReceipt> {
         // Find providers with capacity and trust bias
         // Convert key type
         let local_key: Key = key;
@@ -329,10 +334,10 @@ impl super::Dht for TrustWeightedKademlia {
         let local_key: Key = key;
         {
             let storage = self.storage.read().await;
-            if let Some((value, expiry)) = storage.get(&local_key) {
-                if SystemTime::now() < *expiry {
-                    return Ok(value.clone());
-                }
+            if let Some((value, expiry)) = storage.get(&local_key)
+                && SystemTime::now() < *expiry
+            {
+                return Ok(value.clone());
             }
         }
 
@@ -350,10 +355,13 @@ impl super::Dht for TrustWeightedKademlia {
 
     async fn find_node(&self, target: super::PeerId) -> Result<Vec<super::Contact>> {
         let closest = self.find_closest_nodes(&target, self.k).await;
-        let converted: Vec<super::Contact> = closest.into_iter().map(|contact| super::Contact {
-            peer: contact.peer,
-            address: contact.address,
-        }).collect();
+        let converted: Vec<super::Contact> = closest
+            .into_iter()
+            .map(|contact| super::Contact {
+                peer: contact.peer,
+                address: contact.address,
+            })
+            .collect();
         Ok(converted)
     }
 

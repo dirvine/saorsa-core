@@ -3,6 +3,7 @@ use super::transport::{DeliveryReceipt, DeliveryStatus, ReceivedMessage};
 use super::types::*;
 use super::{DhtClient, KeyExchange, MessageStore, MessageTransport};
 use crate::identity::FourWordAddress;
+use crate::messaging::user_handle::UserHandle;
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use std::collections::HashMap;
@@ -75,7 +76,7 @@ impl MessagingService {
         options: SendOptions,
     ) -> Result<(MessageId, DeliveryReceipt)> {
         // Create rich message
-        let mut message = RichMessage::new(self.identity.clone(), channel_id, content);
+        let mut message = RichMessage::new(UserHandle::from(self.identity.to_string()), channel_id, content);
 
         // Apply options
         message.ephemeral = options.ephemeral;
@@ -230,7 +231,10 @@ impl MessagingService {
     ) -> Result<()> {
         // Update delivery status in store
         if let Ok(mut msg) = self.store.get_message(message_id).await {
-            msg.delivered_to.insert(recipient, Utc::now());
+            msg.delivered_to.insert(
+                crate::messaging::user_resolver::resolve_handle(&recipient),
+                Utc::now(),
+            );
             self.store.update_message(&msg).await?;
         }
         Ok(())
@@ -250,7 +254,7 @@ impl MessagingService {
         channel_id: ChannelId,
         content: MessageContent,
     ) -> Result<EncryptedMessage> {
-        let message = RichMessage::new(self.identity.clone(), channel_id, content);
+        let message = RichMessage::new(UserHandle::from(self.identity.to_string()), channel_id, content);
 
         // Get encryption key
         let key = self
@@ -296,10 +300,10 @@ impl MessagingService {
         Ok(EncryptedMessage {
             id: message.id,
             channel_id: message.channel_id,
-            sender: message.sender.clone(),
+            sender: self.identity.clone(),
             ciphertext,
             nonce: nonce_bytes.to_vec(),
-            key_id: format!("key_{}", message.sender),
+            key_id: format!("key_{}", self.identity),
         })
     }
 
@@ -337,7 +341,7 @@ impl MessagingService {
     #[cfg(test)]
     pub fn create_test_message(
         &self,
-        sender: FourWordAddress,
+        sender: UserHandle,
         channel_id: ChannelId,
         content: MessageContent,
     ) -> RichMessage {
@@ -352,7 +356,7 @@ impl MessagingService {
         let encrypted = EncryptedMessage {
             id: message.id,
             channel_id: message.channel_id,
-            sender: message.sender.clone(),
+            sender: self.identity.clone(),
             ciphertext: vec![],
             nonce: vec![],
             key_id: "test".to_string(),

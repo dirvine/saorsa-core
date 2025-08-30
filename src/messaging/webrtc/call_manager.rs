@@ -5,6 +5,8 @@ use super::media::{MediaEvent, MediaStreamManager};
 use super::signaling::{SignalingEvent, SignalingHandler, SignalingState};
 use super::types::*;
 use crate::identity::FourWordAddress;
+use crate::messaging::user_resolver::resolve_handle;
+use crate::messaging::user_handle::UserHandle;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use std::collections::HashMap;
@@ -113,7 +115,7 @@ impl CallManager {
 
         // Create call session
         let mut session = CallSession::new(call_id, constraints.clone());
-        session.add_participant(callee.clone());
+        session.add_participant(UserHandle::from(callee.to_string()));
         session.state = CallState::Calling;
         session.start_time = Some(Utc::now());
 
@@ -133,6 +135,8 @@ impl CallManager {
             call_id,
             caller: self.local_identity.clone(),
             callee: callee.clone(),
+            caller_handle: Some(resolve_handle(&self.local_identity)),
+            callee_handle: Some(resolve_handle(&callee)),
             sdp: self.generate_sdp_offer(&stream).await?,
             media_types: constraints.to_media_types(),
             timestamp: Utc::now(),
@@ -146,7 +150,7 @@ impl CallManager {
         // Emit event
         let _ = self.event_sender.send(CallEvent::CallInitiated {
             call_id,
-            callee,
+            callee: UserHandle::from(callee.to_string()),
             constraints,
         });
 
@@ -336,7 +340,10 @@ impl CallManager {
 
         let multi_call = MultiPartyCall {
             call_id,
-            participants: all_participants,
+            participants: all_participants
+                .into_iter()
+                .map(|p| UserHandle::from(p.to_string()))
+                .collect(),
             architecture: architecture.clone(),
             created_at: Utc::now(),
         };
@@ -400,7 +407,7 @@ impl CallManager {
             SignalingEvent::IncomingCall { offer } => {
                 // Create call session for incoming call
                 let mut session = CallSession::new(offer.call_id, MediaConstraints::audio_only());
-                session.add_participant(offer.caller.clone());
+                session.add_participant(UserHandle::from(offer.caller.to_string()));
                 session.state = CallState::Calling;
 
                 let mut calls = calls.write().await;
@@ -675,7 +682,7 @@ mod tests {
         assert!(session.participants.is_empty());
 
         // Test adding participant
-        let participant = FourWordAddress::from("alice-bob-charlie-david");
+        let participant = crate::messaging::user_handle::UserHandle::from("alice-bob-charlie-david");
         session.add_participant(participant.clone());
         assert_eq!(session.participants.len(), 1);
         assert!(session.participants.contains(&participant));

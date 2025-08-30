@@ -31,10 +31,6 @@ pub struct IdentityCommand {
 pub enum Commands {
     /// Generate a new identity
     Generate {
-        /// Proof of work difficulty
-        #[arg(short, long, default_value = "16")]
-        difficulty: Option<u32>,
-
         /// Output file path
         #[arg(short, long)]
         output: Option<PathBuf>,
@@ -101,10 +97,9 @@ impl IdentityCliHandler {
     pub async fn execute(&self, command: Commands) -> Result<String> {
         match command {
             Commands::Generate {
-                difficulty,
                 output,
                 seed,
-            } => self.handle_generate(difficulty, output, seed).await,
+            } => self.handle_generate(output, seed).await,
             Commands::Show { path } => self.handle_show(path).await,
             Commands::Verify { path } => self.handle_verify(path).await,
             Commands::Export {
@@ -122,11 +117,9 @@ impl IdentityCliHandler {
 
     async fn handle_generate(
         &self,
-        difficulty: Option<u32>,
         output: Option<PathBuf>,
         seed: Option<String>,
     ) -> Result<String> {
-        let difficulty = difficulty.unwrap_or(16);
         let output_path = output
             .or_else(|| self.default_path.clone())
             .ok_or_else(|| {
@@ -140,17 +133,16 @@ impl IdentityCliHandler {
             let mut seed_bytes = [0u8; 32];
             let seed_hash = sha2::Sha256::digest(seed_str.as_bytes());
             seed_bytes.copy_from_slice(&seed_hash);
-            NodeIdentity::from_seed(&seed_bytes, difficulty)?
+            NodeIdentity::from_seed(&seed_bytes)?
         } else {
-            NodeIdentity::generate(difficulty)?
+            NodeIdentity::generate()?
         };
 
         identity.save_to_file(&output_path).await?;
 
         Ok(format!(
-            "Generated new identity\nNode ID: {}\nWord Address: {}\nSaved to: {}",
+            "Generated new identity\nNode ID: {}\nSaved to: {}",
             identity.node_id(),
-            identity.word_address(),
             output_path.display()
         ))
     }
@@ -165,11 +157,9 @@ impl IdentityCliHandler {
         let identity = NodeIdentity::load_from_file(&path).await?;
 
         Ok(format!(
-            "Identity Information\nNode ID: {}\nWord Address: {}\nPublic Key: {}\nPoW Difficulty: {}",
+            "Identity Information\nNode ID: {}\nPublic Key: {}",
             identity.node_id(),
-            identity.word_address(),
-            hex::encode(identity.public_key().as_bytes()),
-            identity.proof_of_work().difficulty
+            hex::encode(identity.public_key().as_bytes())
         ))
     }
 
@@ -183,12 +173,11 @@ impl IdentityCliHandler {
         let identity = NodeIdentity::load_from_file(&path).await?;
 
         // Verify components
-        let pow_valid = identity.verify_proof_of_work();
         let keys_valid = true; // Keys are valid if we can load them
         let address_matches = true; // Address is derived from node ID
 
-        if pow_valid && keys_valid && address_matches {
-            Ok("Identity is valid\n✓ Proof of Work: Valid\n✓ Cryptographic keys: Valid\n✓ Word address: Matches".to_string())
+        if keys_valid && address_matches {
+            Ok("Identity is valid\n✓ Cryptographic keys: Valid\n✓ Word address: Matches".to_string())
         } else {
             Ok("Identity validation failed".to_string())
         }

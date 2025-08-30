@@ -19,7 +19,7 @@ pub struct CapacityGossip {
 }
 
 /// Capacity histogram for pricing decisions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CapacityHistogram {
     /// Buckets: (min_capacity, max_capacity) -> count
     pub buckets: HashMap<(u64, u64), usize>,
@@ -32,11 +32,7 @@ pub struct CapacityHistogram {
 impl CapacityHistogram {
     /// Create empty histogram
     pub fn new() -> Self {
-        Self {
-            buckets: HashMap::new(),
-            total_free: 0,
-            total_providers: 0,
-        }
+        Self::default()
     }
 
     /// Add capacity data to histogram
@@ -137,10 +133,10 @@ impl CapacityManager {
         let mut peer_capacities = self.peer_capacities.write().await;
 
         // Only update if epoch is newer
-        if let Some(existing) = peer_capacities.get(&gossip.peer) {
-            if gossip.epoch <= existing.epoch {
-                return;
-            }
+        if let Some(existing) = peer_capacities.get(&gossip.peer)
+            && gossip.epoch <= existing.epoch
+        {
+            return;
         }
 
         peer_capacities.insert(gossip.peer.clone(), gossip);

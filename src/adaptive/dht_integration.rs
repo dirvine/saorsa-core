@@ -163,7 +163,10 @@ impl AdaptiveDHT {
         let dht = self.base_dht.read().await;
 
         // Get closest nodes from DHT using find_node
-        let nodes = dht.find_nodes(&dht_key, 8).await.unwrap_or_else(|_| Vec::new());
+        let nodes = dht
+            .find_nodes(&dht_key, 8)
+            .await
+            .unwrap_or_else(|_| Vec::new());
 
         // Sort by trust score
         let sorted_nodes: Vec<_> = nodes

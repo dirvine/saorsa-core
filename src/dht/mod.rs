@@ -94,7 +94,6 @@ pub struct Record {
     pub signature: Option<Vec<u8>>,
 }
 
-
 impl Record {
     /// Create a new record
     pub fn new(key: Key, value: Vec<u8>, publisher: PeerId) -> Self {

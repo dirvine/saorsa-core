@@ -1,6 +1,7 @@
 // WebRTC Types and Data Structures
 
 use crate::identity::FourWordAddress;
+use crate::messaging::user_handle::UserHandle;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -96,6 +97,8 @@ pub struct CallOffer {
     pub call_id: CallId,
     pub caller: FourWordAddress,
     pub callee: FourWordAddress,
+    pub caller_handle: Option<UserHandle>,
+    pub callee_handle: Option<UserHandle>,
     pub sdp: String,
     pub media_types: Vec<MediaType>,
     pub timestamp: DateTime<Utc>,
@@ -160,7 +163,7 @@ impl CallQualityMetrics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiPartyCall {
     pub call_id: CallId,
-    pub participants: Vec<FourWordAddress>,
+    pub participants: Vec<UserHandle>,
     pub architecture: CallArchitecture,
     pub created_at: DateTime<Utc>,
 }
@@ -176,8 +179,8 @@ pub enum CallArchitecture {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConsent {
     pub call_id: CallId,
-    pub requester: FourWordAddress,
-    pub participants: Vec<FourWordAddress>,
+    pub requester: UserHandle,
+    pub participants: Vec<UserHandle>,
 }
 
 /// Consent status
@@ -263,7 +266,7 @@ pub enum CallEvent {
     },
     CallInitiated {
         call_id: CallId,
-        callee: FourWordAddress,
+        callee: UserHandle,
         constraints: MediaConstraints,
     },
     CallAccepted {
@@ -293,7 +296,7 @@ pub enum CallEvent {
 #[derive(Debug, Clone)]
 pub struct CallSession {
     pub call_id: CallId,
-    pub participants: Vec<FourWordAddress>,
+    pub participants: Vec<UserHandle>,
     pub state: CallState,
     pub media_constraints: MediaConstraints,
     pub created_at: DateTime<Utc>,
@@ -324,13 +327,13 @@ impl CallSession {
         }
     }
 
-    pub fn add_participant(&mut self, participant: FourWordAddress) {
+    pub fn add_participant(&mut self, participant: UserHandle) {
         if !self.participants.contains(&participant) {
             self.participants.push(participant);
         }
     }
 
-    pub fn remove_participant(&mut self, participant: &FourWordAddress) {
+    pub fn remove_participant(&mut self, participant: &UserHandle) {
         self.participants.retain(|p| p != participant);
     }
 

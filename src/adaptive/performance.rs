@@ -288,13 +288,13 @@ impl<K: Eq + std::hash::Hash + Clone, V: Clone> PerformanceCache<K, V> {
             entries.retain(|_, entry| entry.inserted_at.elapsed() < self.config.ttl);
 
             // If still over capacity, remove oldest
-            if entries.len() >= self.config.max_entries {
-                if let Some(oldest_key) = entries
+            if entries.len() >= self.config.max_entries
+                && let Some(oldest_key) = entries
                     .iter()
                     .min_by_key(|(_, entry)| entry.inserted_at)
-                    .map(|(k, _)| k.clone()) {
-                    entries.remove(&oldest_key);
-                }
+                    .map(|(k, _)| k.clone())
+            {
+                entries.remove(&oldest_key);
             }
         }
 

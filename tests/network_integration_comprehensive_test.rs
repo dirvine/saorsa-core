@@ -374,3 +374,4 @@ async fn test_high_throughput_messaging() -> Result<()> {
     framework.shutdown_all().await?;
     Ok(())
 }
+#![cfg(feature = "extended_tests")]

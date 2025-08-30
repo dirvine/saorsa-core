@@ -1,8 +1,8 @@
 // Message database implementation using deadpool-sqlite + rusqlite
 // Replaced sqlx to resolve RSA security vulnerability RUSTSEC-2023-0071
 
-use crate::identity::FourWordAddress;
 use crate::messaging::types::*;
+use crate::messaging::user_handle::UserHandle;
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use deadpool_sqlite::{Config, Pool, Runtime};
@@ -327,7 +327,7 @@ impl DatabaseMessageStore {
                                 },
                             )?,
                         ),
-                        sender: FourWordAddress::from(row.get::<_, String>("sender")?),
+                        sender: UserHandle::from(row.get::<_, String>("sender")?),
                         content,
                         thread_id,
                         reply_to,
@@ -416,7 +416,7 @@ impl DatabaseMessageStore {
     }
 
     /// Get mentions for a message
-    async fn get_mentions(&self, message_id: MessageId) -> Result<Vec<FourWordAddress>> {
+    async fn get_mentions(&self, message_id: MessageId) -> Result<Vec<crate::messaging::user_handle::UserHandle>> {
         let conn = self.pool.get().await?;
         let msg_id = message_id.to_string();
 
@@ -434,13 +434,12 @@ impl DatabaseMessageStore {
             .await;
 
         match result {
-            Ok(Ok(user_strings)) => {
-                let mentions = user_strings
+            Ok(Ok(user_strings)) => Ok(
+                user_strings
                     .into_iter()
-                    .map(FourWordAddress::from)
-                    .collect();
-                Ok(mentions)
-            }
+                    .map(crate::messaging::user_handle::UserHandle::from)
+                    .collect(),
+            ),
             Ok(Err(e)) => Err(anyhow::anyhow!("Failed to get mentions: {}", e)),
             Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e)),
         }
@@ -450,7 +449,7 @@ impl DatabaseMessageStore {
     async fn get_reactions(
         &self,
         message_id: MessageId,
-    ) -> Result<HashMap<String, Vec<FourWordAddress>>> {
+    ) -> Result<HashMap<String, Vec<crate::messaging::user_handle::UserHandle>>> {
         let conn = self.pool.get().await?;
         let msg_id = message_id.to_string();
 
@@ -478,16 +477,18 @@ impl DatabaseMessageStore {
             .await;
 
         match result {
-            Ok(Ok(reaction_strings)) => {
-                let reactions = reaction_strings
+            Ok(Ok(reaction_strings)) => Ok(
+                reaction_strings
                     .into_iter()
                     .map(|(emoji, users)| {
-                        let user_addresses = users.into_iter().map(FourWordAddress::from).collect();
-                        (emoji, user_addresses)
+                        let handles = users
+                            .into_iter()
+                            .map(crate::messaging::user_handle::UserHandle::from)
+                            .collect();
+                        (emoji, handles)
                     })
-                    .collect();
-                Ok(reactions)
-            }
+                    .collect(),
+            ),
             Ok(Err(e)) => Err(anyhow::anyhow!("Failed to get reactions: {}", e)),
             Err(e) => Err(anyhow::anyhow!("Database interaction failed: {}", e)),
         }
@@ -554,10 +555,10 @@ impl DatabaseMessageStore {
     }
 
     /// Mark a message as read
-    pub async fn mark_as_read(&self, message_id: MessageId, user: FourWordAddress) -> Result<()> {
+    pub async fn mark_as_read(&self, message_id: MessageId, user: crate::messaging::user_handle::UserHandle) -> Result<()> {
         let conn = self.pool.get().await?;
         let msg_id = message_id.to_string();
-        let user_str = user.to_string();
+        let user_str = user.as_str().to_string();
 
         let result = conn
             .interact(move |conn| -> Result<(), rusqlite::Error> {
@@ -661,11 +662,11 @@ impl DatabaseMessageStore {
         &self,
         message_id: MessageId,
         emoji: String,
-        user: FourWordAddress,
+        user: crate::messaging::user_handle::UserHandle,
     ) -> Result<()> {
         let conn = self.pool.get().await?;
         let msg_id = message_id.to_string();
-        let user_str = user.to_string();
+        let user_str = user.as_str().to_string();
         let emoji_clone = emoji.clone();
 
         let result = conn
@@ -702,11 +703,11 @@ impl DatabaseMessageStore {
         &self,
         message_id: MessageId,
         emoji: String,
-        user: FourWordAddress,
+        user: crate::messaging::user_handle::UserHandle,
     ) -> Result<()> {
         let conn = self.pool.get().await?;
         let msg_id = message_id.to_string();
-        let user_str = user.to_string();
+        let user_str = user.as_str().to_string();
         let emoji_clone = emoji.clone();
 
         let result = conn

@@ -263,13 +263,13 @@ impl SecurityLevel {
                 hash_length: DEFAULT_HASH_LENGTH as u32,
             },
             SecurityLevel::High => Argon2Config {
-                memory_cost: 131072, // 128MB
+                memory_cost: 131_072, // 128MB
                 time_cost: 5,
                 parallelism: 8,
                 hash_length: 32,
             },
             SecurityLevel::Maximum => Argon2Config {
-                memory_cost: 262144, // 256MB
+                memory_cost: 262_144, // 256MB
                 time_cost: 10,
                 parallelism: 16,
                 hash_length: 32,

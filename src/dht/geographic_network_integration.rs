@@ -124,7 +124,7 @@ impl GeographicNetworkIntegration {
 
             // Geographic IP classification (simplified heuristics)
             // Asia-Pacific: specific ranges first
-            (1, _, _, _) | (14, _, _, _) | (27, _, _, _) => GeographicRegion::AsiaPacific,
+            (1 | 14 | 27, _, _, _) => GeographicRegion::AsiaPacific,
 
             // North America: 3.x.x.x, 4.x.x.x, etc. (major US providers)
             (3..=63, _, _, _) => GeographicRegion::NorthAmerica,

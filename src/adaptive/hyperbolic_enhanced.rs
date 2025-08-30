@@ -158,6 +158,12 @@ pub struct NetworkMetrics {
     pub average_path_length: f64,
 }
 
+impl Default for EnhancedHyperbolicSpace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnhancedHyperbolicSpace {
     /// Create a new enhanced hyperbolic space instance
     pub fn new() -> Self {
@@ -320,7 +326,7 @@ impl EnhancedHyperbolicSpace {
                         r: coord.r(),
                         theta: coord.theta(),
                     },
-                    label: format!("Node {:?}", node_id).into(),
+                    label: format!("Node {:?}", node_id),
                     degree: 0,        // Unknown for neighbors
                     trust_score: 0.5, // Default
                 },
@@ -336,7 +342,7 @@ impl EnhancedHyperbolicSpace {
     pub async fn export_visualization_json(&self) -> Result<String> {
         let viz_data = self.visualization_data.read().await;
         serde_json::to_string_pretty(&*viz_data).map_err(|e| {
-            AdaptiveNetworkError::Other(format!("Failed to serialize visualization: {}", e).into())
+            AdaptiveNetworkError::Other(format!("Failed to serialize visualization: {}", e))
         })
     }
 
@@ -353,7 +359,7 @@ impl EnhancedHyperbolicSpace {
         );
 
         // Draw nodes
-        for (_, node) in &viz_data.nodes {
+        for node in viz_data.nodes.values() {
             let (x, y) = polar_to_cartesian(
                 node.coordinate.r,
                 node.coordinate.theta,
@@ -527,9 +533,10 @@ impl EnhancedHyperbolicRoutingStrategy {
                         });
                     }
 
-                    return Err(AdaptiveNetworkError::Routing(
-                        format!("No closer neighbor found after {} hops", hop).into(),
-                    ));
+                    return Err(AdaptiveNetworkError::Routing(format!(
+                        "No closer neighbor found after {} hops",
+                        hop
+                    )));
                 }
             }
         }

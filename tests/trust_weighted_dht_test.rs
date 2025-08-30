@@ -1,18 +1,25 @@
 //! Integration tests for trust-weighted Kademlia DHT
 
 use bytes::Bytes;
+use rand::RngCore;
 use saorsa_core::dht::{
     CapacityManager, Dht, DhtTelemetry, OperationType, Outcome, PutPolicy, TrustWeightedKademlia,
     eigen_trust_epoch, record_interaction,
 };
 use saorsa_core::identity::node_identity::NodeId;
+
+fn random_node_id() -> NodeId {
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    NodeId::from_bytes(bytes)
+}
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
 /// Test basic PUT and GET operations
 #[tokio::test]
 async fn test_put_get_operations() {
-    let node_id = NodeId::random();
+    let node_id = random_node_id();
     let dht = TrustWeightedKademlia::new(node_id);
 
     // Test data
@@ -36,9 +43,9 @@ async fn test_put_get_operations() {
 /// Test trust-weighted routing with interaction recording
 #[tokio::test]
 async fn test_trust_weighted_routing() {
-    let node1 = NodeId::random();
-    let node2 = NodeId::random();
-    let node3 = NodeId::random();
+    let node1 = random_node_id();
+    let node2 = random_node_id();
+    let node3 = random_node_id();
 
     let dht = TrustWeightedKademlia::new(node1.clone());
 
@@ -65,7 +72,7 @@ async fn test_trust_weighted_routing() {
 /// Test capacity signaling and provider selection
 #[tokio::test]
 async fn test_capacity_signaling() {
-    let local_peer = NodeId::random();
+    let local_peer = random_node_id();
     let mut capacity_manager = CapacityManager::new(local_peer.clone(), 10_000_000_000);
 
     // Update local capacity
@@ -73,8 +80,8 @@ async fn test_capacity_signaling() {
     assert_eq!(capacity_manager.local_gossip().free_bytes, 8_000_000_000);
 
     // Receive gossip from other peers
-    let peer1 = NodeId::random();
-    let peer2 = NodeId::random();
+    let peer1 = random_node_id();
+    let peer2 = random_node_id();
 
     capacity_manager
         .receive_gossip(saorsa_core::dht::CapacityGossip {
@@ -168,7 +175,7 @@ async fn test_lookup_under_churn() {
 
     // Create initial network of nodes
     for _ in 0..20 {
-        let node_id = NodeId::random();
+        let node_id = random_node_id();
         let dht = TrustWeightedKademlia::new(node_id.clone());
         nodes.push((node_id, dht));
     }

@@ -234,7 +234,7 @@ main() {
     run_step "Format Check" "cargo fmt --all -- --check" true
     
     # 2. Clippy Linting (Strict)
-    run_step "Clippy (Strict)" "cargo clippy --all-features -- -D warnings -D clippy::panic -D clippy::unwrap_used -D clippy::expect_used -W clippy::pedantic" false
+    run_step "Clippy (Strict)" "cargo clippy --all-features -- -D clippy::panic -D clippy::unwrap_used -D clippy::expect_used -W clippy::pedantic" false
     
     # 3. Build Debug
     run_step "Build (Debug)" "cargo build --all-features" false

@@ -162,7 +162,7 @@ impl RspsDhtStorage {
         let value = self.serialize_provider_record(&record)?;
 
         let dht_record = Record {
-            key: key.clone(),
+            key,
             value,
             publisher: {
                 // Convert PeerId (String) to NodeId

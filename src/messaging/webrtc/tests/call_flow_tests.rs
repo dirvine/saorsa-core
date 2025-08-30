@@ -50,7 +50,7 @@ mod tests {
                     constraints,
                 }) => {
                     assert_eq!(received_id, call_id);
-                    assert_eq!(callee, bob);
+                    assert_eq!(callee, crate::messaging::user_handle::UserHandle::from(bob.to_string()));
                     assert!(constraints.has_audio());
                 }
                 _ => panic!("Expected CallInitiated event"),
@@ -210,9 +210,9 @@ mod tests {
         assert_eq!(session.state, CallState::Idle);
 
         // Add participant
-        session.add_participant(bob.clone());
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(bob.to_string()));
         assert_eq!(session.participants.len(), 1);
-        assert!(session.participants.contains(&bob));
+        assert!(session.participants.contains(&crate::messaging::user_handle::UserHandle::from(bob.to_string())));
 
         // Transition through states
         session.state = CallState::Calling;
@@ -231,7 +231,7 @@ mod tests {
         assert!(duration.unwrap().num_seconds() >= 29);
 
         // Remove participant
-        session.remove_participant(&bob);
+        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(bob.to_string()));
         assert!(session.participants.is_empty());
     }
 
@@ -288,6 +288,8 @@ mod tests {
             call_id,
             caller: alice.clone(),
             callee: bob.clone(),
+            caller_handle: None,
+            callee_handle: None,
             sdp: "v=0\r\n...".to_string(),
             media_types: vec![MediaType::Audio],
             timestamp: chrono::Utc::now(),

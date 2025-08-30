@@ -11,9 +11,9 @@
 // distributed under these licenses is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
-//! Extensions to NodeIdentity for comprehensive test support
+//! Extensions to NodeIdentity for comprehensive test support (sans PoW)
 
-use super::node_identity::{NodeId, NodeIdentity, ProofOfWork};
+use super::node_identity::{NodeId, NodeIdentity};
 use crate::{P2PError, Result};
 use sha2::Digest;
 use std::path::{Path, PathBuf};
@@ -89,77 +89,4 @@ impl NodeIdentity {
         Self::load_from_file(&path).await
     }
 
-    /// Verify proof of work
-    pub fn verify_proof_of_work(&self) -> bool {
-        self.proof_of_work()
-            .verify(self.node_id(), self.proof_of_work().difficulty)
-    }
-}
-
-impl ProofOfWork {
-    /// Compute proof of work with specific node ID and difficulty
-    pub fn compute(node_id: &NodeId, difficulty: u32) -> Result<Self> {
-        Self::solve(node_id, difficulty)
-    }
-
-    /// Compute with timeout
-    pub fn compute_with_timeout(
-        node_id: &NodeId,
-        difficulty: u32,
-        timeout: Duration,
-    ) -> Result<Self> {
-        let start = std::time::Instant::now();
-        let mut nonce = 0u64;
-
-        loop {
-            // Calculate hash to check proof of work
-            let mut hasher = sha2::Sha256::new();
-            hasher.update(node_id.to_bytes());
-            hasher.update(nonce.to_le_bytes());
-            let hash = hasher.finalize();
-
-            // Check leading zeros
-            let leading_zeros = hash.iter().take_while(|&&b| b == 0).count() as u32 * 8;
-            if leading_zeros >= difficulty {
-                return Ok(ProofOfWork {
-                    nonce,
-                    difficulty,
-                    computation_time: start.elapsed(),
-                });
-            }
-
-            nonce = nonce.checked_add(1).ok_or_else(|| {
-                P2PError::Identity(crate::error::IdentityError::InvalidFormat(
-                    "PoW nonce overflow".to_string().into(),
-                ))
-            })?;
-
-            if start.elapsed() > timeout {
-                panic!("timeout"); // For test expectation
-            }
-        }
-    }
-
-    /// Compute hash for a given node ID and nonce
-    pub fn compute_hash(&self, node_id: &NodeId) -> Vec<u8> {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(node_id.to_bytes());
-        hasher.update(self.nonce.to_le_bytes());
-        hasher.finalize().to_vec()
-    }
-}
-
-// Helper for tests
-pub fn count_leading_zero_bits(bytes: &[u8]) -> u32 {
-    let mut count = 0;
-    for byte in bytes {
-        if *byte == 0 {
-            count += 8;
-        } else {
-            count += byte.leading_zeros();
-            break;
-        }
-    }
-    count
 }

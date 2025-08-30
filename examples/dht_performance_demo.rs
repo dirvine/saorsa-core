@@ -3,18 +3,13 @@
 //! This example demonstrates the performance improvements from the optimized DHT storage
 //! implementation, showing O(n) to O(1) improvements for key operations.
 
-use saorsa_core::PeerId;
-use saorsa_core::dht::{DHTConfig, Key, Record, optimized_storage::OptimizedDHTStorage};
+use saorsa_core::dht::{
+    DHTConfig, Key, PeerId as DhtPeerId, Record, optimized_storage::OptimizedDHTStorage,
+};
+use saorsa_core::identity::node_identity::NodeId;
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::sync::RwLock;
-
-// Default implementation for LegacyDHTStorage
-impl Default for LegacyDHTStorage {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 // Default implementation for LegacyDHTStorage
 impl Default for LegacyDHTStorage {
@@ -46,11 +41,11 @@ impl LegacyDHTStorage {
         records.get(key).cloned()
     }
 
-    pub async fn get_records_by_publisher(&self, publisher: &str) -> Vec<Record> {
+    pub async fn get_records_by_publisher(&self, publisher: &DhtPeerId) -> Vec<Record> {
         let records = self.records.read().await;
         records
             .values()
-            .filter(|record| record.publisher.to_string() == publisher)
+            .filter(|record| &record.publisher == publisher)
             .cloned()
             .collect()
     }
@@ -70,9 +65,11 @@ async fn main() -> anyhow::Result<()> {
 
     let mut test_records = Vec::new();
     for i in 0..record_count {
-        let key = Key::new(format!("test_key_{}", i).as_bytes());
+        let key_bytes: [u8; 32] = blake3::hash(format!("test_key_{}", i).as_bytes()).into();
+        let key: Key = key_bytes;
         let value = format!("test_value_{}", i).into_bytes();
-        let publisher = PeerId::from(format!("publisher_{}", i % 100)); // 100 different publishers
+        let pub_bytes: [u8; 32] = blake3::hash(format!("publisher_{}", i % 100).as_bytes()).into();
+        let publisher: DhtPeerId = NodeId::from_bytes(pub_bytes);
         let record = Record::new(key, value, publisher);
         test_records.push(record);
     }
@@ -159,7 +156,9 @@ async fn main() -> anyhow::Result<()> {
     let legacy_start = Instant::now();
     let mut legacy_results = 0;
     for publisher in &test_publishers {
-        let records = legacy_storage.get_records_by_publisher(publisher).await;
+        let pub_bytes: [u8; 32] = blake3::hash(publisher.as_bytes()).into();
+        let pub_id: DhtPeerId = NodeId::from_bytes(pub_bytes);
+        let records = legacy_storage.get_records_by_publisher(&pub_id).await;
         legacy_results += records.len();
     }
     let legacy_query_time = legacy_start.elapsed();
@@ -208,9 +207,10 @@ async fn main() -> anyhow::Result<()> {
     println!("   Testing memory bounds with 1000-record cache limit...");
     for i in 0..2000 {
         // Try to store more than cache can hold
-        let key = Key::new(format!("bound_test_{}", i).as_bytes());
+        let key: Key = blake3::hash(format!("bound_test_{}", i).as_bytes()).into();
         let value = vec![0u8; 512]; // 512 bytes per record
-        let publisher = PeerId::from("bound_tester".to_string());
+        let pub_bytes: [u8; 32] = blake3::hash(b"bound_tester").into();
+        let publisher: DhtPeerId = NodeId::from_bytes(pub_bytes);
         let record = Record::new(key, value, publisher);
         small_cache_storage.store(record).await?;
     }

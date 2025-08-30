@@ -71,12 +71,12 @@ impl StateVector {
 
         // Discretize recency (log scale)
         let recency_bucket = match recency_seconds {
-            r if r < 60 => 5,     // < 1 minute
-            r if r < 600 => 4,    // 1-10 minutes
-            r if r < 3600 => 3,   // 10-60 minutes
-            r if r < 86400 => 2,  // 1-24 hours
-            r if r < 604800 => 1, // 1-7 days
-            _ => 0,               // > 7 days
+            r if r < 60 => 5,      // < 1 minute
+            r if r < 600 => 4,     // 1-10 minutes
+            r if r < 3_600 => 3,   // 10-60 minutes
+            r if r < 86_400 => 2,  // 1-24 hours
+            r if r < 604_800 => 1, // 1-7 days
+            _ => 0,                // > 7 days
         };
 
         // Discretize content size

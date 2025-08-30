@@ -445,7 +445,7 @@ impl Config {
         if let Err(e) = validate_config_value(
             &self.network.max_connections.to_string(),
             Some(1_usize),
-            Some(100000_usize),
+            Some(100_000_usize),
         ) {
             errors.push(P2PError::Config(ConfigError::InvalidValue {
                 field: "max_connections".to_string().into(),
@@ -456,7 +456,7 @@ impl Config {
         if let Err(e) = validate_config_value(
             &self.security.rate_limit.to_string(),
             Some(1_u32),
-            Some(1000000_u32),
+            Some(1_000_000_u32),
         ) {
             errors.push(P2PError::Config(ConfigError::InvalidValue {
                 field: "rate_limit".to_string().into(),

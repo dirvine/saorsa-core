@@ -1,5 +1,6 @@
 // Message type definitions for rich messaging
 
+use crate::messaging::user_handle::UserHandle;
 use crate::identity::FourWordAddress;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -88,8 +89,8 @@ pub struct RichMessage {
     /// Channel/conversation ID
     pub channel_id: ChannelId,
 
-    /// Sender's four-word identity
-    pub sender: FourWordAddress,
+    /// Sender's messaging handle (not a network endpoint)
+    pub sender: UserHandle,
 
     /// Sender's device
     pub sender_device: DeviceId,
@@ -101,7 +102,7 @@ pub struct RichMessage {
     pub attachments: Vec<Attachment>,
 
     /// User mentions
-    pub mentions: Vec<FourWordAddress>,
+    pub mentions: Vec<UserHandle>,
 
     /// Reply to another message
     pub reply_to: Option<MessageId>,
@@ -113,13 +114,13 @@ pub struct RichMessage {
     pub last_thread_reply: Option<DateTime<Utc>>,
 
     /// Reactions grouped by emoji
-    pub reactions: HashMap<String, Vec<FourWordAddress>>,
+    pub reactions: HashMap<String, Vec<UserHandle>>,
 
     /// Read receipts
-    pub read_by: HashMap<FourWordAddress, DateTime<Utc>>,
+    pub read_by: HashMap<UserHandle, DateTime<Utc>>,
 
     /// Delivery receipts
-    pub delivered_to: HashMap<FourWordAddress, DateTime<Utc>>,
+    pub delivered_to: HashMap<UserHandle, DateTime<Utc>>,
 
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
@@ -145,7 +146,7 @@ pub struct RichMessage {
 
 impl RichMessage {
     /// Create a new message
-    pub fn new(sender: FourWordAddress, channel_id: ChannelId, content: MessageContent) -> Self {
+    pub fn new(sender: UserHandle, channel_id: ChannelId, content: MessageContent) -> Self {
         Self {
             id: MessageId::new(),
             thread_id: None,
@@ -230,7 +231,7 @@ pub enum MessageContent {
 pub struct MarkdownContent {
     pub raw: String,
     pub formatted: String,
-    pub mentions: Vec<FourWordAddress>,
+    pub mentions: Vec<UserHandle>,
     pub links: Vec<String>,
 }
 
@@ -289,7 +290,7 @@ pub struct PollMessage {
 pub struct PollOption {
     pub id: String,
     pub text: String,
-    pub votes: Vec<FourWordAddress>,
+    pub votes: Vec<UserHandle>,
 }
 
 /// System message types
@@ -371,7 +372,7 @@ pub struct EncryptedMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchQuery {
     pub text: Option<String>,
-    pub from: Option<Vec<FourWordAddress>>,
+    pub from: Option<Vec<UserHandle>>,
     pub in_channels: Option<Vec<ChannelId>>,
     pub has_attachments: Option<bool>,
     pub has_reactions: Option<bool>,
@@ -392,7 +393,7 @@ pub struct DateRange {
 pub struct ThreadView {
     pub parent_message: RichMessage,
     pub replies: Vec<RichMessage>,
-    pub participants: Vec<FourWordAddress>,
+    pub participants: Vec<UserHandle>,
     pub is_following: bool,
     pub unread_count: u32,
     pub last_activity: DateTime<Utc>,
@@ -401,7 +402,7 @@ pub struct ThreadView {
 /// User presence information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserPresence {
-    pub identity: FourWordAddress,
+    pub identity: UserHandle,
     pub status: PresenceStatus,
     pub custom_status: Option<CustomStatus>,
     pub last_seen: Option<DateTime<Utc>>,
@@ -441,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_message_creation() {
-        let sender = FourWordAddress::from("ocean-forest-moon-star");
+        let sender = UserHandle::from("ocean-forest-moon-star");
         let channel = ChannelId::new();
         let content = MessageContent::Text("Hello, world!".to_string());
 
@@ -456,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_message_expiration() {
-        let sender = FourWordAddress::from("ocean-forest-moon-star");
+        let sender = UserHandle::from("ocean-forest-moon-star");
         let channel = ChannelId::new();
         let content = MessageContent::Text("Ephemeral".to_string());
 

@@ -73,7 +73,7 @@ pub use hyperbolic_enhanced::{
 pub use hyperbolic_greedy::{
     Embedding, EmbeddingConfig, HyperbolicGreedyRouter, embed_snapshot, greedy_next,
 };
-pub use identity::{NodeIdentity, ProofOfWork, SignedMessage, StoredIdentity};
+pub use identity::{NodeIdentity, SignedMessage, StoredIdentity};
 pub use learning::{ChurnPredictor, QLearnCacheManager, ThompsonSampling};
 pub use monitoring::{
     Alert, AlertManager, DashboardData, MonitoringConfig, MonitoringSystem, NetworkHealth,

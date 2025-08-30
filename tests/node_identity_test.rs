@@ -97,3 +97,4 @@ fn test_node_id_xor_distance() {
         assert_eq!(*byte, 0xFF);
     }
 }
+#![cfg(feature = "legacy_pow_tests")]

@@ -431,8 +431,6 @@ pub enum SecurityError {
     #[error("Node is blacklisted")]
     Blacklisted,
 
-    #[error("Invalid proof of work")]
-    InvalidProofOfWork,
 
     #[error("Invalid cryptographic identity")]
     InvalidIdentity,
@@ -496,12 +494,6 @@ impl SecurityManager {
                 )
                 .await;
             return Err(SecurityError::RateLimitExceeded);
-        }
-
-        // Verify proof of work (if implemented)
-        // This is a placeholder - actual PoW verification would be more complex
-        if !self.verify_proof_of_work(&node.id).await {
-            return Err(SecurityError::InvalidProofOfWork);
         }
 
         // Verify cryptographic identity
@@ -667,13 +659,6 @@ impl SecurityManager {
             eclipse_detections: self.eclipse_detector.get_detection_count().await,
             audit_entries: self.auditor.get_entry_count().await,
         }
-    }
-
-    /// Verify proof of work (placeholder)
-    async fn verify_proof_of_work(&self, _node_id: &NodeId) -> bool {
-        // In a real implementation, this would verify the PoW
-        // For now, always return true
-        true
     }
 
     /// Verify node identity

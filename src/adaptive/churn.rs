@@ -320,9 +320,9 @@ impl ChurnHandler {
         stats.failed_nodes = 0;
 
         for node_id in nodes {
-            let status = self.node_monitor.get_node_status(&node_id).await;
+            let node_status = self.node_monitor.get_node_status(&node_id).await;
 
-            match status.status {
+            match node_status.status {
                 NodeState::Active => {
                     stats.active_nodes += 1;
 
@@ -338,7 +338,7 @@ impl ChurnHandler {
                     stats.suspicious_nodes += 1;
 
                     // Check if node should be marked as failed
-                    if status.last_seen.elapsed() > self.config.heartbeat_timeout {
+                    if node_status.last_seen.elapsed() > self.config.heartbeat_timeout {
                         self.handle_node_failure(&node_id).await?;
                     }
                 }
