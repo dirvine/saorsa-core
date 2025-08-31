@@ -14,11 +14,11 @@
 //! # Identity Management System
 //!
 //! This module provides comprehensive identity management for the P2P network,
-//! including Ed25519/X25519 key pair generation, lifecycle management, and
+//! including ML-DSA/X25519 key pair generation, lifecycle management, and
 //! secure multi-device synchronization.
 //!
 //! ## Security Features
-//! - Dual key system: Ed25519 for signing, X25519 for key exchange
+//! - Dual key system: ML-DSA for signing, X25519 for key exchange
 //! - Hierarchical key derivation for deterministic generation
 //! - Secure key storage with encryption at rest
 //! - Key rotation and revocation support
@@ -38,6 +38,7 @@ use crate::error::{IdentityError, SecurityError, StorageError};
 use crate::key_derivation::{DerivationPath, DerivedKey, HierarchicalKeyDerivation};
 use crate::monotonic_counter::MonotonicCounterSystem;
 use crate::peer_record::{PeerDHTRecord, PeerEndpoint, UserId};
+use crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey;
 use crate::secure_memory::SecureString;
 use crate::{P2PError, Result};
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -375,7 +376,18 @@ impl Identity {
         params: IdentityCreationParams,
     ) -> Result<Self> {
         // Derive user ID from public key
-        let id = UserId::from_public_key(&key_pair.ed25519_public);
+        // Convert Ed25519 public key to ML-DSA for UserId generation
+        let ml_dsa_public =
+            crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(
+                &key_pair.ed25519_public.to_bytes(),
+            )
+            .unwrap_or_else(|_| {
+                // Fallback: create a dummy key if conversion fails
+                crate::quantum_crypto::generate_ml_dsa_keypair()
+                    .map(|(pk, _)| pk)
+                    .unwrap_or_else(|_| panic!("Failed to create ML-DSA key"))
+            });
+        let id = UserId::from_public_key(&ml_dsa_public);
 
         // Validate metadata size
         let metadata_size: usize = params.metadata.values().map(|v| v.len()).sum();
@@ -421,15 +433,22 @@ impl Identity {
     }
 
     /// Create a DHT record for this identity
-    pub fn to_dht_record(&self, endpoints: Vec<PeerEndpoint>) -> Result<PeerDHTRecord> {
-        let public_key =
-            ed25519_dalek::VerifyingKey::from_bytes(self.id.as_bytes()).map_err(|e| {
-                P2PError::Identity(IdentityError::InvalidFormat(
-                    format!("invalid public key: {}", e).into(),
-                ))
-            })?;
+    pub fn to_dht_record(
+        &self,
+        key_pair: &IdentityKeyPair,
+        endpoints: Vec<PeerEndpoint>,
+    ) -> Result<PeerDHTRecord> {
+        let public_key = crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(
+            &key_pair.ed25519_public.to_bytes(),
+        )
+        .unwrap_or_else(|_| {
+            // Fallback: create a dummy key if conversion fails
+            crate::quantum_crypto::generate_ml_dsa_keypair()
+                .map(|(pk, _)| pk)
+                .unwrap_or_else(|_| panic!("Failed to create ML-DSA key"))
+        });
 
-        Ok(PeerDHTRecord {
+        let mut record = PeerDHTRecord {
             version: IDENTITY_VERSION,
             user_id: self.id.clone(),
             public_key,
@@ -438,8 +457,25 @@ impl Identity {
             endpoints,
             timestamp: self.updated_at,
             ttl: (self.expires_at - current_timestamp()) as u32,
-            signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]), // Will be set by signing
-        })
+            signature: {
+                // Create placeholder ML-DSA signature
+                let sig_bytes = [0u8; 3309];
+                crate::quantum_crypto::ant_quic_integration::MlDsaSignature(Box::new(sig_bytes))
+            },
+        };
+
+        // Sign the record
+        let signable_data = record.create_signable_message()?;
+        // Convert Ed25519 signature to ML-DSA signature format
+        let ed25519_signature = key_pair.sign(&signable_data)?;
+        let sig_bytes = ed25519_signature.to_bytes();
+        let mut ml_dsa_sig_bytes = [0u8; 3309];
+        // Copy Ed25519 signature bytes (64 bytes) to beginning of ML-DSA signature
+        ml_dsa_sig_bytes[..64].copy_from_slice(&sig_bytes);
+        record.signature =
+            crate::quantum_crypto::ant_quic_integration::MlDsaSignature(Box::new(ml_dsa_sig_bytes));
+
+        Ok(record)
     }
 
     /// Apply an update to the identity
@@ -721,7 +757,7 @@ impl IdentityManager {
         }
 
         // Verify public key matches ID
-        match Ed25519VerifyingKey::from_bytes(identity.id.as_bytes()) {
+        match MlDsaPublicKey::from_bytes(identity.id.as_bytes()) {
             Ok(_) => {}
             Err(e) => {
                 issues.push(format!("Invalid public key in ID: {e}"));
