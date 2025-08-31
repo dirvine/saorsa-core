@@ -567,6 +567,7 @@ mod tests {
     use std::sync::Arc;
 
     // Mock implementations for testing
+    #[allow(dead_code)]
     async fn create_mock_dht_engine() -> Arc<DhtCoreEngine> {
         // This would need proper mocking
         // For now, we'll skip this test since it requires complex setup

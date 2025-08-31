@@ -294,8 +294,10 @@ mod basic_tests {
     use std::sync::Arc;
 
     // Mock DHT for testing
+    #[allow(dead_code)]
     struct MockDhtEngine;
 
+    #[allow(dead_code)]
     impl MockDhtEngine {
         fn new() -> Self {
             Self

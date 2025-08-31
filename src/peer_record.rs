@@ -18,7 +18,7 @@
 //! peer record management with comprehensive validation and serialization.
 //!
 //! ## Security Features
-//! - Ed25519 signature verification for all records
+//! - ML-DSA (post-quantum) signature verification for all records
 //! - Monotonic counter system prevents replay attacks
 //! - Size limits prevent memory exhaustion attacks
 //! - Canonical serialization prevents signature bypass
@@ -32,7 +32,7 @@
 use crate::error::{SecurityError, StorageError};
 use crate::{NetworkAddress, P2PError, Result};
 use blake3::Hash;
-use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
+use crate::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -61,7 +61,7 @@ pub struct UserId {
 
 impl UserId {
     /// Create a new UserId from a public key
-    pub fn from_public_key(public_key: &VerifyingKey) -> Self {
+    pub fn from_public_key(public_key: &MlDsaPublicKey) -> Self {
         let hash = blake3::hash(public_key.as_bytes());
         Self { hash: hash.into() }
     }
@@ -234,7 +234,7 @@ pub struct PeerDHTRecord {
     pub user_id: UserId,
 
     /// User's public key for signature verification
-    pub public_key: VerifyingKey,
+    pub public_key: MlDsaPublicKey,
 
     /// Monotonic counter to prevent replay attacks
     pub sequence_number: u64,
@@ -251,8 +251,8 @@ pub struct PeerDHTRecord {
     /// Time-to-live in seconds
     pub ttl: u32,
 
-    /// Ed25519 signature over all above fields
-    pub signature: Signature,
+    /// ML-DSA signature over all above fields
+    pub signature: MlDsaSignature,
 }
 
 impl PeerDHTRecord {
@@ -262,7 +262,7 @@ impl PeerDHTRecord {
     /// Create a new unsigned DHT record
     pub fn new(
         user_id: UserId,
-        public_key: VerifyingKey,
+        public_key: MlDsaPublicKey,
         sequence_number: u64,
         name: Option<String>,
         endpoints: Vec<PeerEndpoint>,
@@ -280,7 +280,7 @@ impl PeerDHTRecord {
             endpoints,
             timestamp: current_timestamp(),
             ttl,
-            signature: Signature::from_bytes(&[0; 64]), // Placeholder, will be signed
+            signature: MlDsaSignature(vec![]), // Placeholder, will be signed
         })
     }
 
@@ -382,23 +382,27 @@ impl PeerDHTRecord {
     }
 
     /// Sign the record with the given private key
-    pub fn sign(&mut self, signing_key: &ed25519_dalek::SigningKey) -> Result<()> {
+    pub fn sign(&mut self, signing_key: &MlDsaSecretKey) -> Result<()> {
         let message = self.create_signable_message()?;
-        self.signature = signing_key.sign(&message);
+        self.signature = crate::quantum_crypto::ml_dsa_sign(signing_key, &message)
+            .map_err(|e| P2PError::Security(SecurityError::SignatureVerificationFailed(
+                format!("ML-DSA signing failed: {:?}", e).into(),
+            )))?;
         Ok(())
     }
 
     /// Verify the record signature
     pub fn verify_signature(&self) -> Result<()> {
         let message = self.create_signable_message()?;
-        self.public_key
-            .verify(&message, &self.signature)
-            .map_err(|_| {
-                P2PError::Security(SecurityError::SignatureVerificationFailed(
-                    "Failed to verify signature".to_string().into(),
-                ))
-            })?;
-        Ok(())
+        let ok = crate::quantum_crypto::ml_dsa_verify(&self.public_key, &message, &self.signature)
+            .map_err(|e| P2PError::Security(SecurityError::SignatureVerificationFailed(
+                format!("ML-DSA verify error: {:?}", e).into(),
+            )))?;
+        if ok { Ok(()) } else {
+            Err(P2PError::Security(SecurityError::SignatureVerificationFailed(
+                "Failed to verify signature".to_string().into(),
+            )))
+        }
     }
 
     /// Check if the record has expired
@@ -554,14 +558,10 @@ impl SignatureCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::SigningKey;
-    use rand::rngs::OsRng;
+    // Using ML-DSA PQC keys for tests
 
-    fn create_test_keypair() -> (SigningKey, VerifyingKey) {
-        let mut csprng = OsRng {};
-        let signing_key = SigningKey::generate(&mut csprng);
-        let verifying_key = signing_key.verifying_key().clone();
-        (signing_key, verifying_key)
+    fn create_test_keypair() -> (MlDsaSecretKey, MlDsaPublicKey) {
+        crate::quantum_crypto::generate_ml_dsa_keypair().unwrap()
     }
 
     fn create_test_endpoint() -> PeerEndpoint {
@@ -576,8 +576,8 @@ mod tests {
 
     #[test]
     fn test_user_id_generation() {
-        let (_, verifying_key) = create_test_keypair();
-        let user_id = UserId::from_public_key(&verifying_key);
+        let (_, public_key) = create_test_keypair();
+        let user_id = UserId::from_public_key(&public_key);
 
         // Should be deterministic
         let user_id2 = UserId::from_public_key(&verifying_key);
@@ -606,13 +606,13 @@ mod tests {
 
     #[test]
     fn test_dht_record_creation_and_signing() {
-        let (signing_key, verifying_key) = create_test_keypair();
-        let user_id = UserId::from_public_key(&verifying_key);
+        let (secret_key, public_key) = create_test_keypair();
+        let user_id = UserId::from_public_key(&public_key);
         let endpoint = create_test_endpoint();
 
         let mut record = PeerDHTRecord::new(
             user_id,
-            verifying_key,
+            public_key,
             1,
             Some("test-user".to_string()),
             vec![endpoint],
@@ -621,7 +621,7 @@ mod tests {
         .unwrap();
 
         // Sign the record
-        record.sign(&signing_key).unwrap();
+        record.sign(&secret_key).unwrap();
 
         // Verify signature
         assert!(record.verify_signature().is_ok());
@@ -633,13 +633,13 @@ mod tests {
 
     #[test]
     fn test_record_serialization() {
-        let (signing_key, verifying_key) = create_test_keypair();
-        let user_id = UserId::from_public_key(&verifying_key);
+        let (secret_key, public_key) = create_test_keypair();
+        let user_id = UserId::from_public_key(&public_key);
         let endpoint = create_test_endpoint();
 
         let mut record = PeerDHTRecord::new(
             user_id,
-            verifying_key,
+            public_key,
             1,
             Some("test-user".to_string()),
             vec![endpoint],
@@ -647,7 +647,7 @@ mod tests {
         )
         .unwrap();
 
-        record.sign(&signing_key).unwrap();
+        record.sign(&secret_key).unwrap();
 
         // Serialize and deserialize
         let serialized = record.serialize().unwrap();
@@ -658,13 +658,13 @@ mod tests {
 
     #[test]
     fn test_signature_cache() {
-        let (signing_key, verifying_key) = create_test_keypair();
-        let user_id = UserId::from_public_key(&verifying_key);
+        let (secret_key, public_key) = create_test_keypair();
+        let user_id = UserId::from_public_key(&public_key);
         let endpoint = create_test_endpoint();
 
         let mut record = PeerDHTRecord::new(
             user_id,
-            verifying_key,
+            public_key,
             1,
             Some("test-user".to_string()),
             vec![endpoint],
@@ -672,7 +672,7 @@ mod tests {
         )
         .unwrap();
 
-        record.sign(&signing_key).unwrap();
+        record.sign(&secret_key).unwrap();
 
         let mut cache = SignatureCache::new(100);
 
@@ -692,7 +692,7 @@ mod tests {
         let long_name = "a".repeat(256);
         let result = PeerDHTRecord::new(
             user_id.clone(),
-            verifying_key,
+            public_key.clone(),
             1,
             Some(long_name),
             vec![create_test_endpoint()],
@@ -704,7 +704,7 @@ mod tests {
         let many_endpoints = vec![create_test_endpoint(); MAX_ENDPOINTS_PER_PEER + 1];
         let result = PeerDHTRecord::new(
             user_id.clone(),
-            verifying_key,
+            public_key.clone(),
             1,
             Some("test".to_string()),
             many_endpoints,
@@ -715,7 +715,7 @@ mod tests {
         // Test TTL too large
         let result = PeerDHTRecord::new(
             user_id,
-            verifying_key,
+            public_key,
             1,
             Some("test".to_string()),
             vec![create_test_endpoint()],

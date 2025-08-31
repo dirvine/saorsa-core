@@ -47,8 +47,6 @@ pub struct HealthMetrics {
     pub storage_free_bytes: u64,
     /// DHT operations per second
     pub dht_ops_per_second: f64,
-    /// MCP calls per second
-    pub mcp_calls_per_second: f64,
 }
 
 /// Prometheus exporter for health metrics
@@ -245,7 +243,6 @@ impl PrometheusExporter {
         let mut dht_routing_table_size = 0u64;
         let mut active_connections = 0u64;
         let mut dht_ops_per_second = 0.0;
-        let mut mcp_calls_per_second = 0.0;
         let mut bandwidth_usage_bps = 0u64;
         let mut storage_free_bytes = 0u64;
 
@@ -284,13 +281,7 @@ impl PrometheusExporter {
                     {
                         dht_ops_per_second = ops;
                     }
-                    if let Some(calls) = component
-                        .metadata
-                        .get("mcp_calls_per_sec")
-                        .and_then(|v| v.as_f64())
-                    {
-                        mcp_calls_per_second = calls;
-                    }
+
                     if let Some(bw) = component
                         .metadata
                         .get("bandwidth_usage")
@@ -326,7 +317,6 @@ impl PrometheusExporter {
             bandwidth_usage_bps,
             storage_free_bytes,
             dht_ops_per_second,
-            mcp_calls_per_second,
         })
     }
 }

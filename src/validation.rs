@@ -386,13 +386,11 @@ pub fn validate_dht_value(value: &[u8], ctx: &ValidationContext) -> P2pResult<()
 
 // ===== Rate Limiting =====
 
-/// Rate limiter for preventing abuse
+/// Rate limiter for preventing abuse (unified engine)
 #[derive(Debug)]
 pub struct RateLimiter {
-    /// Per-IP rate limits
-    ip_limits: RwLock<HashMap<IpAddr, RateLimitBucket>>,
-    /// Global rate limit
-    global_limit: RwLock<RateLimitBucket>,
+    /// Shared token bucket engine for global and per-IP limiting
+    engine: crate::rate_limit::SharedEngine<IpAddr>,
     /// Configuration
     config: RateLimitConfig,
 }
@@ -424,90 +422,29 @@ impl Default for RateLimitConfig {
     }
 }
 
-/// Token bucket for rate limiting
-#[derive(Debug)]
-struct RateLimitBucket {
-    tokens: f64,
-    last_update: Instant,
-    requests_in_window: u32,
-    window_start: Instant,
-}
-
-impl RateLimitBucket {
-    fn new(initial_tokens: f64) -> Self {
-        let now = Instant::now();
-        Self {
-            tokens: initial_tokens,
-            last_update: now,
-            requests_in_window: 0,
-            window_start: now,
-        }
-    }
-
-    /// Try to consume a token
-    fn try_consume(&mut self, config: &RateLimitConfig) -> bool {
-        let now = Instant::now();
-
-        // Reset window if needed
-        if now.duration_since(self.window_start) > config.window {
-            self.window_start = now;
-            self.requests_in_window = 0;
-        }
-
-        // Refill tokens
-        let elapsed = now.duration_since(self.last_update).as_secs_f64();
-        let refill_rate = config.max_requests as f64 / config.window.as_secs_f64();
-        self.tokens += elapsed * refill_rate;
-        self.tokens = self.tokens.min(config.burst_size as f64);
-        self.last_update = now;
-
-        // Try to consume
-        if self.tokens >= 1.0 && self.requests_in_window < config.max_requests {
-            self.tokens -= 1.0;
-            self.requests_in_window += 1;
-            true
-        } else {
-            false
-        }
-    }
-}
+// Deprecated per-module bucket removed; using crate::rate_limit::Engine instead.
 
 impl RateLimiter {
     /// Create a new rate limiter
     pub fn new(config: RateLimitConfig) -> Self {
-        Self {
-            ip_limits: RwLock::new(HashMap::new()),
-            global_limit: RwLock::new(RateLimitBucket::new(config.burst_size as f64)),
-            config,
-        }
+        let engine_cfg = crate::rate_limit::EngineConfig {
+            window: config.window,
+            max_requests: config.max_requests,
+            burst_size: config.burst_size,
+        };
+        Self { engine: std::sync::Arc::new(crate::rate_limit::Engine::new(engine_cfg)), config }
     }
 
     /// Check if a request from an IP is allowed
     pub fn check_ip(&self, ip: &IpAddr) -> P2pResult<()> {
-        // Check global limit first
-        {
-            let mut global = self.global_limit.write();
-            if !global.try_consume(&self.config) {
-                return Err(ValidationError::RateLimitExceeded {
-                    identifier: "global".to_string(),
-                }
-                .into());
-            }
+        // Global limit
+        if !self.engine.try_consume_global() {
+            return Err(ValidationError::RateLimitExceeded { identifier: "global".to_string() }.into());
         }
 
-        // Check per-IP limit
-        {
-            let mut limits = self.ip_limits.write();
-            let bucket = limits
-                .entry(*ip)
-                .or_insert_with(|| RateLimitBucket::new(self.config.burst_size as f64));
-
-            if !bucket.try_consume(&self.config) {
-                return Err(ValidationError::RateLimitExceeded {
-                    identifier: ip.to_string(),
-                }
-                .into());
-            }
+        // Per-IP limit
+        if !self.engine.try_consume_key(ip) {
+            return Err(ValidationError::RateLimitExceeded { identifier: ip.to_string() }.into());
         }
 
         Ok(())
@@ -515,12 +452,7 @@ impl RateLimiter {
 
     /// Clean up expired entries
     pub fn cleanup(&self) {
-        let mut limits = self.ip_limits.write();
-        let now = Instant::now();
-
-        limits.retain(|_, bucket| {
-            now.duration_since(bucket.last_update) < self.config.cleanup_interval
-        });
+        // Not required with the unified engine (buckets age out via window). No-op.
     }
 }
 

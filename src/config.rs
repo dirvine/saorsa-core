@@ -49,8 +49,7 @@ pub struct Config {
     pub security: SecurityConfig,
     /// Storage configuration
     pub storage: StorageConfig,
-    /// MCP (Model Context Protocol) configuration
-    pub mcp: McpConfig,
+
     /// DHT configuration
     pub dht: DhtConfig,
     /// Transport configuration
@@ -107,20 +106,6 @@ pub struct StorageConfig {
     pub cache_size: u64,
     /// Enable compression
     pub compression_enabled: bool,
-}
-
-/// MCP configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct McpConfig {
-    /// Enable MCP server
-    pub enabled: bool,
-    /// MCP server port
-    pub port: u16,
-    /// Maximum tool execution time in seconds
-    pub max_execution_time: u64,
-    /// Enable resource monitoring
-    pub monitoring_enabled: bool,
 }
 
 /// DHT configuration
@@ -208,17 +193,6 @@ impl Default for StorageConfig {
             max_size: "10GB".to_string(),
             cache_size: 256,
             compression_enabled: true,
-        }
-    }
-}
-
-impl Default for McpConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            port: 9001,
-            max_execution_time: 300,
-            monitoring_enabled: true,
         }
     }
 }
@@ -397,24 +371,6 @@ impl Config {
         }
         if let Ok(val) = env::var("SAORSA_MAX_STORAGE") {
             self.storage.max_size = val;
-        }
-
-        // MCP overrides
-        if let Ok(val) = env::var("SAORSA_MCP_ENABLED") {
-            self.mcp.enabled = val.parse().map_err(|_| {
-                P2PError::Config(ConfigError::InvalidValue {
-                    field: "mcp_enabled".to_string().into(),
-                    reason: "Invalid value".to_string().into(),
-                })
-            })?;
-        }
-        if let Ok(val) = env::var("SAORSA_MCP_PORT") {
-            self.mcp.port = val.parse().map_err(|_| {
-                P2PError::Config(ConfigError::InvalidValue {
-                    field: "mcp_port".to_string().into(),
-                    reason: "Invalid value".to_string().into(),
-                })
-            })?;
         }
 
         Ok(())

@@ -499,7 +499,7 @@ async fn test_q_learning_convergence() {
     // Track Q-values over time
     let mut q_value_history = Vec::new();
 
-    for epoch in 0..100 {
+    for _epoch in 0..100 {
         let mut epoch_q_values = Vec::new();
 
         for _ in 0..100 {

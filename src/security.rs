@@ -27,6 +27,8 @@ use std::collections::HashMap;
 use std::net::Ipv6Addr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use std::sync::Arc;
+
 /// IPv6-based node identity that binds node ID to actual network location
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IPv6NodeID {
@@ -232,6 +234,7 @@ pub struct IPDiversityEnforcer {
     subnet_32_counts: HashMap<Ipv6Addr, usize>,
     asn_counts: HashMap<u32, usize>,
     country_counts: HashMap<String, usize>,
+    geo_provider: Option<Arc<dyn GeoProvider + Send + Sync>>,
 }
 
 impl IPDiversityEnforcer {
@@ -244,7 +247,18 @@ impl IPDiversityEnforcer {
             subnet_32_counts: HashMap::new(),
             asn_counts: HashMap::new(),
             country_counts: HashMap::new(),
+            geo_provider: None,
         }
+    }
+
+    /// Create a new IP diversity enforcer with a GeoIP/ASN provider
+    pub fn with_geo_provider(
+        config: IPDiversityConfig,
+        provider: Arc<dyn GeoProvider + Send + Sync>,
+    ) -> Self {
+        let mut s = Self::new(config);
+        s.geo_provider = Some(provider);
+        s
     }
 
     /// Analyze an IPv6 address for diversity enforcement
@@ -253,15 +267,13 @@ impl IPDiversityEnforcer {
         let subnet_48 = Self::extract_subnet_prefix(ipv6_addr, 48);
         let subnet_32 = Self::extract_subnet_prefix(ipv6_addr, 32);
 
-        // TODO: Implement ASN lookup (requires external database)
-        let asn = None;
-
-        // TODO: Implement GeoIP lookup (requires external database)
-        let country = None;
-
-        // TODO: Implement hosting/VPN provider detection
-        let is_hosting_provider = false;
-        let is_vpn_provider = false;
+        // GeoIP/ASN lookup via provider if available
+        let (asn, country, is_hosting_provider, is_vpn_provider) = if let Some(p) = &self.geo_provider {
+            let info = p.lookup(ipv6_addr);
+            (info.asn, info.country, info.is_hosting_provider, info.is_vpn_provider)
+        } else {
+            (None, None, false, false)
+        };
 
         // Default reputation for new IPs
         let reputation_score = 0.5;
@@ -441,6 +453,49 @@ impl IPDiversityEnforcer {
             max_nodes_per_48: self.subnet_48_counts.values().max().copied().unwrap_or(0),
             max_nodes_per_32: self.subnet_32_counts.values().max().copied().unwrap_or(0),
         }
+    }
+}
+
+/// GeoIP/ASN provider trait
+pub trait GeoProvider {
+    fn lookup(&self, ip: Ipv6Addr) -> GeoInfo;
+}
+
+/// Geo information
+#[derive(Debug, Clone)]
+pub struct GeoInfo {
+    pub asn: Option<u32>,
+    pub country: Option<String>,
+    pub is_hosting_provider: bool,
+    pub is_vpn_provider: bool,
+}
+
+/// A simple in-memory caching wrapper for a GeoProvider
+pub struct CachedGeoProvider<P: GeoProvider> {
+    inner: P,
+    cache: parking_lot::RwLock<HashMap<Ipv6Addr, GeoInfo>>, 
+}
+
+impl<P: GeoProvider> CachedGeoProvider<P> {
+    pub fn new(inner: P) -> Self {
+        Self { inner, cache: parking_lot::RwLock::new(HashMap::new()) }
+    }
+}
+
+impl<P: GeoProvider> GeoProvider for CachedGeoProvider<P> {
+    fn lookup(&self, ip: Ipv6Addr) -> GeoInfo {
+        if let Some(info) = self.cache.read().get(&ip).cloned() { return info; }
+        let info = self.inner.lookup(ip);
+        self.cache.write().insert(ip, info.clone());
+        info
+    }
+}
+
+/// Stub provider returning no ASN/GeoIP info
+pub struct StubGeoProvider;
+impl GeoProvider for StubGeoProvider {
+    fn lookup(&self, _ip: Ipv6Addr) -> GeoInfo {
+        GeoInfo { asn: None, country: None, is_hosting_provider: false, is_vpn_provider: false }
     }
 }
 

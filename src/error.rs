@@ -41,7 +41,7 @@
 //!             addr,
 //!             reason: e.to_string().into(),
 //!         })?;
-//!     
+//!
 //!     Ok(conn)
 //! }
 //! ```
@@ -67,7 +67,7 @@
 //! fn handle_error(err: P2PError) {
 //!     // Automatically logs with appropriate level and context
 //!     err.log();
-//!     
+//!
 //!     // Or get structured log for custom handling
 //!     let log_entry = err.to_error_log();
 //!     send_to_monitoring_system(&log_entry);
@@ -128,10 +128,6 @@ pub enum P2PError {
     // Transport errors
     #[error("Transport error: {0}")]
     Transport(#[from] TransportError),
-
-    // MCP errors
-    #[error("MCP error: {0}")]
-    Mcp(#[from] McpError),
 
     // Configuration errors
     #[error("Configuration error: {0}")]
@@ -291,7 +287,6 @@ pub enum IdentityError {
     #[error("System time error: {0}")]
     SystemTime(Cow<'static, str>),
 
-
     #[error("Not found: {0}")]
     NotFound(Cow<'static, str>),
 
@@ -405,34 +400,6 @@ pub enum TransportError {
 
     #[error("Not initialized")]
     NotInitialized,
-}
-
-/// MCP-related errors
-#[derive(Debug, Error)]
-pub enum McpError {
-    #[error("Tool not found: {0}")]
-    ToolNotFound(Cow<'static, str>),
-
-    #[error("Invalid tool configuration: {0}")]
-    InvalidToolConfig(Cow<'static, str>),
-
-    #[error("Execution failed: {0}")]
-    ExecutionFailed(Cow<'static, str>),
-
-    #[error("Permission denied for tool: {0}")]
-    PermissionDenied(Cow<'static, str>),
-
-    #[error("Invalid response format: {0}")]
-    InvalidResponse(Cow<'static, str>),
-
-    #[error("Server unavailable: {0}")]
-    ServerUnavailable(Cow<'static, str>),
-
-    #[error("Invalid request: {0}")]
-    InvalidRequest(Cow<'static, str>),
-
-    #[error("Tool execution failed: {0}")]
-    ToolExecutionFailed(Cow<'static, str>),
 }
 
 /// Configuration-related errors
@@ -787,7 +754,6 @@ fn error_type_name(error: &P2PError) -> &'static str {
         P2PError::Crypto(_) => "Crypto",
         P2PError::Storage(_) => "Storage",
         P2PError::Transport(_) => "Transport",
-        P2PError::Mcp(_) => "MCP",
         P2PError::Config(_) => "Config",
         P2PError::Io(_) => "IO",
         P2PError::Serialization(_) => "Serialization",

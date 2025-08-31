@@ -61,7 +61,7 @@ pub struct QuicQualityMetrics {
 pub enum QuicConnectionType {
     /// Direct IPv4 connection
     DirectIPv4,
-    /// Direct IPv6 connection  
+    /// Direct IPv6 connection
     DirectIPv6,
 }
 
@@ -517,7 +517,7 @@ impl QualityCalculator {
         }
 
         // Capability bonuses
-        let important_capabilities = ["dht", "mcp", "relay"];
+        let important_capabilities = ["dht", "relay"];
         let capability_count = important_capabilities
             .iter()
             .filter(|&cap| contact.has_capability(cap))
@@ -684,7 +684,7 @@ mod tests {
 
         let initial_score = contact.quality_metrics.quality_score;
 
-        contact.update_capabilities(vec!["dht".to_string(), "mcp".to_string()]);
+        contact.update_capabilities(vec!["dht".to_string()]);
 
         assert!(contact.quality_metrics.quality_score > initial_score);
     }

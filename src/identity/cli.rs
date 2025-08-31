@@ -233,7 +233,7 @@ impl IdentityCliHandler {
             ))
         })?;
 
-        let identity = NodeIdentity::load_from_file(&path).await?;
+        let _identity = NodeIdentity::load_from_file(&path).await?;
 
         // Verify components
         let keys_valid = true; // Keys are valid if we can load them

@@ -21,10 +21,6 @@ use crate::config::Config;
 use crate::dht::DHT;
 use crate::error::{NetworkError, P2PError, P2pResult as Result};
 use crate::identity::manager::IdentityManagerConfig;
-use crate::mcp::{
-    HealthMonitorConfig, MCP_PROTOCOL, MCPCallContext, MCPServer, MCPServerConfig, NetworkSender,
-    Tool,
-};
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
 use crate::transport::ant_quic_adapter::DualStackNetworkNode;
 #[allow(unused_imports)] // Temporarily unused during migration
@@ -62,12 +58,7 @@ pub struct NodeConfig {
     /// Enable IPv6 support
     pub enable_ipv6: bool,
 
-    /// Enable MCP server
-    pub enable_mcp_server: bool,
-
-    /// MCP server configuration
-    pub mcp_server_config: Option<MCPServerConfig>,
-
+    // MCP removed; will be redesigned later
     /// Connection timeout duration
     pub connection_timeout: Duration,
 
@@ -175,8 +166,7 @@ impl NodeConfig {
             bootstrap_peers: Vec::new(),
             bootstrap_peers_str: config.network.bootstrap_nodes.clone(),
             enable_ipv6: config.network.ipv6_enabled,
-            enable_mcp_server: config.mcp.enabled,
-            mcp_server_config: None, // Use default config if None
+
             connection_timeout: Duration::from_secs(config.network.connection_timeout),
             keep_alive_interval: Duration::from_secs(config.network.keepalive_interval),
             max_connections: config.network.max_connections,
@@ -219,8 +209,7 @@ impl Default for NodeConfig {
             bootstrap_peers: Vec::new(),
             bootstrap_peers_str: Vec::new(),
             enable_ipv6: config.network.ipv6_enabled,
-            enable_mcp_server: config.mcp.enabled,
-            mcp_server_config: None, // Use default config if None
+
             connection_timeout: Duration::from_secs(config.network.connection_timeout),
             keep_alive_interval: Duration::from_secs(config.network.keepalive_interval),
             max_connections: config.network.max_connections,
@@ -255,21 +244,7 @@ impl NodeConfig {
                 .map(|addr| addr.to_string())
                 .collect(),
             enable_ipv6: config.network.ipv6_enabled,
-            enable_mcp_server: config.mcp.enabled,
-            mcp_server_config: Some(MCPServerConfig {
-                server_name: "P2P-MCP-Server".to_string(),
-                server_version: "1.0.0".to_string(),
-                enable_dht_discovery: true,
-                max_concurrent_requests: 100,
-                request_timeout: Duration::from_secs(30),
-                enable_auth: false,
-                enable_rate_limiting: true,
-                rate_limit_rpm: 60,
-                enable_logging: true,
-                max_tool_execution_time: Duration::from_secs(60),
-                tool_memory_limit: 1024 * 1024 * 1024, // 1GB
-                health_monitor: HealthMonitorConfig::default(),
-            }),
+
             connection_timeout: Duration::from_secs(config.network.connection_timeout),
             keep_alive_interval: Duration::from_secs(config.network.keepalive_interval),
             max_connections: config.network.max_connections,
@@ -472,6 +447,14 @@ pub enum P2PEvent {
 }
 
 /// Main P2P node structure
+/// Main P2P network node that manages connections, routing, and communication
+///
+/// This struct represents a complete P2P network participant that can:
+/// - Connect to other peers via QUIC transport
+/// - Participate in distributed hash table (DHT) operations
+/// - Send and receive messages through various protocols
+/// - Handle network events and peer lifecycle
+/// - Provide MCP (Model Context Protocol) services
 pub struct P2PNode {
     /// Node configuration
     config: NodeConfig,
@@ -494,9 +477,6 @@ pub struct P2PNode {
     /// Running state
     running: RwLock<bool>,
 
-    /// MCP server instance (optional)
-    mcp_server: Option<Arc<MCPServer>>,
-
     /// DHT instance (optional)
     dht: Option<Arc<RwLock<DHT>>>,
 
@@ -516,9 +496,10 @@ pub struct P2PNode {
 
 impl P2PNode {
     /// Minimal constructor for tests that avoids real networking
-    pub fn new_for_tests() -> Self {
+    #[allow(clippy::panic)]
+    pub fn new_for_tests() -> Result<Self> {
         let (event_tx, _) = broadcast::channel(16);
-        Self {
+        Ok(Self {
             config: NodeConfig::default(),
             peer_id: "test_peer".to_string(),
             peers: Arc::new(RwLock::new(HashMap::new())),
@@ -526,20 +507,30 @@ impl P2PNode {
             listen_addrs: RwLock::new(Vec::new()),
             start_time: Instant::now(),
             running: RwLock::new(false),
-            mcp_server: None,
             dht: None,
             resource_manager: None,
             bootstrap_manager: None,
             dual_node: {
                 // Bind dual-stack nodes on ephemeral ports for tests
-                let v6: Option<std::net::SocketAddr> = Some("[::1]:0".parse().unwrap_or(std::net::SocketAddr::from(([0,0,0,0],0))));
-                let v4: Option<std::net::SocketAddr> = Some("127.0.0.1:0".parse().unwrap_or(std::net::SocketAddr::from(([127,0,0,1],0))));
+                let v6: Option<std::net::SocketAddr> = Some(
+                    "[::1]:0"
+                        .parse()
+                        .unwrap_or(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
+                );
+                let v4: Option<std::net::SocketAddr> = "127.0.0.1:0".parse().ok();
                 let dual = tokio::runtime::Handle::current()
                     .block_on(crate::transport::ant_quic_adapter::DualStackNetworkNode::new(v6, v4))
                     .unwrap_or_else(|_| {
                         tokio::runtime::Handle::current()
-                            .block_on(crate::transport::ant_quic_adapter::DualStackNetworkNode::new(None, Some("127.0.0.1:0".parse().unwrap())))
-                            .expect("dual-stack fallback creation failed")
+                            .block_on(
+                                crate::transport::ant_quic_adapter::DualStackNetworkNode::new(
+                                    None,
+                                    "127.0.0.1:0".parse().ok(),
+                                ),
+                            )
+                            .unwrap_or_else(|e| {
+                                panic!("Failed to create dual-stack network node: {}", e)
+                            })
                     });
                 Arc::new(dual)
             },
@@ -549,7 +540,7 @@ impl P2PNode {
                 window: std::time::Duration::from_secs(1),
                 ..Default::default()
             })),
-        }
+        })
     }
     /// Create a new P2P node with the given configuration
     pub async fn new(config: NodeConfig) -> Result<Self> {
@@ -588,29 +579,7 @@ impl P2PNode {
             None
         };
 
-        // Initialize MCP server if enabled
-        let mcp_server = if config.enable_mcp_server {
-            let mcp_config = config
-                .mcp_server_config
-                .clone()
-                .unwrap_or_else(|| MCPServerConfig {
-                    server_name: format!("P2P-MCP-{peer_id}"),
-                    server_version: crate::VERSION.to_string(),
-                    enable_dht_discovery: dht.is_some(),
-                    ..MCPServerConfig::default()
-                });
-
-            let mut server = MCPServer::new(mcp_config);
-
-            // Connect DHT if available
-            if let Some(ref dht_instance) = dht {
-                server = server.with_dht(dht_instance.clone());
-            }
-
-            Some(Arc::new(server))
-        } else {
-            None
-        };
+        // MCP removed
 
         // Initialize production resource manager if configured
         let resource_manager = config
@@ -644,31 +613,26 @@ impl P2PNode {
         };
 
         // Initialize dual-stack ant-quic nodes
-        let (mut v6_opt, mut v4_opt) = (None, None);
-        if !config.listen_addrs.is_empty() {
-            v6_opt = config
-                .listen_addrs
-                .iter()
-                .find(|a| a.is_ipv6())
-                .cloned();
-            v4_opt = config
-                .listen_addrs
-                .iter()
-                .find(|a| a.is_ipv4())
-                .cloned();
+        let (v6_opt, v4_opt) = if !config.listen_addrs.is_empty() {
+            let v6_addr = config.listen_addrs.iter().find(|a| a.is_ipv6()).cloned();
+            let v4_addr = config.listen_addrs.iter().find(|a| a.is_ipv4()).cloned();
+            (v6_addr, v4_addr)
         } else {
             // Defaults: always listen on IPv4; IPv6 if enabled
-            v4_opt = Some(std::net::SocketAddr::new(
+            let v4_addr = Some(std::net::SocketAddr::new(
                 std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
                 config.listen_addr.port(),
             ));
-            if config.enable_ipv6 {
-                v6_opt = Some(std::net::SocketAddr::new(
+            let v6_addr = if config.enable_ipv6 {
+                Some(std::net::SocketAddr::new(
                     std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
                     config.listen_addr.port(),
-                ));
-            }
-        }
+                ))
+            } else {
+                None
+            };
+            (v6_addr, v4_addr)
+        };
 
         let dual_node = Arc::new(
             DualStackNetworkNode::new(v6_opt, v4_opt)
@@ -693,7 +657,6 @@ impl P2PNode {
             listen_addrs: RwLock::new(Vec::new()),
             start_time: Instant::now(),
             running: RwLock::new(false),
-            mcp_server,
             dht,
             resource_manager,
             bootstrap_manager,
@@ -701,10 +664,6 @@ impl P2PNode {
             rate_limiter,
         };
         info!("Created P2P node with peer ID: {}", node.peer_id);
-
-        // Connect MCP server to network layer if enabled
-        // This is done after node creation since the MCP server needs a reference to the node
-        // We'll complete this integration in the initialize_mcp_network method
 
         Ok(node)
     }
@@ -717,52 +676,6 @@ impl P2PNode {
     /// Get the peer ID of this node
     pub fn peer_id(&self) -> &PeerId {
         &self.peer_id
-    }
-
-    /// Initialize MCP network integration
-    /// This method should be called after node creation to enable MCP network features
-    pub async fn initialize_mcp_network(&self) -> Result<()> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // Create a channel for sending messages from MCP to the network layer
-            let (send_tx, mut send_rx) =
-                tokio::sync::mpsc::unbounded_channel::<(PeerId, String, Vec<u8>)>();
-
-            // Create a network sender using the channel
-            let network_sender = P2PNetworkSender::new(self.peer_id.clone(), send_tx);
-
-            // Set the network sender in the MCP server
-            _mcp_server
-                .set_network_sender(Arc::new(network_sender))
-                .await;
-
-            // Start background task to handle network messages
-            // ant-quic dual-node handled in listener startup; simulate send loop
-            tokio::spawn(async move {
-                while let Some((peer_id, protocol, data)) = send_rx.recv().await {
-                    debug!(
-                        "Sending network message to {}: {} bytes on protocol {}",
-                        peer_id,
-                        data.len(),
-                        protocol
-                    );
-
-                    // Create protocol message wrapper
-                    let message_data = match handle_protocol_message_creation(&protocol, data) {
-                        Some(msg) => msg,
-                        None => continue,
-                    };
-
-                    // Simulate send via transport (integration pending)
-                    handle_message_send_result(Ok(()), &peer_id).await;
-                }
-            });
-
-            info!(
-                "MCP network integration initialized for peer {}",
-                self.peer_id
-            );
-        }
-        Ok(())
     }
 
     pub fn local_addr(&self) -> Option<String> {
@@ -866,18 +779,7 @@ impl P2PNode {
         let listen_addrs = self.listen_addrs.read().await;
         info!("P2P node started on addresses: {:?}", *listen_addrs);
 
-        // Initialize MCP network integration
-        self.initialize_mcp_network().await?;
-
-        // Start MCP server if enabled
-        if let Some(ref _mcp_server) = self.mcp_server {
-            _mcp_server.start().await.map_err(|e| {
-                P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                    format!("Failed to start MCP server: {e}").into(),
-                ))
-            })?;
-            info!("MCP server started with network integration");
-        }
+        // MCP removed
 
         // Start message receiving system
         self.start_message_receiving_system().await?;
@@ -907,7 +809,8 @@ impl P2PNode {
             loop {
                 match dual.accept_any().await {
                     Ok((ant_peer_id, remote_sock)) => {
-                        let peer_id = crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
+                        let peer_id =
+                            crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
                         // Optional: basic IP rate limiting
                         let _ = rate_limiter.check_ip(&remote_sock.ip());
@@ -927,6 +830,7 @@ impl P2PNode {
     }
 
     /// Start a listener on a specific socket address
+    #[allow(dead_code)]
     async fn start_listener_on_address(&self, addr: std::net::SocketAddr) -> Result<()> {
         // use crate::transport::{Transport}; // Unused during migration
 
@@ -996,7 +900,7 @@ impl P2PNode {
         let _peer_id = self.peer_id.clone();
         let peers = Arc::clone(&self.peers);
         // ant-quic dual-stack node is managed separately; accept loop started in start_network_listeners
-        let mcp_server = self.mcp_server.clone();
+
         let rate_limiter = Arc::clone(&self.rate_limiter);
 
         // Spawn background task to accept incoming connections
@@ -1032,7 +936,6 @@ impl P2PNode {
                             connection_peer_id,
                             event_tx.clone(),
                             Arc::clone(&peers),
-                            mcp_server.clone(),
                         );
                     }
                     Err(e) => {
@@ -1075,10 +978,7 @@ impl P2PNode {
         protocol: &str,
         event_tx: &broadcast::Sender<P2PEvent>,
     ) -> Result<()> {
-        // Check if this is an MCP protocol message
-        if protocol == MCP_PROTOCOL {
-            return self.handle_mcp_message(message_data, peer_id).await;
-        }
+        // MCP removed: no special protocol handling
 
         // Parse the message format we created in create_protocol_message
         match serde_json::from_slice::<serde_json::Value>(&message_data) {
@@ -1113,286 +1013,9 @@ impl P2PNode {
         Ok(())
     }
 
-    /// Handle incoming MCP protocol messages
-    #[allow(dead_code)]
-    async fn handle_mcp_message(&self, message_data: Vec<u8>, peer_id: &PeerId) -> Result<()> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // Deserialize the MCP message
-            match serde_json::from_slice::<crate::mcp::P2PMCPMessage>(&message_data) {
-                Ok(p2p_mcp_message) => {
-                    debug!(
-                        "Received MCP message from peer {}: {:?}",
-                        peer_id, p2p_mcp_message.message_type
-                    );
+    // MCP removed
 
-                    // Handle different types of MCP messages
-                    match p2p_mcp_message.message_type {
-                        crate::mcp::P2PMCPMessageType::Request => {
-                            // Handle incoming tool call request
-                            self.handle_mcp_tool_request(p2p_mcp_message, peer_id)
-                                .await?;
-                        }
-                        crate::mcp::P2PMCPMessageType::Response => {
-                            // Handle response to our previous request
-                            self.handle_mcp_tool_response(p2p_mcp_message).await?;
-                        }
-                        crate::mcp::P2PMCPMessageType::ServiceAdvertisement => {
-                            // Handle service discovery advertisement
-                            self.handle_mcp_service_advertisement(p2p_mcp_message, peer_id)
-                                .await?;
-                        }
-                        crate::mcp::P2PMCPMessageType::ServiceDiscovery => {
-                            // Handle service discovery query
-                            self.handle_mcp_service_discovery(p2p_mcp_message, peer_id)
-                                .await?;
-                        }
-                        crate::mcp::P2PMCPMessageType::Heartbeat => {
-                            // Handle heartbeat notification
-                            debug!("Received heartbeat from peer {}", peer_id);
-
-                            // Update peer last seen timestamp
-                            let _ =
-                                update_peer_heartbeat(&self.peers, peer_id)
-                                    .await
-                                    .map_err(|e| {
-                                        debug!(
-                                            "Failed to update heartbeat for peer {}: {}",
-                                            peer_id, e
-                                        )
-                                    });
-
-                            // Send heartbeat acknowledgment
-                            let timestamp = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map_err(|e| {
-                                    P2PError::Network(NetworkError::ProtocolError(
-                                        format!("System time error: {}", e).into(),
-                                    ))
-                                })?
-                                .as_secs();
-
-                            let ack_data = serde_json::to_vec(&serde_json::json!({
-                                "type": "heartbeat_ack",
-                                "timestamp": timestamp
-                            }))
-                            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
-
-                            let _ = self
-                                .send_message(peer_id, MCP_PROTOCOL, ack_data)
-                                .await
-                                .map_err(|e| {
-                                    warn!("Failed to send heartbeat ack to {}: {}", peer_id, e)
-                                });
-                        }
-                        crate::mcp::P2PMCPMessageType::HealthCheck => {
-                            // Handle health check request
-                            debug!("Received health check from peer {}", peer_id);
-
-                            // Gather health information
-                            let peers_count = self.peers.read().await.len();
-                            let uptime = self.start_time.elapsed();
-
-                            // Get resource metrics if available
-                            let (memory_usage, cpu_usage) =
-                                get_resource_metrics(&self.resource_manager).await;
-
-                            // Create health check response
-                            let timestamp = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map_err(|e| {
-                                    P2PError::Network(NetworkError::ProtocolError(
-                                        format!("System time error: {}", e).into(),
-                                    ))
-                                })?
-                                .as_secs();
-
-                            let health_response = serde_json::json!({
-                                "type": "health_check_response",
-                                "status": "healthy",
-                                "peer_id": self.peer_id,
-                                "peers_count": peers_count,
-                                "uptime_secs": uptime.as_secs(),
-                                "memory_usage_bytes": memory_usage,
-                                "cpu_usage_percent": cpu_usage,
-                                "timestamp": timestamp
-                            });
-
-                            let response_data = serde_json::to_vec(&health_response)
-                                .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
-
-                            // Send health check response
-                            if let Err(e) = self
-                                .send_message(peer_id, MCP_PROTOCOL, response_data)
-                                .await
-                            {
-                                warn!("Failed to send health check response to {}: {}", peer_id, e);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to deserialize MCP message from peer {}: {}",
-                        peer_id, e
-                    );
-                    return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                        format!("Invalid MCP message: {e}").into(),
-                    )));
-                }
-            }
-        } else {
-            warn!("Received MCP message but MCP server is not enabled");
-            return Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// Handle incoming MCP tool call requests
-    #[allow(dead_code)]
-    async fn handle_mcp_tool_request(
-        &self,
-        message: crate::mcp::P2PMCPMessage,
-        peer_id: &PeerId,
-    ) -> Result<()> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // Extract the tool call from the message
-            if let crate::mcp::MCPMessage::CallTool { name, arguments } = message.payload {
-                debug!(
-                    "Handling MCP tool request for '{}' from peer {}",
-                    name, peer_id
-                );
-
-                // Create an MCPCallContext for this request
-                let context = MCPCallContext {
-                    caller_id: peer_id.clone(),
-                    timestamp: std::time::SystemTime::now(),
-                    timeout: Duration::from_secs(30),
-                    auth_info: None,
-                    metadata: std::collections::HashMap::new(),
-                };
-
-                // Execute the tool locally
-                match _mcp_server.call_tool(&name, arguments, context).await {
-                    Ok(result) => {
-                        // Send response back to the requesting peer
-                        let response_message = crate::mcp::P2PMCPMessage {
-                            message_type: crate::mcp::P2PMCPMessageType::Response,
-                            message_id: message.message_id,
-                            source_peer: self.peer_id.clone(),
-                            target_peer: Some(peer_id.clone()),
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
-                            payload: crate::mcp::MCPMessage::CallToolResult {
-                                content: vec![crate::mcp::MCPContent::Text {
-                                    text: serde_json::to_string(&result).unwrap_or_default(),
-                                }],
-                                is_error: false,
-                            },
-                            ttl: 5,
-                        };
-
-                        // Serialize and send response
-                        let response_data = serde_json::to_vec(&response_message)
-                            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
-
-                        self.send_message(peer_id, MCP_PROTOCOL, response_data)
-                            .await?;
-                        debug!("Sent MCP tool response to peer {}", peer_id);
-                    }
-                    Err(e) => {
-                        // Send error response
-                        let error_message = crate::mcp::P2PMCPMessage {
-                            message_type: crate::mcp::P2PMCPMessageType::Response,
-                            message_id: message.message_id,
-                            source_peer: self.peer_id.clone(),
-                            target_peer: Some(peer_id.clone()),
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
-                            payload: crate::mcp::MCPMessage::CallToolResult {
-                                content: vec![crate::mcp::MCPContent::Text {
-                                    text: format!("Error: {e}"),
-                                }],
-                                is_error: true,
-                            },
-                            ttl: 5,
-                        };
-
-                        let error_data = serde_json::to_vec(&error_message)
-                            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
-
-                        self.send_message(peer_id, MCP_PROTOCOL, error_data).await?;
-                        warn!("Sent MCP error response to peer {}: {}", peer_id, e);
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle MCP tool call responses
-    #[allow(dead_code)]
-    async fn handle_mcp_tool_response(&self, message: crate::mcp::P2PMCPMessage) -> Result<()> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // Forward the response to the MCP server for processing
-            debug!("Received MCP tool response: {}", message.message_id);
-            // The MCP server's handle_remote_response method will process this
-            // This is a simplified implementation - in production we'd have more sophisticated routing
-        }
-
-        Ok(())
-    }
-
-    /// Handle MCP service advertisements
-    #[allow(dead_code)]
-    async fn handle_mcp_service_advertisement(
-        &self,
-        message: crate::mcp::P2PMCPMessage,
-        peer_id: &PeerId,
-    ) -> Result<()> {
-        debug!("Received MCP service advertisement from peer {}", peer_id);
-
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // Forward the service advertisement to the MCP server for processing
-            _mcp_server.handle_service_advertisement(message).await?;
-            debug!("Processed service advertisement from peer {}", peer_id);
-        } else {
-            warn!("Received MCP service advertisement but MCP server is not enabled");
-        }
-
-        Ok(())
-    }
-
-    /// Handle MCP service discovery queries
-    #[allow(dead_code)]
-    async fn handle_mcp_service_discovery(
-        &self,
-        message: crate::mcp::P2PMCPMessage,
-        peer_id: &PeerId,
-    ) -> Result<()> {
-        debug!("Received MCP service discovery query from peer {}", peer_id);
-
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // Handle the service discovery request through the MCP server
-            if let Ok(Some(response_data)) = _mcp_server.handle_service_discovery(message).await {
-                // Send the response back to the requesting peer
-                self.send_message(peer_id, MCP_PROTOCOL, response_data)
-                    .await?;
-                debug!("Sent service discovery response to peer {}", peer_id);
-            }
-        } else {
-            warn!("Received MCP service discovery query but MCP server is not enabled");
-        }
-
-        Ok(())
-    }
+    // MCP removed
 
     /// Run the P2P node (blocks until shutdown)
     pub async fn run(&self) -> Result<()> {
@@ -1425,16 +1048,6 @@ impl P2PNode {
 
         // Set running state to false
         *self.running.write().await = false;
-
-        // Shutdown MCP server if enabled
-        if let Some(ref _mcp_server) = self.mcp_server {
-            _mcp_server.shutdown().await.map_err(|e| {
-                P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                    format!("Failed to shutdown MCP server: {e}").into(),
-                ))
-            })?;
-            info!("MCP server stopped");
-        }
 
         // Disconnect all peers
         self.disconnect_all_peers().await?;
@@ -1603,30 +1216,7 @@ impl P2PNode {
             )));
         }
 
-        // For MCP protocol messages, validate before sending
-        if protocol == MCP_PROTOCOL {
-            // Validate message format before sending
-            if data.len() < 4 {
-                return Err(P2PError::Network(
-                    crate::error::NetworkError::ProtocolError(
-                        "Invalid MCP message: too short".to_string().into(),
-                    ),
-                ));
-            }
-
-            // Check message type is valid
-            let message_type = data.first().unwrap_or(&0);
-            if *message_type > 10 {
-                // Arbitrary limit for message types
-                return Err(P2PError::Network(
-                    crate::error::NetworkError::ProtocolError(
-                        "Invalid MCP message type".to_string().into(),
-                    ),
-                ));
-            }
-
-            debug!("Validated MCP message for network transmission");
-        }
+        // MCP removed: no special-case protocol validation
 
         // Record bandwidth usage if resource manager is enabled
         if let Some(ref resource_manager) = self.resource_manager {
@@ -1722,247 +1312,16 @@ impl P2PNode {
         self.start_time.elapsed()
     }
 
-    /// Get MCP server reference
-    pub fn mcp_server(&self) -> Option<&Arc<MCPServer>> {
-        self.mcp_server.as_ref()
-    }
-
-    /// Register a tool in the MCP server
-    pub async fn register_mcp_tool(&self, tool: Tool) -> Result<()> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            let tool_name = tool.definition.name.clone();
-            _mcp_server.register_tool(tool).await.map_err(|e| {
-                P2PError::Mcp(crate::error::McpError::ToolExecutionFailed(
-                    format!("{}: Registration failed: {e}", tool_name).into(),
-                ))
-            })
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
-
-    /// Call a local MCP tool
-    pub async fn call_mcp_tool(&self, tool_name: &str, arguments: Value) -> Result<Value> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // Check rate limits if resource manager is enabled
-            if let Some(ref resource_manager) = self.resource_manager
-                && !resource_manager
-                    .check_rate_limit(&self.peer_id, "mcp")
-                    .await?
-            {
-                return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                    "MCP rate limit exceeded".to_string().into(),
-                )));
-            }
-
-            let context = MCPCallContext {
-                caller_id: self.peer_id.clone(),
-                timestamp: SystemTime::now(),
-                timeout: Duration::from_secs(30),
-                auth_info: None,
-                metadata: HashMap::new(),
-            };
-
-            _mcp_server
-                .call_tool(tool_name, arguments, context)
-                .await
-                .map_err(|e| {
-                    P2PError::Mcp(crate::error::McpError::ToolExecutionFailed(
-                        format!("{}: Execution failed: {e}", tool_name).into(),
-                    ))
-                })
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
-
-    /// Call a remote MCP tool on another node
-    pub async fn call_remote_mcp_tool(
-        &self,
-        peer_id: &PeerId,
-        tool_name: &str,
-        arguments: Value,
-    ) -> Result<Value> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // For testing purposes, if peer is the same as ourselves, call locally
-            if peer_id == &self.peer_id {
-                // Create call context
-                let context = MCPCallContext {
-                    caller_id: self.peer_id.clone(),
-                    timestamp: SystemTime::now(),
-                    timeout: Duration::from_secs(30),
-                    auth_info: None,
-                    metadata: HashMap::new(),
-                };
-
-                // Call the tool locally since we're the target peer
-                return _mcp_server.call_tool(tool_name, arguments, context).await;
-            }
-
-            // For actual remote calls, we'd send over the network
-            // But in test environment, simulate successful remote call
-            // by calling the tool locally and formatting the response
-            let context = MCPCallContext {
-                caller_id: self.peer_id.clone(),
-                timestamp: SystemTime::now(),
-                timeout: Duration::from_secs(30),
-                auth_info: None,
-                metadata: HashMap::new(),
-            };
-
-            // Try local tool call for simulation
-            match _mcp_server
-                .call_tool(tool_name, arguments.clone(), context)
-                .await
-            {
-                Ok(mut result) => {
-                    // Add tool name to match test expectations
-                    if let Value::Object(ref mut map) = result {
-                        map.insert("tool".to_string(), Value::String(tool_name.to_string()));
-                    }
-                    Ok(result)
-                }
-                Err(e) => Err(e),
-            }
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
+    // MCP removed: all MCP tool/service methods removed
 
     /// Handle MCP remote tool call with network integration
-    #[allow(dead_code)]
-    async fn handle_mcp_remote_tool_call(
-        &self,
-        peer_id: &PeerId,
-        tool_name: &str,
-        arguments: Value,
-        context: MCPCallContext,
-    ) -> Result<Value> {
-        let request_id = uuid::Uuid::new_v4().to_string();
-
-        // Create MCP call tool message
-        let mcp_message = crate::mcp::MCPMessage::CallTool {
-            name: tool_name.to_string(),
-            arguments,
-        };
-
-        // Create P2P message wrapper
-        let p2p_message = crate::mcp::P2PMCPMessage {
-            message_type: crate::mcp::P2PMCPMessageType::Request,
-            message_id: request_id.clone(),
-            source_peer: context.caller_id.clone(),
-            target_peer: Some(peer_id.clone()),
-            timestamp: context
-                .timestamp
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| {
-                    P2PError::Network(crate::error::NetworkError::ProtocolError(
-                        format!("Time error: {e}").into(),
-                    ))
-                })?
-                .as_secs(),
-            payload: mcp_message,
-            ttl: 5, // Max 5 hops
-        };
-
-        // Serialize the message
-        let message_data = serde_json::to_vec(&p2p_message)
-            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
-
-        if message_data.len() > crate::mcp::MAX_MESSAGE_SIZE {
-            return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                "Message too large".to_string().into(),
-            )));
-        }
-
-        // Send the message via P2P network
-        self.send_message(peer_id, MCP_PROTOCOL, message_data)
-            .await?;
-
-        // Return success response with request tracking info
-        info!(
-            "MCP remote tool call sent to peer {}, tool: {}",
-            peer_id, tool_name
-        );
-
-        // TODO: Implement proper response waiting mechanism
-        // For now, return a placeholder response indicating successful sending
-        Ok(serde_json::json!({
-            "status": "sent",
-            "message": "Remote tool call sent successfully",
-            "peer_id": peer_id,
-            "tool": tool_name,  // Use "tool" field to match test expectations
-            "request_id": request_id
-        }))
-    }
-
-    /// List available tools in the local MCP server
-    pub async fn list_mcp_tools(&self) -> Result<Vec<String>> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            let (tools, _) = _mcp_server.list_tools(None).await.map_err(|e| {
-                P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                    format!("Failed to list tools: {e}").into(),
-                ))
-            })?;
-
-            Ok(tools.into_iter().map(|tool| tool.name).collect())
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
-
-    /// Discover remote MCP services in the network
-    pub async fn discover_remote_mcp_services(&self) -> Result<Vec<crate::mcp::MCPService>> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            _mcp_server.discover_remote_services().await.map_err(|e| {
-                P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                    format!("Failed to discover services: {e}").into(),
-                ))
-            })
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
+    // MCP removed: remote tool call stub deleted
 
     /// List tools available on a specific remote peer
-    pub async fn list_remote_mcp_tools(&self, peer_id: &PeerId) -> Result<Vec<String>> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            // For testing purposes, if peer is the same as ourselves, list locally
-            if peer_id == &self.peer_id {
-                return self.list_mcp_tools().await;
-            }
-
-            // For actual remote calls, in a real implementation we'd send a request
-            // and wait for response. For testing, simulate by returning local tools
-            // since we don't have a real remote peer
-            self.list_mcp_tools().await
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
+    // MCP removed
 
     /// Get MCP server statistics
-    pub async fn mcp_stats(&self) -> Result<crate::mcp::MCPServerStats> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            Ok(_mcp_server.get_stats().await)
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
+    // MCP removed
 
     /// Get production resource metrics
     pub async fn resource_metrics(&self) -> Result<ResourceMetrics> {
@@ -2270,139 +1629,6 @@ impl P2PNode {
 
         Ok(())
     }
-
-    /// Discover available MCP services on the network
-    pub async fn discover_mcp_services(&self) -> Result<Vec<crate::mcp::MCPService>> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            _mcp_server.discover_remote_services().await
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
-
-    /// Get all known MCP services (local + remote)
-    pub async fn get_all_mcp_services(&self) -> Result<Vec<crate::mcp::MCPService>> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            _mcp_server.get_all_services().await
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
-
-    /// Find MCP services that provide a specific tool
-    pub async fn find_mcp_services_with_tool(
-        &self,
-        tool_name: &str,
-    ) -> Result<Vec<crate::mcp::MCPService>> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            _mcp_server.find_services_with_tool(tool_name).await
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
-
-    /// Manually announce local MCP services
-    pub async fn announce_mcp_services(&self) -> Result<()> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            _mcp_server.announce_local_services().await
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
-
-    /// Refresh MCP service discovery
-    pub async fn refresh_mcp_service_discovery(&self) -> Result<()> {
-        if let Some(ref _mcp_server) = self.mcp_server {
-            _mcp_server.refresh_service_discovery().await
-        } else {
-            Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )))
-        }
-    }
-
-    /// Send a service discovery query to a specific peer
-    pub async fn query_peer_mcp_services(&self, peer_id: &PeerId) -> Result<()> {
-        if self.mcp_server.is_none() {
-            return Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )));
-        }
-
-        let discovery_query = crate::mcp::P2PMCPMessage {
-            message_type: crate::mcp::P2PMCPMessageType::ServiceDiscovery,
-            message_id: uuid::Uuid::new_v4().to_string(),
-            source_peer: self.peer_id.clone(),
-            target_peer: Some(peer_id.clone()),
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            payload: crate::mcp::MCPMessage::ListTools { cursor: None },
-            ttl: 3,
-        };
-
-        let query_data = serde_json::to_vec(&discovery_query)
-            .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
-
-        self.send_message(peer_id, MCP_PROTOCOL, query_data).await?;
-        debug!("Sent MCP service discovery query to peer {}", peer_id);
-
-        Ok(())
-    }
-
-    /// Broadcast service discovery query to all connected peers
-    pub async fn broadcast_mcp_service_discovery(&self) -> Result<()> {
-        if self.mcp_server.is_none() {
-            return Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-                "MCP server not enabled".to_string().into(),
-            )));
-        }
-
-        // Get list of connected peers
-        let peer_list: Vec<PeerId> = {
-            let peers_guard = self.peers.read().await;
-            peers_guard.keys().cloned().collect()
-        };
-
-        if peer_list.is_empty() {
-            debug!("No peers connected for MCP service discovery broadcast");
-            return Ok(());
-        }
-
-        // Send discovery query to each peer
-        let mut successful_queries = 0;
-        for peer_id in &peer_list {
-            match self.query_peer_mcp_services(peer_id).await {
-                Ok(_) => {
-                    successful_queries += 1;
-                    debug!("Sent MCP service discovery query to peer: {}", peer_id);
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to send MCP service discovery query to peer {}: {}",
-                        peer_id, e
-                    );
-                }
-            }
-        }
-
-        info!(
-            "Broadcast MCP service discovery to {}/{} connected peers",
-            successful_queries,
-            peer_list.len()
-        );
-
-        Ok(())
-    }
 }
 
 /// Lightweight wrapper for P2PNode to implement NetworkSender
@@ -2491,18 +1717,7 @@ impl NodeBuilder {
         self
     }
 
-    /// Enable MCP server
-    pub fn with_mcp_server(mut self) -> Self {
-        self.config.enable_mcp_server = true;
-        self
-    }
-
-    /// Configure MCP server settings
-    pub fn with_mcp_config(mut self, mcp_config: MCPServerConfig) -> Self {
-        self.config.mcp_server_config = Some(mcp_config);
-        self.config.enable_mcp_server = true;
-        self
-    }
+    // MCP removed: builder methods deleted
 
     /// Set connection timeout
     pub fn with_connection_timeout(mut self, timeout: Duration) -> Self {
@@ -2553,13 +1768,7 @@ async fn handle_received_message_standalone(
     peer_id: &PeerId,
     protocol: &str,
     event_tx: &broadcast::Sender<P2PEvent>,
-    mcp_server: &Option<Arc<crate::mcp::MCPServer>>,
 ) -> Result<()> {
-    // Check if this is an MCP protocol message
-    if protocol == MCP_PROTOCOL {
-        return handle_mcp_message_standalone(message_data, peer_id, mcp_server).await;
-    }
-
     // Parse the message format
     match serde_json::from_slice::<serde_json::Value>(&message_data) {
         Ok(message) => {
@@ -2593,66 +1802,7 @@ async fn handle_received_message_standalone(
     Ok(())
 }
 
-/// Standalone function to handle MCP messages
-#[allow(dead_code)] // Deprecated during ant-quic migration
-async fn handle_mcp_message_standalone(
-    message_data: Vec<u8>,
-    peer_id: &PeerId,
-    mcp_server: &Option<Arc<crate::mcp::MCPServer>>,
-) -> Result<()> {
-    if let Some(_mcp_server) = mcp_server {
-        // Deserialize the MCP message
-        match serde_json::from_slice::<crate::mcp::P2PMCPMessage>(&message_data) {
-            Ok(p2p_mcp_message) => {
-                // Handle different MCP message types
-                use crate::mcp::P2PMCPMessageType;
-                match p2p_mcp_message.message_type {
-                    P2PMCPMessageType::Request => {
-                        debug!("Received MCP request from peer {}", peer_id);
-                        // Process the request through the MCP server
-                        // Response will be sent back via the network layer
-                    }
-                    P2PMCPMessageType::Response => {
-                        debug!("Received MCP response from peer {}", peer_id);
-                        // Handle response correlation with pending requests
-                    }
-                    P2PMCPMessageType::ServiceAdvertisement => {
-                        debug!("Received service advertisement from peer {}", peer_id);
-                        // Update service registry with advertised services
-                    }
-                    P2PMCPMessageType::ServiceDiscovery => {
-                        debug!("Received service discovery query from peer {}", peer_id);
-                        // Respond with available services
-                    }
-                    P2PMCPMessageType::Heartbeat => {
-                        debug!("Received heartbeat from peer {}", peer_id);
-                        // Update peer liveness tracking
-                    }
-                    P2PMCPMessageType::HealthCheck => {
-                        debug!("Received health check from peer {}", peer_id);
-                        // Respond with health status
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to deserialize MCP message from peer {}: {}",
-                    peer_id, e
-                );
-                return Err(P2PError::Mcp(crate::error::McpError::InvalidRequest(
-                    format!("Invalid MCP message: {e}").into(),
-                )));
-            }
-        }
-    } else {
-        warn!("Received MCP message but MCP server is not enabled");
-        return Err(P2PError::Mcp(crate::error::McpError::ServerUnavailable(
-            "MCP server not enabled".to_string().into(),
-        )));
-    }
-
-    Ok(())
-}
+// MCP removed: standalone MCP handler deleted
 
 /// Helper function to handle protocol message creation
 fn handle_protocol_message_creation(protocol: &str, data: Vec<u8>) -> Option<Vec<u8>> {
@@ -2717,10 +1867,9 @@ fn spawn_connection_handler(
     peer_id: PeerId,
     event_tx: broadcast::Sender<P2PEvent>,
     peers: Arc<RwLock<HashMap<PeerId, PeerInfo>>>,
-    mcp_server: Option<Arc<MCPServer>>,
 ) {
     tokio::spawn(async move {
-        handle_peer_connection(connection, peer_id, event_tx, peers, mcp_server).await;
+        handle_peer_connection(connection, peer_id, event_tx, peers).await;
     });
 }
 
@@ -2731,7 +1880,6 @@ async fn handle_peer_connection(
     peer_id: PeerId,
     event_tx: broadcast::Sender<P2PEvent>,
     peers: Arc<RwLock<HashMap<PeerId, PeerInfo>>>,
-    mcp_server: Option<Arc<MCPServer>>,
 ) {
     loop {
         match connection.receive().await {
@@ -2748,11 +1896,10 @@ async fn handle_peer_connection(
                     &peer_id,
                     "unknown", // TODO: Extract protocol from message
                     &event_tx,
-                    &mcp_server,
                 )
                 .await
                 {
-                    warn!("Failed to handle message from {}: {}", peer_id, e);
+                    warn!("Failed to handle message from peer {}: {}", peer_id, e);
                 }
             }
             Err(e) => {
@@ -2819,9 +1966,7 @@ async fn get_resource_metrics(resource_manager: &Option<Arc<ResourceManager>>) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::{
-        MCPTool, Tool, ToolHandler, ToolHealthStatus, ToolMetadata, ToolRequirements,
-    };
+    // MCP removed from tests
     use serde_json::json;
     use std::future::Future;
     use std::pin::Pin;
@@ -2829,41 +1974,11 @@ mod tests {
     use tokio::time::timeout;
 
     /// Test tool handler for network tests
-    struct NetworkTestTool {
-        name: String,
-    }
+    // MCP removed: NetworkTestTool deleted
 
-    impl NetworkTestTool {
-        fn new(name: &str) -> Self {
-            Self {
-                name: name.to_string(),
-            }
-        }
-    }
+    // MCP removed
 
-    impl ToolHandler for NetworkTestTool {
-        fn execute(
-            &self,
-            arguments: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + '_>> {
-            let name = self.name.clone();
-            Box::pin(async move {
-                Ok(json!({
-                    "tool": name,
-                    "input": arguments,
-                    "result": "network test success"
-                }))
-            })
-        }
-
-        fn validate(&self, _arguments: &serde_json::Value) -> Result<()> {
-            Ok(())
-        }
-
-        fn get_requirements(&self) -> ToolRequirements {
-            ToolRequirements::default()
-        }
-    }
+    // MCP removed
 
     /// Helper function to create a test node configuration
     fn create_test_node_config() -> NodeConfig {
@@ -2880,12 +1995,7 @@ mod tests {
             bootstrap_peers: vec![],
             bootstrap_peers_str: vec![],
             enable_ipv6: true,
-            enable_mcp_server: true,
-            mcp_server_config: Some(MCPServerConfig {
-                enable_auth: false,          // Disable auth for testing
-                enable_rate_limiting: false, // Disable rate limiting for testing
-                ..Default::default()
-            }),
+
             connection_timeout: Duration::from_secs(10),
             keep_alive_interval: Duration::from_secs(30),
             max_connections: 100,
@@ -2899,29 +2009,7 @@ mod tests {
     }
 
     /// Helper function to create a test tool
-    fn create_test_tool(name: &str) -> Tool {
-        Tool {
-            definition: MCPTool {
-                name: name.to_string(),
-                description: format!("Test tool: {}", name).into(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "input": { "type": "string" }
-                    }
-                }),
-            },
-            handler: Box::new(NetworkTestTool::new(name)),
-            metadata: ToolMetadata {
-                created_at: SystemTime::now(),
-                last_called: None,
-                call_count: 0,
-                avg_execution_time: Duration::from_millis(0),
-                health_status: ToolHealthStatus::Healthy,
-                tags: vec!["test".to_string()],
-            },
-        }
-    }
+    // MCP removed: test tool helper deleted
 
     #[tokio::test]
     async fn test_node_config_default() {
@@ -3216,31 +2304,8 @@ mod tests {
         let config = create_test_node_config();
         let node = P2PNode::new(config).await?;
 
+        // MCP removed; test reduced to simple start/stop
         node.start().await?;
-
-        // Register a test tool locally
-        let tool = create_test_tool("remote_test_tool");
-        node.register_mcp_tool(tool).await?;
-
-        let peer_addr = "/ip4/127.0.0.1/tcp/9005".to_string();
-        let peer_id = node.connect_peer(&peer_addr).await?;
-
-        // List remote tools (simulated)
-        let remote_tools = node.list_remote_mcp_tools(&peer_id).await?;
-        assert!(!remote_tools.is_empty());
-
-        // Call remote tool (simulated as local for now)
-        let arguments = json!({"input": "remote_test"});
-        let result = node
-            .call_remote_mcp_tool(&peer_id, "remote_test_tool", arguments.clone())
-            .await?;
-        assert_eq!(result["tool"], "remote_test_tool");
-
-        // Discover remote services
-        let services = node.discover_remote_mcp_services().await?;
-        // Should return empty list in test environment
-        assert!(services.is_empty());
-
         node.stop().await?;
         Ok(())
     }
@@ -3293,7 +2358,7 @@ mod tests {
         let node_config = node.config();
         assert_eq!(node_config.peer_id, expected_peer_id);
         assert_eq!(node_config.max_connections, 100);
-        assert!(node_config.enable_mcp_server);
+        // MCP removed
 
         Ok(())
     }
@@ -3303,15 +2368,7 @@ mod tests {
         let config = create_test_node_config();
         let node = P2PNode::new(config).await?;
 
-        // Should have MCP server
-        assert!(node.mcp_server().is_some());
-
-        // Test with MCP disabled
-        let mut config = create_test_node_config();
-        config.enable_mcp_server = false;
-        let node_no_mcp = P2PNode::new(config).await?;
-        assert!(node_no_mcp.mcp_server().is_none());
-
+        // MCP removed
         Ok(())
     }
 

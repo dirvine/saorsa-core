@@ -592,6 +592,20 @@ impl SecurityManager {
         hash: &[u8],
         signature: Option<&[u8]>,
     ) -> Result<(), SecurityError> {
+        // Basic anti-replay check using timestamp prefix if present
+        if message.len() >= 8 {
+            let mut ts_bytes = [0u8; 8];
+            ts_bytes.copy_from_slice(&message[..8]);
+            let msg_ts = u64::from_be_bytes(ts_bytes);
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            // 5-minute future tolerance window
+            if msg_ts > now + 300 {
+                return Err(SecurityError::IntegrityCheckFailed);
+            }
+        }
         // Check message size
         if message.len() > self.config.integrity.max_message_size {
             return Err(SecurityError::MessageTooLarge);
@@ -661,11 +675,12 @@ impl SecurityManager {
         }
     }
 
-    /// Verify node identity
-    async fn verify_identity(&self, _node: &NodeDescriptor) -> bool {
-        // Verify that the node ID matches the public key hash
-        // This is a simplified check - real implementation would be more thorough
-        true
+    /// Verify node identity by binding NodeId to the advertised ML-DSA public key
+    async fn verify_identity(&self, node: &NodeDescriptor) -> bool {
+        // Derive BLAKE3 hash of ML-DSA public key bytes to match UserId
+        let bytes = node.public_key.as_bytes();
+        let hash = blake3::hash(bytes);
+        node.id.as_bytes() == hash.as_bytes()
     }
 }
 
@@ -1271,10 +1286,14 @@ mod tests {
         let manager = SecurityManager::new(config, identity);
 
         // Test node join validation
+        // Generate a valid ML-DSA key and derive matching UserId via blake3(pubkey)
+        let (ml_pub, _ml_sec) = crate::quantum_crypto::generate_ml_dsa_keypair().unwrap();
+        let derived_hash = blake3::hash(ml_pub.as_bytes());
+        let derived_id = crate::peer_record::UserId::from_bytes(*derived_hash.as_bytes());
         let node = NodeDescriptor {
-            id: NodeId { hash: [3u8; 32] },
-            public_key: ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(),
-            addresses: vec![], // No hardcoded addresses in tests
+            id: derived_id,
+            public_key: ml_pub,
+            addresses: vec![],
             hyperbolic: None,
             som_position: None,
             trust: 0.5,

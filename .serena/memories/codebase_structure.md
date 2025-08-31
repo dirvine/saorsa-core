@@ -55,7 +55,6 @@
 - `messaging/` - Message handling
 - `discuss/` - Forum system
 - `projects/` - Project management
-- `mcp/` - Model Context Protocol integration
 
 ### System Components
 - `bootstrap/` - Network bootstrapping

@@ -17,8 +17,7 @@
 //! with Kademlia fallback. It uses HyperMap/Mercator-style background embedding
 //! with drift detection and partial re-fitting.
 
-use crate::dht::DhtKey;
-use crate::dht::core_engine::{DhtCoreEngine, NodeId};
+use crate::dht::core_engine::NodeId;
 use crate::{P2PError, PeerId, Result};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -173,11 +172,22 @@ pub struct EmbeddingQuality {
 }
 
 /// Greedy-assist hyperbolic router with Kad fallback
+/// Hyperbolic greedy routing implementation for P2P networks
+///
+/// Uses hyperbolic geometry to embed network nodes in a low-dimensional space
+/// and performs greedy routing based on distance minimization. This provides
+/// efficient routing with O(log n) path lengths while maintaining network
+/// connectivity and fault tolerance.
+///
+/// Features:
+/// - Dynamic network embedding using gradient descent
+/// - Greedy next-hop selection based on hyperbolic distance
+/// - Automatic drift detection and embedding updates
+/// - Fallback to DHT-based routing when hyperbolic routing fails
+/// - Real-time performance monitoring and metrics collection
 pub struct HyperbolicGreedyRouter {
     /// Current embedding
     embedding: Arc<RwLock<Option<Embedding>>>,
-    /// DHT engine for Kademlia fallback
-    dht_engine: Arc<DhtCoreEngine>,
     /// Configuration
     config: EmbeddingConfig,
     /// Last re-fit time
@@ -253,10 +263,9 @@ impl RoutingMetrics {
 
 impl HyperbolicGreedyRouter {
     /// Create a new hyperbolic greedy router
-    pub fn new(local_id: PeerId, dht_engine: Arc<DhtCoreEngine>) -> Self {
+    pub fn new(local_id: PeerId) -> Self {
         Self {
             embedding: Arc::new(RwLock::new(None)),
-            dht_engine,
             config: EmbeddingConfig::default(),
             last_refit: Arc::new(RwLock::new(Instant::now())),
             drift_detector: Arc::new(RwLock::new(DriftDetector::new(0.1))),
@@ -466,24 +475,6 @@ impl HyperbolicGreedyRouter {
         None
     }
 
-    /// Kademlia fallback routing
-    async fn kad_fallback(&self, target: &NodeId) -> Option<PeerId> {
-        // Use DHT engine to find next hop
-        // DhtCoreEngine doesn't have find_closest_peers, use find_nodes instead
-        let target_key = DhtKey::from_bytes(*target.as_bytes());
-        match self.dht_engine.find_nodes(&target_key, 1).await {
-            Ok(nodes) => {
-                // Convert NodeInfo to PeerId
-                nodes.into_iter().next().map(|node| {
-                    // Convert NodeId to PeerId (String)
-                    // Encode the node ID as hex string
-                    hex::encode(node.id.as_bytes())
-                })
-            }
-            Err(_) => None,
-        }
-    }
-
     /// Detect drift in embedding quality
     pub async fn detect_drift(&self, observed_error: f64) -> bool {
         let mut detector = self.drift_detector.write().await;
@@ -553,18 +544,7 @@ pub async fn embed_snapshot(peers: &[PeerId]) -> Result<Embedding> {
         format!("peer_{}", rand::random::<u64>())
     };
 
-    // Convert PeerId to NodeId for DHT
-    let mut node_id_bytes = [0u8; 32];
-    let id_bytes = local_id.as_bytes();
-    let len = id_bytes.len().min(32);
-    node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
-    let node_id = NodeId::from_bytes(node_id_bytes);
-
-    let dht = Arc::new(
-        DhtCoreEngine::new(node_id).map_err(|e| P2PError::Internal(e.to_string().into()))?,
-    );
-
-    let router = HyperbolicGreedyRouter::new(local_id, dht);
+    let router = HyperbolicGreedyRouter::new(local_id);
     router.embed_snapshot(peers).await
 }
 
@@ -646,16 +626,7 @@ mod tests {
     async fn test_embedding_creation() {
         let local_id = format!("test_peer_{}", rand::random::<u64>());
 
-        // Convert PeerId to NodeId for DHT
-        let mut node_id_bytes = [0u8; 32];
-        let id_bytes = local_id.as_bytes();
-        let len = id_bytes.len().min(32);
-        node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
-        let node_id = NodeId::from_bytes(node_id_bytes);
-
-        let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
-
-        let router = HyperbolicGreedyRouter::new(local_id, dht);
+        let router = HyperbolicGreedyRouter::new(local_id);
 
         let peers: Vec<PeerId> = (0..10).map(|i| format!("peer_{}", i)).collect();
         let embedding = router.embed_snapshot(&peers).await;
@@ -686,18 +657,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_greedy_routing() {
-        let local_id = format!("local_{}", rand::random::<u64>());
+        let local_id = format!("test_peer_{}", rand::random::<u64>());
 
-        // Convert PeerId to NodeId for DHT
-        let mut node_id_bytes = [0u8; 32];
-        let id_bytes = local_id.as_bytes();
-        let len = id_bytes.len().min(32);
-        node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
-        let node_id = NodeId::from_bytes(node_id_bytes);
-
-        let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
-
-        let router = HyperbolicGreedyRouter::new(local_id.clone(), dht);
+        let router = HyperbolicGreedyRouter::new(local_id.clone());
 
         // Create test embedding
         let mut coordinates = HashMap::new();
@@ -735,18 +697,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_partial_refit() {
-        let local_id = format!("refit_test_{}", rand::random::<u64>());
+        let local_id = format!("test_peer_{}", rand::random::<u64>());
 
-        // Convert PeerId to NodeId for DHT
-        let mut node_id_bytes = [0u8; 32];
-        let id_bytes = local_id.as_bytes();
-        let len = id_bytes.len().min(32);
-        node_id_bytes[..len].copy_from_slice(&id_bytes[..len]);
-        let node_id = NodeId::from_bytes(node_id_bytes);
-
-        let dht = Arc::new(DhtCoreEngine::new(node_id).unwrap());
-
-        let router = HyperbolicGreedyRouter::new(local_id, dht);
+        let router = HyperbolicGreedyRouter::new(local_id);
 
         // Create initial embedding
         let initial_peers: Vec<PeerId> = (0..5).map(|i| format!("initial_{}", i)).collect();

@@ -106,12 +106,7 @@ Provides high-level services that applications can use.
 
 ### Components
 
-#### Model Context Protocol (`mcp/`)
-Every node runs an MCP server, enabling:
-- **Tool Discovery**: Nodes advertise capabilities
-- **AI Integration**: LLMs can use network as tools
-- **Service Mesh**: Automatic service discovery
-- **Load Balancing**: Intelligent request routing
+
 
 #### Node Management (`network.rs`)
 - **Bootstrap Process**: Initial network joining

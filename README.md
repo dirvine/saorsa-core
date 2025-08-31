@@ -4,7 +4,7 @@
 [![Crates.io](https://img.shields.io/crates/v/saorsa-core.svg)](https://crates.io/crates/saorsa-core)
 [![Documentation](https://docs.rs/saorsa-core/badge.svg)](https://docs.rs/saorsa-core)
 
-Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-stack endpoints (IPv6+IPv4), four-word endpoint encoding, and MCP integration.
+Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-stack endpoints (IPv6+IPv4), and four-word endpoint encoding.
 
 ## Guides
 
@@ -17,7 +17,6 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-s
 - **Placement System**: Intelligent shard placement with EigenTrust integration and Byzantine fault tolerance
 - **QUIC Transport**: High-performance networking with ant-quic
 - **Four-Word Endpoints**: Human‑readable network endpoints via `four-word-networking` (IPv4 encodes to 4 words; IPv6 word count decided by the crate); decode requires an explicit port (no defaults).
-- **MCP Integration**: Model Context Protocol support
 - **Post-Quantum Cryptography**: Future-ready cryptographic algorithms
 - **WebRTC over QUIC**: Advanced WebRTC-QUIC bridge for real-time media streaming with adaptive quality
 - **Media Processing**: Image and audio processing with blurhash and symphonia
@@ -70,23 +69,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - IPv4 → 4 words; IPv6 → word count is crate‑defined; decoding requires a port (no implicit defaults).
 - Four‑words are reserved strictly for network endpoints; user identities in messaging are separate handles.
 
-### MCP Server
-
-```rust
-use saorsa_core::mcp::{McpServer, McpConfig};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = McpConfig::default();
-    let server = McpServer::new(config).await?;
-    
-    // Start MCP server
-    server.start().await?;
-    
-    Ok(())
-}
-```
-
 ## Architecture
 
 ### Core Components
@@ -97,14 +79,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 4. **Identity**: Post‑quantum cryptographic identities with ML‑DSA‑65 signatures (no PoW; no embedded four‑word address)
 5. **Storage**: Local and distributed content storage with audit and repair
 6. **Geographic Routing**: Location-aware message routing
-7. **MCP Integration**: Model Context Protocol for AI/LLM integration
+
 
 ### Cryptographic Architecture
 
 Saorsa Core implements a pure post-quantum cryptographic approach for maximum security:
 
 - **Post‑quantum signatures**: ML‑DSA‑65 (FIPS 204) for quantum‑resistant digital signatures (~128‑bit quantum security)
-- **PQC Encryption**: ChaCha20Poly1305 with quantum-resistant key derivation
+- **PQC Encryption**: ChaCha20-Poly1305 with quantum-resistant key derivation
 - **Key Exchange**: ML-KEM-768 (FIPS 203) for quantum-resistant key encapsulation (~128-bit quantum security)
 - **Hashing**: BLAKE3 for fast, secure content addressing
 - **Transport Security**: QUIC with TLS 1.3 and PQC cipher suites
@@ -199,7 +181,6 @@ let config = NetworkConfig {
         "bootstrap2.example.com:9000".parse()?,
     ],
     enable_four_word_addresses: true,
-    enable_mcp: true,
     dht_replication: 20,
     storage_capacity: 1024 * 1024 * 1024, // 1GB
     ..Default::default()
@@ -208,9 +189,8 @@ let config = NetworkConfig {
 
 ## Feature Flags
 
-- `default` - DHT, MCP, ant-quic (four-word addresses always enabled)
+- `default` - DHT, ant-quic (four-word addresses always enabled)
 - `dht` - DHT functionality
-- `mcp` - MCP server support
 - `ant-quic` - QUIC transport
 - `quantum-resistant` - Post-quantum cryptography (ML-DSA, ML-KEM)
 - `threshold` - Threshold cryptography
@@ -246,7 +226,7 @@ Key benchmarks:
 ## Security
 
 - **Post-Quantum Signatures**: ML-DSA-65 (FIPS 204) for quantum-resistant digital signatures (~128-bit quantum security)
-- **PQC Encryption**: ChaCha20Poly1305 with quantum-resistant key derivation
+- **PQC Encryption**: ChaCha20-Poly1305 with quantum-resistant key derivation
 - **Key Exchange**: ML-KEM-768 (FIPS 203) for quantum-resistant key encapsulation (~128-bit quantum security)
 - **BLAKE3 Hashing**: Fast and secure content addressing
 - **QUIC Encryption**: Transport-level encryption with PQC support
@@ -543,7 +523,7 @@ cargo build --release
 cargo build --all-features
 
 # Feature-specific build
-cargo build --features "dht,mcp,quantum-resistant"
+cargo build --features "dht,quantum-resistant"
 ```
 
 ### Testing

@@ -259,8 +259,12 @@ impl DualStackNetworkNode {
         }
 
         // Both available: race IPv6 first, then IPv4 shortly after
-        let v6_node = self.v6.as_ref().unwrap().node.clone();
-        let v4_node = self.v4.as_ref().unwrap().node.clone();
+        let v6_node = self.v6.as_ref().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotConnected, "IPv6 node not available")
+        })?.node.clone();
+        let v4_node = self.v4.as_ref().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotConnected, "IPv4 node not available")
+        })?.node.clone();
 
         // Clone targets for tasks
         let v6_list = v6_targets.clone();
@@ -353,6 +357,7 @@ impl DualStackNetworkNode {
     }
 
     /// Send to peer by PeerId; tries IPv6 node first, then IPv4
+    #[allow(clippy::collapsible_if)]
     pub async fn send_to_peer(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
         if let Some(v6) = &self.v6 {
             if v6.node.send_to_peer(peer_id, data).await.is_ok() {

@@ -144,15 +144,9 @@ async fn main() -> Result<()> {
                     info!("   • {}", peer);
                 }
             }
-            "/status" => match node.mcp_stats().await {
-                Ok(stats) => {
-                    info!("📊 Network Status:");
-                    info!("   • Active sessions: {}", stats.active_sessions);
-                    info!("   • Total requests: {}", stats.total_requests);
-                    info!("   • Total responses: {}", stats.total_responses);
-                }
-                Err(e) => error!("Failed to get stats: {}", e),
-            },
+            "/status" => {
+                info!("📊 Network Status: MCP stats removed");
+            }
             msg if !msg.is_empty() => {
                 // In a real chat app, we'd publish to a topic or send to specific peers
                 // For now, just echo locally

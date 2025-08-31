@@ -246,7 +246,6 @@ async fn test_mab_exploration_vs_exploitation() {
     let strategies = vec![StrategyChoice::Kademlia, StrategyChoice::Hyperbolic];
 
     let mut exploration_count = 0;
-    let mut exploitation_count = 0;
 
     for _ in 0..1000 {
         let decision = mab
@@ -256,8 +255,6 @@ async fn test_mab_exploration_vs_exploitation() {
 
         if decision.exploration {
             exploration_count += 1;
-        } else {
-            exploitation_count += 1;
         }
 
         // Update with random outcome

@@ -572,6 +572,7 @@ mod tests {
     use tokio::time::Duration;
 
     /// Helper function to parse addresses in tests
+    #[allow(dead_code)]
     fn parse_addr(addr: &str) -> Result<NetworkAddress> {
         addr.parse::<NetworkAddress>().map_err(|e| {
             P2PError::Network(crate::error::NetworkError::InvalidAddress(

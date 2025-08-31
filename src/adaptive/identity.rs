@@ -211,7 +211,6 @@ impl StoredIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand_core::RngCore;
 
     #[test]
     fn test_identity_generation() {

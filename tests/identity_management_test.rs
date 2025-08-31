@@ -2,7 +2,7 @@
 //!
 //! This test suite validates the complete identity system for the P2P network:
 //! - Four-word human-readable addresses
-//! - Ed25519 cryptographic identities  
+//! - Ed25519 cryptographic identities
 //! - Identity encryption and secure storage
 //! - Proof-of-work Sybil resistance
 //! - Cross-system identity consistency
@@ -12,7 +12,7 @@ use rand::{RngCore, thread_rng};
 use saorsa_core::identity::{
     encryption::{decrypt_with_device_password, encrypt_with_device_password},
     four_words::FourWordAddress,
-    node_identity::{NodeId, NodeIdentity, ProofOfWork},
+    node_identity::{NodeId, NodeIdentity},
 };
 use saorsa_core::quantum_crypto::ant_quic_integration::ml_dsa_verify;
 use sha2::{Digest, Sha256};
@@ -22,7 +22,7 @@ use std::time::Instant;
 /// Helper to create deterministic test identity
 fn create_test_identity(_seed: u64) -> NodeIdentity {
     // Generate a new identity with minimal proof of work for testing
-    NodeIdentity::generate(1).expect("generate should succeed in tests")
+    NodeIdentity::generate().expect("generate should succeed in tests")
 }
 
 /// Helper to create random test data
@@ -113,7 +113,7 @@ async fn test_node_identity_cryptography() -> Result<()> {
     let identity = create_test_identity(42);
     let node_id = identity.node_id();
     let public_key = identity.public_key();
-    let signing_key = identity.secret_key_bytes();
+    let _signing_key = identity.secret_key().clone();
 
     // Node ID should be derived from public key
     let expected_node_id = NodeId::from_public_key(&public_key);
@@ -323,6 +323,8 @@ async fn test_identity_encryption() -> Result<()> {
 }
 
 #[tokio::test]
+// Commented out since Proof-of-Work has been removed from the codebase
+/*
 async fn test_proof_of_work() -> Result<()> {
     println!("⛏️ Testing Proof of Work");
 
@@ -386,7 +388,7 @@ async fn test_proof_of_work() -> Result<()> {
     println!("✅ Proof of work test passed");
     Ok(())
 }
-
+*/
 #[tokio::test]
 async fn test_identity_consistency() -> Result<()> {
     println!("🔄 Testing Identity Consistency");
@@ -789,7 +791,8 @@ async fn test_identity_system_integration() -> Result<()> {
         );
     }
 
-    // Phase 5: Proof of work integration
+    // Phase 5: Proof of work integration (commented out since PoW removed)
+    /*
     println!("  Phase 5: Proof of work validation");
     let difficulty = 8; // Light difficulty for testing
 
@@ -804,6 +807,7 @@ async fn test_identity_system_integration() -> Result<()> {
             addr
         );
     }
+    */
 
     // Phase 6: Network health validation
     println!("  Phase 6: Network health validation");
@@ -841,9 +845,7 @@ async fn test_identity_system_integration() -> Result<()> {
     );
     println!("  ✅ All signatures verified correctly");
     println!("  ✅ Identity encryption works for all nodes");
-    println!("  ✅ Proof of work integration successful");
     println!("  ✅ Network health checks passed");
     println!("✅ Identity system integration test passed");
     Ok(())
 }
-#![cfg(feature = "legacy_pow_tests")]

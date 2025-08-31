@@ -411,7 +411,7 @@ mod tests {
         let mut config = TestSuiteConfig::default();
         config.timeout_seconds = 60; // Shorter timeout for testing
 
-        let mut runner = IntegrationTestRunner::new(config);
+        let runner = IntegrationTestRunner::new(config);
 
         // This would run all tests in a real scenario
         // For now, just test the runner setup

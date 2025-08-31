@@ -127,7 +127,6 @@ Advanced storage orchestration with EigenTrust integration:
 - **Chat** (`src/chat/`): Slack-like messaging
 - **Discuss** (`src/discuss/`): Forum system
 - **Projects** (`src/projects/`): Hierarchical organization
-- **MCP Server** (`src/mcp/`): AI integration via Model Context Protocol
 
 ## Key Architectural Patterns
 
@@ -234,9 +233,8 @@ let decision = orchestrator.place_data(
 
 ### Feature Flags
 ```toml
-default = ["dht", "mcp", "ant-quic"]
+default = ["dht", "ant-quic"]
 dht = []                    # Distributed Hash Table
-mcp = []                    # Model Context Protocol  
 ant-quic = []               # QUIC transport (recommended)
 quantum-resistant = []      # Post-quantum cryptography
 threshold = []              # Threshold cryptography

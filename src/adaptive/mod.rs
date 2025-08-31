@@ -39,7 +39,7 @@ pub mod gossip;
 pub mod hyperbolic;
 pub mod hyperbolic_enhanced;
 pub mod hyperbolic_greedy;
-pub mod identity;
+// Use crate-level PQC identity instead of local Ed25519 variant
 pub mod learning;
 pub mod monitoring;
 pub mod multi_armed_bandit;
@@ -73,7 +73,7 @@ pub use hyperbolic_enhanced::{
 pub use hyperbolic_greedy::{
     Embedding, EmbeddingConfig, HyperbolicGreedyRouter, embed_snapshot, greedy_next,
 };
-pub use identity::{NodeIdentity, SignedMessage, StoredIdentity};
+pub use crate::identity::{NodeIdentity};
 pub use learning::{ChurnPredictor, QLearnCacheManager, ThompsonSampling};
 pub use monitoring::{
     Alert, AlertManager, DashboardData, MonitoringConfig, MonitoringSystem, NetworkHealth,
@@ -181,7 +181,8 @@ pub type NodeId = crate::peer_record::UserId;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeDescriptor {
     pub id: NodeId,
-    pub public_key: ed25519_dalek::VerifyingKey,
+    // PQC-only: ML-DSA public key
+    pub public_key: crate::MlDsaPublicKey,
     pub addresses: Vec<String>,
     pub hyperbolic: Option<HyperbolicCoordinate>,
     pub som_position: Option<[f64; 4]>,

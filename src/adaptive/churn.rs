@@ -623,11 +623,19 @@ impl NodeMonitor {
         let now = Instant::now();
         self.heartbeats.write().await.insert(node_id.clone(), now);
 
-        if let Some(status) = self.node_status.write().await.get_mut(node_id) {
-            status.last_heartbeat = Some(now);
-            status.last_seen = now;
-            status.status = NodeState::Active;
-        }
+        let mut status_map = self.node_status.write().await;
+        let status = status_map.entry(node_id.clone()).or_insert_with(|| NodeStatus {
+            node_id: node_id.clone(),
+            last_seen: now,
+            last_heartbeat: None,
+            last_gossip: None,
+            status: NodeState::Active,
+            reliability: 1.0,
+            stored_content: HashSet::new(),
+        });
+        status.last_heartbeat = Some(now);
+        status.last_seen = now;
+        status.status = NodeState::Active;
     }
 
     /// Record gossip activity
@@ -790,7 +798,7 @@ mod tests {
         let node_id = NodeId { hash: [1u8; 32] };
 
         // Record heartbeat
-        handler.handle_heartbeat(&node_id).await.unwrap();
+        handler.node_monitor.record_heartbeat(&node_id).await;
 
         // Check node is alive
         assert!(handler.node_monitor.is_alive(&node_id).await);

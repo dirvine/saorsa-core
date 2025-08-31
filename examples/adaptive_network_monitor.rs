@@ -32,7 +32,6 @@ struct NetworkMetrics {
     // Q-Learning metrics
     cache_hits: usize,
     cache_misses: usize,
-    cache_evictions: usize,
 
     // Network metrics
     messages_sent: usize,
@@ -81,7 +80,6 @@ impl NetworkMetrics {
 
 struct AdaptiveNetworkMonitor {
     network: Arc<Network>,
-    coordinator: Arc<AdaptiveCoordinator>,
     metrics: Arc<RwLock<NetworkMetrics>>,
 }
 
@@ -91,14 +89,8 @@ impl AdaptiveNetworkMonitor {
         let node_cfg = NodeConfig::default();
         let network = Arc::new(Network::new(node_cfg).await?);
 
-        // Build adaptive coordinator
-        let identity = Identity::generate()?;
-        let coord_cfg = NetworkConfig::default();
-        let coordinator = Arc::new(AdaptiveCoordinator::new(identity.into(), coord_cfg).await?);
-
         Ok(Self {
             network,
-            coordinator,
             metrics: Arc::new(RwLock::new(NetworkMetrics::default())),
         })
     }

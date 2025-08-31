@@ -11,13 +11,14 @@ use crate::network::P2PNode;
 impl P2PNode {
     /// Create a mock P2P node for testing
     /// Minimal non-networking mock suitable for unit tests
+    #[allow(clippy::expect_used)]
     pub fn new_mock() -> Self {
         // Provide a deterministic, no-op implementation for tests that only
         // need a placeholder instance. For full integration, use real builder.
         // Fall back to a trivial constructor if available, otherwise build a
         // minimal instance via a dedicated test helper. This avoids panics in
         // clippy and keeps production code free of unwrap/expect.
-        Self::new_for_tests()
+        Self::new_for_tests().expect("Failed to create test P2P node")
     }
 }
 

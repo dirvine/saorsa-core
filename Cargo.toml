@@ -6,7 +6,7 @@ authors = ["Saorsa Labs Limited <saorsalabs@gmail.com>"]
 license = "AGPL-3.0"
 homepage = "https://github.com/dirvine/saorsa-core-foundation"
 repository = "https://github.com/dirvine/saorsa-core-foundation"
-description = "Saorsa - Core P2P networking library with DHT, QUIC transport, four-word addresses, and MCP integration"
+description = "Saorsa - Core P2P networking library with DHT, QUIC transport, and four-word addresses"
 keywords = ["p2p", "networking", "dht", "quic", "decentralized"]
 categories = ["network-programming", "asynchronous", "cryptography"]
 readme = "README.md"
@@ -146,41 +146,13 @@ tokio-test = "0.4"
 
 # All features are now enabled by default - no feature flags needed
 
-# [[bench]]
-# name = "dht_benchmark"
-# harness = false
+[[bench]]
+name = "adaptive_benchmarks"
+harness = false
 
-# [[bench]]
-# name = "security_benchmark"
-# harness = false
-
-# [[bench]]
-# name = "production_benchmark"
-# harness = false
-
-# [[bench]]
-# name = "multi_armed_bandit_bench"
-# harness = false
-
-# [[bench]]
-# name = "q_learning_cache_bench"
-# harness = false
-
-# [[bench]]
-# name = "eviction_bench"
-# harness = false
-
-# [[bench]]
-# name = "eigentrust_bench"
-# harness = false
-
-# [[bench]]
-# name = "validation_bench"
-# harness = false
-
-# [[bench]]
-# name = "gossipsub_bench"
-# harness = false
+[[bench]]
+name = "validation_bench"
+harness = false
 
 [[test]]
 name = "eigentrust_integration_test"

@@ -31,9 +31,8 @@ mod cli_command_tests {
         // Create CLI handler
         let handler = IdentityCliHandler::new(Some(identity_path.clone()));
 
-        // Test generate command with custom difficulty
+        // Test generate command
         let cmd = IdentityCommand::Generate {
-            difficulty: Some(8),
             output: Some(identity_path.clone()),
             seed: None,
         };
@@ -59,7 +58,6 @@ mod cli_command_tests {
 
         // First generate an identity
         let gen_cmd = IdentityCommand::Generate {
-            difficulty: Some(8),
             output: Some(identity_path.clone()),
             seed: None,
         };
@@ -89,7 +87,6 @@ mod cli_command_tests {
 
         // Generate identity
         let gen_cmd = IdentityCommand::Generate {
-            difficulty: Some(8),
             output: Some(identity_path.clone()),
             seed: None,
         };
@@ -119,7 +116,6 @@ mod cli_command_tests {
 
         // Generate identity
         let gen_cmd = IdentityCommand::Generate {
-            difficulty: Some(8),
             output: Some(identity_path.clone()),
             seed: None,
         };
@@ -154,7 +150,6 @@ mod cli_command_tests {
 
         // Generate identity
         let gen_cmd = IdentityCommand::Generate {
-            difficulty: Some(8),
             output: Some(identity_path.clone()),
             seed: None,
         };
@@ -195,13 +190,13 @@ mod cli_command_tests {
     #[test]
     fn test_cli_argument_parsing() {
         // Test generate command parsing
-        let args = vec!["identity", "generate", "--difficulty", "16"];
+        let args = vec!["identity", "generate", "--output", "/tmp/test.json"];
         let parsed = IdentityCommand::try_parse_from(args);
         assert!(parsed.is_ok());
 
         match parsed.unwrap() {
-            IdentityCommand::Generate { difficulty, .. } => {
-                assert_eq!(difficulty, Some(16));
+            IdentityCommand::Generate { .. } => {
+                // Generate command parsed successfully
             }
             _ => panic!("Wrong command parsed"),
         }
@@ -226,7 +221,6 @@ mod cli_command_tests {
 
         // Test generate with seed
         let cmd = IdentityCommand::Generate {
-            difficulty: Some(8),
             output: Some(identity_path.clone()),
             seed: Some("my-deterministic-seed-phrase".to_string()),
         };
@@ -237,7 +231,6 @@ mod cli_command_tests {
         // Generate again with same seed
         let identity_path2 = temp_dir.path().join("identity2.json");
         let cmd2 = IdentityCommand::Generate {
-            difficulty: Some(8),
             output: Some(identity_path2.clone()),
             seed: Some("my-deterministic-seed-phrase".to_string()),
         };
@@ -252,12 +245,8 @@ mod cli_command_tests {
             .await
             .unwrap();
 
-        // Should be identical
+        // Compare node IDs instead of word addresses (deterministic generation)
         assert_eq!(id1.node_id(), id2.node_id());
-        assert_eq!(
-            id1.word_address().to_string(),
-            id2.word_address().to_string()
-        );
     }
 }
 
@@ -283,4 +272,4 @@ mod cli_integration_tests {
 }
 
 // Removed local helper types; use `saorsa_core::identity::cli::MessageInput` instead.
-#![cfg(feature = "legacy_pow_tests")]
+#[cfg(feature = "legacy_pow_tests")]

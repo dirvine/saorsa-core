@@ -5,8 +5,8 @@
 //! memory safety, and concurrent access safety.
 
 use anyhow::Result;
-use saorsa_core::PeerId;
-use saorsa_core::dht::{DHTConfig, Key, Record, optimized_storage::OptimizedDHTStorage};
+
+use saorsa_core::dht::{DHTConfig, Record, optimized_storage::OptimizedDHTStorage};
 use saorsa_core::identity::node_identity::NodeId;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -795,15 +795,11 @@ async fn test_dht_system_integration() -> Result<()> {
     // Simulate realistic P2P network usage patterns
     struct NetworkNode {
         id: String,
-        records_published: usize,
-        records_accessed: usize,
     }
 
     let nodes: Vec<NetworkNode> = (0..20)
         .map(|i| NetworkNode {
             id: format!("node_{}", i),
-            records_published: 0,
-            records_accessed: 0,
         })
         .collect();
 
@@ -830,7 +826,7 @@ async fn test_dht_system_integration() -> Result<()> {
     println!("  Phase 2: Network operation");
     for access_round in 0..10 {
         // Each node accesses data from random other nodes
-        for (node_idx, node) in nodes.iter().enumerate() {
+        for node_idx in 0..nodes.len() {
             let target_node_idx = (node_idx + access_round + 1) % nodes.len();
             let target_node = &nodes[target_node_idx];
 

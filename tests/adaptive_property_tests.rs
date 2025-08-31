@@ -5,7 +5,7 @@
 
 use proptest::prelude::*;
 use saorsa_core::adaptive::*;
-use saorsa_core::security::SecurityEventType;
+use saorsa_core::adaptive::security::SecurityEvent;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

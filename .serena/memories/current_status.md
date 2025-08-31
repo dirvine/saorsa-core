@@ -35,7 +35,6 @@ The library is now ready for:
 2. Further development of adaptive networking features
 3. Enhancement of placement system
 4. Additional WebRTC over QUIC improvements
-5. MCP server enhancements
 
 ## No Pending Tasks
 All requested work has been completed successfully. The post-quantum cryptography integration is fully functional and published.

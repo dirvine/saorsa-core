@@ -9,7 +9,7 @@ Saorsa Core is a comprehensive P2P networking library designed for the Saorsa pl
 - **QUIC Transport**: High-performance networking with ant-quic (v0.8.1) 
 - **Post-Quantum Cryptography**: NIST Level 3 quantum-resistant security (ML-DSA-65, ML-KEM-768)
 - **Four-Word Addresses**: Human-readable network addresses
-- **MCP Integration**: Model Context Protocol support for AI integration
+
 - **WebRTC over QUIC**: Advanced real-time media streaming
 - **Adaptive Networking**: ML-driven routing with Thompson Sampling and Q-Learning
 - **Geographic Routing**: Location-aware peer selection
@@ -31,7 +31,6 @@ Saorsa Core is a comprehensive P2P networking library designed for the Saorsa pl
 - Decentralized applications requiring P2P networking
 - Secure data storage and retrieval systems
 - Real-time communication platforms
-- AI-integrated applications via MCP
 - Applications requiring post-quantum security
 
 ## Architecture

@@ -481,7 +481,7 @@ mod tests {
         assert!(retrieved.is_none());
 
         // Run cleanup
-        let cleaned = storage.cleanup_expired().await.unwrap();
-        assert!(cleaned >= 0); // Should clean up expired records
+        let _cleaned = storage.cleanup_expired().await.unwrap();
+        // Cleanup completed successfully (cleaned count can be 0 or more)
     }
 }

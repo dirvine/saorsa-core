@@ -2,20 +2,21 @@
 //! Tests all adaptive features including Thompson Sampling, MAB routing,
 //! Q-Learning cache, LSTM churn prediction, and more.
 
+use rand::RngCore;
 use saorsa_core::{
     adaptive::{
+        ContentHash, ContentType, LearningContext, NetworkConditions, NodeId, Outcome,
+        StrategyChoice,
         eviction::{AdaptiveStrategy, EvictionStrategy, EvictionStrategyType},
+        gossip::{AdaptiveGossipSub, GossipMessage, TopicPriority},
         learning::{ChurnPredictor, ThompsonSampling},
         multi_armed_bandit::{MABConfig, MultiArmedBandit, RouteId},
         q_learning_cache::{QLearnCacheManager, QLearningConfig},
         security::{SecurityConfig, SecurityManager},
-        gossip::{AdaptiveGossipSub, GossipMessage, TopicPriority},
         trust::MockTrustProvider,
-        ContentType, LearningContext, NetworkConditions, Outcome, StrategyChoice,
-        NodeId, ContentHash,
     },
-    peer_record::UserId,
     identity::NodeIdentity,
+    peer_record::UserId,
 };
 use std::{
     collections::HashMap,
@@ -26,17 +27,12 @@ use tokio::{
     sync::{Mutex, RwLock},
     time::sleep,
 };
-use rand::RngCore;
 
 /// Test configuration for adaptive network testing
 #[derive(Clone)]
 struct TestConfig {
     num_nodes: usize,
     test_duration: Duration,
-    enable_thompson_sampling: bool,
-    enable_mab_routing: bool,
-    enable_q_learning: bool,
-    enable_lstm_churn: bool,
 }
 
 impl Default for TestConfig {
@@ -44,10 +40,6 @@ impl Default for TestConfig {
         Self {
             num_nodes: 10,
             test_duration: Duration::from_secs(30),
-            enable_thompson_sampling: true,
-            enable_mab_routing: true,
-            enable_q_learning: true,
-            enable_lstm_churn: true,
         }
     }
 }
@@ -105,12 +97,14 @@ async fn test_thompson_sampling_adaptation() -> anyhow::Result<()> {
         let success = rand::random::<bool>();
 
         // Update with outcome
-        thompson.update(
-            ContentType::DHTLookup,
-            selected_strategy,
-            success,
-            if success { 50 } else { 200 }, // latency
-        ).await?;
+        thompson
+            .update(
+                ContentType::DHTLookup,
+                selected_strategy,
+                success,
+                if success { 50 } else { 200 }, // latency
+            )
+            .await?;
 
         if i % 20 == 0 {
             println!("Iteration {}: Selected strategy {:?}", i, selected_strategy);
@@ -125,7 +119,11 @@ async fn test_thompson_sampling_adaptation() -> anyhow::Result<()> {
 
     // Check that we have some learning data
     assert!(metrics.total_decisions > 0);
-    assert!(metrics.decisions_by_type.contains_key(&ContentType::DHTLookup));
+    assert!(
+        metrics
+            .decisions_by_type
+            .contains_key(&ContentType::DHTLookup)
+    );
 
     network.stop_all().await?;
     Ok(())
@@ -170,19 +168,33 @@ async fn test_multi_armed_bandit_routing() -> anyhow::Result<()> {
         let success = rand::random::<bool>();
         *route_attempts.entry(decision.route_id.clone()).or_insert(0) += 1;
         if success {
-            *route_successes.entry(decision.route_id.clone()).or_insert(0) += 1;
+            *route_successes
+                .entry(decision.route_id.clone())
+                .or_insert(0) += 1;
         }
 
         let outcome = Outcome {
             success,
-            latency_ms: if success { 50 + rand::random::<u64>() % 50 } else { 200 + rand::random::<u64>() % 100 },
-            hops: if success { 1 + rand::random::<usize>() % 3 } else { 5 + rand::random::<usize>() % 5 },
+            latency_ms: if success {
+                50 + rand::random::<u64>() % 50
+            } else {
+                200 + rand::random::<u64>() % 100
+            },
+            hops: if success {
+                1 + rand::random::<usize>() % 3
+            } else {
+                5 + rand::random::<usize>() % 5
+            },
         };
 
-        mab.update_route(&decision.route_id, ContentType::DHTLookup, &outcome).await?;
+        mab.update_route(&decision.route_id, ContentType::DHTLookup, &outcome)
+            .await?;
 
         if i % 50 == 0 {
-            println!("MAB Decision {}: Strategy {:?}, Success: {}", i, decision.route_id.strategy, success);
+            println!(
+                "MAB Decision {}: Strategy {:?}, Success: {}",
+                i, decision.route_id.strategy, success
+            );
         }
     }
 
@@ -191,14 +203,31 @@ async fn test_multi_armed_bandit_routing() -> anyhow::Result<()> {
     let mut total_successes = 0;
     for (route_id, attempts) in &route_attempts {
         let successes = route_successes.get(route_id).copied().unwrap_or(0);
-        let success_rate = if *attempts > 0 { successes as f64 / *attempts as f64 } else { 0.0 };
-        println!("Route {:?}: {}/{} ({:.1}%)", route_id.strategy, successes, attempts, success_rate * 100.0);
+        let success_rate = if *attempts > 0 {
+            successes as f64 / *attempts as f64
+        } else {
+            0.0
+        };
+        println!(
+            "Route {:?}: {}/{} ({:.1}%)",
+            route_id.strategy,
+            successes,
+            attempts,
+            success_rate * 100.0
+        );
         total_attempts += attempts;
         total_successes += successes;
     }
 
-    let overall_success_rate = if total_attempts > 0 { total_successes as f64 / total_attempts as f64 } else { 0.0 };
-    println!("Overall MAB success rate: {:.2}%", overall_success_rate * 100.0);
+    let overall_success_rate = if total_attempts > 0 {
+        total_successes as f64 / total_attempts as f64
+    } else {
+        0.0
+    };
+    println!(
+        "Overall MAB success rate: {:.2}%",
+        overall_success_rate * 100.0
+    );
 
     // Verify MAB is learning optimal routes
     assert!(overall_success_rate >= 0.0);
@@ -206,7 +235,10 @@ async fn test_multi_armed_bandit_routing() -> anyhow::Result<()> {
 
     // Get final metrics
     let metrics = mab.get_metrics().await;
-    println!("MAB Metrics: {} total decisions, {} exploration", metrics.total_decisions, metrics.exploration_decisions);
+    println!(
+        "MAB Metrics: {} total decisions, {} exploration",
+        metrics.total_decisions, metrics.exploration_decisions
+    );
 
     network.stop_all().await?;
     Ok(())
@@ -254,19 +286,28 @@ async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
 
             // Decide whether to cache
             let state = q_cache.get_current_state(content_hash).await?;
-            let available_actions = q_cache.get_available_actions(content_hash, content_data.len() as u64).await?;
+            let available_actions = q_cache
+                .get_available_actions(content_hash, content_data.len() as u64)
+                .await?;
             let action = q_cache.select_action(&state, available_actions).await?;
 
             // Execute action
             let hit = q_cache.is_cached(content_hash).await;
-            let reward = if matches!(action, saorsa_core::adaptive::q_learning_cache::CacheAction::Cache(_)) {
+            let reward = if matches!(
+                action,
+                saorsa_core::adaptive::q_learning_cache::CacheAction::Cache(_)
+            ) {
                 if hit { 1.0 } else { -0.1 } // Reward for caching useful content
             } else {
                 if hit { -0.5 } else { 0.1 } // Penalty for not caching needed content
             };
 
-            q_cache.update_statistics(&action, content_hash, content_data.len() as u64, hit).await?;
-            q_cache.update_q_value(&state, action.action_type(), reward, &state, false).await?;
+            q_cache
+                .update_statistics(&action, content_hash, content_data.len() as u64, hit)
+                .await?;
+            q_cache
+                .update_q_value(&state, action.action_type(), reward, &state, false)
+                .await?;
         }
     }
 
@@ -317,16 +358,16 @@ async fn test_lstm_churn_prediction() -> anyhow::Result<()> {
 
         // Create feature vector (10 features as expected by the predictor)
         let features = vec![
-            online_duration,      // online_duration
-            response_time,        // avg_response_time
-            0.8,                  // resource_contribution
-            message_freq,         // message_frequency
-            (i % 24) as f64,      // time_of_day
-            (i % 7) as f64,       // day_of_week
+            online_duration,          // online_duration
+            response_time,            // avg_response_time
+            0.8,                      // resource_contribution
+            message_freq,             // message_frequency
+            (i % 24) as f64,          // time_of_day
+            (i % 7) as f64,           // day_of_week
             0.9 - (i as f64 * 0.001), // historical_reliability
-            (i % 5) as f64,       // recent_disconnections
-            4.0,                  // avg_session_length
-            0.85,                 // connection_stability
+            (i % 5) as f64,           // recent_disconnections
+            4.0,                      // avg_session_length
+            0.85,                     // connection_stability
         ];
 
         // Update node features
@@ -337,9 +378,18 @@ async fn test_lstm_churn_prediction() -> anyhow::Result<()> {
     let prediction = predictor.predict(&test_node).await;
 
     println!("LSTM Churn Prediction:");
-    println!("  1h probability: {:.2}%", prediction.probability_1h * 100.0);
-    println!("  6h probability: {:.2}%", prediction.probability_6h * 100.0);
-    println!("  24h probability: {:.2}%", prediction.probability_24h * 100.0);
+    println!(
+        "  1h probability: {:.2}%",
+        prediction.probability_1h * 100.0
+    );
+    println!(
+        "  6h probability: {:.2}%",
+        prediction.probability_6h * 100.0
+    );
+    println!(
+        "  24h probability: {:.2}%",
+        prediction.probability_24h * 100.0
+    );
     println!("  Confidence: {:.2}%", prediction.confidence * 100.0);
 
     // Verify predictions are valid
@@ -354,7 +404,10 @@ async fn test_lstm_churn_prediction() -> anyhow::Result<()> {
     let unknown_node = UserId::from_bytes(unknown_hash);
 
     let unknown_prediction = predictor.predict(&unknown_node).await;
-    println!("Unknown node prediction confidence: {:.2}%", unknown_prediction.confidence * 100.0);
+    println!(
+        "Unknown node prediction confidence: {:.2}%",
+        unknown_prediction.confidence * 100.0
+    );
     assert!(unknown_prediction.confidence < 0.2); // Should have low confidence for unknown node
 
     network.stop_all().await?;
@@ -389,7 +442,11 @@ async fn test_adaptive_eviction_strategies() -> anyhow::Result<()> {
     for i in 0..150 {
         let content_idx = if i < 50 {
             // Hot items (first 20) get many accesses
-            if i % 3 == 0 { rand::random::<usize>() % 20 } else { 20 + rand::random::<usize>() % 30 }
+            if i % 3 == 0 {
+                rand::random::<usize>() % 20
+            } else {
+                20 + rand::random::<usize>() % 30
+            }
         } else {
             // Mix of hot and cold
             rand::random::<usize>() % 50
@@ -416,12 +473,19 @@ async fn test_adaptive_eviction_strategies() -> anyhow::Result<()> {
     // Create access info for testing
     let mut access_info = HashMap::new();
     for (i, hash) in content_hashes.iter().enumerate() {
-        let access_count = if i < 20 { 10 + rand::random::<u64>() % 20 } else { rand::random::<u64>() % 5 };
-        access_info.insert(*hash, saorsa_core::adaptive::q_learning_cache::AccessInfo {
-            count: access_count,
-            last_access_secs: rand::random::<u64>() % 86400, // Random time in last 24h
-            size: 1024 + rand::random::<u64>() % 4096, // 1-5KB items
-        });
+        let access_count = if i < 20 {
+            10 + rand::random::<u64>() % 20
+        } else {
+            rand::random::<u64>() % 5
+        };
+        access_info.insert(
+            *hash,
+            saorsa_core::adaptive::q_learning_cache::AccessInfo {
+                count: access_count,
+                last_access_secs: rand::random::<u64>() % 86400, // Random time in last 24h
+                size: 1024 + rand::random::<u64>() % 4096,       // 1-5KB items
+            },
+        );
     }
 
     // Test eviction selection
@@ -527,9 +591,15 @@ async fn test_adaptive_gossip_protocol() -> anyhow::Result<()> {
     }
 
     // Set topic priorities
-    gossip.set_topic_priority("topic_a", TopicPriority::High).await;
-    gossip.set_topic_priority("topic_b", TopicPriority::Normal).await;
-    gossip.set_topic_priority("topic_c", TopicPriority::Low).await;
+    gossip
+        .set_topic_priority("topic_a", TopicPriority::High)
+        .await;
+    gossip
+        .set_topic_priority("topic_b", TopicPriority::Normal)
+        .await;
+    gossip
+        .set_topic_priority("topic_c", TopicPriority::Low)
+        .await;
 
     // Create and publish messages
     let start = Instant::now();
@@ -584,8 +654,10 @@ async fn test_adaptive_gossip_protocol() -> anyhow::Result<()> {
 
     // Check updated stats after heartbeat
     let updated_stats = gossip.get_stats().await;
-    println!("Stats after heartbeat: mesh_size={}, peer_count={}",
-             updated_stats.mesh_size, updated_stats.peer_count);
+    println!(
+        "Stats after heartbeat: mesh_size={}, peer_count={}",
+        updated_stats.mesh_size, updated_stats.peer_count
+    );
 
     network.stop_all().await?;
     Ok(())
@@ -634,17 +706,27 @@ async fn test_security_monitoring() -> anyhow::Result<()> {
     let suspicious_node = &test_nodes[0];
     for i in 0..20 {
         // Rapid requests from same node
-        let rate_limit_result = monitor.check_rate_limit(suspicious_node, Some("10.0.0.1".parse()?)).await;
+        let rate_limit_result = monitor
+            .check_rate_limit(suspicious_node, Some("10.0.0.1".parse()?))
+            .await;
 
         if rate_limit_result.is_err() {
-            println!("Rate limit triggered for suspicious node after {} requests", i + 1);
+            println!(
+                "Rate limit triggered for suspicious node after {} requests",
+                i + 1
+            );
             break;
         }
     }
 
     // Test blacklist functionality
     let bad_node = &test_nodes[1];
-    monitor.blacklist_node(bad_node.clone(), saorsa_core::adaptive::security::BlacklistReason::RateLimitViolation).await;
+    monitor
+        .blacklist_node(
+            bad_node.clone(),
+            saorsa_core::adaptive::security::BlacklistReason::RateLimitViolation,
+        )
+        .await;
 
     // Try to validate join from blacklisted node
     let node_descriptor = saorsa_core::adaptive::NodeDescriptor {
@@ -701,7 +783,10 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
     let mab = Arc::new(Mutex::new(
         MultiArmedBandit::new(MABConfig::default()).await?,
     ));
-    let q_cache = Arc::new(Mutex::new(QLearnCacheManager::new(QLearningConfig::default(), 1024 * 1024)));
+    let q_cache = Arc::new(Mutex::new(QLearnCacheManager::new(
+        QLearningConfig::default(),
+        1024 * 1024,
+    )));
     let churn_predictor = Arc::new(Mutex::new(ChurnPredictor::new()));
 
     // Metrics tracking
@@ -726,9 +811,16 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
             };
 
             let mut ts = thompson_clone.lock().await;
-            let strategy = ts.select_strategy(content_type).await.unwrap_or(StrategyChoice::Kademlia);
+            let strategy = ts
+                .select_strategy(content_type)
+                .await
+                .unwrap_or(StrategyChoice::Kademlia);
             let success = rand::random::<f64>() < 0.7; // 70% success rate
-            let latency = if success { 50 + rand::random::<u64>() % 50 } else { 200 + rand::random::<u64>() % 100 };
+            let latency = if success {
+                50 + rand::random::<u64>() % 50
+            } else {
+                200 + rand::random::<u64>() % 100
+            };
 
             let _ = ts.update(content_type, strategy, success, latency).await;
 
@@ -756,15 +848,28 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
             ];
 
             let mut mab = mab_clone.lock().await;
-            let decision = mab.select_route(destination, ContentType::DHTLookup, &strategies).await.unwrap();
+            let decision = mab
+                .select_route(destination, ContentType::DHTLookup, &strategies)
+                .await
+                .unwrap();
             let success = rand::random::<f64>() < 0.75; // 75% success rate
             let outcome = Outcome {
                 success,
-                latency_ms: if success { 40 + rand::random::<u64>() % 60 } else { 150 + rand::random::<u64>() % 150 },
-                hops: if success { 1 + rand::random::<usize>() % 4 } else { 3 + rand::random::<usize>() % 7 },
+                latency_ms: if success {
+                    40 + rand::random::<u64>() % 60
+                } else {
+                    150 + rand::random::<u64>() % 150
+                },
+                hops: if success {
+                    1 + rand::random::<usize>() % 4
+                } else {
+                    3 + rand::random::<usize>() % 7
+                },
             };
 
-            let _ = mab.update_route(&decision.route_id, ContentType::DHTLookup, &outcome).await;
+            let _ = mab
+                .update_route(&decision.route_id, ContentType::DHTLookup, &outcome)
+                .await;
 
             let mut m = metrics_clone.write().await;
             m.mab_selections += 1;
@@ -786,14 +891,24 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
 
             let mut q_cache = q_cache_clone.lock().await;
             let state = q_cache.get_current_state(&content_hash).await.unwrap();
-            let available_actions = q_cache.get_available_actions(&content_hash, content_data.len() as u64).await.unwrap();
-            let action = q_cache.select_action(&state, available_actions).await.unwrap();
+            let available_actions = q_cache
+                .get_available_actions(&content_hash, content_data.len() as u64)
+                .await
+                .unwrap();
+            let action = q_cache
+                .select_action(&state, available_actions)
+                .await
+                .unwrap();
 
             let hit = q_cache.is_cached(&content_hash).await;
             let reward = q_cache.calculate_reward(&action, hit, 0.5, 0.6).await;
 
-            let _ = q_cache.update_statistics(&action, &content_hash, content_data.len() as u64, hit).await;
-            let _ = q_cache.update_q_value(&state, action.action_type(), reward, &state, false).await;
+            let _ = q_cache
+                .update_statistics(&action, &content_hash, content_data.len() as u64, hit)
+                .await;
+            let _ = q_cache
+                .update_q_value(&state, action.action_type(), reward, &state, false)
+                .await;
 
             let mut m = metrics_clone.write().await;
             m.cache_accesses += 1;
@@ -817,15 +932,15 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
             // Update node features
             let features = vec![
                 3600.0 + rand::random::<f64>() * 7200.0, // online_duration
-                50.0 + rand::random::<f64>() * 100.0,     // avg_response_time
-                0.5 + rand::random::<f64>() * 0.5,        // resource_contribution
-                5.0 + rand::random::<f64>() * 15.0,       // message_frequency
-                (i % 24) as f64,                           // time_of_day
-                (i % 7) as f64,                            // day_of_week
-                0.8 + rand::random::<f64>() * 0.2,        // historical_reliability
-                (i % 3) as f64,                            // recent_disconnections
-                2.0 + rand::random::<f64>() * 4.0,        // avg_session_length
-                0.7 + rand::random::<f64>() * 0.3,        // connection_stability
+                50.0 + rand::random::<f64>() * 100.0,    // avg_response_time
+                0.5 + rand::random::<f64>() * 0.5,       // resource_contribution
+                5.0 + rand::random::<f64>() * 15.0,      // message_frequency
+                (i % 24) as f64,                         // time_of_day
+                (i % 7) as f64,                          // day_of_week
+                0.8 + rand::random::<f64>() * 0.2,       // historical_reliability
+                (i % 3) as f64,                          // recent_disconnections
+                2.0 + rand::random::<f64>() * 4.0,       // avg_session_length
+                0.7 + rand::random::<f64>() * 0.3,       // connection_stability
             ];
 
             let _ = churn.update_node_features(node, features).await;
@@ -854,7 +969,9 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
     println!("Thompson Sampling:");
     println!("  Selections: {}", final_metrics.thompson_selections);
     if final_metrics.thompson_selections > 0 {
-        let success_rate = (final_metrics.thompson_successes as f64 / final_metrics.thompson_selections as f64) * 100.0;
+        let success_rate = (final_metrics.thompson_successes as f64
+            / final_metrics.thompson_selections as f64)
+            * 100.0;
         println!("  Success Rate: {:.2}%", success_rate);
     }
 
@@ -869,22 +986,36 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
     println!("  Accesses: {}", final_metrics.cache_accesses);
     println!("  Hits: {}", final_metrics.cache_hits);
     if final_metrics.cache_accesses > 0 {
-        let hit_rate = (final_metrics.cache_hits as f64 / final_metrics.cache_accesses as f64) * 100.0;
+        let hit_rate =
+            (final_metrics.cache_hits as f64 / final_metrics.cache_accesses as f64) * 100.0;
         println!("  Hit Rate: {:.2}%", hit_rate);
     }
 
     println!("\nChurn Prediction:");
     println!("  Predictions: {}", final_metrics.churn_predictions);
     if final_metrics.churn_predictions > 0 {
-        let avg_risk = (final_metrics.avg_churn_risk / final_metrics.churn_predictions as f64) * 100.0;
+        let avg_risk =
+            (final_metrics.avg_churn_risk / final_metrics.churn_predictions as f64) * 100.0;
         println!("  Average Churn Risk: {:.2}%", avg_risk);
     }
 
     // Verify all components are functioning
-    assert!(final_metrics.thompson_selections > 0, "Thompson Sampling should be active");
-    assert!(final_metrics.mab_selections > 0, "MAB routing should be active");
-    assert!(final_metrics.cache_accesses > 0, "Q-Learning cache should be active");
-    assert!(final_metrics.churn_predictions > 0, "Churn prediction should be active");
+    assert!(
+        final_metrics.thompson_selections > 0,
+        "Thompson Sampling should be active"
+    );
+    assert!(
+        final_metrics.mab_selections > 0,
+        "MAB routing should be active"
+    );
+    assert!(
+        final_metrics.cache_accesses > 0,
+        "Q-Learning cache should be active"
+    );
+    assert!(
+        final_metrics.churn_predictions > 0,
+        "Churn prediction should be active"
+    );
 
     network.stop_all().await?;
     println!("\nSimulation completed successfully!");
@@ -902,10 +1033,6 @@ struct SimulationMetrics {
     cache_hits: usize,
     churn_predictions: usize,
     avg_churn_risk: f64,
-    messages_sent: usize,
-    messages_delivered: usize,
-    nodes_churned: usize,
-    threats_detected: usize,
 }
 
 #[tokio::test]
@@ -923,7 +1050,9 @@ async fn test_adaptive_network_resilience() -> anyhow::Result<()> {
 
     // Create adaptive components to test resilience
     let thompson = Arc::new(Mutex::new(ThompsonSampling::new()));
-    let mab = Arc::new(Mutex::new(MultiArmedBandit::new(MABConfig::default()).await?));
+    let mab = Arc::new(Mutex::new(
+        MultiArmedBandit::new(MABConfig::default()).await?,
+    ));
     let churn_predictor = Arc::new(Mutex::new(ChurnPredictor::new()));
 
     // Track initial performance
@@ -935,12 +1064,20 @@ async fn test_adaptive_network_resilience() -> anyhow::Result<()> {
         let mut ts = thompson.lock().await;
         let strategy = ts.select_strategy(content_type).await?;
         let success = rand::random::<f64>() < 0.8; // 80% success initially
-        let _ = ts.update(content_type, strategy, success, if success { 50 } else { 150 }).await;
+        let _ = ts
+            .update(
+                content_type,
+                strategy,
+                success,
+                if success { 50 } else { 150 },
+            )
+            .await;
 
         initial_performance.push(success);
     }
 
-    let initial_success_rate = initial_performance.iter().filter(|&&s| s).count() as f64 / initial_performance.len() as f64;
+    let initial_success_rate = initial_performance.iter().filter(|&&s| s).count() as f64
+        / initial_performance.len() as f64;
     println!("Initial success rate: {:.2}%", initial_success_rate * 100.0);
 
     // Simulate node failures and network stress
@@ -980,7 +1117,9 @@ async fn test_adaptive_network_resilience() -> anyhow::Result<()> {
         let strategies = vec![StrategyChoice::Kademlia, StrategyChoice::Hyperbolic];
 
         let mut mab_guard = mab.lock().await;
-        let decision = mab_guard.select_route(destination, ContentType::DHTLookup, &strategies).await?;
+        let decision = mab_guard
+            .select_route(destination, ContentType::DHTLookup, &strategies)
+            .await?;
 
         // Simulate degraded performance due to failures
         let base_success_rate = 0.6; // Reduced due to failures
@@ -993,23 +1132,39 @@ async fn test_adaptive_network_resilience() -> anyhow::Result<()> {
         let success = rand::random::<f64>() < adjusted_success_rate;
         let outcome = Outcome {
             success,
-            latency_ms: if success { 80 + rand::random::<u64>() % 70 } else { 250 + rand::random::<u64>() % 150 },
-            hops: if success { 2 + rand::random::<usize>() % 4 } else { 5 + rand::random::<usize>() % 6 },
+            latency_ms: if success {
+                80 + rand::random::<u64>() % 70
+            } else {
+                250 + rand::random::<u64>() % 150
+            },
+            hops: if success {
+                2 + rand::random::<usize>() % 4
+            } else {
+                5 + rand::random::<usize>() % 6
+            },
         };
 
-        let _ = mab_guard.update_route(&decision.route_id, ContentType::DHTLookup, &outcome).await;
+        let _ = mab_guard
+            .update_route(&decision.route_id, ContentType::DHTLookup, &outcome)
+            .await;
         drop(mab_guard);
 
         stress_performance.push(success);
 
         if i % 5 == 0 {
-            println!("  Stress test iteration {}: success={}, strategy={:?}",
-                    i, success, decision.route_id.strategy);
+            println!(
+                "  Stress test iteration {}: success={}, strategy={:?}",
+                i, success, decision.route_id.strategy
+            );
         }
     }
 
-    let stress_success_rate = stress_performance.iter().filter(|&&s| s).count() as f64 / stress_performance.len() as f64;
-    println!("Stress test success rate: {:.2}%", stress_success_rate * 100.0);
+    let stress_success_rate =
+        stress_performance.iter().filter(|&&s| s).count() as f64 / stress_performance.len() as f64;
+    println!(
+        "Stress test success rate: {:.2}%",
+        stress_success_rate * 100.0
+    );
 
     // Test adaptive recovery
     println!("Testing adaptive recovery mechanisms...");
@@ -1025,31 +1180,64 @@ async fn test_adaptive_network_resilience() -> anyhow::Result<()> {
         let mut ts = thompson.lock().await;
         let strategy = ts.select_strategy(content_type).await?;
         let success = rand::random::<f64>() < 0.75; // Improved performance after adaptation
-        let _ = ts.update(content_type, strategy, success, if success { 60 } else { 120 }).await;
+        let _ = ts
+            .update(
+                content_type,
+                strategy,
+                success,
+                if success { 60 } else { 120 },
+            )
+            .await;
 
         recovery_performance.push(success);
     }
 
-    let recovery_success_rate = recovery_performance.iter().filter(|&&s| s).count() as f64 / recovery_performance.len() as f64;
-    println!("Recovery success rate: {:.2}%", recovery_success_rate * 100.0);
+    let recovery_success_rate = recovery_performance.iter().filter(|&&s| s).count() as f64
+        / recovery_performance.len() as f64;
+    println!(
+        "Recovery success rate: {:.2}%",
+        recovery_success_rate * 100.0
+    );
 
     // Verify resilience
     println!("Resilience Analysis:");
-    println!("  Initial performance: {:.2}%", initial_success_rate * 100.0);
+    println!(
+        "  Initial performance: {:.2}%",
+        initial_success_rate * 100.0
+    );
     println!("  Stress performance: {:.2}%", stress_success_rate * 100.0);
-    println!("  Recovery performance: {:.2}%", recovery_success_rate * 100.0);
-    println!("  Performance degradation: {:.2}%", (initial_success_rate - stress_success_rate) * 100.0);
-    println!("  Recovery improvement: {:.2}%", (recovery_success_rate - stress_success_rate) * 100.0);
+    println!(
+        "  Recovery performance: {:.2}%",
+        recovery_success_rate * 100.0
+    );
+    println!(
+        "  Performance degradation: {:.2}%",
+        (initial_success_rate - stress_success_rate) * 100.0
+    );
+    println!(
+        "  Recovery improvement: {:.2}%",
+        (recovery_success_rate - stress_success_rate) * 100.0
+    );
 
     // The network should show some resilience (recovery better than worst stress performance)
-    assert!(recovery_success_rate >= stress_success_rate * 0.9, "Network should show resilience");
+    assert!(
+        recovery_success_rate >= stress_success_rate * 0.9,
+        "Network should show resilience"
+    );
 
     // Check churn predictions for failed nodes
     for failed_node in &failed_nodes {
         let churn = churn_predictor.lock().await;
         let prediction = churn.predict(failed_node).await;
-        println!("Failed node {:?} churn risk: {:.2}%", &failed_node.hash[..4], prediction.probability_1h * 100.0);
-        assert!(prediction.probability_1h > 0.3, "Failed nodes should have elevated churn risk");
+        println!(
+            "Failed node {:?} churn risk: {:.2}%",
+            &failed_node.hash[..4],
+            prediction.probability_1h * 100.0
+        );
+        assert!(
+            prediction.probability_1h > 0.3,
+            "Failed nodes should have elevated churn risk"
+        );
     }
 
     network.stop_all().await?;
@@ -1070,7 +1258,9 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
 
     // Create adaptive components
     let thompson = ThompsonSampling::new();
-    let mab = Arc::new(Mutex::new(MultiArmedBandit::new(MABConfig::default()).await?));
+    let mab = Arc::new(Mutex::new(
+        MultiArmedBandit::new(MABConfig::default()).await?,
+    ));
     let q_cache = QLearnCacheManager::new(QLearningConfig::default(), 2 * 1024 * 1024); // 2MB cache
 
     // Measure baseline performance (no adaptation)
@@ -1118,22 +1308,44 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
         let content_type = ContentType::DHTLookup;
         let strategy = thompson.select_strategy(content_type).await?;
         let success = rand::random::<f64>() < 0.7; // Slightly better than baseline
-        let latency = if success { 40 + rand::random::<u64>() % 40 } else { 120 + rand::random::<u64>() % 80 };
-        let _ = thompson.update(content_type, strategy, success, latency).await;
+        let latency = if success {
+            40 + rand::random::<u64>() % 40
+        } else {
+            120 + rand::random::<u64>() % 80
+        };
+        let _ = thompson
+            .update(content_type, strategy, success, latency)
+            .await;
 
         // MAB for routing optimization
         let destination = &network.get_nodes()[i % network.get_nodes().len()];
-        let strategies = vec![StrategyChoice::Kademlia, StrategyChoice::Hyperbolic, StrategyChoice::TrustPath];
+        let strategies = vec![
+            StrategyChoice::Kademlia,
+            StrategyChoice::Hyperbolic,
+            StrategyChoice::TrustPath,
+        ];
 
         let mut mab_guard = mab.lock().await;
-        let decision = mab_guard.select_route(destination, content_type, &strategies).await?;
+        let decision = mab_guard
+            .select_route(destination, content_type, &strategies)
+            .await?;
         let route_success = rand::random::<f64>() < 0.75;
         let outcome = Outcome {
             success: route_success,
-            latency_ms: if route_success { 30 + rand::random::<u64>() % 30 } else { 100 + rand::random::<u64>() % 100 },
-            hops: if route_success { 1 + rand::random::<usize>() % 3 } else { 3 + rand::random::<usize>() % 5 },
+            latency_ms: if route_success {
+                30 + rand::random::<u64>() % 30
+            } else {
+                100 + rand::random::<u64>() % 100
+            },
+            hops: if route_success {
+                1 + rand::random::<usize>() % 3
+            } else {
+                3 + rand::random::<usize>() % 5
+            },
         };
-        let _ = mab_guard.update_route(&decision.route_id, content_type, &outcome).await;
+        let _ = mab_guard
+            .update_route(&decision.route_id, content_type, &outcome)
+            .await;
 
         // Q-learning cache optimization
         let mut cache_hash = [0u8; 32];
@@ -1142,14 +1354,20 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
         let content_data = format!("cached_content_{}", i).into_bytes();
 
         let state = q_cache.get_current_state(&cache_hash).await?;
-        let available_actions = q_cache.get_available_actions(&cache_hash, content_data.len() as u64).await?;
+        let available_actions = q_cache
+            .get_available_actions(&cache_hash, content_data.len() as u64)
+            .await?;
         let action = q_cache.select_action(&state, available_actions).await?;
 
         let hit = q_cache.is_cached(&cache_hash).await;
         let reward = q_cache.calculate_reward(&action, hit, 0.4, 0.5).await;
 
-        let _ = q_cache.update_statistics(&action, &cache_hash, content_data.len() as u64, hit).await;
-        let _ = q_cache.update_q_value(&state, action.action_type(), reward, &state, false).await;
+        let _ = q_cache
+            .update_statistics(&action, &cache_hash, content_data.len() as u64, hit)
+            .await;
+        let _ = q_cache
+            .update_q_value(&state, action.action_type(), reward, &state, false)
+            .await;
     }
 
     // Measure optimized performance
@@ -1167,7 +1385,9 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
         let strategies = vec![StrategyChoice::Kademlia, StrategyChoice::Hyperbolic];
 
         let mab_guard = mab.lock().await;
-        let decision = mab_guard.select_route(destination, content_type, &strategies).await?;
+        let decision = mab_guard
+            .select_route(destination, content_type, &strategies)
+            .await?;
 
         // Simulate improved performance due to adaptation
         let strategy_bonus = match strategy {
@@ -1201,15 +1421,22 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
     println!("  Success rate: {:.2}%", optimized_success_rate * 100.0);
 
     let latency_improvement = ((baseline_avg - optimized_avg) / baseline_avg) * 100.0;
-    let success_improvement = ((optimized_success_rate - baseline_success_rate) / baseline_success_rate) * 100.0;
+    let success_improvement =
+        ((optimized_success_rate - baseline_success_rate) / baseline_success_rate) * 100.0;
 
     println!("Performance improvements:");
     println!("  Latency improvement: {:.2}%", latency_improvement);
     println!("  Success rate improvement: {:.2}%", success_improvement);
 
     // Verify adaptive mechanisms provide improvement
-    assert!(optimized_success_rate >= baseline_success_rate * 0.95, "Success rate should not degrade significantly");
-    assert!(optimized_avg <= baseline_avg * 1.05, "Latency should not degrade significantly");
+    assert!(
+        optimized_success_rate >= baseline_success_rate * 0.95,
+        "Success rate should not degrade significantly"
+    );
+    assert!(
+        optimized_avg <= baseline_avg * 1.05,
+        "Latency should not degrade significantly"
+    );
 
     // Check that adaptive components have learned
     let thompson_metrics = thompson.get_metrics().await;
@@ -1219,7 +1446,10 @@ async fn test_adaptive_performance_optimization() -> anyhow::Result<()> {
     println!("Learning verification:");
     println!("  Thompson decisions: {}", thompson_metrics.total_decisions);
     println!("  MAB decisions: {}", mab_metrics.total_decisions);
-    println!("  Cache accesses: {}", cache_stats.hits + cache_stats.misses);
+    println!(
+        "  Cache accesses: {}",
+        cache_stats.hits + cache_stats.misses
+    );
     println!("  Cache hit rate: {:.2}%", cache_stats.hit_rate() * 100.0);
 
     assert!(thompson_metrics.total_decisions > 0);

@@ -333,7 +333,6 @@ impl ComponentChecker for ResourceHealthChecker {
             "bandwidth_usage": metrics.bandwidth_usage,
             "cpu_usage": metrics.cpu_usage,
             "dht_ops_per_sec": metrics.dht_metrics.ops_per_sec,
-            "mcp_calls_per_sec": metrics.mcp_metrics.calls_per_sec,
         }))
     }
 }

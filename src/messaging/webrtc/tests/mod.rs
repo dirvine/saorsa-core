@@ -12,10 +12,12 @@ mod multi_party_tests;
 mod quic_connectivity_tests;
 
 /// Mock DHT engine for testing
+#[allow(dead_code)]
 pub struct MockDhtEngine {
     pub peer_endpoints: std::collections::HashMap<FourWordAddress, String>,
 }
 
+#[allow(dead_code)]
 impl MockDhtEngine {
     pub fn new() -> Self {
         Self {

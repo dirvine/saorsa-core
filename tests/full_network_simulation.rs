@@ -27,8 +27,8 @@ use std::time::Duration;
 /// Simulated network environment
 struct NetworkSimulation {
     nodes: HashMap<NodeId, Arc<NetworkCoordinator>>,
-    network_latency: Duration,
-    packet_loss_rate: f64,
+    _network_latency: Duration,
+    _packet_loss_rate: f64,
 }
 
 impl NetworkSimulation {
@@ -62,8 +62,8 @@ impl NetworkSimulation {
 
         Self {
             nodes,
-            network_latency: Duration::from_millis(50),
-            packet_loss_rate: 0.01,
+            _network_latency: Duration::from_millis(50),
+            _packet_loss_rate: 0.01,
         }
     }
 

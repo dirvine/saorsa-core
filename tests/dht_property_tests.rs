@@ -6,7 +6,6 @@
 
 use anyhow::Result;
 use proptest::prelude::*;
-use saorsa_core::PeerId;
 use saorsa_core::dht::{DHTConfig, Key, Record, optimized_storage::OptimizedDHTStorage};
 use saorsa_core::identity::node_identity::NodeId;
 use std::collections::{HashMap, HashSet};
@@ -353,7 +352,7 @@ proptest! {
             if expired_count > 0 {
                 // Should have cleaned up at least some expired records
                 // (Due to LRU, some expired records might have been evicted already)
-                prop_assert!(cleaned >= 0, "Cleanup should return non-negative count");
+                // Note: cleaned count can be 0 if records were already evicted by LRU
             }
 
             // After cleanup, getting expired records should return None

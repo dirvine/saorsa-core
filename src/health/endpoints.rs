@@ -99,6 +99,20 @@ impl HealthServer {
         (server, shutdown_tx)
     }
 
+    /// Create a health server binding from environment variables if present
+    /// SAORSA_METRICS_HOST (default 127.0.0.1), SAORSA_METRICS_PORT (default 9090)
+    pub fn from_env(health_manager: Arc<HealthManager>) -> (Self, tokio::sync::oneshot::Sender<()>) {
+        let host = std::env::var("SAORSA_METRICS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port: u16 = std::env::var("SAORSA_METRICS_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(9090);
+        let addr = format!("{}:{}", host, port).parse().unwrap_or_else(|_| {
+            std::net::SocketAddr::from(([127, 0, 0, 1], 9090))
+        });
+        Self::new(health_manager, addr)
+    }
+
     /// Run the health server
     pub async fn run(self) -> Result<()> {
         let router = self.endpoints.router();

@@ -27,7 +27,6 @@
 //! - QUIC-based transport with NAT traversal
 //! - IPv4-first with simple addressing
 //! - Kademlia DHT for distributed routing
-//! - Built-in MCP server for AI capabilities
 //! - Four-word human-readable addresses
 //!
 //! ## Example
@@ -44,7 +43,7 @@
 //!         .with_mcp_server()
 //!         .build()
 //!         .await?;
-//!     
+//!
 //!     node.run().await?;
 //!     Ok(())
 //! }
@@ -69,8 +68,7 @@ pub mod dht_network_manager;
 /// Transport layer (QUIC, TCP)
 pub mod transport;
 
-/// Model Context Protocol server
-pub mod mcp;
+// MCP removed; will be redesigned later
 
 /// Security and cryptography
 pub mod security;
@@ -104,6 +102,9 @@ pub mod utils;
 
 /// Validation framework for input sanitization and rate limiting
 pub mod validation;
+
+/// Unified rate limiting engine
+pub mod rate_limit;
 
 /// Production hardening features
 pub mod production;
@@ -183,7 +184,6 @@ pub use key_derivation::{
     BatchDerivationRequest, BatchDerivationResult, DerivationPath, DerivationPriority,
     DerivationStats, DerivedKey, HierarchicalKeyDerivation, MasterSeed,
 };
-pub use mcp::{MCPServer, MCPService, Tool};
 pub use monotonic_counter::{
     BatchUpdateRequest, BatchUpdateResult, CounterStats, MonotonicCounterSystem, PeerCounter,
     SequenceValidationResult,

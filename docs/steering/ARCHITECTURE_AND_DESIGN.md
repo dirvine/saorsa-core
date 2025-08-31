@@ -54,7 +54,6 @@ This document establishes the architectural principles, design patterns, and tec
 - Comprehensive documentation and examples
 - Type-safe APIs with clear error handling
 - Four-word human-readable addresses
-- Model Context Protocol (MCP) integration for AI assistance
 
 **Rationale**: Adoption depends on developer productivity and ease of integration.
 

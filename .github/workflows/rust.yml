@@ -81,6 +81,13 @@ jobs:
           -- -D warnings || echo "Sample mutation testing completed"
       if: matrix.rust == 'stable'
 
+    - name: Fail if backup files are present
+      run: |
+        if git ls-files | grep -E '(\.bak\d*|\.backup)$'; then
+          echo "Found backup files (.bak/.backup). Please remove them." >&2
+          exit 1
+        fi
+
   security_audit:
     name: Security Audit
     runs-on: ubuntu-latest
