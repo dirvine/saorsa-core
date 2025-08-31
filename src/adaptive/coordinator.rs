@@ -264,7 +264,7 @@ impl NetworkCoordinator {
 
         // Create trust provider for components that need it
         let mut pre_trusted = HashSet::new();
-        pre_trusted.insert(identity.node_id().clone());
+        pre_trusted.insert(identity.to_user_id());
         let trust_engine = Arc::new(EigenTrustEngine::new(pre_trusted));
 
         // Initialize routing components
@@ -297,7 +297,7 @@ impl NetworkCoordinator {
 
         // Initialize gossip
         let gossip = Arc::new(AdaptiveGossipSub::new(
-            identity.node_id().clone(),
+            identity.to_user_id(),
             trust_engine.clone(),
         ));
 
@@ -358,7 +358,7 @@ impl NetworkCoordinator {
         // Initialize churn handler
         let churn_config = ChurnConfig::default();
         let churn_handler = Arc::new(ChurnHandler::new(
-            identity.node_id().clone(),
+            identity.to_user_id(),
             churn_predictor.clone(),
             trust_engine.clone(),
             replication.clone(),
@@ -417,7 +417,7 @@ impl NetworkCoordinator {
             integrity: IntegrityConfig::default(),
             audit: AuditConfig::default(),
         };
-        let security = Arc::new(SecurityManager::new(security_config, (*identity).clone()));
+        let security = Arc::new(SecurityManager::new(security_config, &*identity));
 
         // Initialize performance cache
         let cache_config = CacheConfig {
@@ -509,7 +509,7 @@ impl NetworkCoordinator {
     pub async fn store(&self, data: Vec<u8>) -> Result<ContentHash> {
         // Security check
         self.security
-            .check_rate_limit(self.identity.node_id(), None)
+            .check_rate_limit(&self.identity.to_user_id(), None)
             .await
             .map_err(|e| {
                 P2PError::Network(crate::error::NetworkError::ProtocolError(
@@ -586,7 +586,7 @@ impl NetworkCoordinator {
         let msg = GossipMessage {
             topic: topic.to_string(),
             data: message,
-            from: NodeId::from_bytes(self.identity.node_id().hash),
+            from: NodeId::from_bytes(self.identity.node_id().0),
             seqno: 0, // Will be set by gossip
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -751,7 +751,7 @@ impl NetworkCoordinator {
     /// Public accessor for basic node information used by tests/examples
     pub async fn get_node_info(&self) -> Result<NodeDescriptor> {
         Ok(NodeDescriptor {
-            id: self.identity.node_id().clone(),
+            id: self.identity.to_user_id(),
             public_key: self.identity.public_key().clone(),
             addresses: vec![],
             hyperbolic: None,

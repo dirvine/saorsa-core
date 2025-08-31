@@ -51,7 +51,7 @@ pub struct IPv6NodeID {
 pub struct IPDiversityConfig {
     /// Maximum nodes per /64 subnet (default: 1)
     pub max_nodes_per_64: usize,
-    /// Maximum nodes per /48 allocation (default: 3)  
+    /// Maximum nodes per /48 allocation (default: 3)
     pub max_nodes_per_48: usize,
     /// Maximum nodes per /32 region (default: 10)
     pub max_nodes_per_32: usize,
@@ -268,12 +268,18 @@ impl IPDiversityEnforcer {
         let subnet_32 = Self::extract_subnet_prefix(ipv6_addr, 32);
 
         // GeoIP/ASN lookup via provider if available
-        let (asn, country, is_hosting_provider, is_vpn_provider) = if let Some(p) = &self.geo_provider {
-            let info = p.lookup(ipv6_addr);
-            (info.asn, info.country, info.is_hosting_provider, info.is_vpn_provider)
-        } else {
-            (None, None, false, false)
-        };
+        let (asn, country, is_hosting_provider, is_vpn_provider) =
+            if let Some(p) = &self.geo_provider {
+                let info = p.lookup(ipv6_addr);
+                (
+                    info.asn,
+                    info.country,
+                    info.is_hosting_provider,
+                    info.is_vpn_provider,
+                )
+            } else {
+                (None, None, false, false)
+            };
 
         // Default reputation for new IPs
         let reputation_score = 0.5;
@@ -457,7 +463,7 @@ impl IPDiversityEnforcer {
 }
 
 /// GeoIP/ASN provider trait
-pub trait GeoProvider {
+pub trait GeoProvider: std::fmt::Debug {
     fn lookup(&self, ip: Ipv6Addr) -> GeoInfo;
 }
 
@@ -471,20 +477,26 @@ pub struct GeoInfo {
 }
 
 /// A simple in-memory caching wrapper for a GeoProvider
+#[derive(Debug)]
 pub struct CachedGeoProvider<P: GeoProvider> {
     inner: P,
-    cache: parking_lot::RwLock<HashMap<Ipv6Addr, GeoInfo>>, 
+    cache: parking_lot::RwLock<HashMap<Ipv6Addr, GeoInfo>>,
 }
 
 impl<P: GeoProvider> CachedGeoProvider<P> {
     pub fn new(inner: P) -> Self {
-        Self { inner, cache: parking_lot::RwLock::new(HashMap::new()) }
+        Self {
+            inner,
+            cache: parking_lot::RwLock::new(HashMap::new()),
+        }
     }
 }
 
 impl<P: GeoProvider> GeoProvider for CachedGeoProvider<P> {
     fn lookup(&self, ip: Ipv6Addr) -> GeoInfo {
-        if let Some(info) = self.cache.read().get(&ip).cloned() { return info; }
+        if let Some(info) = self.cache.read().get(&ip).cloned() {
+            return info;
+        }
         let info = self.inner.lookup(ip);
         self.cache.write().insert(ip, info.clone());
         info
@@ -492,10 +504,16 @@ impl<P: GeoProvider> GeoProvider for CachedGeoProvider<P> {
 }
 
 /// Stub provider returning no ASN/GeoIP info
+#[derive(Debug)]
 pub struct StubGeoProvider;
 impl GeoProvider for StubGeoProvider {
     fn lookup(&self, _ip: Ipv6Addr) -> GeoInfo {
-        GeoInfo { asn: None, country: None, is_hosting_provider: false, is_vpn_provider: false }
+        GeoInfo {
+            asn: None,
+            country: None,
+            is_hosting_provider: false,
+            is_vpn_provider: false,
+        }
     }
 }
 

@@ -30,7 +30,7 @@ use sha2::{Digest, Sha256};
 use std::fmt;
 
 // Import PQC types from ant_quic via quantum_crypto module
-use ant_quic::crypto::pqc::types::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
+use crate::quantum_crypto::ant_quic_integration::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
 
 // No four-word address tied to identity; addressing is handled elsewhere.
 
@@ -113,10 +113,9 @@ impl PublicNodeIdentity {
     }
 
     // Word addresses are not part of identity; use bootstrap/transport layers
-    
 }
 
-/// Core node identity with cryptographic keys and four-word address
+/// Core node identity with cryptographic keys
 pub struct NodeIdentity {
     /// ML-DSA-65 secret key (private)
     secret_key: MlDsaSecretKey,
@@ -144,6 +143,11 @@ impl NodeIdentity {
             public_key,
             node_id,
         })
+    }
+
+    /// Convert this identity's NodeId to a UserId for use in adaptive modules
+    pub fn to_user_id(&self) -> crate::peer_record::UserId {
+        crate::peer_record::UserId::from_bytes(self.node_id.0)
     }
 
     /// Generate from seed (deterministic)

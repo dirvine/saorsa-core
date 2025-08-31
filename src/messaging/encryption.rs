@@ -4,8 +4,6 @@ use super::key_exchange::KeyExchange;
 use super::types::*;
 use crate::identity::FourWordAddress;
 
-// Note: UserHandle import was removed as it's not used in this module
-
 use anyhow::Result;
 use blake3::Hasher;
 use chacha20poly1305::{

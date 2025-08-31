@@ -199,7 +199,7 @@ pub struct SecurityManager {
     auditor: Arc<SecurityAuditor>,
 
     /// Node identity for signing
-    _identity: NodeIdentity,
+    _identity: crate::peer_record::UserId,
 }
 
 /// Rate limiter
@@ -431,7 +431,6 @@ pub enum SecurityError {
     #[error("Node is blacklisted")]
     Blacklisted,
 
-
     #[error("Invalid cryptographic identity")]
     InvalidIdentity,
 
@@ -450,7 +449,7 @@ pub enum SecurityError {
 
 impl SecurityManager {
     /// Create new security manager
-    pub fn new(config: SecurityConfig, identity: NodeIdentity) -> Self {
+    pub fn new(config: SecurityConfig, identity: &NodeIdentity) -> Self {
         let rate_limiter = Arc::new(RateLimiter::new(config.rate_limit.clone()));
         let blacklist = Arc::new(BlacklistManager::new(config.blacklist.clone()));
         let eclipse_detector = Arc::new(EclipseDetector::new(config.eclipse_detection.clone()));
@@ -464,7 +463,7 @@ impl SecurityManager {
             eclipse_detector,
             integrity_verifier,
             auditor,
-            _identity: identity,
+            _identity: identity.to_user_id(),
         }
     }
 

@@ -75,7 +75,7 @@ impl AdaptiveDHT {
         };
 
         // Create DHT with local ID from identity
-        let local_key = Self::node_id_to_key(identity.node_id());
+        let local_key = Self::node_id_to_key(&identity.to_user_id());
         // Convert Key to NodeId for DhtCoreEngine
         let node_id = crate::dht::core_engine::NodeId::from_key(DhtKey::from_bytes(local_key));
         let base_dht = Arc::new(RwLock::new(DHT::new(node_id)?));
@@ -218,33 +218,21 @@ impl AdaptiveDHT {
                 NodeDescriptor {
                     id: node_id,
                     // TODO: Get real key from node - for now use a deterministic dummy key
-                    // This is a known valid ed25519 public key (the generator point)
+                    // Create a dummy ML-DSA public key for testing
                     public_key: {
-                        // Try to use a placeholder key first
-                        let placeholder = [
-                            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-                            21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-                        ];
-
-                        // Use the ed25519 base point as fallback (always valid)
-                        const ED25519_BASEPOINT_BYTES: [u8; 32] = [
-                            0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-                            0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-                            0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-                        ];
-
-                        ed25519_dalek::VerifyingKey::from_bytes(&placeholder).unwrap_or_else(|_| {
-                            // Fall back to the known valid base point
-                            ed25519_dalek::VerifyingKey::from_bytes(&ED25519_BASEPOINT_BYTES)
-                                .ok()
-                                .unwrap_or_else(|| {
-                                    // If even the base point fails, something is seriously wrong
-                                    // Create a verifying key from the generator point another way
-                                    use ed25519_dalek::SigningKey;
-                                    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
-                                    signing_key.verifying_key()
-                                })
-                        })
+                        // For testing, create a dummy key from a fixed seed
+                        // In production, this should come from the actual node identity
+                        use crate::quantum_crypto::generate_ml_dsa_keypair;
+                        match generate_ml_dsa_keypair() {
+                            Ok((public_key, _)) => public_key,
+                            Err(_) => {
+                                // Fallback: create a dummy key from known bytes
+                                // This is not cryptographically secure but works for testing
+                                let dummy_bytes = [1u8; 1952]; // ML-DSA-65 public key size
+                                crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(&dummy_bytes)
+                                    .unwrap_or_else(|_| panic!("Failed to create dummy ML-DSA key"))
+                            }
+                        }
                     },
                     addresses: vec![node.address.clone()],
                     hyperbolic: None,

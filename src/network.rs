@@ -29,10 +29,10 @@ use crate::validation::RateLimitConfig;
 use crate::validation::RateLimiter;
 use crate::{NetworkAddress, PeerId};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
@@ -975,7 +975,7 @@ impl P2PNode {
         &self,
         message_data: Vec<u8>,
         peer_id: &PeerId,
-        protocol: &str,
+        _protocol: &str,
         event_tx: &broadcast::Sender<P2PEvent>,
     ) -> Result<()> {
         // MCP removed: no special protocol handling
@@ -1631,6 +1631,16 @@ impl P2PNode {
     }
 }
 
+/// Network sender trait for sending messages
+#[async_trait::async_trait]
+pub trait NetworkSender: Send + Sync {
+    /// Send a message to a specific peer
+    async fn send_message(&self, peer_id: &PeerId, protocol: &str, data: Vec<u8>) -> Result<()>;
+
+    /// Get our local peer ID
+    fn local_peer_id(&self) -> &PeerId;
+}
+
 /// Lightweight wrapper for P2PNode to implement NetworkSender
 #[derive(Clone)]
 pub struct P2PNetworkSender {
@@ -1766,7 +1776,7 @@ impl NodeBuilder {
 async fn handle_received_message_standalone(
     message_data: Vec<u8>,
     peer_id: &PeerId,
-    protocol: &str,
+    _protocol: &str,
     event_tx: &broadcast::Sender<P2PEvent>,
 ) -> Result<()> {
     // Parse the message format
@@ -1967,9 +1977,6 @@ async fn get_resource_metrics(resource_manager: &Option<Arc<ResourceManager>>) -
 mod tests {
     use super::*;
     // MCP removed from tests
-    use serde_json::json;
-    use std::future::Future;
-    use std::pin::Pin;
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -2018,7 +2025,6 @@ mod tests {
         assert!(config.peer_id.is_none());
         assert_eq!(config.listen_addrs.len(), 2);
         assert!(config.enable_ipv6);
-        assert!(config.enable_mcp_server);
         assert_eq!(config.max_connections, 1000);
         assert_eq!(config.max_incoming_connections, 100);
         assert_eq!(config.connection_timeout, Duration::from_secs(30));
@@ -2264,42 +2270,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mcp_integration() -> Result<()> {
-        let config = create_test_node_config();
-        let node = P2PNode::new(config).await?;
-
-        // Start the node (which starts the MCP server)
-        node.start().await?;
-
-        // Register a test tool
-        let tool = create_test_tool("network_test_tool");
-        node.register_mcp_tool(tool).await?;
-
-        // List tools
-        let tools = node.list_mcp_tools().await?;
-        assert!(tools.contains(&"network_test_tool".to_string()));
-
-        // Call the tool
-        let arguments = json!({"input": "test_input"});
-        let result = node
-            .call_mcp_tool("network_test_tool", arguments.clone())
-            .await?;
-        assert_eq!(result["tool"], "network_test_tool");
-        assert_eq!(result["input"], arguments);
-
-        // Get MCP stats
-        let stats = node.mcp_stats().await?;
-        assert_eq!(stats.total_tools, 1);
-
-        // Test call to non-existent tool
-        let result = node.call_mcp_tool("non_existent_tool", json!({})).await;
-        assert!(result.is_err());
-
-        node.stop().await?;
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_remote_mcp_operations() -> Result<()> {
         let config = create_test_node_config();
         let node = P2PNode::new(config).await?;
@@ -2391,7 +2361,6 @@ mod tests {
             .listen_on("/ip6/::1/tcp/9100")
             .with_bootstrap_peer("/ip4/127.0.0.1/tcp/9101")
             .with_ipv6(true)
-            .with_mcp_server()
             .with_connection_timeout(Duration::from_secs(15))
             .with_max_connections(200)
             .build()
@@ -2402,87 +2371,8 @@ mod tests {
         assert_eq!(config.listen_addrs.len(), 4); // 2 default + 2 added by builder
         assert_eq!(config.bootstrap_peers.len(), 1);
         assert!(config.enable_ipv6);
-        assert!(config.enable_mcp_server);
         assert_eq!(config.connection_timeout, Duration::from_secs(15));
         assert_eq!(config.max_connections, 200);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_node_builder_with_mcp_config() -> Result<()> {
-        let mcp_config = MCPServerConfig {
-            server_name: "test_mcp_server".to_string(),
-            server_version: "1.0.0".to_string(),
-            enable_dht_discovery: false,
-            enable_auth: false,
-            ..MCPServerConfig::default()
-        };
-
-        let node = P2PNode::builder()
-            .with_peer_id("mcp_config_test".to_string())
-            .with_mcp_config(mcp_config.clone())
-            .build()
-            .await?;
-
-        assert_eq!(node.peer_id(), "mcp_config_test");
-        let config = node.config();
-        assert!(config.enable_mcp_server);
-        assert!(config.mcp_server_config.is_some());
-
-        let node_mcp_config = config
-            .mcp_server_config
-            .as_ref()
-            .expect("MCP server config should be present in test config");
-        assert_eq!(node_mcp_config.server_name, "test_mcp_server");
-        assert!(!node_mcp_config.enable_auth);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_mcp_server_not_enabled_errors() -> Result<()> {
-        let mut config = create_test_node_config();
-        config.enable_mcp_server = false;
-        let node = P2PNode::new(config).await?;
-
-        // All MCP operations should fail
-        let tool = create_test_tool("test_tool");
-        let result = node.register_mcp_tool(tool).await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("MCP server not enabled")
-        );
-
-        let result = node.call_mcp_tool("test_tool", json!({})).await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("MCP server not enabled")
-        );
-
-        let result = node.list_mcp_tools().await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("MCP server not enabled")
-        );
-
-        let result = node.mcp_stats().await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("MCP server not enabled")
-        );
 
         Ok(())
     }

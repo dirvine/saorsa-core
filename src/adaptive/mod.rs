@@ -55,6 +55,7 @@ pub mod transport;
 pub mod trust;
 
 // Re-export commonly used types
+pub use crate::identity::NodeIdentity;
 pub use churn::{ChurnConfig, ChurnHandler, NodeMonitor, NodeState, RecoveryManager};
 pub use client::{
     AdaptiveP2PClient, Client, ClientConfig, ClientProfile, NetworkStats as ClientNetworkStats,
@@ -73,7 +74,6 @@ pub use hyperbolic_enhanced::{
 pub use hyperbolic_greedy::{
     Embedding, EmbeddingConfig, HyperbolicGreedyRouter, embed_snapshot, greedy_next,
 };
-pub use crate::identity::{NodeIdentity};
 pub use learning::{ChurnPredictor, QLearnCacheManager, ThompsonSampling};
 pub use monitoring::{
     Alert, AlertManager, DashboardData, MonitoringConfig, MonitoringSystem, NetworkHealth,
@@ -178,11 +178,11 @@ pub struct NetworkMessage {
 pub type NodeId = crate::peer_record::UserId;
 
 /// Node descriptor containing all information about a peer
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct NodeDescriptor {
     pub id: NodeId,
     // PQC-only: ML-DSA public key
-    pub public_key: crate::MlDsaPublicKey,
+    pub public_key: crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey,
     pub addresses: Vec<String>,
     pub hyperbolic: Option<HyperbolicCoordinate>,
     pub som_position: Option<[f64; 4]>,

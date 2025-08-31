@@ -41,22 +41,22 @@
 //!     fn validate(&self, ctx: &ValidationContext) -> Result<()> {
 //!         // Validate peer ID format
 //!         validate_peer_id(&self.peer_id)?;
-//!         
+//!
 //!         // Validate payload size
 //!         validate_message_size(self.payload.len(), ctx.max_message_size)?;
-//!         
+//!
 //!         Ok(())
 //!     }
 //! }
 //! ```
 
 use crate::error::{P2PError, P2pResult};
-use parking_lot::RwLock;
+
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use thiserror::Error;
 
 // Constants for validation rules
@@ -432,19 +432,28 @@ impl RateLimiter {
             max_requests: config.max_requests,
             burst_size: config.burst_size,
         };
-        Self { engine: std::sync::Arc::new(crate::rate_limit::Engine::new(engine_cfg)), config }
+        Self {
+            engine: std::sync::Arc::new(crate::rate_limit::Engine::new(engine_cfg)),
+            config,
+        }
     }
 
     /// Check if a request from an IP is allowed
     pub fn check_ip(&self, ip: &IpAddr) -> P2pResult<()> {
         // Global limit
         if !self.engine.try_consume_global() {
-            return Err(ValidationError::RateLimitExceeded { identifier: "global".to_string() }.into());
+            return Err(ValidationError::RateLimitExceeded {
+                identifier: "global".to_string(),
+            }
+            .into());
         }
 
         // Per-IP limit
         if !self.engine.try_consume_key(ip) {
-            return Err(ValidationError::RateLimitExceeded { identifier: ip.to_string() }.into());
+            return Err(ValidationError::RateLimitExceeded {
+                identifier: ip.to_string(),
+            }
+            .into());
         }
 
         Ok(())

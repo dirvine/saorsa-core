@@ -118,9 +118,6 @@ pub mod error;
 /// Peer record system for DHT-based peer discovery
 pub mod peer_record;
 
-/// Enhanced cryptographic signature verification system
-pub mod crypto_verify;
-
 /// Monotonic counter system for replay attack prevention
 pub mod monotonic_counter;
 
@@ -157,10 +154,6 @@ pub mod placement;
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
 pub use bootstrap::{BootstrapCache, BootstrapManager, CacheConfig, ContactEntry};
-pub use crypto_verify::{
-    BatchVerificationRequest, BatchVerificationResult, EnhancedSignatureVerification,
-    EnhancedSignatureVerifier, VerificationStats,
-};
 pub use dht::{Key, Record};
 pub use dht_network_manager::{
     BootstrapNode, DhtNetworkConfig, DhtNetworkEvent, DhtNetworkManager, DhtNetworkOperation,
@@ -267,9 +260,10 @@ pub use quantum_crypto::{
 
     MlDsaOperations,
 
-    MlDsaPublicKey,
-    MlDsaSecretKey,
-    MlDsaSignature,
+    // Use ant-quic types for better trait implementations
+    MlDsaPublicKey as AntMlDsaPublicKey,
+    MlDsaSecretKey as AntMlDsaSecretKey,
+    MlDsaSignature as AntMlDsaSignature,
     // Algorithm implementations
     MlKem768,
     MlKemCiphertext,

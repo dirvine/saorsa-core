@@ -32,7 +32,7 @@
 
 #![allow(missing_docs)]
 
-use crate::crypto_verify::EnhancedSignatureVerifier;
+// use crate::crypto_verify::EnhancedSignatureVerifier; // Temporarily disabled
 use crate::encrypted_key_storage::{EncryptedKeyStorageManager, SecurityLevel};
 use crate::error::{IdentityError, SecurityError, StorageError};
 use crate::key_derivation::{DerivationPath, DerivedKey, HierarchicalKeyDerivation};
@@ -238,8 +238,8 @@ pub struct IdentityManager {
     key_storage: Arc<EncryptedKeyStorageManager>,
     /// Key derivation system
     key_derivation: Arc<AsyncRwLock<HierarchicalKeyDerivation>>,
-    /// Signature verifier
-    verifier: Arc<EnhancedSignatureVerifier>,
+    /// Signature verifier (temporarily disabled)
+    // verifier: Arc<EnhancedSignatureVerifier>,
     /// Monotonic counter system
     counter_system: Arc<MonotonicCounterSystem>,
     /// Active identities cache
@@ -495,7 +495,7 @@ impl IdentityManager {
             security_level,
         )?);
 
-        let verifier = Arc::new(EnhancedSignatureVerifier::new());
+        // let verifier = Arc::new(EnhancedSignatureVerifier::new()); // Temporarily disabled
 
         let counter_system = MonotonicCounterSystem::new_with_sync_interval(
             storage_path.join("counters"),
@@ -509,7 +509,7 @@ impl IdentityManager {
             key_derivation: Arc::new(AsyncRwLock::new(HierarchicalKeyDerivation::new(
                 crate::key_derivation::MasterSeed::generate()?,
             ))),
-            verifier,
+            // verifier, // Temporarily disabled
             counter_system: Arc::new(counter_system),
             identities: Arc::new(RwLock::new(HashMap::new())),
             key_pairs: Arc::new(RwLock::new(HashMap::new())),
@@ -1488,7 +1488,7 @@ impl Clone for IdentityManager {
             storage_path: self.storage_path.clone(),
             key_storage: self.key_storage.clone(),
             key_derivation: self.key_derivation.clone(),
-            verifier: self.verifier.clone(),
+            // verifier: self.verifier.clone(), // Temporarily disabled
             counter_system: self.counter_system.clone(),
             identities: self.identities.clone(),
             key_pairs: self.key_pairs.clone(),
