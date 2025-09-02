@@ -9,4 +9,3 @@ pub fn resolve_handle(addr: &FourWordAddress) -> UserHandle {
     // TODO: Replace with directory/profile lookup when available
     UserHandle::from(addr.to_string())
 }
-

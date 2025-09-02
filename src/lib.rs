@@ -133,9 +133,6 @@ pub mod encrypted_key_storage;
 /// Persistent state management with crash recovery
 pub mod persistent_state;
 
-/// Identity management system with Ed25519/X25519 key pairs
-pub mod identity_manager;
-
 /// Adaptive P2P network implementation
 pub mod adaptive;
 
@@ -168,11 +165,6 @@ pub use health::{
     ComponentChecker, ComponentHealth, HealthEndpoints, HealthManager, HealthResponse,
     HealthServer, HealthStatus, PrometheusExporter,
 };
-pub use identity_manager::{
-    Identity, IdentityCreationParams, IdentityKeyPair, IdentityManager, IdentityState,
-    IdentityStats, IdentitySyncPackage, IdentityUpdate, IdentityVerification,
-    RevocationCertificate, RevocationReason,
-};
 pub use key_derivation::{
     BatchDerivationRequest, BatchDerivationResult, DerivationPath, DerivationPriority,
     DerivationStats, DerivedKey, HierarchicalKeyDerivation, MasterSeed,
@@ -182,6 +174,9 @@ pub use monotonic_counter::{
     SequenceValidationResult,
 };
 pub use network::{NodeBuilder, NodeConfig, P2PEvent, P2PNode};
+// Back-compat exports for tests
+pub use config::Config;
+pub use network::P2PNode as Node;
 pub use peer_record::{EndpointId, NatType, PeerDHTRecord, PeerEndpoint, SignatureCache, UserId};
 pub use persistent_state::{
     FlushStrategy, IntegrityReport, PersistentStateManager, RecoveryMode, RecoveryStats,
@@ -198,10 +193,7 @@ pub use validation::{
     validate_message_size, validate_network_address, validate_peer_id,
 };
 
-// Enhanced identity exports
-pub use identity::enhanced::{
-    Department, EnhancedIdentity, EnhancedIdentityManager, Organization, Permission, Team,
-};
+// Enhanced identity removed
 
 // Storage exports
 pub use storage::{FileChunker, StorageManager}; // SyncManager temporarily disabled

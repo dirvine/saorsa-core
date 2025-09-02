@@ -19,7 +19,6 @@
 //! - Hybrid modes for gradual migration from classical algorithms
 
 pub mod ant_quic_integration;
-pub mod hybrid;
 pub mod types;
 
 // NOTE: Not using wildcard import to avoid conflicts with ant-quic types
@@ -158,57 +157,7 @@ pub enum ProtocolVersion {
     V2,
 }
 
-/// Signature scheme selection
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SignatureScheme {
-    /// Classical Ed25519 signatures (for backward compatibility)
-    Classical(Vec<u8>),
-
-    /// Post-quantum ML-DSA signatures
-    PostQuantum(Vec<u8>),
-
-    /// Dual signatures for hybrid mode
-    Dual {
-        classical: Vec<u8>,
-        post_quantum: Vec<u8>,
-    },
-}
-
-// NOTE: SignatureScheme::verify method removed - use ant-quic PQC verify functions directly:
-// - ml_dsa_verify(public_key: &MlDsaPublicKey, message: &[u8], signature: &MlDsaSignature)
-// - For Ed25519: use ed25519_verify from this module
-// These are re-exported from ant_quic_integration module
-
-impl SignatureScheme {
-    // verify method removed - see note above
-}
-
-// NOTE: PublicKeySet and PrivateKeySet removed - use ant-quic PQC types directly
-
-// NOTE: KeyPair struct and generate_keypair function removed to avoid conflicts
-// Use ant-quic PQC functions directly:
-// - generate_ml_dsa_keypair() -> (MlDsaPublicKey, MlDsaSecretKey)
-// - generate_ml_kem_keypair() -> (MlKemPublicKey, MlKemSecretKey)
-// - For Ed25519: generate_ed25519_keypair() below
-//
-// These functions are re-exported from ant_quic_integration module
-
-/// Generate Ed25519 keypair (placeholder for actual implementation)
-#[allow(dead_code)]
-fn generate_ed25519_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
-    use ed25519_dalek::SigningKey;
-    use rand::rngs::OsRng;
-
-    let signing_key = SigningKey::generate(&mut OsRng);
-    let public_key = signing_key.verifying_key().to_bytes().to_vec();
-
-    // Create 64-byte private key (signing key + public key)
-    let mut private_key = vec![0u8; 64];
-    private_key[..32].copy_from_slice(&signing_key.to_bytes());
-    private_key[32..].copy_from_slice(&public_key);
-
-    Ok((public_key, private_key))
-}
+// PQC-only; hybrid and classical paths removed
 
 /// Algorithm negotiation for establishing connections
 pub fn negotiate_algorithms(

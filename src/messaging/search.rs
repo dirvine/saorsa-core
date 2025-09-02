@@ -314,9 +314,7 @@ impl MessageSearch {
         }
 
         // Check sender
-        if !filters.from_users.is_empty()
-            && !filters.from_users.contains(&message.sender)
-        {
+        if !filters.from_users.is_empty() && !filters.from_users.contains(&message.sender) {
             return false;
         }
 

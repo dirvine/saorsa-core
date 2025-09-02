@@ -205,10 +205,7 @@ impl RealtimeSync {
     }
 
     /// Get current presence for users
-    pub async fn get_presence(
-        &self,
-        users: Vec<UserHandle>,
-    ) -> HashMap<UserHandle, UserPresence> {
+    pub async fn get_presence(&self, users: Vec<UserHandle>) -> HashMap<UserHandle, UserPresence> {
         let presence = self.presence.read().await;
 
         users
@@ -397,8 +394,7 @@ mod tests {
         let channel = ChannelId::new();
 
         // Start typing
-        sync
-            .broadcast_typing(channel, UserHandle::from("alice"), true)
+        sync.broadcast_typing(channel, UserHandle::from("alice"), true)
             .await
             .unwrap();
 
@@ -411,8 +407,7 @@ mod tests {
         let dht = super::DhtClient::new_mock();
         let sync = RealtimeSync::new(dht).await.unwrap();
 
-        sync
-            .update_presence(UserHandle::from("alice"), PresenceStatus::Online)
+        sync.update_presence(UserHandle::from("alice"), PresenceStatus::Online)
             .await
             .unwrap();
 

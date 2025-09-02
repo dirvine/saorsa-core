@@ -1,6 +1,6 @@
 [package]
 name = "saorsa-core"
-version = "0.3.13"
+version = "0.3.14"
 edition = "2024"
 authors = ["Saorsa Labs Limited <saorsalabs@gmail.com>"]
 license = "AGPL-3.0"
@@ -25,6 +25,9 @@ metrics = ["dep:prometheus", "ant-quic/prometheus"]
 [dependencies]
 # Core async and serialization
 tokio = { version = "1.35", features = ["full"] }
+
+# Pin time crate to compatible version
+time = { version = "0.3.36", features = ["serde", "parsing", "formatting"] }
 futures = "0.3"
 async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
@@ -37,7 +40,7 @@ smallvec = { version = "1.13", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 bytes = "1.5"
 hex = "0.4"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
 base64 = "0.21"
 array-init = "2.1"
 

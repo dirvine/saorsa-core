@@ -18,9 +18,10 @@
 //! large-scale Sybil attacks while maintaining network openness.
 
 use crate::PeerId;
+use crate::quantum_crypto::ant_quic_integration::{
+    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature, ml_dsa_sign, ml_dsa_verify,
+};
 use anyhow::{Result, anyhow};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -36,7 +37,7 @@ pub struct IPv6NodeID {
     pub node_id: Vec<u8>,
     /// IPv6 address this node ID is bound to
     pub ipv6_addr: Ipv6Addr,
-    /// Ed25519 public key for signatures
+    /// ML-DSA public key for signatures
     pub public_key: Vec<u8>,
     /// Signature proving ownership of the IPv6 address and keys
     pub signature: Vec<u8>,
@@ -120,14 +121,18 @@ impl Default for IPDiversityConfig {
 
 impl IPv6NodeID {
     /// Generate a new IPv6-based node ID
-    pub fn generate(ipv6_addr: Ipv6Addr, keypair: &SigningKey) -> Result<Self> {
+    pub fn generate(
+        ipv6_addr: Ipv6Addr,
+        secret: &MlDsaSecretKey,
+        public: &MlDsaPublicKey,
+    ) -> Result<Self> {
         let mut rng = rand::thread_rng();
         let mut salt = vec![0u8; 16];
         rand::RngCore::fill_bytes(&mut rng, &mut salt);
 
         let timestamp = SystemTime::now();
         let timestamp_secs = timestamp.duration_since(UNIX_EPOCH)?.as_secs();
-        let public_key = keypair.verifying_key().to_bytes().to_vec();
+        let public_key = public.as_bytes().to_vec();
 
         // Generate node ID: SHA256(ipv6_address || public_key || salt || timestamp)
         let mut hasher = Sha256::new();
@@ -144,7 +149,9 @@ impl IPv6NodeID {
         message_to_sign.extend_from_slice(&salt);
         message_to_sign.extend_from_slice(&timestamp_secs.to_le_bytes());
 
-        let signature = keypair.sign(&message_to_sign).to_bytes().to_vec();
+        let sig = ml_dsa_sign(secret, &message_to_sign)
+            .map_err(|e| anyhow!("ML-DSA sign failed: {:?}", e))?;
+        let signature = sig.0.to_vec();
 
         Ok(IPv6NodeID {
             node_id,
@@ -171,22 +178,16 @@ impl IPv6NodeID {
             return Ok(false);
         }
 
-        // Verify signature
-        if self.public_key.len() != 32 {
-            return Ok(false);
-        }
-        if self.signature.len() != 64 {
-            return Ok(false);
-        }
+        let public_key = MlDsaPublicKey::from_bytes(&self.public_key)
+            .map_err(|e| anyhow!("Invalid ML-DSA public key: {:?}", e))?;
 
-        let mut pk_bytes = [0u8; 32];
-        pk_bytes.copy_from_slice(&self.public_key);
-        let public_key = VerifyingKey::from_bytes(&pk_bytes)
-            .map_err(|e| anyhow!("Invalid public key: {}", e))?;
-
-        let mut sig_bytes = [0u8; 64];
+        // Convert Vec<u8> to fixed-size array for MlDsaSignature
+        if self.signature.len() != 3309 {
+            return Ok(false); // Invalid signature length
+        }
+        let mut sig_bytes = [0u8; 3309];
         sig_bytes.copy_from_slice(&self.signature);
-        let signature = Signature::from_bytes(&sig_bytes);
+        let signature = MlDsaSignature(Box::new(sig_bytes));
 
         let mut message_to_verify = Vec::new();
         message_to_verify.extend_from_slice(&self.ipv6_addr.octets());
@@ -194,10 +195,9 @@ impl IPv6NodeID {
         message_to_verify.extend_from_slice(&self.salt);
         message_to_verify.extend_from_slice(&self.timestamp_secs.to_le_bytes());
 
-        match public_key.verify(&message_to_verify, &signature) {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
-        }
+        let ok = ml_dsa_verify(&public_key, &message_to_verify, &signature)
+            .map_err(|e| anyhow!("ML-DSA verify error: {:?}", e))?;
+        Ok(ok)
     }
 
     /// Extract /64 subnet from IPv6 address
@@ -617,48 +617,15 @@ impl ReputationManager {
     }
 }
 
-/// Legacy security types for compatibility
-pub mod security_types {
-    use super::*;
-
-    /// Ed25519 key pair wrapper
-    pub struct KeyPair {
-        inner: SigningKey,
-    }
-
-    impl KeyPair {
-        /// Generate a new key pair
-        pub fn generate() -> Self {
-            // Generate key pair using ed25519-dalek directly
-            let signing_key = SigningKey::generate(&mut OsRng);
-
-            KeyPair { inner: signing_key }
-        }
-
-        /// Get the inner Ed25519 keypair
-        pub fn inner(&self) -> &SigningKey {
-            &self.inner
-        }
-
-        /// Get public key bytes
-        pub fn public_key_bytes(&self) -> [u8; 32] {
-            self.inner.verifying_key().to_bytes()
-        }
-
-        /// Sign a message
-        pub fn sign(&self, message: &[u8]) -> [u8; 64] {
-            self.inner.sign(message).to_bytes()
-        }
-    }
-}
+// Ed25519 compatibility removed
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::quantum_crypto::generate_ml_dsa_keypair;
 
-    fn create_test_keypair() -> SigningKey {
-        let mut csprng = rand::rngs::OsRng;
-        SigningKey::generate(&mut csprng)
+    fn create_test_keypair() -> (MlDsaPublicKey, MlDsaSecretKey) {
+        generate_ml_dsa_keypair().expect("Failed to generate test keypair")
     }
 
     fn create_test_ipv6() -> Ipv6Addr {
@@ -680,14 +647,14 @@ mod tests {
 
     #[test]
     fn test_ipv6_node_id_generation() -> Result<()> {
-        let keypair = create_test_keypair();
+        let (public_key, secret_key) = create_test_keypair();
         let ipv6_addr = create_test_ipv6();
 
-        let node_id = IPv6NodeID::generate(ipv6_addr, &keypair)?;
+        let node_id = IPv6NodeID::generate(ipv6_addr, &secret_key, &public_key)?;
 
         assert_eq!(node_id.ipv6_addr, ipv6_addr);
-        assert_eq!(node_id.public_key.len(), 32);
-        assert_eq!(node_id.signature.len(), 64);
+        assert_eq!(node_id.public_key.len(), 1952); // ML-DSA-65 public key size
+        assert_eq!(node_id.signature.len(), 3309); // ML-DSA-65 signature size
         assert_eq!(node_id.node_id.len(), 32); // SHA256 output
         assert_eq!(node_id.salt.len(), 16);
         assert!(node_id.timestamp_secs > 0);
@@ -697,10 +664,10 @@ mod tests {
 
     #[test]
     fn test_ipv6_node_id_verification() -> Result<()> {
-        let keypair = create_test_keypair();
+        let (public_key, secret_key) = create_test_keypair();
         let ipv6_addr = create_test_ipv6();
 
-        let node_id = IPv6NodeID::generate(ipv6_addr, &keypair)?;
+        let node_id = IPv6NodeID::generate(ipv6_addr, &secret_key, &public_key)?;
         let is_valid = node_id.verify()?;
 
         assert!(is_valid);
@@ -710,10 +677,10 @@ mod tests {
 
     #[test]
     fn test_ipv6_node_id_verification_fails_with_wrong_data() -> Result<()> {
-        let keypair = create_test_keypair();
+        let (public_key, secret_key) = create_test_keypair();
         let ipv6_addr = create_test_ipv6();
 
-        let mut node_id = IPv6NodeID::generate(ipv6_addr, &keypair)?;
+        let mut node_id = IPv6NodeID::generate(ipv6_addr, &secret_key, &public_key)?;
 
         // Tamper with the node ID
         node_id.node_id[0] ^= 0xFF;
@@ -721,14 +688,14 @@ mod tests {
         assert!(!is_valid);
 
         // Test with wrong signature length
-        let mut node_id2 = IPv6NodeID::generate(ipv6_addr, &keypair)?;
-        node_id2.signature = vec![0u8; 32]; // Wrong length
+        let mut node_id2 = IPv6NodeID::generate(ipv6_addr, &secret_key, &public_key)?;
+        node_id2.signature = vec![0u8; 32]; // Wrong length (should be 3309 for ML-DSA)
         let is_valid2 = node_id2.verify()?;
         assert!(!is_valid2);
 
         // Test with wrong public key length
-        let mut node_id3 = IPv6NodeID::generate(ipv6_addr, &keypair)?;
-        node_id3.public_key = vec![0u8; 16]; // Wrong length
+        let mut node_id3 = IPv6NodeID::generate(ipv6_addr, &secret_key, &public_key)?;
+        node_id3.public_key = vec![0u8; 16]; // Wrong length (should be 1952 for ML-DSA-65)
         let is_valid3 = node_id3.verify()?;
         assert!(!is_valid3);
 
@@ -737,12 +704,12 @@ mod tests {
 
     #[test]
     fn test_ipv6_subnet_extraction() -> Result<()> {
-        let keypair = create_test_keypair();
+        let (public_key, secret_key) = create_test_keypair();
         let ipv6_addr = Ipv6Addr::new(
             0x2001, 0xdb8, 0x85a3, 0x1234, 0x5678, 0x8a2e, 0x0370, 0x7334,
         );
 
-        let node_id = IPv6NodeID::generate(ipv6_addr, &keypair)?;
+        let node_id = IPv6NodeID::generate(ipv6_addr, &secret_key, &public_key)?;
 
         // Test /64 subnet extraction
         let subnet_64 = node_id.extract_subnet_64();
@@ -1119,22 +1086,18 @@ mod tests {
 
     #[test]
     fn test_security_types_keypair() {
-        let keypair = security_types::KeyPair::generate();
+        let (public_key, secret_key) =
+            generate_ml_dsa_keypair().expect("Failed to generate keypair");
 
-        let public_key_bytes = keypair.public_key_bytes();
-        assert_eq!(public_key_bytes.len(), 32);
+        let public_key_bytes = public_key.as_bytes();
+        assert_eq!(public_key_bytes.len(), 1952); // ML-DSA-65 public key size
 
         let message = b"test message";
-        let signature = keypair.sign(message);
-        assert_eq!(signature.len(), 64);
+        let signature = ml_dsa_sign(&secret_key, message).expect("Failed to sign message");
+        assert_eq!(signature.as_bytes().len(), 3309); // ML-DSA-65 signature size
 
-        // Verify the signature using the inner keypair
-        let inner = keypair.inner();
-        assert!(
-            inner
-                .verify(message, &Signature::from_bytes(&signature))
-                .is_ok()
-        );
+        // Verify the signature
+        assert!(ml_dsa_verify(&public_key, message, &signature).is_ok());
     }
 
     #[test]
@@ -1255,8 +1218,8 @@ mod tests {
 
         // Remove and check cleanup
         enforcer.remove_node(&analysis);
-        assert!(enforcer.asn_counts.get(&64512).is_none());
-        assert!(enforcer.country_counts.get("US").is_none());
+        assert!(!enforcer.asn_counts.contains_key(&64512));
+        assert!(!enforcer.country_counts.contains_key("US"));
 
         Ok(())
     }

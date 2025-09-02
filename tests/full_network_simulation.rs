@@ -19,6 +19,7 @@
 //! demonstrating all adaptive layers working together.
 
 use saorsa_core::adaptive::coordinator::DegradationReason;
+use saorsa_core::UserId;
 use saorsa_core::adaptive::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,7 +27,7 @@ use std::time::Duration;
 
 /// Simulated network environment
 struct NetworkSimulation {
-    nodes: HashMap<NodeId, Arc<NetworkCoordinator>>,
+    nodes: HashMap<UserId, Arc<NetworkCoordinator>>,
     _network_latency: Duration,
     _packet_loss_rate: f64,
 }
@@ -38,7 +39,7 @@ impl NetworkSimulation {
 
         for i in 0..num_nodes {
             let identity = NodeIdentity::generate().unwrap();
-            let node_id = identity.node_id().clone();
+            let user_id = identity.to_user_id();
 
             let config = NetworkConfig {
                 bootstrap_nodes: bootstrap_nodes.clone(),
@@ -52,7 +53,7 @@ impl NetworkSimulation {
 
             let coordinator = Arc::new(NetworkCoordinator::new(identity, config).await.unwrap());
 
-            nodes.insert(node_id.clone(), coordinator);
+            nodes.insert(user_id, coordinator);
 
             // First 3 nodes are bootstrap nodes
             if i < 3 {

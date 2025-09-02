@@ -145,4 +145,3 @@ fn test_special_addresses() {
     assert!(!public.is_loopback());
     assert!(public.four_words().is_some());
 }
-#![cfg(feature = "extended_tests")]

@@ -18,7 +18,7 @@ use saorsa_core::bootstrap::BootstrapDiscovery;
 use saorsa_core::network::{NodeConfig, P2PNode};
 use std::str::FromStr;
 use tokio::io::{self, AsyncBufReadExt};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// A simple P2P chat application using three-word addresses
 #[derive(Parser, Debug)]

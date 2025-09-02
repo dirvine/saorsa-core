@@ -1282,7 +1282,7 @@ mod tests {
     async fn test_security_manager_integration() {
         let config = SecurityConfig::default();
         let identity = NodeIdentity::generate().unwrap();
-        let manager = SecurityManager::new(config, identity);
+        let manager = SecurityManager::new(config, &identity);
 
         // Test node join validation
         // Generate a valid ML-DSA key and derive matching UserId via blake3(pubkey)

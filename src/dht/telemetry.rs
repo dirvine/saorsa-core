@@ -249,8 +249,9 @@ fn percentile(sorted_data: &[u64], percentile: u8) -> u64 {
         return 0;
     }
 
-    let index = (percentile as f64 / 100.0 * (sorted_data.len() - 1) as f64) as usize;
-    sorted_data[index]
+    let pos = percentile as f64 / 100.0 * (sorted_data.len() - 1) as f64;
+    let index = pos.ceil() as usize;
+    sorted_data[index.min(sorted_data.len() - 1)]
 }
 
 #[cfg(test)]

@@ -50,7 +50,10 @@ mod tests {
                     constraints,
                 }) => {
                     assert_eq!(received_id, call_id);
-                    assert_eq!(callee, crate::messaging::user_handle::UserHandle::from(bob.to_string()));
+                    assert_eq!(
+                        callee,
+                        crate::messaging::user_handle::UserHandle::from(bob.to_string())
+                    );
                     assert!(constraints.has_audio());
                 }
                 _ => panic!("Expected CallInitiated event"),
@@ -210,9 +213,17 @@ mod tests {
         assert_eq!(session.state, CallState::Idle);
 
         // Add participant
-        session.add_participant(crate::messaging::user_handle::UserHandle::from(bob.to_string()));
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(
+            bob.to_string(),
+        ));
         assert_eq!(session.participants.len(), 1);
-        assert!(session.participants.contains(&crate::messaging::user_handle::UserHandle::from(bob.to_string())));
+        assert!(
+            session
+                .participants
+                .contains(&crate::messaging::user_handle::UserHandle::from(
+                    bob.to_string()
+                ))
+        );
 
         // Transition through states
         session.state = CallState::Calling;
@@ -231,7 +242,9 @@ mod tests {
         assert!(duration.unwrap().num_seconds() >= 29);
 
         // Remove participant
-        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(bob.to_string()));
+        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(
+            bob.to_string(),
+        ));
         assert!(session.participants.is_empty());
     }
 

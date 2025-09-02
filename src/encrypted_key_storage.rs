@@ -41,10 +41,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
     aead::{Aead, KeyInit},
 };
-use argon2::{
-    Algorithm, Argon2, Params, Version,
-    password_hash::{PasswordHasher, SaltString},
-};
+use argon2::{Algorithm, Argon2, Params, Version, password_hash::SaltString};
 use rand::{RngCore, thread_rng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -59,7 +56,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 const STORAGE_FORMAT_VERSION: u32 = 1;
 
 /// Size of AES-256-GCM key in bytes
-const AES_KEY_SIZE: usize = 32;
+const _AES_KEY_SIZE: usize = 32;
 
 /// Size of AES-256-GCM nonce in bytes
 const AES_NONCE_SIZE: usize = 12;
@@ -179,8 +176,7 @@ pub struct EncryptedKeyStorageManager {
     argon2_config: Argon2Config,
     /// In-memory cache of decrypted keys
     key_cache: Arc<RwLock<HashMap<String, SecureMemory>>>,
-    /// Password hash cache for performance
-    password_cache: Arc<Mutex<Option<SecureMemory>>>,
+    // Removed insecure password cache that bypassed password validation
     /// Background key derivation tasks
     _background_tasks: Arc<AsyncRwLock<HashMap<String, tokio::task::JoinHandle<Result<()>>>>>,
     /// Performance statistics
@@ -199,13 +195,11 @@ pub struct StorageStats {
     /// Total cache misses
     pub cache_misses: u64,
     /// Average derivation time in milliseconds
-    pub avg_derivation_time_ms: u64,
+    pub avg_derivation_time_ms: f64,
     /// Total storage operations
     pub storage_operations: u64,
-    /// Total storage failures
-    pub storage_failures: u64,
-    /// Current cache size in bytes
-    pub cache_size_bytes: u64,
+    /// Cache size in bytes
+    pub cache_size_bytes: usize,
 }
 
 /// Password validation result
@@ -342,7 +336,6 @@ impl EncryptedKeyStorageManager {
             storage_path,
             argon2_config,
             key_cache: Arc::new(RwLock::new(HashMap::new())),
-            password_cache: Arc::new(Mutex::new(None)),
             _background_tasks: Arc::new(AsyncRwLock::new(HashMap::new())),
             stats: Arc::new(Mutex::new(StorageStats::default())),
             _security_level: security_level,
@@ -455,8 +448,8 @@ impl EncryptedKeyStorageManager {
                 ))
             })?;
             stats.storage_operations += 1;
-            stats.avg_derivation_time_ms =
-                (stats.avg_derivation_time_ms + start_time.elapsed().as_millis() as u64) / 2;
+            let elapsed_ms = start_time.elapsed().as_millis() as f64;
+            stats.avg_derivation_time_ms = (stats.avg_derivation_time_ms + elapsed_ms) / 2.0;
         }
 
         Ok(())
@@ -517,8 +510,8 @@ impl EncryptedKeyStorageManager {
                 ))
             })?;
             stats.cache_misses += 1;
-            stats.avg_derivation_time_ms =
-                (stats.avg_derivation_time_ms + start_time.elapsed().as_millis() as u64) / 2;
+            let elapsed_ms = start_time.elapsed().as_millis() as f64;
+            stats.avg_derivation_time_ms = (stats.avg_derivation_time_ms + elapsed_ms) / 2.0;
         }
 
         Ok(master_seed)
@@ -557,14 +550,9 @@ impl EncryptedKeyStorageManager {
         self.encrypt_and_store(new_password, &salt, &nonce, &key_data)
             .await?;
 
-        // Clear password cache
-        {
-            let mut cache = self.password_cache.lock().map_err(|_| {
-                P2PError::Storage(StorageError::LockPoisoned(
-                    "mutex lock failed".to_string().into(),
-                ))
-            })?;
-            *cache = None;
+        // Clear in-memory key cache so subsequent reads require correct password
+        if let Ok(mut cache) = self.key_cache.write() {
+            cache.clear();
         }
 
         // Update statistics
@@ -700,20 +688,6 @@ impl EncryptedKeyStorageManager {
         })?;
         cache.clear();
 
-        let mut password_cache = self.password_cache.lock().map_err(|_| {
-            P2PError::Storage(StorageError::LockPoisoned(
-                "mutex lock failed".to_string().into(),
-            ))
-        })?;
-        *password_cache = None;
-
-        let mut stats = self.stats.lock().map_err(|_| {
-            P2PError::Storage(StorageError::LockPoisoned(
-                "mutex lock failed".to_string().into(),
-            ))
-        })?;
-        stats.cache_size_bytes = 0;
-
         Ok(())
     }
 
@@ -725,18 +699,6 @@ impl EncryptedKeyStorageManager {
     ) -> Result<SecureMemory> {
         let start_time = Instant::now();
 
-        // Check password cache
-        {
-            let cache = self.password_cache.lock().map_err(|_| {
-                P2PError::Storage(StorageError::LockPoisoned(
-                    "mutex lock failed".to_string().into(),
-                ))
-            })?;
-            if let Some(ref cached_key) = *cache {
-                return SecureMemory::from_slice(cached_key.as_slice());
-            }
-        }
-
         let password_str = password.as_str().map_err(|e| {
             P2PError::Security(crate::error::SecurityError::DecryptionFailed(
                 format!("Invalid password encoding: {e}").into(),
@@ -744,37 +706,22 @@ impl EncryptedKeyStorageManager {
         })?;
 
         let argon2 = self.argon2_config.create_argon2()?;
-        let salt_string = SaltString::encode_b64(salt).map_err(|e| {
+        let _salt_string = SaltString::encode_b64(salt).map_err(|e| {
             P2PError::Security(crate::error::SecurityError::DecryptionFailed(
                 format!("Failed to encode salt: {e}").into(),
             ))
         })?;
 
-        let hash = argon2
-            .hash_password(password_str.as_bytes(), &salt_string)
+        let mut derived_key = vec![0u8; 32];
+        argon2
+            .hash_password_into(password_str.as_bytes(), salt, &mut derived_key)
             .map_err(|e| {
                 P2PError::Security(crate::error::SecurityError::DecryptionFailed(
                     format!("Argon2id key derivation failed: {e}").into(),
                 ))
             })?;
 
-        let hash_output = hash.hash.ok_or_else(|| {
-            P2PError::Security(crate::error::SecurityError::KeyGenerationFailed(
-                "Argon2id hash output missing".to_string().into(),
-            ))
-        })?;
-        let key_bytes = hash_output.as_bytes();
-        let derived_key = SecureMemory::from_slice(&key_bytes[..AES_KEY_SIZE])?;
-
-        // Cache the derived key
-        {
-            let mut cache = self.password_cache.lock().map_err(|_| {
-                P2PError::Storage(StorageError::LockPoisoned(
-                    "mutex lock failed".to_string().into(),
-                ))
-            })?;
-            *cache = Some(SecureMemory::from_slice(derived_key.as_slice())?);
-        }
+        // Update statistics
 
         // Update statistics
         {
@@ -784,11 +731,16 @@ impl EncryptedKeyStorageManager {
                 ))
             })?;
             stats.total_derivations += 1;
-            stats.avg_derivation_time_ms =
-                (stats.avg_derivation_time_ms + start_time.elapsed().as_millis() as u64) / 2;
+            let elapsed_ms = start_time.elapsed().as_millis() as f64;
+            stats.avg_derivation_time_ms = if stats.total_derivations == 1 {
+                elapsed_ms
+            } else {
+                (stats.avg_derivation_time_ms * ((stats.total_derivations - 1) as f64) + elapsed_ms)
+                    / (stats.total_derivations as f64)
+            };
         }
 
-        Ok(derived_key)
+        SecureMemory::from_slice(&derived_key)
     }
 
     /// Encrypt and store key data
@@ -958,8 +910,7 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password =
-            SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("G00d-Pa55w0rd_#1").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         assert!(storage_path.exists());
@@ -974,8 +925,7 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password =
-            SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("G00d-Pa55w0rd_#1").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         // Create and store master seed
@@ -1009,7 +959,7 @@ mod tests {
 
         // Test strong password
         let strong_password =
-            SecureString::from_plain_str("MySecurePassword123!").expect("Test assertion failed");
+            SecureString::from_plain_str("G00d-Pa55w0rd_#2").expect("Test assertion failed");
         let validation = manager
             .validate_password(&strong_password)
             .expect("Test assertion failed");
@@ -1026,9 +976,9 @@ mod tests {
             .expect("Test assertion failed");
 
         let old_password =
-            SecureString::from_plain_str("old_password_123!").expect("Test assertion failed");
+            SecureString::from_plain_str("Old-G00d-Pa55_#7").expect("Test assertion failed");
         let new_password =
-            SecureString::from_plain_str("new_password_456!").expect("Test assertion failed");
+            SecureString::from_plain_str("New-G00d-Pa55_#8").expect("Test assertion failed");
 
         manager.initialize(&old_password).await?;
 
@@ -1050,12 +1000,12 @@ mod tests {
         assert_eq!(master_seed.seed_material(), retrieved_seed.seed_material());
 
         // Verify old password doesn't work
-        assert!(
-            manager
-                .retrieve_master_seed("test_seed", &old_password)
-                .await
-                .is_err()
-        );
+        // Clear cache to avoid bypassing password check
+        manager.clear_cache()?;
+        assert!(manager
+            .retrieve_master_seed("test_seed", &old_password)
+            .await
+            .is_err());
 
         Ok(())
     }
@@ -1076,7 +1026,7 @@ mod tests {
             let manager = EncryptedKeyStorageManager::new(&storage_path, level)
                 .expect("Test assertion failed");
             let password =
-                SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
+                SecureString::from_plain_str("G00d-Pa55w0rd_#3").expect("Test assertion failed");
 
             let start_time = Instant::now();
             manager.initialize(&password).await?;
@@ -1104,8 +1054,7 @@ mod tests {
         let manager = EncryptedKeyStorageManager::new(&storage_path, SecurityLevel::Fast)
             .expect("Test assertion failed");
 
-        let password =
-            SecureString::from_plain_str("test_password_123!").expect("Test assertion failed");
+        let password = SecureString::from_plain_str("G00d-Pa55w0rd_#1").expect("Test assertion failed");
         manager.initialize(&password).await?;
 
         // Store master seed

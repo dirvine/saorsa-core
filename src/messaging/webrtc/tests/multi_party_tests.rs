@@ -297,9 +297,15 @@ mod tests {
         assert!(session.participants.is_empty());
 
         // Add participants
-        session.add_participant(crate::messaging::user_handle::UserHandle::from(alice.to_string()));
-        session.add_participant(crate::messaging::user_handle::UserHandle::from(bob.to_string()));
-        session.add_participant(crate::messaging::user_handle::UserHandle::from(charlie.to_string()));
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(
+            alice.to_string(),
+        ));
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(
+            bob.to_string(),
+        ));
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(
+            charlie.to_string(),
+        ));
 
         assert_eq!(session.participants.len(), 3);
         let alice_h = crate::messaging::user_handle::UserHandle::from(alice.to_string());
@@ -310,11 +316,15 @@ mod tests {
         assert!(session.participants.contains(&charlie_h));
 
         // Try to add duplicate participant
-        session.add_participant(crate::messaging::user_handle::UserHandle::from(alice.to_string()));
+        session.add_participant(crate::messaging::user_handle::UserHandle::from(
+            alice.to_string(),
+        ));
         assert_eq!(session.participants.len(), 3); // Should not duplicate
 
         // Remove participant
-        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(bob.to_string()));
+        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(
+            bob.to_string(),
+        ));
         assert_eq!(session.participants.len(), 2);
         assert!(!session.participants.contains(&bob_h));
         assert!(session.participants.contains(&alice_h));
@@ -322,7 +332,9 @@ mod tests {
 
         // Remove non-existent participant
         let david = FourWordAddress::from("david-eve-frank-grace");
-        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(david.to_string()));
+        session.remove_participant(&crate::messaging::user_handle::UserHandle::from(
+            david.to_string(),
+        ));
         assert_eq!(session.participants.len(), 2); // Should not change
     }
 
@@ -345,14 +357,18 @@ mod tests {
         let mut session = CallSession::new(call_id, MediaConstraints::video_call());
 
         for participant in &participants {
-            session.add_participant(crate::messaging::user_handle::UserHandle::from(participant.to_string()));
+            session.add_participant(crate::messaging::user_handle::UserHandle::from(
+                participant.to_string(),
+            ));
         }
 
         assert_eq!(session.participants.len(), 20);
 
         // Remove some participants
         for i in (15..20).rev() {
-            session.remove_participant(&crate::messaging::user_handle::UserHandle::from(participants[i].to_string()));
+            session.remove_participant(&crate::messaging::user_handle::UserHandle::from(
+                participants[i].to_string(),
+            ));
         }
 
         assert_eq!(session.participants.len(), 15);

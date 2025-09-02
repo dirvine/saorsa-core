@@ -62,10 +62,10 @@ impl P2PNetworkNode {
     /// Create a new P2P network node
     pub async fn new(bind_addr: SocketAddr) -> Result<Self> {
         let config = QuicNodeConfig {
-            role: EndpointRole::Client, // Regular P2P node
-            bootstrap_nodes: vec![],    // Bootstrap nodes can be added later
-            enable_coordinator: false,  // We don't need a coordinator
-            max_connections: 100,       // Reasonable default
+            role: EndpointRole::Bootstrap, // Use Bootstrap role to avoid requiring bootstrap nodes in tests
+            bootstrap_nodes: vec![],       // Bootstrap nodes not needed for Bootstrap role
+            enable_coordinator: false,     // We don't need a coordinator
+            max_connections: 100,          // Reasonable default
             connection_timeout: Duration::from_secs(30),
             stats_interval: Duration::from_secs(60),
             auth_config: AuthConfig::default(), // Use ant-quic's default auth (includes PQC)
@@ -230,8 +230,16 @@ pub struct DualStackNetworkNode {
 impl DualStackNetworkNode {
     /// Create dual nodes bound to IPv6 and IPv4 addresses respectively.
     pub async fn new(v6_addr: Option<SocketAddr>, v4_addr: Option<SocketAddr>) -> Result<Self> {
-        let v6 = if let Some(addr) = v6_addr { Some(P2PNetworkNode::new(addr).await?) } else { None };
-        let v4 = if let Some(addr) = v4_addr { Some(P2PNetworkNode::new(addr).await?) } else { None };
+        let v6 = if let Some(addr) = v6_addr {
+            Some(P2PNetworkNode::new(addr).await?)
+        } else {
+            None
+        };
+        let v4 = if let Some(addr) = v4_addr {
+            Some(P2PNetworkNode::new(addr).await?)
+        } else {
+            None
+        };
         Ok(Self { v6, v4 })
     }
 
@@ -259,12 +267,22 @@ impl DualStackNetworkNode {
         }
 
         // Both available: race IPv6 first, then IPv4 shortly after
-        let v6_node = self.v6.as_ref().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotConnected, "IPv6 node not available")
-        })?.node.clone();
-        let v4_node = self.v4.as_ref().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotConnected, "IPv4 node not available")
-        })?.node.clone();
+        let v6_node = self
+            .v6
+            .as_ref()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotConnected, "IPv6 node not available")
+            })?
+            .node
+            .clone();
+        let v4_node = self
+            .v4
+            .as_ref()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotConnected, "IPv4 node not available")
+            })?
+            .node
+            .clone();
 
         // Clone targets for tasks
         let v6_list = v6_targets.clone();
@@ -313,7 +331,9 @@ impl DualStackNetworkNode {
         node: &Option<P2PNetworkNode>,
         targets: &[SocketAddr],
     ) -> Result<PeerId> {
-        let node = node.as_ref().ok_or_else(|| anyhow::anyhow!("node not available"))?;
+        let node = node
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("node not available"))?;
         for &addr in targets {
             if let Ok(peer) = node.node.connect_to_bootstrap(addr).await {
                 return Ok(peer);
@@ -325,8 +345,12 @@ impl DualStackNetworkNode {
     /// Return all local listening addresses available (v6 then v4 if present)
     pub fn local_addrs(&self) -> Vec<SocketAddr> {
         let mut out = Vec::new();
-        if let Some(v6) = &self.v6 { out.push(v6.local_address()); }
-        if let Some(v4) = &self.v4 { out.push(v4.local_address()); }
+        if let Some(v6) = &self.v6 {
+            out.push(v6.local_address());
+        }
+        if let Some(v4) = &self.v4 {
+            out.push(v4.local_address());
+        }
         out
     }
 
@@ -351,8 +375,12 @@ impl DualStackNetworkNode {
     /// Get all connected peers (merged from both stacks)
     pub async fn get_connected_peers(&self) -> Vec<(PeerId, SocketAddr)> {
         let mut out = Vec::new();
-        if let Some(v6) = &self.v6 { out.extend(v6.get_connected_peers().await); }
-        if let Some(v4) = &self.v4 { out.extend(v4.get_connected_peers().await); }
+        if let Some(v6) = &self.v6 {
+            out.extend(v6.get_connected_peers().await);
+        }
+        if let Some(v4) = &self.v4 {
+            out.extend(v4.get_connected_peers().await);
+        }
         out
     }
 

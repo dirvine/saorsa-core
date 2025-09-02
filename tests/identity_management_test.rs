@@ -15,7 +15,6 @@ use saorsa_core::identity::{
     node_identity::{NodeId, NodeIdentity},
 };
 use saorsa_core::quantum_crypto::ant_quic_integration::ml_dsa_verify;
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -113,7 +112,7 @@ async fn test_node_identity_cryptography() -> Result<()> {
     let identity = create_test_identity(42);
     let node_id = identity.node_id();
     let public_key = identity.public_key();
-    let _signing_key = identity.secret_key().clone();
+    let _signing_key = identity.secret_key_bytes();
 
     // Node ID should be derived from public key
     let expected_node_id = NodeId::from_public_key(&public_key);
@@ -322,7 +321,6 @@ async fn test_identity_encryption() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
 // Commented out since Proof-of-Work has been removed from the codebase
 /*
 async fn test_proof_of_work() -> Result<()> {
@@ -686,6 +684,7 @@ fn xor_arrays(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
 }
 
 // Helper function to count leading zero bits in a hash
+#[allow(dead_code)]
 fn count_leading_zero_bits(hash: &[u8]) -> u32 {
     let mut count = 0;
     for &byte in hash {
@@ -780,7 +779,7 @@ async fn test_identity_system_integration() -> Result<()> {
     let sync_data = b"Identity sync package for network node";
 
     // Test encryption/decryption for each node
-    for (identity, addr) in &network_identities {
+    for (_identity, addr) in &network_identities {
         let encrypted = encrypt_with_device_password(sync_data, device_password)?;
         let decrypted = decrypt_with_device_password(&encrypted, device_password)?;
 

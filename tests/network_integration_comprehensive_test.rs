@@ -9,12 +9,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
 
-use saorsa_core::{
-    Config, Identity, NetworkEvent, Node, PeerRecord, network::NetworkManager,
-    transport::quic::QuicTransport,
-};
+use saorsa_core::config::Config;
+use saorsa_core::network::P2PNode as Node;
 
 /// Test framework for multi-node network scenarios
+#[allow(dead_code)]
 struct NetworkTestFramework {
     nodes: Vec<Arc<Node>>,
     configs: Vec<Config>,
@@ -28,11 +27,11 @@ impl NetworkTestFramework {
 
         for i in 0..node_count {
             let mut config = Config::default();
-            config.network.listen_port = 9000 + i as u16;
-            config.network.enable_mdns = true;
+            config.network.listen_address = format!("127.0.0.1:{}", 9000 + i);
             config.network.max_connections = 100;
 
-            let node = Node::new(config.clone())
+            let node_cfg = saorsa_core::network::NodeConfig::from_config(&config)?;
+            let node = saorsa_core::network::P2PNode::new(node_cfg)
                 .await
                 .context(format!("Failed to create node {}", i))?;
 
@@ -66,7 +65,7 @@ impl NetworkTestFramework {
         for i in 1..self.nodes.len() {
             let peer_addr = format!("/ip4/127.0.0.1/tcp/{}", 9000 + (i - 1));
             self.nodes[i]
-                .connect_to_peer(&peer_addr)
+                .connect_peer(&peer_addr)
                 .await
                 .context(format!("Failed to connect node {} to node {}", i, i - 1))?;
         }
@@ -81,7 +80,7 @@ impl NetworkTestFramework {
             for j in (i + 1)..self.nodes.len() {
                 let peer_addr = format!("/ip4/127.0.0.1/tcp/{}", 9000 + j);
                 self.nodes[i]
-                    .connect_to_peer(&peer_addr)
+                    .connect_peer(&peer_addr)
                     .await
                     .context(format!("Failed to connect node {} to node {}", i, j))?;
 
@@ -121,7 +120,7 @@ impl NetworkTestFramework {
         let mut stats = Vec::new();
 
         for (i, node) in self.nodes.iter().enumerate() {
-            let peer_count = node.get_connected_peers().await?.len();
+            let peer_count = node.connected_peers().await.len();
             stats.push((i, peer_count));
         }
 
@@ -239,7 +238,7 @@ async fn test_peer_discovery_under_load() -> Result<()> {
     // Connect nodes in a star topology (all to node 0)
     for i in 1..framework.nodes.len() {
         let peer_addr = format!("/ip4/127.0.0.1/tcp/9000");
-        framework.nodes[i].connect_to_peer(&peer_addr).await?;
+        framework.nodes[i].connect_peer(&peer_addr).await?;
     }
 
     sleep(Duration::from_secs(3)).await;
@@ -294,7 +293,7 @@ async fn test_connection_failure_recovery() -> Result<()> {
     for (i, node) in framework.nodes.iter().enumerate() {
         if i != 1 {
             // Skip failed node
-            let peer_count = node.get_connected_peers().await?.len();
+            let peer_count = node.connected_peers().await.len();
             failure_stats.push((i, peer_count));
         }
     }
@@ -348,7 +347,7 @@ async fn test_high_throughput_messaging() -> Result<()> {
             let peer_id = format!("node_{}", i);
 
             framework.nodes[0]
-                .send_message(&peer_id, message)
+                .send_message(&peer_id, "test_topic", message)
                 .await
                 .context(format!("Failed to send message {} to node {}", msg_id, i))?;
         }
@@ -374,4 +373,3 @@ async fn test_high_throughput_messaging() -> Result<()> {
     framework.shutdown_all().await?;
     Ok(())
 }
-#![cfg(feature = "extended_tests")]

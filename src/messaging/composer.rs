@@ -200,10 +200,7 @@ impl MessageComposer {
     }
 
     /// Build message from draft
-    pub fn build_message(
-        &self,
-        channel_id: ChannelId,
-    ) -> Result<SendMessageRequest> {
+    pub fn build_message(&self, channel_id: ChannelId) -> Result<SendMessageRequest> {
         let draft = self
             .drafts
             .get(&channel_id)

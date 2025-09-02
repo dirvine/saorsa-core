@@ -337,6 +337,7 @@ impl KeyRatchet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messaging::user_handle::UserHandle;
 
     #[tokio::test]
     async fn test_message_encryption() {

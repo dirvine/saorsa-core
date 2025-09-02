@@ -88,8 +88,8 @@ impl OptimizedDHTStorage {
 
         Self {
             records: Arc::new(RwLock::new(
-                // Safe: max(100) guarantees non-zero value
-                LruCache::new(NonZeroUsize::new(cache_size.max(100)).unwrap_or(NonZeroUsize::MIN)),
+                // Respect requested size; ensure non-zero with a floor of 1
+                LruCache::new(NonZeroUsize::new(cache_size.max(1)).unwrap_or(NonZeroUsize::MIN)),
             )),
             expiration_index: Arc::new(RwLock::new(BTreeMap::new())),
             publisher_index: Arc::new(RwLock::new(HashMap::new())),
@@ -407,7 +407,7 @@ mod tests {
         let key = *hash.as_bytes();
         let value = b"test_value".to_vec();
         let publisher = crate::identity::node_identity::NodeId::from_bytes([123u8; 32]);
-        let record = Record::new(key.clone(), value.clone(), publisher);
+        let record = Record::new(key, value.clone(), publisher);
 
         // Store and retrieve
         storage.store(record.clone()).await.unwrap();
@@ -454,7 +454,7 @@ mod tests {
 
         // Query by publisher
         let records = storage
-            .get_records_by_publisher("test_publisher", None)
+            .get_records_by_publisher(&publisher.to_string(), None)
             .await;
         assert_eq!(records.len(), 3);
     }
@@ -469,7 +469,7 @@ mod tests {
         let key = *hash.as_bytes();
         let value = b"expired_value".to_vec();
         let publisher = crate::identity::node_identity::NodeId::from_bytes([123u8; 32]);
-        let mut record = Record::new(key.clone(), value, publisher);
+        let mut record = Record::new(key, value, publisher);
 
         // Set expiration to past
         record.expires_at = SystemTime::now() - Duration::from_secs(3600);

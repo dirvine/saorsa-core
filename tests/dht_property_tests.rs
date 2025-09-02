@@ -342,7 +342,7 @@ proptest! {
             }
 
             let before_cleanup = storage.get_stats().await;
-            let cleaned = storage.cleanup_expired().await.unwrap();
+            let _cleaned = storage.cleanup_expired().await.unwrap();
             let after_cleanup = storage.get_stats().await;
 
             // Properties about cleanup

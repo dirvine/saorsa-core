@@ -922,7 +922,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("No connection to peer")
+                .contains("Peer not found")
         );
     }
 

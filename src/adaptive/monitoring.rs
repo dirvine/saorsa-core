@@ -114,7 +114,7 @@ pub enum LogLevel {
 
 /// Core network metrics exposed via Prometheus
 #[allow(dead_code)]
-struct NetworkMetrics {
+pub(crate) struct NetworkMetrics {
     #[cfg(feature = "metrics")]
     // Node metrics
     connected_nodes: IntGauge,
@@ -444,87 +444,113 @@ pub struct LogEntry {
 impl MonitoringSystem {
     /// Create a new monitoring system
     pub fn new(components: MonitoredComponents, config: MonitoringConfig) -> Result<Self> {
+        Self::new_with_registry(
+            components, 
+            config, 
+            None
+        )
+    }
+
+    /// Create a new monitoring system with a custom registry (for testing)
+    pub fn new_with_registry(
+        components: MonitoredComponents,
+        config: MonitoringConfig,
         #[cfg(feature = "metrics")]
-        let registry = Registry::new();
+        custom_registry: Option<Registry>,
+        #[cfg(not(feature = "metrics"))]
+        _custom_registry: Option<()>,
+    ) -> Result<Self> {
+        // Generate unique metric names for tests to avoid conflicts
+        #[cfg(feature = "metrics")]
+        let is_test = custom_registry.is_some();
+        #[cfg(feature = "metrics")]
+        let metric_prefix = if is_test {
+            format!("p2p_test_{}_", std::process::id())
+        } else {
+            "p2p_".to_string()
+        };
+
+        #[cfg(feature = "metrics")]
+        let registry = custom_registry.unwrap_or_else(Registry::new);
 
         // Initialize metrics
         #[cfg(feature = "metrics")]
         let metrics = NetworkMetrics {
             // Node metrics
             connected_nodes: register_int_gauge!(
-                "p2p_connected_nodes",
+                &format!("{}connected_nodes", metric_prefix),
                 "Number of connected nodes"
             )?,
-            active_nodes: register_int_gauge!("p2p_active_nodes", "Number of active nodes")?,
+            active_nodes: register_int_gauge!(&format!("{}active_nodes", metric_prefix), "Number of active nodes")?,
             suspicious_nodes: register_int_gauge!(
-                "p2p_suspicious_nodes",
+                &format!("{}suspicious_nodes", metric_prefix),
                 "Number of suspicious nodes"
             )?,
-            failed_nodes: register_int_gauge!("p2p_failed_nodes", "Number of failed nodes")?,
+            failed_nodes: register_int_gauge!(&format!("{}failed_nodes", metric_prefix), "Number of failed nodes")?,
 
             // Routing metrics
             routing_requests: register_counter!(
-                "p2p_routing_requests_total",
+                &format!("{}routing_requests_total", metric_prefix),
                 "Total routing requests"
             )?,
             routing_success: register_counter!(
-                "p2p_routing_success_total",
+                &format!("{}routing_success_total", metric_prefix),
                 "Successful routing requests"
             )?,
             routing_latency: register_histogram!(
-                "p2p_routing_latency_seconds",
+                &format!("{}routing_latency_seconds", metric_prefix),
                 "Routing request latency in seconds"
             )?,
 
             // Storage metrics
-            stored_items: register_int_gauge!("p2p_stored_items", "Number of stored items")?,
-            storage_bytes: register_int_gauge!("p2p_storage_bytes", "Total storage in bytes")?,
+            stored_items: register_int_gauge!(&format!("{}stored_items", metric_prefix), "Number of stored items")?,
+            storage_bytes: register_int_gauge!(&format!("{}storage_bytes", metric_prefix), "Total storage in bytes")?,
             replication_factor: register_gauge!(
-                "p2p_replication_factor",
+                &format!("{}replication_factor", metric_prefix),
                 "Average replication factor"
             )?,
 
             // Network traffic metrics
-            messages_sent: register_counter!("p2p_messages_sent_total", "Total messages sent")?,
+            messages_sent: register_counter!(&format!("{}messages_sent_total", metric_prefix), "Total messages sent")?,
             messages_received: register_counter!(
-                "p2p_messages_received_total",
+                &format!("{}messages_received_total", metric_prefix),
                 "Total messages received"
             )?,
-            bytes_sent: register_counter!("p2p_bytes_sent_total", "Total bytes sent")?,
-            bytes_received: register_counter!("p2p_bytes_received_total", "Total bytes received")?,
+            bytes_sent: register_counter!(&format!("{}bytes_sent_total", metric_prefix), "Total bytes sent")?,
+            bytes_received: register_counter!(&format!("{}bytes_received_total", metric_prefix), "Total bytes received")?,
 
             // Cache metrics
-            cache_hits: register_counter!("p2p_cache_hits_total", "Total cache hits")?,
-            cache_misses: register_counter!("p2p_cache_misses_total", "Total cache misses")?,
-            cache_size: register_int_gauge!("p2p_cache_size_bytes", "Cache size in bytes")?,
+            cache_hits: register_counter!(&format!("{}cache_hits_total", metric_prefix), "Total cache hits")?,
+            cache_misses: register_counter!(&format!("{}cache_misses_total", metric_prefix), "Total cache misses")?,
+            cache_size: register_int_gauge!(&format!("{}cache_size_bytes", metric_prefix), "Cache size in bytes")?,
             cache_evictions: register_counter!(
-                "p2p_cache_evictions_total",
+                &format!("{}cache_evictions_total", metric_prefix),
                 "Total cache evictions"
             )?,
 
             // Learning metrics
             thompson_selections: register_int_counter!(
-                "p2p_thompson_selections_total",
+                &format!("{}thompson_selections_total", metric_prefix),
                 "Thompson sampling strategy selections"
             )?,
-            qlearn_updates: register_counter!("p2p_qlearn_updates_total", "Q-learning updates")?,
+            qlearn_updates: register_counter!(&format!("{}qlearn_updates_total", metric_prefix), "Q-learning updates")?,
             churn_predictions: register_counter!(
-                "p2p_churn_predictions_total",
+                &format!("{}churn_predictions_total", metric_prefix),
                 "Churn predictions made"
             )?,
 
             // Gossip metrics
             gossip_messages: register_counter!(
-                "p2p_gossip_messages_total",
+                &format!("{}gossip_messages_total", metric_prefix),
                 "Total gossip messages"
             )?,
-            mesh_size: register_int_gauge!("p2p_gossip_mesh_size", "Gossip mesh size")?,
-            topic_count: register_int_gauge!("p2p_gossip_topics", "Number of gossip topics")?,
+            mesh_size: register_int_gauge!(&format!("{}gossip_mesh_size", metric_prefix), "Gossip mesh size")?,
+            topic_count: register_int_gauge!(&format!("{}gossip_topics", metric_prefix), "Number of gossip topics")?,
 
             // Performance metrics
-            cpu_usage: register_gauge!("p2p_cpu_usage_percent", "CPU usage percentage")?,
-            memory_usage: register_int_gauge!("p2p_memory_usage_bytes", "Memory usage in bytes")?,
-            thread_count: register_int_gauge!("p2p_thread_count", "Number of threads")?,
+            cpu_usage: register_gauge!(&format!("{}cpu_usage_percent", metric_prefix), "CPU usage percentage")?,
+            memory_usage: register_int_gauge!(&format!("{}memory_usage_bytes", metric_prefix), "Memory usage in bytes")?,
+            thread_count: register_int_gauge!(&format!("{}thread_count", metric_prefix), "Number of threads")?,
         };
 
         #[cfg(not(feature = "metrics"))]
@@ -580,6 +606,7 @@ impl MonitoringSystem {
     }
 
     /// Collect metrics from all components
+    #[allow(unused_variables)]
     async fn collect_metrics(&self) -> Result<()> {
         // Collect churn statistics
         let churn_stats = self.components.churn_handler.get_stats().await;

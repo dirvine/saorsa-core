@@ -284,6 +284,14 @@ impl LSTMChurnPredictor {
             *out = sigmoid(*out); // Probability output
         }
 
+        // Enforce monotonicity across horizons: 1h <= 6h <= 24h
+        if output[1] < output[0] {
+            output[1] = output[0];
+        }
+        if output[2] < output[1] {
+            output[2] = output[1];
+        }
+
         // Calculate confidence based on feature quality
         let confidence = self.calculate_confidence(features);
 

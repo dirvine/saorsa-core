@@ -197,7 +197,7 @@ async fn test_greedy_routing_success_ratio() {
 #[tokio::test]
 async fn test_stretch_on_scale_free_graph() {
     // Generate smaller graph for stretch calculation
-    let (nodes, _edges) = generate_scale_free_graph(20);
+    let (nodes, edges) = generate_scale_free_graph(20);
 
     // Create embedding
     let embedding = embed_snapshot(&nodes).await.unwrap();

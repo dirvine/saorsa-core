@@ -102,5 +102,5 @@ async fn test_p2p_peer_authentication() {
 #[test]
 fn test_ant_quic_feature_enabled() {
     // ant-quic is now always enabled (no feature flags)
-    assert!(true, "ant-quic is always enabled");
+    // Test passes by default
 }

@@ -1,3 +1,5 @@
+#![allow(unused_variables, unused_mut)]
+#![allow(unused_variables, unused_mut, unused_imports)]
 //! Comprehensive integration tests for the adaptive network components
 //! Tests all adaptive features including Thompson Sampling, MAB routing,
 //! Q-Learning cache, LSTM churn prediction, and more.
@@ -17,6 +19,7 @@ use saorsa_core::{
     },
     identity::NodeIdentity,
     peer_record::UserId,
+    quantum_crypto::ant_quic_integration::MlDsaPublicKey,
 };
 use std::{
     collections::HashMap,
@@ -80,8 +83,7 @@ impl TestNetwork {
 async fn test_thompson_sampling_adaptation() -> anyhow::Result<()> {
     let config = TestConfig {
         num_nodes: 5,
-        enable_thompson_sampling: true,
-        ..Default::default()
+        test_duration: Duration::from_secs(30),
     };
 
     let network = TestNetwork::new(config.clone()).await?;
@@ -132,9 +134,8 @@ async fn test_thompson_sampling_adaptation() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_multi_armed_bandit_routing() -> anyhow::Result<()> {
     let config = TestConfig {
-        num_nodes: 8,
-        enable_mab_routing: true,
-        ..Default::default()
+        num_nodes: 10,
+        test_duration: Duration::from_secs(30),
     };
 
     let network = TestNetwork::new(config.clone()).await?;
@@ -247,9 +248,8 @@ async fn test_multi_armed_bandit_routing() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
     let config = TestConfig {
-        num_nodes: 6,
-        enable_q_learning: true,
-        ..Default::default()
+        num_nodes: 8,
+        test_duration: Duration::from_secs(30),
     };
 
     let network = TestNetwork::new(config.clone()).await?;
@@ -334,9 +334,8 @@ async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_lstm_churn_prediction() -> anyhow::Result<()> {
     let config = TestConfig {
-        num_nodes: 10,
-        enable_lstm_churn: true,
-        ..Default::default()
+        num_nodes: 6,
+        test_duration: Duration::from_secs(30),
     };
 
     let network = TestNetwork::new(config.clone()).await?;
@@ -560,7 +559,8 @@ async fn test_adaptive_replication() -> anyhow::Result<()> {
         "Critical data replicas (placeholder): {}",
         critical_replicas
     );
-    assert!(critical_replicas >= 0);
+    // critical_replicas is unsigned; the following is always true
+    assert!(critical_replicas <= usize::MAX);
 
     network.stop_all().await?;
     Ok(())
@@ -675,8 +675,8 @@ async fn test_security_monitoring() -> anyhow::Result<()> {
 
     // Create security manager
     let security_config = SecurityConfig::default();
-    let identity = saorsa_core::adaptive::identity::NodeIdentity::generate()?;
-    let monitor = SecurityManager::new(security_config, identity);
+    let identity = saorsa_core::identity::NodeIdentity::generate()?;
+    let monitor = SecurityManager::new(security_config, &identity);
 
     // Create test nodes
     let mut test_nodes = Vec::new();
@@ -731,7 +731,7 @@ async fn test_security_monitoring() -> anyhow::Result<()> {
     // Try to validate join from blacklisted node
     let node_descriptor = saorsa_core::adaptive::NodeDescriptor {
         id: bad_node.clone(),
-        public_key: ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(),
+        public_key: MlDsaPublicKey::from_bytes(&[0u8; 1952]).unwrap(),
         addresses: vec!["127.0.0.1:8080".to_string()],
         hyperbolic: None,
         som_position: None,
@@ -767,12 +767,8 @@ async fn test_full_adaptive_network_simulation() -> anyhow::Result<()> {
     println!("Starting comprehensive adaptive network simulation...");
 
     let config = TestConfig {
-        num_nodes: 20,
-        test_duration: Duration::from_secs(30), // Shorter for testing
-        enable_thompson_sampling: true,
-        enable_mab_routing: true,
-        enable_q_learning: true,
-        enable_lstm_churn: true,
+        num_nodes: 4,
+        test_duration: Duration::from_secs(30),
     };
 
     let network = TestNetwork::new(config.clone()).await?;

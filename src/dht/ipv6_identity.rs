@@ -595,7 +595,7 @@ impl IPv6DHTNode {
 mod tests {
     use super::*;
     use crate::security::{IPAnalysis, IPv6NodeID};
-    use ed25519_dalek::SigningKey;
+    use crate::quantum_crypto::ant_quic_integration::generate_ml_dsa_keypair;
     use std::net::Ipv6Addr;
     use std::str::FromStr;
     use std::time::Duration;
@@ -611,10 +611,9 @@ mod tests {
     }
 
     fn create_test_ipv6_identity() -> IPv6NodeID {
-        let mut csprng = rand::rngs::OsRng {};
-        let signing_key = SigningKey::generate(&mut csprng);
+        let (public, secret) = generate_ml_dsa_keypair().unwrap();
         let ipv6_addr = Ipv6Addr::from_str("2001:db8::1").unwrap();
-        IPv6NodeID::generate(ipv6_addr, &signing_key).unwrap()
+        IPv6NodeID::generate(ipv6_addr, &secret, &public).unwrap()
     }
 
     fn create_test_ip_analysis() -> IPAnalysis {

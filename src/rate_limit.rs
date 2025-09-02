@@ -1,8 +1,8 @@
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use parking_lot::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -22,7 +22,12 @@ struct Bucket {
 impl Bucket {
     fn new(initial_tokens: f64) -> Self {
         let now = Instant::now();
-        Self { tokens: initial_tokens, last_update: now, requests_in_window: 0, window_start: now }
+        Self {
+            tokens: initial_tokens,
+            last_update: now,
+            requests_in_window: 0,
+            window_start: now,
+        }
     }
 
     fn try_consume(&mut self, cfg: &EngineConfig) -> bool {
@@ -55,20 +60,28 @@ pub struct Engine<K: Eq + Hash + Clone + ToString> {
 
 impl<K: Eq + Hash + Clone + ToString> Engine<K> {
     pub fn new(cfg: EngineConfig) -> Self {
-        Self { cfg, global: Mutex::new(Bucket::new(0.0)), keyed: RwLock::new(HashMap::new()) }
+        let burst_size = cfg.burst_size as f64;
+        Self {
+            cfg,
+            global: Mutex::new(Bucket::new(burst_size)),
+            keyed: RwLock::new(HashMap::new()),
+        }
     }
 
+    #[allow(clippy::panic)]
     pub fn try_consume_global(&self) -> bool {
-        let mut g = self.global.lock().unwrap();
+        let mut g = self.global.lock().unwrap_or_else(|e| {
+            // Mutex poisoning indicates a serious bug, panic is appropriate
+            panic!("Global rate limit mutex poisoned: {}", e)
+        });
         g.try_consume(&self.cfg)
     }
 
     pub fn try_consume_key(&self, key: &K) -> bool {
         let mut map = self.keyed.write();
-        let bucket = map.entry(key.clone()).or_insert_with(|| Bucket::new(0.0));
+        let bucket = map.entry(key.clone()).or_insert_with(|| Bucket::new(self.cfg.burst_size as f64));
         bucket.try_consume(&self.cfg)
     }
 }
 
 pub type SharedEngine<K> = Arc<Engine<K>>;
-

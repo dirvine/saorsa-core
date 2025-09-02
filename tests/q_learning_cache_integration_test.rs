@@ -11,6 +11,7 @@
 // distributed under these licenses is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
+#![allow(dead_code)]
 //! Integration tests for Q-Learning Cache Management
 
 use saorsa_core::adaptive::{

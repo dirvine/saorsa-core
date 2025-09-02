@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_variables, unused_imports)]
 //! Chaos engineering tests for adaptive network resilience
 //!
 //! This module implements chaos engineering principles to test the

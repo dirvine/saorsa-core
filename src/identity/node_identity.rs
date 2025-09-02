@@ -151,24 +151,32 @@ impl NodeIdentity {
     }
 
     /// Generate from seed (deterministic)
-    pub fn from_seed(_seed: &[u8; 32]) -> Result<Self> {
-        // For deterministic generation, we use the seed to generate ML-DSA keys
-        // Note: ML-DSA doesn't directly support seed-based generation like Ed25519
-        // For now, we'll generate random keys but use the seed for deterministic NodeId
-        let (public_key, secret_key) =
-            crate::quantum_crypto::generate_ml_dsa_keypair().map_err(|e| {
-                P2PError::Identity(IdentityError::InvalidFormat(
-                    format!("Failed to generate ML-DSA key pair: {}", e).into(),
-                ))
-            })?;
+    pub fn from_seed(seed: &[u8; 32]) -> Result<Self> {
+        // Deterministically derive key material via HKDF-SHA256
+        use hkdf::Hkdf;
+        use sha2::Sha256;
+
+        // ML-DSA-65 public/secret key sizes (bytes)
+        const ML_DSA_PUB_LEN: usize = 1952;
+        const ML_DSA_SEC_LEN: usize = 4032;
+
+        let hk = Hkdf::<Sha256>::new(None, seed);
+        let mut derived = vec![0u8; ML_DSA_PUB_LEN + ML_DSA_SEC_LEN];
+        hk.expand(b"saorsa-node-identity-seed", &mut derived)
+            .map_err(|_| P2PError::Identity(IdentityError::InvalidFormat("HKDF expand failed".into())))?;
+
+        let pub_bytes = &derived[..ML_DSA_PUB_LEN];
+        let sec_bytes = &derived[ML_DSA_PUB_LEN..];
+
+        // Construct keys from bytes; these constructors accept byte slices in our integration
+        let public_key = crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(pub_bytes)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("Invalid ML-DSA public key bytes: {e}").into())))?;
+        let secret_key = crate::quantum_crypto::ant_quic_integration::MlDsaSecretKey::from_bytes(sec_bytes)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("Invalid ML-DSA secret key bytes: {e}").into())))?;
 
         let node_id = NodeId::from_public_key(&public_key);
 
-        Ok(Self {
-            secret_key,
-            public_key,
-            node_id,
-        })
+        Ok(Self { secret_key, public_key, node_id })
     }
 
     /// Get node ID
@@ -276,6 +284,8 @@ impl NodeIdentity {
 pub struct IdentityData {
     /// ML-DSA secret key bytes (4032 bytes for ML-DSA-65)
     pub secret_key: Vec<u8>,
+    /// ML-DSA public key bytes (1952 bytes for ML-DSA-65)
+    pub public_key: Vec<u8>,
 }
 
 impl NodeIdentity {
@@ -283,18 +293,20 @@ impl NodeIdentity {
     pub fn export(&self) -> IdentityData {
         IdentityData {
             secret_key: self.secret_key.as_bytes().to_vec(),
+            public_key: self.public_key.as_bytes().to_vec(),
         }
     }
 
     /// Import identity from persisted data
-    /// Note: Currently not implemented due to ant-quic API limitations
-    pub fn import(_data: &IdentityData) -> Result<Self> {
-        // TODO: Implement when ant-quic provides key import functionality
-        Err(P2PError::Identity(IdentityError::InvalidFormat(
-            "Import from persisted data not yet implemented"
-                .to_string()
-                .into(),
-        )))
+    pub fn import(data: &IdentityData) -> Result<Self> {
+        // Reconstruct keys from bytes
+        let secret_key = crate::quantum_crypto::ant_quic_integration::MlDsaSecretKey::from_bytes(&data.secret_key)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("Invalid ML-DSA secret key: {e}").into())))?;
+        let public_key = crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(&data.public_key)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("Invalid ML-DSA public key: {e}").into())))?;
+
+        let node_id = NodeId::from_public_key(&public_key);
+        Ok(Self { secret_key, public_key, node_id })
     }
 }
 

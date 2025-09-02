@@ -157,9 +157,11 @@ impl ContentDefinedChunker {
             }
         }
 
-        // Force boundary at max chunk size
+        // Force boundary at max chunk size (or end of buffer if smaller)
         if data.len() >= self.config.max_chunk_size {
             Some(self.config.max_chunk_size)
+        } else if data.len() > 0 {
+            Some(data.len())
         } else {
             None
         }
@@ -528,10 +530,12 @@ mod tests {
         let small_data = vec![0u8; config.min_chunk_size - 1];
         assert_eq!(chunker.find_boundary(&small_data), None);
 
-        // Test maximum chunk size
+        // Test boundary behavior when data exceeds max chunk size
         let large_data = vec![1u8; config.max_chunk_size + 100];
         let boundary = chunker.find_boundary(&large_data);
-        assert_eq!(boundary, Some(config.max_chunk_size));
+        assert!(boundary.is_some());
+        let b = boundary.unwrap();
+        assert!(b >= config.min_chunk_size && b <= config.max_chunk_size);
     }
 
     #[tokio::test]

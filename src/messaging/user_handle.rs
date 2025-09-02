@@ -63,4 +63,3 @@ impl Hash for UserHandle {
         self.0.hash(state)
     }
 }
-

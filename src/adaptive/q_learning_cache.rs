@@ -71,21 +71,21 @@ impl StateVector {
 
         // Discretize recency (log scale)
         let recency_bucket = match recency_seconds {
-            r if r < 60 => 5,      // < 1 minute
-            r if r < 600 => 4,     // 1-10 minutes
-            r if r < 3_600 => 3,   // 10-60 minutes
-            r if r < 86_400 => 2,  // 1-24 hours
-            r if r < 604_800 => 1, // 1-7 days
-            _ => 0,                // > 7 days
+            r if r < 60 => 5,         // < 1 minute
+            r if r < 600 => 4,        // 1-10 minutes
+            r if r <= 3_600 => 3,     // up to 1 hour
+            r if r <= 86_400 => 2,    // up to 24 hours
+            r if r <= 604_800 => 1,   // up to 7 days
+            _ => 0,                   // > 7 days
         };
 
         // Discretize content size
         let content_size_bucket = match content_size {
-            s if s < 1024 => 0,             // < 1KB (tiny)
-            s if s < 1024 * 100 => 1,       // 1-100KB (small)
-            s if s < 1024 * 1024 => 2,      // 100KB-1MB (medium)
-            s if s < 1024 * 1024 * 10 => 3, // 1-10MB (large)
-            _ => 4,                         // > 10MB (huge)
+            s if s < 1024 => 0,                // < 1KB (tiny)
+            s if s < 1024 * 100 => 1,          // 1-100KB (small)
+            s if s <= 1024 * 1024 => 2,        // up to 1MB (medium)
+            s if s <= 1024 * 1024 * 10 => 3,   // up to 10MB (large)
+            _ => 4,                            // > 10MB (huge)
         };
 
         Self {
@@ -568,13 +568,15 @@ impl QLearnCacheManager {
             CacheAction::DoNothing => {}
         }
 
-        // Update access info for existing content
-        if let Some(info) = stats.access_frequency.get_mut(content_hash) {
-            info.count += 1;
-            info.last_access_secs = Self::current_timestamp_secs();
-            // Notify eviction strategy
-            drop(stats);
-            self.eviction_strategy.write().await.on_access(content_hash);
+        // Update access info for existing content on cache hit only
+        if hit {
+            if let Some(info) = stats.access_frequency.get_mut(content_hash) {
+                info.count += 1;
+                info.last_access_secs = Self::current_timestamp_secs();
+                // Notify eviction strategy
+                drop(stats);
+                self.eviction_strategy.write().await.on_access(content_hash);
+            }
         }
 
         Ok(())

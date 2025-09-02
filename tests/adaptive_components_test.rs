@@ -5,7 +5,6 @@ use saorsa_core::adaptive::{
     ContentHash, NodeId,
     eviction::{CacheState, EvictionStrategy, LFUStrategy, LRUStrategy},
     hyperbolic::HyperbolicSpace,
-    identity::NodeIdentity,
     learning::{ChurnPredictor, QLearnCacheManager, ThompsonSampling},
     multi_armed_bandit::{MABConfig, MultiArmedBandit},
     q_learning_cache::{AccessInfo, StateVector},
@@ -16,6 +15,7 @@ use saorsa_core::adaptive::{
     storage::ReplicationConfig,
     trust::MockTrustProvider,
 };
+use saorsa_core::identity::NodeIdentity;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -81,7 +81,7 @@ async fn test_security_manager_basic() -> anyhow::Result<()> {
 
     let config = SecurityConfig::default();
     let identity = NodeIdentity::generate()?;
-    let security = SecurityManager::new(config, identity);
+    let security = SecurityManager::new(config, &identity);
 
     println!("✓ Security Manager instance created successfully");
 
@@ -325,7 +325,7 @@ async fn test_adaptive_system_creation() -> anyhow::Result<()> {
     println!("✓ Q-Learning Cache Manager created");
 
     let identity = NodeIdentity::generate()?;
-    let security = SecurityManager::new(SecurityConfig::default(), identity);
+    let security = SecurityManager::new(SecurityConfig::default(), &identity);
     println!("✓ Security Manager created");
 
     let _predictor = ChurnPredictor::new();

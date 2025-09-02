@@ -1,7 +1,7 @@
 // Message type definitions for rich messaging
 
-use crate::messaging::user_handle::UserHandle;
 use crate::identity::FourWordAddress;
+use crate::messaging::user_handle::UserHandle;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

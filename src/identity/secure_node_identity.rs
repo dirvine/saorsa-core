@@ -38,8 +38,6 @@ pub struct SecureNodeIdentity {
 
     /// Node ID derived from public key
     node_id: NodeId,
-
-
 }
 
 impl SecureNodeIdentity {
@@ -93,6 +91,7 @@ impl SecureNodeIdentity {
     pub fn export(&self) -> IdentityData {
         IdentityData {
             secret_key: self.secret_key.as_bytes().to_vec(),
+            public_key: self.public_key.as_bytes().to_vec(),
         }
     }
 
@@ -136,7 +135,6 @@ impl SecureNodeIdentity {
     pub fn public_key(&self) -> &MlDsaPublicKey {
         &self.public_key
     }
-
 }
 
 /// Validate system entropy is sufficient for key generation

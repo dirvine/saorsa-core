@@ -359,7 +359,17 @@ pub mod integration_helpers {
 
     /// Extract peer ID from address (helper function)
     pub fn extract_peer_id_from_address(address: &Multiaddr) -> String {
-        format!("peer_from_{}", address.to_string().replace('/', "_"))
+        // Reconstruct a multiaddr-like string from NetworkAddress
+        let ip = address.ip();
+        let port = address.port();
+        match ip {
+            std::net::IpAddr::V4(v4) => {
+                format!("peer_from__ip4_{}_tcp_{}", v4, port)
+            }
+            std::net::IpAddr::V6(v6) => {
+                format!("peer_from__ip6_{}_tcp_{}", v6, port)
+            }
+        }
     }
 }
 

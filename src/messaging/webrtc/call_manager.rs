@@ -5,8 +5,8 @@ use super::media::{MediaEvent, MediaStreamManager};
 use super::signaling::{SignalingEvent, SignalingHandler, SignalingState};
 use super::types::*;
 use crate::identity::FourWordAddress;
-use crate::messaging::user_resolver::resolve_handle;
 use crate::messaging::user_handle::UserHandle;
+use crate::messaging::user_resolver::resolve_handle;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use std::collections::HashMap;
@@ -682,7 +682,8 @@ mod tests {
         assert!(session.participants.is_empty());
 
         // Test adding participant
-        let participant = crate::messaging::user_handle::UserHandle::from("alice-bob-charlie-david");
+        let participant =
+            crate::messaging::user_handle::UserHandle::from("alice-bob-charlie-david");
         session.add_participant(participant.clone());
         assert_eq!(session.participants.len(), 1);
         assert!(session.participants.contains(&participant));

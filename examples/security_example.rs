@@ -15,6 +15,7 @@
 
 use anyhow::Result;
 use saorsa_core::adaptive::*;
+use saorsa_core::quantum_crypto::ant_quic_integration::MlDsaPublicKey;
 use std::time::Duration;
 
 #[tokio::main]
@@ -31,12 +32,12 @@ async fn main() -> Result<()> {
     security_config.eclipse_detection.min_diversity_score = 0.6;
 
     // Create security manager
-    let security_manager = SecurityManager::new(security_config, identity);
+    let security_manager = SecurityManager::new(security_config, &identity);
 
     // Example: Validate a node join request
     let new_node = NodeDescriptor {
         id: NodeId { hash: [1u8; 32] },
-        public_key: ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(),
+        public_key: MlDsaPublicKey::from_bytes(&[0u8; 1952]).unwrap(),
         addresses: vec!["192.168.1.10:8000".to_string()],
         hyperbolic: None,
         som_position: None,

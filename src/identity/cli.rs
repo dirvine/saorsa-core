@@ -159,10 +159,7 @@ impl IdentityCliHandler {
 
     pub async fn execute(&self, command: IdentityCommand) -> Result<String> {
         match command {
-            IdentityCommand::Generate {
-                output,
-                seed,
-            } => self.handle_generate(output, seed).await,
+            IdentityCommand::Generate { output, seed } => self.handle_generate(output, seed).await,
             IdentityCommand::Show { path } => self.handle_show(path).await,
             IdentityCommand::Verify { path } => self.handle_verify(path).await,
             IdentityCommand::Export {

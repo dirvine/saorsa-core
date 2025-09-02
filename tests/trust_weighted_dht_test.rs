@@ -3,8 +3,8 @@
 use bytes::Bytes;
 use rand::RngCore;
 use saorsa_core::dht::{
-    CapacityManager, Dht, DhtTelemetry, OperationType, Outcome, PutPolicy, TrustWeightedKademlia,
-    eigen_trust_epoch, record_interaction,
+    trust_weighted_kademlia::Outcome,
+    CapacityManager, Dht, DhtTelemetry, OperationType, PutPolicy, TrustWeightedKademlia,
 };
 use saorsa_core::identity::node_identity::NodeId;
 
@@ -14,7 +14,7 @@ fn random_node_id() -> NodeId {
     NodeId::from_bytes(bytes)
 }
 use std::time::Duration;
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 
 /// Test basic PUT and GET operations
 #[tokio::test]
@@ -56,11 +56,9 @@ async fn test_trust_weighted_routing() {
 
     // Record bad interactions with node3
     for _ in 0..3 {
-        dht.record_interaction(node3.clone(), Outcome::Timeout)
-            .await;
+        dht.record_interaction(node3.clone(), Outcome::Timeout).await;
     }
-    dht.record_interaction(node3.clone(), Outcome::BadData)
-        .await;
+    dht.record_interaction(node3.clone(), Outcome::BadData).await;
 
     // Run EigenTrust computation
     dht.eigen_trust_epoch().await;
@@ -189,7 +187,7 @@ async fn test_lookup_under_churn() {
     };
 
     let start = std::time::Instant::now();
-    let receipt = nodes[0].1.put(key, value.clone(), policy).await.unwrap();
+    let _receipt = nodes[0].1.put(key, value.clone(), policy).await.unwrap();
     let put_duration = start.elapsed();
 
     telemetry.record_put(put_duration, 3, true, None).await;
@@ -345,16 +343,17 @@ async fn test_capacity_histogram_aggregation() {
 /// Test concurrent operations
 #[tokio::test]
 async fn test_concurrent_operations() {
-    let node_id = NodeId::random();
-    let dht = TrustWeightedKademlia::new(node_id);
-    let telemetry = DhtTelemetry::new(10000);
+    use std::sync::Arc;
+    let node_id = random_node_id();
+    let dht = Arc::new(TrustWeightedKademlia::new(node_id));
+    let telemetry = Arc::new(DhtTelemetry::new(10000));
 
     // Launch multiple concurrent operations
     let mut handles = Vec::new();
 
     for i in 0..10 {
-        let dht_clone = &dht;
-        let telemetry_clone = &telemetry;
+        let dht_clone = dht.clone();
+        let telemetry_clone = telemetry.clone();
 
         let handle = tokio::spawn(async move {
             let key = [i as u8; 32];

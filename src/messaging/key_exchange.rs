@@ -316,8 +316,11 @@ impl KeyExchange {
     ) -> Result<(Vec<u8>, Vec<u8>)> {
         let hkdf = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
 
-        // Create info string from identities
-        let info = format!("{}-{}", self.identity, peer);
+        // Create a symmetric info string independent of initiator/responder ordering
+        let a = self.identity.to_string();
+        let b = peer.to_string();
+        let (first, second) = if a <= b { (a, b) } else { (b, a) };
+        let info = format!("{}-{}", first, second);
 
         // Derive 64 bytes (32 for encryption, 32 for MAC)
         let mut okm = [0u8; 64];

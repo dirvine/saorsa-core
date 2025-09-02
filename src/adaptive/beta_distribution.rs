@@ -157,7 +157,13 @@ fn sample_gamma<R: Rng>(shape: f64, rng: &mut R) -> f64 {
             let mut v;
 
             loop {
-                x = rng.gen_range(-1.0..1.0); // Standard normal approximation
+                // Generate a standard normal sample using Box-Muller
+                let (z, ok) = standard_normal(rng);
+                if ok {
+                    x = z;
+                } else {
+                    continue;
+                }
                 v = 1.0 + c * x;
                 if v > 0.0 {
                     break;
@@ -176,6 +182,20 @@ fn sample_gamma<R: Rng>(shape: f64, rng: &mut R) -> f64 {
             }
         }
     }
+}
+
+/// Generate a single standard normal N(0,1) value via Box-Muller transform.
+/// Returns (z, true) on success; (0.0, false) if a retry is needed due to log(0).
+fn standard_normal<R: Rng>(rng: &mut R) -> (f64, bool) {
+    let u1: f64 = rng.r#gen::<f64>();
+    let u2: f64 = rng.r#gen::<f64>();
+    // Avoid u1 == 0 which would cause ln(0)
+    if u1 <= f64::MIN_POSITIVE {
+        return (0.0, false);
+    }
+    let r = (-2.0_f64 * u1.ln()).sqrt();
+    let theta = 2.0 * std::f64::consts::PI * u2;
+    (r * theta.cos(), true)
 }
 
 /// Errors that can occur with Beta distribution

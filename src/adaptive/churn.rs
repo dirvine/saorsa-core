@@ -624,15 +624,17 @@ impl NodeMonitor {
         self.heartbeats.write().await.insert(node_id.clone(), now);
 
         let mut status_map = self.node_status.write().await;
-        let status = status_map.entry(node_id.clone()).or_insert_with(|| NodeStatus {
-            node_id: node_id.clone(),
-            last_seen: now,
-            last_heartbeat: None,
-            last_gossip: None,
-            status: NodeState::Active,
-            reliability: 1.0,
-            stored_content: HashSet::new(),
-        });
+        let status = status_map
+            .entry(node_id.clone())
+            .or_insert_with(|| NodeStatus {
+                node_id: node_id.clone(),
+                last_seen: now,
+                last_heartbeat: None,
+                last_gossip: None,
+                status: NodeState::Active,
+                reliability: 1.0,
+                stored_content: HashSet::new(),
+            });
         status.last_heartbeat = Some(now);
         status.last_seen = now;
         status.status = NodeState::Active;
@@ -811,10 +813,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_failure_detection() {
-        let mut config = ChurnConfig::default();
-        config.heartbeat_timeout = Duration::from_millis(100); // Short timeout for testing
-
-        let handler = create_test_churn_handler().await;
+        let mut handler = create_test_churn_handler().await;
+        // Short timeout for testing
+        handler.config.heartbeat_timeout = Duration::from_millis(100);
+        // Ensure NodeMonitor uses the same short timeout
+        if let Some(nm) = Arc::get_mut(&mut handler.node_monitor) {
+            nm.config.heartbeat_timeout = Duration::from_millis(100);
+        }
         let node_id = NodeId { hash: [1u8; 32] };
 
         // Record initial heartbeat
@@ -833,6 +838,8 @@ mod tests {
         let node_id = NodeId { hash: [1u8; 32] };
 
         // Add node with high churn probability
+        // Ensure node is tracked as active first
+        handler.node_monitor.record_heartbeat(&node_id).await;
         handler
             .predictor
             .update_node_features(
@@ -859,9 +866,11 @@ mod tests {
         assert_eq!(status.status, NodeState::Departing);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_churn_rate_calculation() {
-        let handler = create_test_churn_handler().await;
+        let mut handler = create_test_churn_handler().await;
+        // Avoid triggering high-churn handling which can slow tests
+        handler.config.max_churn_rate = 1.0;
 
         // Add some nodes
         for i in 0..10 {
@@ -878,8 +887,10 @@ mod tests {
                 .await;
         }
 
-        // Run monitoring cycle
-        handler.monitor_cycle().await.unwrap();
+        // Run monitoring cycle with a strict timeout to avoid hangs
+        let res = tokio::time::timeout(std::time::Duration::from_secs(30), handler.monitor_cycle()).await;
+        assert!(res.is_ok(), "monitor_cycle timed out");
+        res.unwrap().unwrap();
 
         // Check stats
         let stats = handler.get_stats().await;

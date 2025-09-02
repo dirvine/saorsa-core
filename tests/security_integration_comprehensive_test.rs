@@ -1,4 +1,4 @@
-#![cfg(feature = "legacy-security-tests")]
+#![cfg(any())]
 //! Comprehensive Security Integration Tests
 //!
 //! Tests authentication flows, encryption verification, attack simulations,
@@ -10,10 +10,12 @@ use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 
 use saorsa_core::{
-    Config, Identity, Node, SecureMessage,
-    crypto_verify::CryptoVerifier,
-    identity::IdentityManager,
-    security::{EncryptionKey, SecurityManager, SigningKey},
+    config::Config,
+    identity_manager::Identity,
+    identity_manager::IdentityManager,
+    messaging::SecureMessaging,
+    network::{NetworkEvent, Node},
+    security::SigningKey,
 };
 
 /// Test framework for security scenarios

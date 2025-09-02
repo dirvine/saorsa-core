@@ -21,18 +21,23 @@ use saorsa_core::identity::{NodeId, NodeIdentity};
 #[test]
 fn test_node_identity_generation() -> Result<()> {
     // Generate with easy difficulty for testing
-    let identity = NodeIdentity::generate(8).unwrap();
+    let identity = NodeIdentity::generate().unwrap();
 
     // Check all fields are set
-    assert!(!identity.word_address().is_empty());
-    assert!(identity.proof_of_work().verify(identity.node_id(), 8));
+    // Word address functionality removed - using PQC addresses instead
+    assert!(!identity.node_id().to_string().is_empty());
+    // POW functionality removed - using PQC signatures instead
+    let message = b"test message";
+    let signature = identity.sign(message).unwrap();
+    assert!(identity.verify(message, &signature).unwrap());
 
     println!("Generated identity:");
     println!("  Node ID: {}", identity.node_id());
-    println!("  Word address: {}", identity.word_address());
+    println!("  Node ID: {}", identity.node_id());
     println!(
         "  PoW computation time: {:?}",
-        identity.proof_of_work().computation_time
+        // POW computation time no longer tracked
+        0u64
     );
     Ok(())
 }
@@ -42,32 +47,32 @@ fn test_deterministic_identity() {
     let seed = [0x42; 32];
 
     // Generate same identity twice
-    let id1 = NodeIdentity::from_seed(&seed, 8).unwrap();
-    let id2 = NodeIdentity::from_seed(&seed, 8).unwrap();
+    let id1 = NodeIdentity::from_seed(&seed).unwrap();
+    let id2 = NodeIdentity::from_seed(&seed).unwrap();
 
     // Should be identical
     assert_eq!(id1.node_id(), id2.node_id());
-    assert_eq!(id1.word_address(), id2.word_address());
+    assert_eq!(id1.node_id(), id2.node_id());
 }
 
 #[test]
 fn test_signing_and_verification() {
-    let identity = NodeIdentity::generate(8).unwrap();
+    let identity = NodeIdentity::generate().unwrap();
     let message = b"Test message for P2P network";
 
     // Sign message
-    let signature = identity.sign(message);
+    let signature = identity.sign(message).unwrap();
 
     // Verify with same identity
-    assert!(identity.verify(message, &signature));
+    assert!(identity.verify(message, &signature).unwrap());
 
     // Verify with wrong message should fail
-    assert!(!identity.verify(b"Wrong message", &signature));
+    assert!(!identity.verify(b"Wrong message", &signature).unwrap());
 }
 
 #[test]
 fn test_persistence() {
-    let identity = NodeIdentity::generate(8).unwrap();
+    let identity = NodeIdentity::generate().unwrap();
     let original_id = identity.node_id().clone();
 
     // Export to data
@@ -97,4 +102,3 @@ fn test_node_id_xor_distance() {
         assert_eq!(*byte, 0xFF);
     }
 }
-#![cfg(feature = "legacy_pow_tests")]

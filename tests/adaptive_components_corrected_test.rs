@@ -2,10 +2,9 @@
 //! Tests the actual exported adaptive features using real APIs
 
 use saorsa_core::adaptive::{
-    ContentHash, ContentType, NodeId, Outcome, StrategyChoice,
+    ContentHash, ContentType, NodeId, NodeIdentity, Outcome, StrategyChoice,
     eviction::{CacheState, EvictionStrategy, LFUStrategy, LRUStrategy},
     hyperbolic::HyperbolicSpace,
-    identity::NodeIdentity,
     learning::{ChurnPredictor, NodeEvent, NodeFeatures, QLearnCacheManager, ThompsonSampling},
     multi_armed_bandit::{MABConfig, MultiArmedBandit},
     q_learning_cache::{AccessInfo, StateVector},
@@ -13,9 +12,9 @@ use saorsa_core::adaptive::{
     routing::AdaptiveRouter,
     security::{BlacklistReason, SecurityConfig, SecurityError, SecurityManager},
     som::{GridSize, SelfOrganizingMap, SomConfig},
-    storage::ReplicationConfig,
-    trust::MockTrustProvider,
 };
+use saorsa_core::adaptive::{storage::ReplicationConfig, trust::MockTrustProvider};
+use saorsa_core::quantum_crypto::ant_quic_integration::MlDsaPublicKey;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -193,12 +192,12 @@ async fn test_security_manager_real_api() -> anyhow::Result<()> {
 
     let config = SecurityConfig::default();
     let identity = NodeIdentity::generate()?;
-    let security = SecurityManager::new(config, identity);
+    let security = SecurityManager::new(config, &identity);
 
     // Test node join validation
     let test_node = saorsa_core::adaptive::NodeDescriptor {
         id: NodeId { hash: [1u8; 32] },
-        public_key: ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32])?,
+        public_key: MlDsaPublicKey::from_bytes(&vec![0u8; 1952])?,
         addresses: vec!["192.168.1.100:8080".to_string()],
         hyperbolic: None,
         som_position: None,
@@ -641,7 +640,7 @@ async fn test_integrated_adaptive_system() -> anyhow::Result<()> {
     let cache_manager = QLearnCacheManager::new(2048);
 
     let identity = NodeIdentity::generate()?;
-    let security = SecurityManager::new(SecurityConfig::default(), identity);
+    let security = SecurityManager::new(SecurityConfig::default(), &identity);
 
     let predictor = ChurnPredictor::new();
 

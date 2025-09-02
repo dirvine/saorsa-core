@@ -215,7 +215,7 @@ impl MultiArmedBandit {
 
             return Ok(RouteDecision {
                 route_id,
-                probability: distribution.mean(),
+                probability: distribution.mean().clamp(0.0, 1.0), // Clamp to valid probability range
                 exploration: true,
                 confidence_interval: distribution.confidence_interval(),
                 expected_latency_ms: stats.avg_latency_ms,
@@ -280,7 +280,7 @@ impl MultiArmedBandit {
 
         Ok(RouteDecision {
             route_id,
-            probability: best_sample,
+            probability: best_sample.min(1.0), // Clamp to valid probability range
             exploration: false,
             confidence_interval: distribution.confidence_interval(),
             expected_latency_ms: best_stats.avg_latency_ms,
@@ -417,12 +417,71 @@ impl MultiArmedBandit {
             .await
             .map_err(P2PError::Io)?;
 
-        let (statistics, metrics): (HashMap<(RouteId, ContentType), RouteStatistics>, MABMetrics) =
+        // Try legacy tuple format first
+        let parsed_legacy: Result<(HashMap<(RouteId, ContentType), RouteStatistics>, MABMetrics)> =
             serde_json::from_str(&data).map_err(|e| {
                 P2PError::Storage(crate::error::StorageError::Database(
-                    format!("Failed to deserialize statistics: {}", e).into(),
+                    format!("Failed to deserialize legacy statistics: {}", e).into(),
+                ))
+            });
+
+        let (statistics, metrics) = if let Ok((stats, metrics)) = parsed_legacy {
+            (stats, metrics)
+        } else {
+            // New format: {"statistics":[{route_id:{node_id, strategy}, content_type, stats}], "metrics":{...}}
+            let v: serde_json::Value = serde_json::from_str(&data).map_err(|e| {
+                P2PError::Storage(crate::error::StorageError::Database(
+                    format!("Failed to parse statistics JSON: {}", e).into(),
                 ))
             })?;
+
+            let metrics: MABMetrics = serde_json::from_value(v.get("metrics").cloned().unwrap_or_default()).unwrap_or_default();
+
+            let mut map: HashMap<(RouteId, ContentType), RouteStatistics> = HashMap::new();
+            if let Some(arr) = v.get("statistics").and_then(|s| s.as_array()) {
+                for item in arr {
+                    if let (Some(route_id_v), Some(ct_v), Some(stats_v)) = (
+                        item.get("route_id"),
+                        item.get("content_type"),
+                        item.get("stats"),
+                    ) {
+                        // Parse route id
+                        let node_hex = route_id_v.get("node_id").and_then(|n| n.as_str()).unwrap_or("");
+                        let mut node_bytes = [0u8; 32];
+                        if let Ok(b) = hex::decode(node_hex) {
+                            let len = b.len().min(32);
+                            node_bytes[..len].copy_from_slice(&b[..len]);
+                        }
+                        let node = crate::peer_record::UserId::from_bytes(node_bytes);
+                        let strategy_str = route_id_v.get("strategy").and_then(|s| s.as_str()).unwrap_or("Kademlia");
+                        let strategy = match strategy_str {
+                            "Kademlia" => StrategyChoice::Kademlia,
+                            "Hyperbolic" => StrategyChoice::Hyperbolic,
+                            "TrustPath" => StrategyChoice::TrustPath,
+                            "SOMRegion" => StrategyChoice::SOMRegion,
+                            _ => StrategyChoice::Kademlia,
+                        };
+                        let route_id = RouteId { node_id: node, strategy };
+
+                        // Parse content type
+                        let ct_str = ct_v.as_str().unwrap_or("DHTLookup");
+                        let ct = match ct_str {
+                            "DHTLookup" => ContentType::DHTLookup,
+                            "DataRetrieval" => ContentType::DataRetrieval,
+                            "ComputeRequest" => ContentType::ComputeRequest,
+                            "RealtimeMessage" => ContentType::RealtimeMessage,
+                            _ => ContentType::DHTLookup,
+                        };
+
+                        // Parse stats
+                        if let Ok(st) = serde_json::from_value::<RouteStatistics>(stats_v.clone()) {
+                            map.insert((route_id, ct), st);
+                        }
+                    }
+                }
+            }
+            (map, metrics)
+        };
 
         // Clean up old statistics
         let now = std::time::SystemTime::now()
@@ -459,7 +518,25 @@ impl MultiArmedBandit {
             fs::create_dir_all(parent).await.map_err(P2PError::Io)?;
         }
 
-        let data = serde_json::to_string_pretty(&(statistics, metrics)).map_err(|e| {
+        // New format: serialize with string keys for portability
+        let export_stats: Vec<serde_json::Value> = statistics
+            .iter()
+            .map(|((rid, ct), st)| {
+                let node_hex = hex::encode(rid.node_id.as_bytes());
+                serde_json::json!({
+                    "route_id": {"node_id": node_hex, "strategy": format!("{:?}", rid.strategy)},
+                    "content_type": format!("{:?}", ct),
+                    "stats": st,
+                })
+            })
+            .collect();
+
+        let export = serde_json::json!({
+            "statistics": export_stats,
+            "metrics": metrics,
+        });
+
+        let data = serde_json::to_string_pretty(&export).map_err(|e| {
             P2PError::Storage(crate::error::StorageError::Database(
                 format!("Failed to serialize statistics: {}", e).into(),
             ))

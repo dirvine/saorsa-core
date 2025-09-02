@@ -112,9 +112,11 @@ impl WordEncoder {
                 format!("Encoder init failed: {e}").into(),
             ))
         })?;
-        let encoded = encoder
-            .encode(&addr.to_string())
-            .map_err(|e| P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(format!("{e}").into())))?;
+        let encoded = encoder.encode(&addr.to_string()).map_err(|e| {
+            P2PError::Bootstrap(crate::error::BootstrapError::InvalidData(
+                format!("{e}").into(),
+            ))
+        })?;
         Ok(FourWordAddress(encoded.replace(' ', "-")))
     }
 }
@@ -161,7 +163,7 @@ impl BootstrapManager {
 
     /// Create a new bootstrap manager with custom configuration
     pub async fn with_config(config: CacheConfig) -> Result<Self> {
-        let cache_dir = home_cache_dir()?;
+        let cache_dir = config.cache_dir.clone();
 
         let cache = BootstrapCache::new(cache_dir.clone(), config).await?;
         let merge_coordinator = MergeCoordinator::new(cache_dir)?;

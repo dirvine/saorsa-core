@@ -50,7 +50,11 @@ impl ReactionManager {
 
         // Use database store directly
         self.store
-            .add_reaction(message_id, emoji.clone(), UserHandle::from(user.as_str().to_string()))
+            .add_reaction(
+                message_id,
+                emoji.clone(),
+                UserHandle::from(user.as_str().to_string()),
+            )
             .await?;
 
         // Update cache
@@ -75,7 +79,11 @@ impl ReactionManager {
     ) -> Result<()> {
         // Use database store directly
         self.store
-            .remove_reaction(message_id, emoji.clone(), UserHandle::from(user.as_str().to_string()))
+            .remove_reaction(
+                message_id,
+                emoji.clone(),
+                UserHandle::from(user.as_str().to_string()),
+            )
             .await?;
 
         // Update cache

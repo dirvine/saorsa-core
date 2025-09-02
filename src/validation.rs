@@ -392,6 +392,7 @@ pub struct RateLimiter {
     /// Shared token bucket engine for global and per-IP limiting
     engine: crate::rate_limit::SharedEngine<IpAddr>,
     /// Configuration
+    #[allow(dead_code)]
     config: RateLimitConfig,
 }
 
@@ -679,7 +680,7 @@ mod tests {
     #[test]
     fn test_rate_limiter() {
         let config = RateLimitConfig {
-            window: Duration::from_secs(1),
+            window: Duration::from_millis(500), // Shorter window for testing
             max_requests: 10,
             burst_size: 5,
             ..Default::default()
@@ -693,8 +694,11 @@ mod tests {
             assert!(limiter.check_ip(&ip).is_ok());
         }
 
-        // Should start rate limiting
-        std::thread::sleep(Duration::from_millis(100));
+        // Should start rate limiting after burst
+        assert!(limiter.check_ip(&ip).is_err()); // Should be rate limited now
+
+        // After waiting longer than the window, should allow again
+        std::thread::sleep(Duration::from_millis(600));
         assert!(limiter.check_ip(&ip).is_ok());
     }
 

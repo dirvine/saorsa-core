@@ -341,7 +341,18 @@ impl EnhancedHyperbolicSpace {
     /// Export visualization data as JSON
     pub async fn export_visualization_json(&self) -> Result<String> {
         let viz_data = self.visualization_data.read().await;
-        serde_json::to_string_pretty(&*viz_data).map_err(|e| {
+        // Convert keys to strings for JSON compatibility
+        use std::collections::BTreeMap;
+        let mut nodes_map: BTreeMap<String, VisualizationNode> = BTreeMap::new();
+        for (k, v) in viz_data.nodes.iter() {
+            nodes_map.insert(format!("{:?}", k), v.clone());
+        }
+        let export = serde_json::json!({
+            "nodes": nodes_map,
+            "metrics": viz_data.metrics,
+        });
+
+        serde_json::to_string_pretty(&export).map_err(|e| {
             AdaptiveNetworkError::Other(format!("Failed to serialize visualization: {}", e))
         })
     }

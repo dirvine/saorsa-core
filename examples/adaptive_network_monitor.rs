@@ -1,9 +1,6 @@
 //! Live monitoring tool for the adaptive network
 //! Run with: cargo run --example adaptive_network_monitor
 
-use saorsa_core::adaptive::NodeIdentity as Identity;
-use saorsa_core::adaptive::coordinator::NetworkConfig;
-use saorsa_core::adaptive::coordinator::NetworkCoordinator as AdaptiveCoordinator;
 use saorsa_core::adaptive::learning::ThompsonSampling;
 use saorsa_core::adaptive::multi_armed_bandit::{MABConfig, MultiArmedBandit};
 use saorsa_core::adaptive::q_learning_cache::{

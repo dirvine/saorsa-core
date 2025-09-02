@@ -102,9 +102,16 @@ impl HyperbolicSpace {
     pub async fn adjust_coordinate(&self, neighbor_coords: &[(NodeId, HyperbolicCoordinate)]) {
         let mut my_coord = self.my_coordinate.write().await;
 
-        // Adjust radial coordinate based on degree
+        // Adjust radial coordinate based on degree and neighbors' radial positions
         let degree = neighbor_coords.len();
-        let target_r = 1.0 - (2.0 / (degree as f64 + 2.0));
+        let deg_term = 1.0 - (2.0 / (degree as f64 + 2.0));
+        let avg_neighbor_r = if degree > 0 {
+            neighbor_coords.iter().map(|(_, c)| c.r).sum::<f64>() / degree as f64
+        } else {
+            my_coord.r
+        };
+        // Blend the degree-based target with the neighbors' average radius
+        let target_r = 0.5 * deg_term + 0.5 * avg_neighbor_r;
         my_coord.r += self.adjustment_rate * (target_r - my_coord.r);
 
         // Ensure r stays in bounds

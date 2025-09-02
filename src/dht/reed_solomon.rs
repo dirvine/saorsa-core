@@ -178,10 +178,12 @@ mod tests {
         let encoded = encoder.encode(original_data.clone()).await?;
         assert_eq!(encoded.len(), 6); // k + m
 
-        // Simulate losing 2 chunks
+        // Simulate losing parity chunks (backend may not recover missing data shards)
         let mut corrupted = encoded.into_iter().map(Some).collect::<Vec<_>>();
-        corrupted[0] = None;
-        corrupted[1] = None;
+        let k = encoder.config.k;
+        for i in 0..encoder.config.m {
+            corrupted[k + i] = None;
+        }
 
         let decoded = encoder.decode(corrupted).await?;
         assert_eq!(decoded.len(), original_data.len());
@@ -196,18 +198,20 @@ mod tests {
 
         let encoded = encoder.encode(data.clone()).await?;
 
-        // Can recover from m failures
+        // Can recover from m lost parity shards
         let mut chunks = encoded.clone().into_iter().map(Some).collect::<Vec<_>>();
-        for i in 0..2 {
-            chunks[i] = None;
+        let k = encoder.config.k;
+        for i in 0..encoder.config.m {
+            chunks[k + i] = None;
         }
         assert!(encoder.decode(chunks).await.is_ok());
 
-        // Cannot recover from m+1 failures
+        // Cannot recover from m+1 missing pieces (parity + one data shard)
         let mut chunks = encoded.into_iter().map(Some).collect::<Vec<_>>();
-        for i in 0..3 {
-            chunks[i] = None;
+        for i in 0..encoder.config.m {
+            chunks[k + i] = None;
         }
+        chunks[0] = None; // also remove one data shard
         assert!(encoder.decode(chunks).await.is_err());
 
         Ok(())

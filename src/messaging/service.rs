@@ -76,7 +76,11 @@ impl MessagingService {
         options: SendOptions,
     ) -> Result<(MessageId, DeliveryReceipt)> {
         // Create rich message
-        let mut message = RichMessage::new(UserHandle::from(self.identity.to_string()), channel_id, content);
+        let mut message = RichMessage::new(
+            UserHandle::from(self.identity.to_string()),
+            channel_id,
+            content,
+        );
 
         // Apply options
         message.ephemeral = options.ephemeral;
@@ -254,7 +258,11 @@ impl MessagingService {
         channel_id: ChannelId,
         content: MessageContent,
     ) -> Result<EncryptedMessage> {
-        let message = RichMessage::new(UserHandle::from(self.identity.to_string()), channel_id, content);
+        let message = RichMessage::new(
+            UserHandle::from(self.identity.to_string()),
+            channel_id,
+            content,
+        );
 
         // Get encryption key
         let key = self

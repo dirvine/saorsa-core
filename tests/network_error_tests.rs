@@ -19,6 +19,7 @@ use saorsa_core::Result;
 use saorsa_core::error::{NetworkError, P2PError};
 use saorsa_core::network::{NodeConfig as P2PNodeConfig, P2PNode};
 use std::net::SocketAddr;
+use std::time::Duration;
 
 #[tokio::test]
 async fn test_invalid_address_parsing() {
@@ -129,16 +130,17 @@ async fn test_default_address_fallback() {
 }
 
 #[tokio::test]
-async fn test_mcp_config_optional_handling() {
-    // Test that missing MCP config doesn't panic
+async fn test_connection_timeout_config_handling() {
+    // Test that connection timeout configuration works properly
     let mut config = P2PNodeConfig::default();
-    config.mcp_server_config = None;
+    config.connection_timeout = Duration::from_secs(30);
 
-    // Should create node without MCP, not panic
+    // Should create node with custom timeout, not panic
     let result = P2PNode::new(config).await;
     assert!(result.is_ok());
 
     let node = result.unwrap();
-    // MCP operations should fail gracefully
-    assert!(node.mcp_server().is_none());
+    // Node should be created successfully with custom timeout
+
+    node.shutdown().await.unwrap();
 }

@@ -90,7 +90,6 @@ fn test_env_overrides() {
         env::set_var("SAORSA_LISTEN_ADDRESS", "10.0.0.1:7000");
         env::set_var("SAORSA_RATE_LIMIT", "2000");
         env::set_var("SAORSA_BOOTSTRAP_NODES", "boot1:9000,boot2:9000,boot3:9000");
-        env::set_var("SAORSA_MCP_ENABLED", "false");
     }
 
     let config = Config::load().unwrap();
@@ -98,7 +97,7 @@ fn test_env_overrides() {
     assert_eq!(config.network.listen_address, "10.0.0.1:7000");
     assert_eq!(config.security.rate_limit, 2000);
     assert_eq!(config.network.bootstrap_nodes.len(), 3);
-    assert!(!config.mcp.enabled);
+    // MCP removed; no MCP-enabled flag
 
     // Clean up
     #[allow(unsafe_code)]
@@ -106,7 +105,6 @@ fn test_env_overrides() {
         env::remove_var("SAORSA_LISTEN_ADDRESS");
         env::remove_var("SAORSA_RATE_LIMIT");
         env::remove_var("SAORSA_BOOTSTRAP_NODES");
-        env::remove_var("SAORSA_MCP_ENABLED");
     }
 }
 
@@ -140,12 +138,7 @@ fn test_node_config_from_config() {
     assert_eq!(node_config.listen_addr.to_string(), "127.0.0.1:9000");
     assert_eq!(node_config.max_connections, config.network.max_connections);
     assert_eq!(node_config.enable_ipv6, config.network.ipv6_enabled);
-    assert_eq!(node_config.enable_mcp_server, config.mcp.enabled);
-
-    // Check MCP server config
-    let mcp_config = node_config.mcp_server_config.unwrap();
-    assert_eq!(mcp_config.server_name, "P2P Node MCP Server");
-    assert_eq!(mcp_config.enable_dht_discovery, true);
+    // MCP removed; no MCP server configuration
 }
 
 #[test]
