@@ -3,8 +3,8 @@
 use bytes::Bytes;
 use rand::RngCore;
 use saorsa_core::dht::{
-    trust_weighted_kademlia::Outcome,
     CapacityManager, Dht, DhtTelemetry, OperationType, PutPolicy, TrustWeightedKademlia,
+    trust_weighted_kademlia::Outcome,
 };
 use saorsa_core::identity::node_identity::NodeId;
 
@@ -56,9 +56,11 @@ async fn test_trust_weighted_routing() {
 
     // Record bad interactions with node3
     for _ in 0..3 {
-        dht.record_interaction(node3.clone(), Outcome::Timeout).await;
+        dht.record_interaction(node3.clone(), Outcome::Timeout)
+            .await;
     }
-    dht.record_interaction(node3.clone(), Outcome::BadData).await;
+    dht.record_interaction(node3.clone(), Outcome::BadData)
+        .await;
 
     // Run EigenTrust computation
     dht.eigen_trust_epoch().await;

@@ -749,16 +749,25 @@ mod tests {
     #[test]
     fn test_global_pool() {
         let memory = allocate_secure(256).unwrap();
-        println!("allocate_secure(256) returned memory.len() = {}", memory.len());
+        println!(
+            "allocate_secure(256) returned memory.len() = {}",
+            memory.len()
+        );
         assert_eq!(memory.len(), 4096); // Pool allocates in chunks
 
         // Pool allocates in chunks of 4096 bytes, so capacity will be the chunk size
         let vec = secure_vec_with_capacity(128).unwrap();
-        println!("secure_vec_with_capacity(128) returned vec.capacity() = {}", vec.capacity());
+        println!(
+            "secure_vec_with_capacity(128) returned vec.capacity() = {}",
+            vec.capacity()
+        );
         assert_eq!(vec.capacity(), 4096); // Pool chunk size
 
         let string = secure_string_with_capacity(64).unwrap();
-        println!("secure_string_with_capacity(64) returned string.vec.capacity() = {}", string.vec.capacity());
+        println!(
+            "secure_string_with_capacity(64) returned string.vec.capacity() = {}",
+            string.vec.capacity()
+        );
         assert_eq!(string.vec.capacity(), 4096); // Pool chunk size
     }
 }

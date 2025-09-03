@@ -333,11 +333,15 @@ impl Client {
     }
 
     /// Create a new client with optional monitoring (for testing)
-    pub async fn new_with_monitoring(config: ClientConfig, enable_monitoring: bool) -> Result<Self> {
+    pub async fn new_with_monitoring(
+        config: ClientConfig,
+        enable_monitoring: bool,
+    ) -> Result<Self> {
         let (subscription_tx, subscription_rx) = mpsc::channel(1000);
 
         // Initialize network components based on profile
-        let components = Self::initialize_components_with_monitoring(&config, enable_monitoring).await?;
+        let components =
+            Self::initialize_components_with_monitoring(&config, enable_monitoring).await?;
 
         let client = Self {
             config,
@@ -361,7 +365,10 @@ impl Client {
     }
 
     /// Initialize network components with optional monitoring
-    async fn initialize_components_with_monitoring(config: &ClientConfig, enable_monitoring: bool) -> Result<NetworkComponents> {
+    async fn initialize_components_with_monitoring(
+        config: &ClientConfig,
+        enable_monitoring: bool,
+    ) -> Result<NetworkComponents> {
         // Create trust provider
         let trust_provider = Arc::new(crate::adaptive::trust::MockTrustProvider::new());
 
@@ -458,7 +465,7 @@ impl Client {
             let test_registry = Some(prometheus::Registry::new());
             #[cfg(not(feature = "metrics"))]
             let test_registry = None;
-            
+
             Arc::new(MonitoringSystem::new_with_registry(
                 crate::adaptive::monitoring::MonitoredComponents {
                     router: router.clone(),
@@ -778,7 +785,6 @@ mod tests {
     use super::*;
     use crate::adaptive::monitoring::MonitoringSystem;
 
-
     #[tokio::test]
     async fn test_client_creation() {
         let client = new_test_client(ClientConfig::default()).await.unwrap();
@@ -787,7 +793,6 @@ mod tests {
         let state = client.state.read().await;
         assert!(!state.connected);
     }
-
 
     /// Create a minimal test client without any monitoring components
     pub async fn new_test_client(config: ClientConfig) -> Result<Client> {
@@ -854,20 +859,23 @@ mod tests {
         let test_registry = Some(prometheus::Registry::new());
         #[cfg(not(feature = "metrics"))]
         let test_registry = None;
-        
-        let monitoring = Arc::new(MonitoringSystem::new_with_registry(
-            crate::adaptive::monitoring::MonitoredComponents {
-                router: router.clone(),
-                churn_handler: churn.clone(),
-                gossip: gossip.clone(),
-                storage: storage.clone(),
-                replication: replication.clone(),
-                thompson: thompson.clone(),
-                cache: cache.clone(),
-            },
-            crate::adaptive::monitoring::MonitoringConfig::default(),
-            test_registry,
-        ).unwrap());
+
+        let monitoring = Arc::new(
+            MonitoringSystem::new_with_registry(
+                crate::adaptive::monitoring::MonitoredComponents {
+                    router: router.clone(),
+                    churn_handler: churn.clone(),
+                    gossip: gossip.clone(),
+                    storage: storage.clone(),
+                    replication: replication.clone(),
+                    thompson: thompson.clone(),
+                    cache: cache.clone(),
+                },
+                crate::adaptive::monitoring::MonitoringConfig::default(),
+                test_registry,
+            )
+            .expect("Failed to create monitoring system for tests"),
+        );
 
         let components = NetworkComponents {
             node_id,
@@ -895,11 +903,10 @@ mod tests {
         Ok(client)
     }
 
-
     #[tokio::test]
     async fn test_client_connect() {
         let client = new_test_client(ClientConfig::default()).await.unwrap();
-        
+
         // Manually trigger connection for test
         client.connect_to_node("127.0.0.1:8000").await.unwrap();
 
@@ -912,7 +919,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_operations() {
         let client = new_test_client(ClientConfig::default()).await.unwrap();
-        
+
         // Connect first
         client.connect_to_node("127.0.0.1:8000").await.unwrap();
 
@@ -932,18 +939,13 @@ mod tests {
         // Operations should fail when not connected
         let result = client.store(vec![1, 2, 3]).await;
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Not connected")
-        );
+        assert!(result.unwrap_err().to_string().contains("Not connected"));
     }
 
     #[tokio::test]
     async fn test_network_stats() {
         let client = new_test_client(ClientConfig::default()).await.unwrap();
-        
+
         // Connect first
         client.connect_to_node("127.0.0.1:8000").await.unwrap();
 
@@ -985,7 +987,7 @@ mod tests {
     #[tokio::test]
     async fn test_pubsub_messaging() {
         let client = new_test_client(ClientConfig::default()).await.unwrap();
-        
+
         // Connect first
         client.connect_to_node("127.0.0.1:8000").await.unwrap();
 
@@ -1003,7 +1005,7 @@ mod tests {
     #[tokio::test]
     async fn test_compute_job() {
         let client = new_test_client(ClientConfig::default()).await.unwrap();
-        
+
         // Connect first
         client.connect_to_node("127.0.0.1:8000").await.unwrap();
 

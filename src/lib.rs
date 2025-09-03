@@ -53,6 +53,12 @@
 #![allow(missing_debug_implementations)]
 #![warn(rust_2018_idioms)]
 
+/// Four-word identifier system
+pub mod fwid;
+
+/// Public API matching the spec
+pub mod api;
+
 /// Network address types
 pub mod address;
 
@@ -67,6 +73,19 @@ pub mod dht_network_manager;
 
 /// Transport layer (QUIC, TCP)
 pub mod transport;
+
+/// Authentication system for multi-writer records
+pub mod auth;
+
+/// Async event bus for watches and state changes
+pub mod events;
+/// Shared simple structs
+pub mod types;
+/// MLS verifier adapter and proof format
+pub mod mls;
+
+/// Telemetry for metrics and health signals
+pub mod telemetry;
 
 // MCP removed; will be redesigned later
 
@@ -150,6 +169,11 @@ pub mod placement;
 
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
+
+// New spec-compliant API exports
+pub use auth::{
+    DelegatedWriteAuth, MlsWriteAuth, PubKey, Sig, SingleWriteAuth, ThresholdWriteAuth, WriteAuth,
+};
 pub use bootstrap::{BootstrapCache, BootstrapManager, CacheConfig, ContactEntry};
 pub use dht::{Key, Record};
 pub use dht_network_manager::{
@@ -161,6 +185,8 @@ pub use encrypted_key_storage::{
     KeyMetadata, PasswordValidation, SecurityLevel, StorageStats,
 };
 pub use error::{P2PError, P2pResult as Result};
+pub use events::{Subscription, TopologyEvent, device_subscribe, dht_watch, subscribe_topology};
+pub use fwid::{FourWordsV1, Key as FwKey, fw_check, fw_to_key};
 pub use health::{
     ComponentChecker, ComponentHealth, HealthEndpoints, HealthManager, HealthResponse,
     HealthServer, HealthStatus, PrometheusExporter,
@@ -174,6 +200,7 @@ pub use monotonic_counter::{
     SequenceValidationResult,
 };
 pub use network::{NodeBuilder, NodeConfig, P2PEvent, P2PNode};
+pub use telemetry::{Metrics, StreamClass, record_lookup, record_timeout, telemetry};
 // Back-compat exports for tests
 pub use config::Config;
 pub use network::P2PNode as Node;

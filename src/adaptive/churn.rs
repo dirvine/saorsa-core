@@ -888,7 +888,8 @@ mod tests {
         }
 
         // Run monitoring cycle with a strict timeout to avoid hangs
-        let res = tokio::time::timeout(std::time::Duration::from_secs(30), handler.monitor_cycle()).await;
+        let res =
+            tokio::time::timeout(std::time::Duration::from_secs(30), handler.monitor_cycle()).await;
         assert!(res.is_ok(), "monitor_cycle timed out");
         res.unwrap().unwrap();
 

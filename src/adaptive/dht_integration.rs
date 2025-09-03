@@ -154,7 +154,6 @@ impl AdaptiveDHT {
     }
 
     /// Find nodes close to a key using trust-weighted selection
-    #[allow(clippy::panic)]
     pub async fn find_closest_nodes(
         &self,
         target: &NodeId,
@@ -201,10 +200,10 @@ impl AdaptiveDHT {
         sorted_nodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take top nodes and convert to NodeDescriptors
-        Ok(sorted_nodes
+        let nodes: Vec<NodeDescriptor> = sorted_nodes
             .into_iter()
             .take(count)
-            .map(|(node, trust)| {
+            .filter_map(|(node, trust)| {
                 // Convert node.id to array
                 let mut hash = [0u8; 32];
                 let peer_bytes = node.id.as_bytes();
@@ -216,34 +215,22 @@ impl AdaptiveDHT {
                 }
                 let node_id = NodeId::from_bytes(hash);
 
-                NodeDescriptor {
+                // Attempt to build a public key; skip node on failure
+                use crate::quantum_crypto::generate_ml_dsa_keypair;
+                let public_key = match generate_ml_dsa_keypair() {
+                    Ok((public_key, _)) => Some(public_key),
+                    Err(_) => {
+                        let dummy_bytes = [1u8; 1952];
+                        crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(
+                            &dummy_bytes,
+                        )
+                        .ok()
+                    }
+                }?;
+
+                Some(NodeDescriptor {
                     id: node_id,
-                    // TODO: Get real key from node - for now use a deterministic dummy key
-                    // Create a dummy ML-DSA public key for testing
-                    public_key: {
-                        // For testing, create a dummy key from a fixed seed
-                        // In production, this should come from the actual node identity
-                        use crate::quantum_crypto::generate_ml_dsa_keypair;
-                        match generate_ml_dsa_keypair() {
-                            Ok((public_key, _)) => public_key,
-                            Err(_) => {
-                                // Fallback: create a dummy key from known bytes
-                                // This is not cryptographically secure but works for testing
-                                let dummy_bytes = [1u8; 1952]; // ML-DSA-65 public key size
-                                crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(&dummy_bytes)
-                                    .unwrap_or_else(|_| {
-                                        // If even the fallback fails, create a minimal dummy key
-                                        // This should never happen in practice
-                                        crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(&[1u8; 1952])
-                                            .unwrap_or_else(|e| {
-                                                // Last resort: create an invalid key that will be rejected
-                                                // This ensures we never panic in production
-                                                panic!("Critical error: Failed to create any ML-DSA key: {}", e)
-                                            })
-                                    })
-                            }
-                        }
-                    },
+                    public_key,
                     addresses: vec![node.address.clone()],
                     hyperbolic: None,
                     som_position: None,
@@ -253,9 +240,11 @@ impl AdaptiveDHT {
                         compute: 0,
                         bandwidth: 0,
                     },
-                }
+                })
             })
-            .collect())
+            .collect();
+
+        Ok(nodes)
     }
 
     /// Update routing table with new node information

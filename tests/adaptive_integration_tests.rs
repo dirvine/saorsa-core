@@ -1,6 +1,6 @@
 //! Adaptive integration tests aligned with current APIs
-use saorsa_core::adaptive::*;
 use saorsa_core::adaptive::q_learning_cache::{ActionType, StateVector};
+use saorsa_core::adaptive::*;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -71,7 +71,9 @@ async fn test_adaptive_router_routes_with_registered_strategy() -> anyhow::Resul
         async fn find_path(&self, target: &NodeId) -> Result<Vec<NodeId>> {
             Ok(vec![target.clone()])
         }
-        fn route_score(&self, _from: &NodeId, _to: &NodeId) -> f64 { 1.0 }
+        fn route_score(&self, _from: &NodeId, _to: &NodeId) -> f64 {
+            1.0
+        }
         fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {}
     }
 
@@ -85,4 +87,3 @@ async fn test_adaptive_router_routes_with_registered_strategy() -> anyhow::Resul
     assert_eq!(path[0], target);
     Ok(())
 }
-

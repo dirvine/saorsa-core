@@ -1583,7 +1583,10 @@ mod tests {
         }
         // Crash recovery may not be fully implemented yet
         // assert!(recovered_count > 0, "No data was recovered from crash");
-        println!("Recovered {} out of 10 entries (crash recovery may not be fully implemented)", recovered_count);
+        println!(
+            "Recovered {} out of 10 entries (crash recovery may not be fully implemented)",
+            recovered_count
+        );
 
         // Recovery stats might not be implemented yet, so we'll skip this assertion
         // let stats = manager.recovery_stats().unwrap();
@@ -1694,6 +1697,9 @@ mod tests {
         // Skip snapshot validation for now as it may not be fully implemented
         // assert!(report.valid_snapshots > 0);
         // assert_eq!(report.corrupted_snapshots, 0);
-        println!("Integrity report: {} entries, {} valid snapshots, {} corrupted", report.total_entries, report.valid_snapshots, report.corrupted_snapshots);
+        println!(
+            "Integrity report: {} entries, {} valid snapshots, {} corrupted",
+            report.total_entries, report.valid_snapshots, report.corrupted_snapshots
+        );
     }
 }

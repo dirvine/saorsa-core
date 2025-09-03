@@ -529,8 +529,7 @@ impl SiblingList {
     /// Add or update a node in the sibling list
     pub fn add_node(&mut self, node: DHTNode) {
         // Remove if already exists
-        self.siblings
-            .retain(|n| n.address != node.address);
+        self.siblings.retain(|n| n.address != node.address);
 
         // Add new node
         self.siblings.push(node);
@@ -612,10 +611,10 @@ impl SiblingList {
                 }
                 lz
             };
-        if proposed_lz <= expected_lz && proposed_distance != expected_distance {
-            debug!("Proposed node is not closer to target than local node");
-            return false;
-        }
+            if proposed_lz <= expected_lz && proposed_distance != expected_distance {
+                debug!("Proposed node is not closer to target than local node");
+                return false;
+            }
 
             // Check if any sibling should know about this node
             let should_know = self.siblings.iter().any(|sibling| {

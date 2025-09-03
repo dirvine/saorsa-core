@@ -688,19 +688,19 @@ impl AdaptiveGossipSub {
                         scores.get(from).map(|s| s.score()).unwrap_or(0.0)
                     };
 
-            // If we have no prior score, fall back to trust provider's score
-            let score = if score == 0.0 {
-                self.trust_provider.get_trust(from)
-            } else {
-                score
-            };
+                    // If we have no prior score, fall back to trust provider's score
+                    let score = if score == 0.0 {
+                        self.trust_provider.get_trust(from)
+                    } else {
+                        score
+                    };
 
-            if score > 0.0 {
-                topic_mesh.insert(from.clone());
-            } else {
-                // Send PRUNE back if we don't want them
-                let _ = self.send_prune(from, &topic, Duration::from_secs(60)).await;
-            }
+                    if score > 0.0 {
+                        topic_mesh.insert(from.clone());
+                    } else {
+                        // Send PRUNE back if we don't want them
+                        let _ = self.send_prune(from, &topic, Duration::from_secs(60)).await;
+                    }
                 }
             }
             ControlMessage::Prune { topic, backoff: _ } => {

@@ -465,12 +465,8 @@ impl HyperbolicGreedyRouter {
             }
 
             // If no strictly better neighbor, select any neighbor to avoid dead-ends in tests
-            let chosen = best_neighbor.or_else(|| {
-                emb.coordinates
-                    .keys()
-                    .find(|p| *p != &here)
-                    .cloned()
-            });
+            let chosen =
+                best_neighbor.or_else(|| emb.coordinates.keys().find(|p| *p != &here).cloned());
             if let Some(peer) = chosen {
                 let mut metrics = self.metrics.write().await;
                 metrics.greedy_success += 1;
@@ -593,11 +589,7 @@ pub async fn greedy_next(target: NodeId, here: PeerId, emb: &Embedding) -> Optio
         }
         // If no neighbor is strictly closer, return any neighbor to avoid dead-ends in tests
         if best_neighbor.is_none() {
-            best_neighbor = emb
-                .coordinates
-                .keys()
-                .find(|p| *p != &here)
-                .cloned();
+            best_neighbor = emb.coordinates.keys().find(|p| *p != &here).cloned();
         }
         return best_neighbor;
     }

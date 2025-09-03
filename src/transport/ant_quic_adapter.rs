@@ -39,6 +39,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
+use crate::telemetry::StreamClass;
 
 // Import ant-quic types
 use ant_quic::auth::AuthConfig;
@@ -136,6 +137,23 @@ impl P2PNetworkNode {
             .send_to_peer(peer_id, data)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send to peer {}: {}", peer_id, e))?;
+        Ok(())
+    }
+
+    /// Send data with a StreamClass (basic QoS wiring with telemetry)
+    pub async fn send_with_class(
+        &self,
+        peer_id: &PeerId,
+        data: &[u8],
+        class: StreamClass,
+    ) -> Result<()> {
+        // In the current adapter, packets are sent directly; a future enhancement
+        // may map classes to prioritized QUIC streams.
+        self.send_to_peer(peer_id, data).await?;
+        // Record a simple per-class bandwidth sample using message size
+        crate::telemetry::telemetry()
+            .record_stream_bandwidth(class, data.len() as u64)
+            .await;
         Ok(())
     }
 
@@ -404,6 +422,23 @@ impl DualStackNetworkNode {
     pub async fn send_to_peer_string(&self, peer_id: &str, data: &[u8]) -> Result<()> {
         let ant_peer = string_to_ant_peer_id(peer_id);
         self.send_to_peer(&ant_peer, data).await
+    }
+
+    /// Send to peer with a StreamClass (basic QoS wiring with telemetry)
+    pub async fn send_with_class(
+        &self,
+        peer_id: &PeerId,
+        data: &[u8],
+        class: StreamClass,
+    ) -> Result<()> {
+        let res = self.send_to_peer(peer_id, data).await;
+        // Record a simple per-class bandwidth sample using message size
+        if res.is_ok() {
+            crate::telemetry::telemetry()
+                .record_stream_bandwidth(class, data.len() as u64)
+                .await;
+        }
+        res
     }
 }
 

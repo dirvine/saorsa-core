@@ -435,7 +435,9 @@ impl MultiArmedBandit {
                 ))
             })?;
 
-            let metrics: MABMetrics = serde_json::from_value(v.get("metrics").cloned().unwrap_or_default()).unwrap_or_default();
+            let metrics: MABMetrics =
+                serde_json::from_value(v.get("metrics").cloned().unwrap_or_default())
+                    .unwrap_or_default();
 
             let mut map: HashMap<(RouteId, ContentType), RouteStatistics> = HashMap::new();
             if let Some(arr) = v.get("statistics").and_then(|s| s.as_array()) {
@@ -446,14 +448,20 @@ impl MultiArmedBandit {
                         item.get("stats"),
                     ) {
                         // Parse route id
-                        let node_hex = route_id_v.get("node_id").and_then(|n| n.as_str()).unwrap_or("");
+                        let node_hex = route_id_v
+                            .get("node_id")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("");
                         let mut node_bytes = [0u8; 32];
                         if let Ok(b) = hex::decode(node_hex) {
                             let len = b.len().min(32);
                             node_bytes[..len].copy_from_slice(&b[..len]);
                         }
                         let node = crate::peer_record::UserId::from_bytes(node_bytes);
-                        let strategy_str = route_id_v.get("strategy").and_then(|s| s.as_str()).unwrap_or("Kademlia");
+                        let strategy_str = route_id_v
+                            .get("strategy")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("Kademlia");
                         let strategy = match strategy_str {
                             "Kademlia" => StrategyChoice::Kademlia,
                             "Hyperbolic" => StrategyChoice::Hyperbolic,
@@ -461,7 +469,10 @@ impl MultiArmedBandit {
                             "SOMRegion" => StrategyChoice::SOMRegion,
                             _ => StrategyChoice::Kademlia,
                         };
-                        let route_id = RouteId { node_id: node, strategy };
+                        let route_id = RouteId {
+                            node_id: node,
+                            strategy,
+                        };
 
                         // Parse content type
                         let ct_str = ct_v.as_str().unwrap_or("DHTLookup");

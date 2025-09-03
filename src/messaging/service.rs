@@ -47,10 +47,10 @@ impl MessagingService {
 
         // Create mock network for testing
         #[cfg(test)]
-        let network = Arc::new(crate::network::P2PNode::new_mock());
+        let network = Arc::new(crate::network::P2PNode::new_for_tests()?);
 
         #[cfg(not(test))]
-        let network = Arc::new(crate::network::P2PNode::new_mock()); // Mock for now
+        let network = Arc::new(crate::network::P2PNode::new_for_tests()?); // Using test version for now
         let transport = Arc::new(MessageTransport::new(network, dht_client.clone()).await?);
         let key_exchange = Arc::new(KeyExchange::new(identity.clone())?);
 

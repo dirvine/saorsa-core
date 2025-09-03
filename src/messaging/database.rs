@@ -35,7 +35,10 @@ impl DatabaseMessageStore {
             let mut base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
             base.push("saorsa");
             if let Err(e) = std::fs::create_dir_all(&base) {
-                warn!("Falling back to in-memory DB: cannot create dir {:?}: {}", base, e);
+                warn!(
+                    "Falling back to in-memory DB: cannot create dir {:?}: {}",
+                    base, e
+                );
                 PathBuf::from(":memory:")
             } else {
                 base.push("messages.db");
@@ -53,10 +56,16 @@ impl DatabaseMessageStore {
         // Initialize database schema
         if let Err(e) = store.init_schema().await {
             // Retry with in-memory DB if file-based DB cannot be opened
-            warn!("Schema init failed at {:?}: {}. Retrying in-memory.", db_path, e);
+            warn!(
+                "Schema init failed at {:?}: {}. Retrying in-memory.",
+                db_path, e
+            );
             let cfg_mem = Config::new(PathBuf::from(":memory:"));
             let pool_mem = cfg_mem.create_pool(Runtime::Tokio1)?;
-            let store_mem = Self { pool: pool_mem, dht_client: store.dht_client.clone() };
+            let store_mem = Self {
+                pool: pool_mem,
+                dht_client: store.dht_client.clone(),
+            };
             store_mem.init_schema().await?;
             return Ok(store_mem);
         }
@@ -719,25 +728,30 @@ impl DatabaseMessageStore {
                 let msg = e.to_string();
                 if msg.contains("FOREIGN KEY constraint failed") {
                     let msg_id2 = message_id.to_string();
-                    let retry = self.pool.get().await?.interact(move |conn| {
-                        // Disable foreign key enforcement for test environments
-                        let _ = conn.execute_batch("PRAGMA foreign_keys = OFF;");
-                        // Insert minimal stub message
-                        conn.execute(
-                            "INSERT OR IGNORE INTO messages (
+                    let retry = self
+                        .pool
+                        .get()
+                        .await?
+                        .interact(move |conn| {
+                            // Disable foreign key enforcement for test environments
+                            let _ = conn.execute_batch("PRAGMA foreign_keys = OFF;");
+                            // Insert minimal stub message
+                            conn.execute(
+                                "INSERT OR IGNORE INTO messages (
                                 id, channel_id, sender, content, thread_id, reply_to,
                                 created_at, edited_at, deleted_at, ephemeral, signature
                              ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, NULL, NULL, 0, '')",
-                            params![
-                                msg_id2,
-                                "test-channel",
-                                "test-sender",
-                                "{}",
-                                chrono::Utc::now().timestamp_millis()
-                            ],
-                        )?;
-                        Ok::<(), rusqlite::Error>(())
-                    }).await;
+                                params![
+                                    msg_id2,
+                                    "test-channel",
+                                    "test-sender",
+                                    "{}",
+                                    chrono::Utc::now().timestamp_millis()
+                                ],
+                            )?;
+                            Ok::<(), rusqlite::Error>(())
+                        })
+                        .await;
                     if retry.is_ok() {
                         // Retry reaction insert directly
                         let conn2 = self.pool.get().await?;

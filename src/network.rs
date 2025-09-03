@@ -493,7 +493,6 @@ pub struct P2PNode {
 
 impl P2PNode {
     /// Minimal constructor for tests that avoids real networking
-    #[allow(clippy::panic)]
     pub fn new_for_tests() -> Result<Self> {
         let (event_tx, _) = broadcast::channel(16);
         Ok(Self {
@@ -509,26 +508,40 @@ impl P2PNode {
             bootstrap_manager: None,
             dual_node: {
                 // Bind dual-stack nodes on ephemeral ports for tests
-                let v6: Option<std::net::SocketAddr> = Some(
-                    "[::1]:0"
-                        .parse()
-                        .unwrap_or(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
-                );
+                let v6: Option<std::net::SocketAddr> = "[::1]:0"
+                    .parse()
+                    .ok()
+                    .or(Some(std::net::SocketAddr::from(([0, 0, 0, 0], 0))));
                 let v4: Option<std::net::SocketAddr> = "127.0.0.1:0".parse().ok();
-                let dual = tokio::runtime::Handle::current()
-                    .block_on(crate::transport::ant_quic_adapter::DualStackNetworkNode::new(v6, v4))
-                    .unwrap_or_else(|_| {
-                        tokio::runtime::Handle::current()
-                            .block_on(
-                                crate::transport::ant_quic_adapter::DualStackNetworkNode::new(
-                                    None,
-                                    "127.0.0.1:0".parse().ok(),
-                                ),
-                            )
-                            .unwrap_or_else(|e| {
-                                panic!("Failed to create dual-stack network node: {}", e)
-                            })
-                    });
+                let handle = tokio::runtime::Handle::current();
+                let dual_attempt = handle
+                    .block_on(crate::transport::ant_quic_adapter::DualStackNetworkNode::new(
+                        v6, v4,
+                    ));
+                let dual = match dual_attempt {
+                    Ok(d) => d,
+                    Err(_e1) => {
+                        // Fallback to IPv4-only ephemeral bind
+                        let fallback = handle.block_on(
+                            crate::transport::ant_quic_adapter::DualStackNetworkNode::new(
+                                None,
+                                "127.0.0.1:0".parse().ok(),
+                            ),
+                        );
+                        match fallback {
+                            Ok(d) => d,
+                            Err(e2) => {
+                                return Err(P2PError::Network(NetworkError::BindError(
+                                    format!(
+                                        "Failed to create dual-stack network node: {}",
+                                        e2
+                                    )
+                                    .into(),
+                                )));
+                            }
+                        }
+                    }
+                };
                 Arc::new(dual)
             },
             rate_limiter: Arc::new(RateLimiter::new(RateLimitConfig {
@@ -547,6 +560,21 @@ impl P2PNode {
         });
 
         let (event_tx, _) = broadcast::channel(1000);
+
+        // Initialize and register a TrustWeightedKademlia DHT for the global API
+        // Use a deterministic local NodeId derived from the peer_id
+        {
+            use blake3::Hasher;
+            let mut hasher = Hasher::new();
+            hasher.update(peer_id.as_bytes());
+            let digest = hasher.finalize();
+            let mut nid = [0u8; 32];
+            nid.copy_from_slice(digest.as_bytes());
+            let twdht = std::sync::Arc::new(crate::dht::TrustWeightedKademlia::new(
+                crate::identity::node_identity::NodeId::from_bytes(nid),
+            ));
+            let _ = crate::api::set_dht_instance(twdht);
+        }
 
         // Initialize DHT if needed
         let dht = if true {
@@ -2286,7 +2314,7 @@ mod tests {
         // Note: We're not actually connecting to real peers here
         // since that would require running bootstrap nodes.
         // The health check should still pass with no connections.
-        
+
         Ok(())
     }
 
@@ -2348,11 +2376,11 @@ mod tests {
             .with_peer_id("builder_test_peer".to_string())
             .listen_on("/ip4/127.0.0.1/tcp/0")
             .listen_on("/ip6/::1/tcp/0")
-            .with_bootstrap_peer("/ip4/127.0.0.1/tcp/9000")  // Use a valid port number
+            .with_bootstrap_peer("/ip4/127.0.0.1/tcp/9000") // Use a valid port number
             .with_ipv6(true)
             .with_connection_timeout(Duration::from_secs(15))
             .with_max_connections(200);
-        
+
         // Test the configuration that was built
         let config = builder.config;
         assert_eq!(config.peer_id, Some("builder_test_peer".to_string()));

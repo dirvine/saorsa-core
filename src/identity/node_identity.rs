@@ -128,7 +128,7 @@ pub struct NodeIdentity {
 impl NodeIdentity {
     /// Generate new identity
     pub fn generate() -> Result<Self> {
-        // Generate ML-DSA-65 key pair using ant-quic integration
+        // Generate ML-DSA-65 key pair (ant-quic integration)
         let (public_key, secret_key) =
             crate::quantum_crypto::generate_ml_dsa_keypair().map_err(|e| {
                 P2PError::Identity(IdentityError::InvalidFormat(
@@ -163,20 +163,36 @@ impl NodeIdentity {
         let hk = Hkdf::<Sha256>::new(None, seed);
         let mut derived = vec![0u8; ML_DSA_PUB_LEN + ML_DSA_SEC_LEN];
         hk.expand(b"saorsa-node-identity-seed", &mut derived)
-            .map_err(|_| P2PError::Identity(IdentityError::InvalidFormat("HKDF expand failed".into())))?;
+            .map_err(|_| {
+                P2PError::Identity(IdentityError::InvalidFormat("HKDF expand failed".into()))
+            })?;
 
         let pub_bytes = &derived[..ML_DSA_PUB_LEN];
         let sec_bytes = &derived[ML_DSA_PUB_LEN..];
 
         // Construct keys from bytes; these constructors accept byte slices in our integration
-        let public_key = crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(pub_bytes)
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("Invalid ML-DSA public key bytes: {e}").into())))?;
-        let secret_key = crate::quantum_crypto::ant_quic_integration::MlDsaSecretKey::from_bytes(sec_bytes)
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("Invalid ML-DSA secret key bytes: {e}").into())))?;
+        let public_key =
+            crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(pub_bytes)
+                .map_err(|e| {
+                    P2PError::Identity(IdentityError::InvalidFormat(
+                        format!("Invalid ML-DSA public key bytes: {e}").into(),
+                    ))
+                })?;
+        let secret_key =
+            crate::quantum_crypto::ant_quic_integration::MlDsaSecretKey::from_bytes(sec_bytes)
+                .map_err(|e| {
+                    P2PError::Identity(IdentityError::InvalidFormat(
+                        format!("Invalid ML-DSA secret key bytes: {e}").into(),
+                    ))
+                })?;
 
         let node_id = NodeId::from_public_key(&public_key);
 
-        Ok(Self { secret_key, public_key, node_id })
+        Ok(Self {
+            secret_key,
+            public_key,
+            node_id,
+        })
     }
 
     /// Get node ID
@@ -300,13 +316,29 @@ impl NodeIdentity {
     /// Import identity from persisted data
     pub fn import(data: &IdentityData) -> Result<Self> {
         // Reconstruct keys from bytes
-        let secret_key = crate::quantum_crypto::ant_quic_integration::MlDsaSecretKey::from_bytes(&data.secret_key)
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("Invalid ML-DSA secret key: {e}").into())))?;
-        let public_key = crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(&data.public_key)
-            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("Invalid ML-DSA public key: {e}").into())))?;
+        let secret_key = crate::quantum_crypto::ant_quic_integration::MlDsaSecretKey::from_bytes(
+            &data.secret_key,
+        )
+        .map_err(|e| {
+            P2PError::Identity(IdentityError::InvalidFormat(
+                format!("Invalid ML-DSA secret key: {e}").into(),
+            ))
+        })?;
+        let public_key = crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(
+            &data.public_key,
+        )
+        .map_err(|e| {
+            P2PError::Identity(IdentityError::InvalidFormat(
+                format!("Invalid ML-DSA public key: {e}").into(),
+            ))
+        })?;
 
         let node_id = NodeId::from_public_key(&public_key);
-        Ok(Self { secret_key, public_key, node_id })
+        Ok(Self {
+            secret_key,
+            public_key,
+            node_id,
+        })
     }
 }
 

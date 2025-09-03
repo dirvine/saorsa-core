@@ -292,19 +292,22 @@ impl EnhancedIdentityManager {
         // Generate quantum-resistant keys
         let capabilities = CryptoCapabilities::default();
         // Generate PQC keys using ant-quic directly
-        let (_ml_dsa_pub, _ml_dsa_sec) = generate_ml_dsa_keypair()?;
-        let (_ml_kem_pub, _ml_kem_sec) = generate_ml_kem_keypair()?;
+        let (ml_dsa_pub, _ml_dsa_sec) = generate_ml_dsa_keypair()?;
+        let (ml_kem_pub, _ml_kem_sec) = generate_ml_kem_keypair()?;
 
         // Create quantum peer identity
         let peer_id =
             crate::quantum_crypto::types::PeerId(base_identity.user_id.as_bytes().to_vec());
 
+        // Serialize the PQC public keys to bytes
+        // ant-quic 0.8.14 provides as_bytes() methods for key serialization
+        let ml_dsa_pub_bytes = ml_dsa_pub.as_bytes().to_vec();
+        let ml_kem_pub_bytes = ml_kem_pub.as_bytes().to_vec();
+
         let quantum_identity = QuantumPeerIdentity {
             peer_id,
-            // NOTE: ant-quic PQC keys don't implement Serialize, using placeholder
-            // In production, implement proper serialization via ant-quic APIs
-            ml_dsa_public_key: vec![0u8; 1952], // ML-DSA-65 public key size
-            ml_kem_public_key: vec![0u8; 1184], // ML-KEM-768 public key size
+            ml_dsa_public_key: ml_dsa_pub_bytes,
+            ml_kem_public_key: ml_kem_pub_bytes,
             frost_public_key: None,             // Optional threshold key
             legacy_key: None,                   // Optional legacy key
             capabilities,

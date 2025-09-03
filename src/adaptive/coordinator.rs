@@ -902,8 +902,9 @@ mod tests {
         // Use a timeout to prevent hanging
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            NetworkCoordinator::new(identity, config)
-        ).await;
+            NetworkCoordinator::new(identity, config),
+        )
+        .await;
 
         match result {
             Ok(Ok(coordinator)) => {
@@ -928,16 +929,15 @@ mod tests {
         // Use a timeout to prevent hanging
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            NetworkCoordinator::new(identity, config)
-        ).await;
+            NetworkCoordinator::new(identity, config),
+        )
+        .await;
 
         match result {
             Ok(Ok(coordinator)) => {
                 // Join would fail without actual bootstrap nodes, but state should update
-                let join_result = tokio::time::timeout(
-                    Duration::from_secs(5),
-                    coordinator.join_network()
-                ).await;
+                let join_result =
+                    tokio::time::timeout(Duration::from_secs(5), coordinator.join_network()).await;
                 // We don't assert on the result since it may fail in test environment
                 let _ = join_result;
             }
@@ -960,8 +960,9 @@ mod tests {
         // Use a timeout to prevent hanging
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            NetworkCoordinator::new(identity, config)
-        ).await;
+            NetworkCoordinator::new(identity, config),
+        )
+        .await;
 
         match result {
             Ok(Ok(coordinator)) => {
@@ -976,13 +977,17 @@ mod tests {
                 // With default handlers registered, routing should succeed
                 let route_result = tokio::time::timeout(
                     Duration::from_secs(5),
-                    coordinator.route_message(message)
-                ).await;
+                    coordinator.route_message(message),
+                )
+                .await;
 
                 match route_result {
                     Ok(Ok(_)) => {} // Success
                     Ok(Err(e)) => {
-                        println!("Message routing failed (expected in test environment): {}", e);
+                        println!(
+                            "Message routing failed (expected in test environment): {}",
+                            e
+                        );
                     }
                     Err(_) => {
                         println!("Message routing timed out (expected in test environment)");
@@ -1008,15 +1013,17 @@ mod tests {
         // Use a timeout to prevent hanging
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            NetworkCoordinator::new(identity, config)
-        ).await;
+            NetworkCoordinator::new(identity, config),
+        )
+        .await;
 
         match result {
             Ok(Ok(coordinator)) => {
                 let degradation_result = tokio::time::timeout(
                     Duration::from_secs(5),
-                    coordinator.handle_degradation(DegradationReason::HighChurn)
-                ).await;
+                    coordinator.handle_degradation(DegradationReason::HighChurn),
+                )
+                .await;
 
                 match degradation_result {
                     Ok(Ok(_)) => {
@@ -1024,7 +1031,10 @@ mod tests {
                         assert!(matches!(state.health, NetworkHealthStatus::Degraded));
                     }
                     Ok(Err(e)) => {
-                        println!("Degradation handling failed (expected in test environment): {}", e);
+                        println!(
+                            "Degradation handling failed (expected in test environment): {}",
+                            e
+                        );
                     }
                     Err(_) => {
                         println!("Degradation handling timed out (expected in test environment)");
@@ -1050,21 +1060,24 @@ mod tests {
         // Use a timeout to prevent hanging
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            NetworkCoordinator::new(identity, config)
-        ).await;
+            NetworkCoordinator::new(identity, config),
+        )
+        .await;
 
         match result {
             Ok(Ok(coordinator)) => {
                 // Metrics collection should work
-                let metrics_result = tokio::time::timeout(
-                    Duration::from_secs(5),
-                    coordinator.collect_metrics()
-                ).await;
+                let metrics_result =
+                    tokio::time::timeout(Duration::from_secs(5), coordinator.collect_metrics())
+                        .await;
 
                 match metrics_result {
                     Ok(Ok(_)) => {} // Success
                     Ok(Err(e)) => {
-                        println!("Metrics collection failed (expected in test environment): {}", e);
+                        println!(
+                            "Metrics collection failed (expected in test environment): {}",
+                            e
+                        );
                     }
                     Err(_) => {
                         println!("Metrics collection timed out (expected in test environment)");

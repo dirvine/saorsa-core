@@ -9,7 +9,10 @@ use tokio::time::{Duration, sleep};
 
 use saorsa_core::{
     Config,
-    adaptive::{client::{Client, ClientConfig, AdaptiveP2PClient}, coordinator::NetworkCoordinator},
+    adaptive::{
+        client::{AdaptiveP2PClient, Client, ClientConfig},
+        coordinator::NetworkCoordinator,
+    },
     health::HealthManager,
 };
 
@@ -104,8 +107,8 @@ impl ProductionTestFramework {
 
         let test_cases: Vec<(String, bool)> = vec![
             ("valid_key".to_string(), true),
-            ("".to_string(), false),                        // Empty key should fail
-            ("a".repeat(1000), false),                       // Too long should fail
+            ("".to_string(), false),   // Empty key should fail
+            ("a".repeat(1000), false), // Too long should fail
             ("valid/path".to_string(), true),
             ("../invalid".to_string(), false), // Path traversal should fail
         ];
@@ -243,7 +246,10 @@ async fn test_production_input_validation() -> Result<()> {
     let validation_passes = framework.test_input_validation().await?;
 
     println!("Validation tests passed (N/A): {}", validation_passes);
-    assert_eq!(validation_passes, 0, "Validation not applicable in current API");
+    assert_eq!(
+        validation_passes, 0,
+        "Validation not applicable in current API"
+    );
 
     framework.shutdown_all().await?;
     Ok(())

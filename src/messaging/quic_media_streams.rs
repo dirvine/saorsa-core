@@ -292,7 +292,11 @@ impl RateLimiter {
     pub fn available_tokens(&mut self) -> f64 {
         // Do not refill here to provide a stable snapshot immediately after operations
         // Clamp tiny residuals to zero to avoid flaky float comparisons in tests
-        if self.tokens.abs() < 1e-5 { 0.0 } else { self.tokens }
+        if self.tokens.abs() < 1e-5 {
+            0.0
+        } else {
+            self.tokens
+        }
     }
 }
 

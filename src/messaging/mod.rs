@@ -6,6 +6,7 @@ pub mod database;
 pub mod encryption;
 pub mod key_exchange;
 pub mod media;
+#[cfg(any(test, feature = "mocks"))]
 pub mod mocks;
 pub mod quic_media_streams;
 pub mod reactions;

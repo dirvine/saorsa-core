@@ -68,18 +68,22 @@ impl<K: Eq + Hash + Clone + ToString> Engine<K> {
         }
     }
 
-    #[allow(clippy::panic)]
     pub fn try_consume_global(&self) -> bool {
-        let mut g = self.global.lock().unwrap_or_else(|e| {
-            // Mutex poisoning indicates a serious bug, panic is appropriate
-            panic!("Global rate limit mutex poisoned: {}", e)
-        });
-        g.try_consume(&self.cfg)
+        match self.global.lock() {
+            Ok(mut guard) => guard.try_consume(&self.cfg),
+            Err(_poisoned) => {
+                // Treat poisoned mutex as a denial to maintain safety
+                // and avoid panicking in production code.
+                false
+            }
+        }
     }
 
     pub fn try_consume_key(&self, key: &K) -> bool {
         let mut map = self.keyed.write();
-        let bucket = map.entry(key.clone()).or_insert_with(|| Bucket::new(self.cfg.burst_size as f64));
+        let bucket = map
+            .entry(key.clone())
+            .or_insert_with(|| Bucket::new(self.cfg.burst_size as f64));
         bucket.try_consume(&self.cfg)
     }
 }

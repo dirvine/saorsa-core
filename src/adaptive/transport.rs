@@ -473,7 +473,11 @@ mod tests {
         let manager = TransportManager::new();
 
         // Should be able to listen (skip if environment disallows)
-        if manager.listen("127.0.0.1:0".parse().unwrap()).await.is_err() {
+        if manager
+            .listen("127.0.0.1:0".parse().unwrap())
+            .await
+            .is_err()
+        {
             return;
         }
     }
