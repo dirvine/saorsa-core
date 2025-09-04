@@ -815,80 +815,54 @@ impl ProjectsManager {
         Ok(())
     }
 
-    /// Encrypt content using AES-GCM
+    /// Encrypt content using ChaCha20Poly1305 (saorsa-pqc)
     fn encrypt_content(&self, content: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{AeadInPlace, Aes256Gcm, KeyInit, Nonce};
-        use rand::RngCore;
-
-        // Removed unused P2PError import
-
-        // Ensure key is exactly 32 bytes for AES-256
+        use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricKey};
+        // Ensure key is exactly 32 bytes
         if key.len() != 32 {
             return Err(ProjectsError::InvalidOperation(
                 "Invalid encryption key length - must be 32 bytes".to_string(),
             ));
         }
-
-        let cipher_key = aes_gcm::Key::<Aes256Gcm>::from_slice(key);
-        let cipher = Aes256Gcm::new(cipher_key);
-
-        // Generate random 96-bit nonce
-        let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // Encrypt the data
-        let mut ciphertext = content.to_vec();
-        let tag = cipher
-            .encrypt_in_place_detached(nonce, b"", &mut ciphertext)
+        let mut k = [0u8; 32];
+        k.copy_from_slice(&key[..32]);
+        let sk = SymmetricKey::from_bytes(k);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
+        let (ciphertext, nonce) = cipher
+            .encrypt(content, None)
             .map_err(|e| ProjectsError::InvalidOperation(format!("Encryption failed: {e}")))?;
-
-        // Combine nonce + ciphertext + tag
-        let mut result = Vec::with_capacity(12 + ciphertext.len() + 16);
-        result.extend_from_slice(&nonce_bytes);
-        result.extend_from_slice(&ciphertext);
-        result.extend_from_slice(&tag);
-
-        Ok(result)
+        let mut out = Vec::with_capacity(nonce.len() + ciphertext.len());
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
     }
 
-    /// Decrypt content using AES-GCM
+    /// Decrypt content using ChaCha20Poly1305 (saorsa-pqc)
     fn decrypt_content(&self, encrypted: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{AeadInPlace, Aes256Gcm, KeyInit, Nonce};
-        // Removed unused P2PError import
-
-        // Ensure key is exactly 32 bytes for AES-256
+        use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricKey};
+        // Ensure key is exactly 32 bytes
         if key.len() != 32 {
             return Err(ProjectsError::InvalidOperation(
                 "Invalid decryption key length - must be 32 bytes".to_string(),
             ));
         }
 
-        // Minimum size: 12 (nonce) + 16 (tag) = 28 bytes
-        if encrypted.len() < 28 {
+        // Minimum size: need at least nonce length + 1 byte ciphertext
+        if encrypted.len() < 13 {
             return Err(ProjectsError::InvalidOperation(
                 "Invalid encrypted data - too short".to_string(),
             ));
         }
-
-        let cipher_key = aes_gcm::Key::<Aes256Gcm>::from_slice(key);
-        let cipher = Aes256Gcm::new(cipher_key);
-
-        // Extract nonce (first 12 bytes)
-        let nonce = Nonce::from_slice(&encrypted[0..12]);
-
-        // Extract tag (last 16 bytes)
-        let tag_start = encrypted.len() - 16;
-        let tag = &encrypted[tag_start..];
-
-        // Extract ciphertext (middle portion)
-        let mut plaintext = encrypted[12..tag_start].to_vec();
-
-        // Decrypt the data
+        // Extract nonce (first 12 bytes to match our encrypt usage)
+        let (nonce_slice, ciphertext) = encrypted.split_at(12);
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(nonce_slice);
+        let mut k = [0u8; 32];
+        k.copy_from_slice(&key[..32]);
+        let sk = SymmetricKey::from_bytes(k);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
         cipher
-            .decrypt_in_place_detached(nonce, b"", &mut plaintext, tag.into())
-            .map_err(|e| ProjectsError::InvalidOperation(format!("Decryption failed: {e}")))?;
-
-        Ok(plaintext)
+            .decrypt(ciphertext, &nonce, None)
+            .map_err(|e| ProjectsError::InvalidOperation(format!("Decryption failed: {e}")))
     }
 }

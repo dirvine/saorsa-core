@@ -373,7 +373,7 @@ impl DatabaseMessageStore {
                         sender_device: crate::messaging::types::DeviceId("primary".to_string()),
                         encryption: EncryptionMethod::E2E,
                         signature: MessageSignature {
-                            algorithm: "ed25519".to_string(),
+                            algorithm: "ml-dsa".to_string(),
                             signature: signature_bytes,
                         },
                     })

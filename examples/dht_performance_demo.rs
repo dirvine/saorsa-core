@@ -32,7 +32,7 @@ impl LegacyDHTStorage {
 
     pub async fn store(&self, record: Record) -> anyhow::Result<()> {
         let mut records = self.records.write().await;
-        records.insert(record.key.clone(), record);
+        records.insert(record.key, record);
         Ok(())
     }
 

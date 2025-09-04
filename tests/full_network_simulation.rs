@@ -77,13 +77,11 @@ impl NetworkSimulation {
 
     async fn simulate_data_operations(&self) {
         // Store data from different nodes
-        let data_items = vec![
-            b"Important document".to_vec(),
+        let data_items = [b"Important document".to_vec(),
             b"Video file chunk 1".to_vec(),
             b"Configuration data".to_vec(),
             b"User profile information".to_vec(),
-            b"Cached web content".to_vec(),
-        ];
+            b"Cached web content".to_vec()];
 
         let mut stored_hashes = vec![];
 

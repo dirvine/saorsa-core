@@ -1,14 +1,26 @@
 // Copyright 2024 Saorsa Labs Limited
 //
+// This software is dual-licensed under:
+// - GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
+// - Commercial License
+//
+// For AGPL-3.0 license, see LICENSE-AGPL-3.0
+// For commercial licensing, contact: saorsalabs@gmail.com
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under these licenses is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//
 // Example usage of the Saorsa Core specification modules
 
 use anyhow::Result;
 use bytes::Bytes;
 use saorsa_core::api::*;
 use saorsa_core::auth::*;
-use saorsa_core::events::{self, TopologyEvent, ForwardEvent, global_bus, Subscription};
+use saorsa_core::events::{self, TopologyEvent, global_bus};
 use saorsa_core::fwid::*;
 use saorsa_core::telemetry::*;
+use saorsa_core::types::Forward;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -72,16 +84,22 @@ async fn example_auth() -> Result<()> {
     let record = b"important data";
     let sig = Sig::new(vec![6, 7, 8, 9, 10]);
 
-    let valid = single_auth.verify(record, &[sig.clone()]).await?;
-    println!("✓ Single-writer auth: {}", if valid { "valid" } else { "invalid" });
+    let valid = single_auth.verify(record.as_ref(), &[sig.clone()]).await?;
+    println!(
+        "✓ Single-writer auth: {}",
+        if valid { "valid" } else { "invalid" }
+    );
 
     // Delegated authentication
     let key2 = PubKey::new(vec![11, 12, 13]);
     let key3 = PubKey::new(vec![14, 15, 16]);
     let delegated = DelegatedWriteAuth::new(vec![pub_key.clone(), key2, key3]);
 
-    let valid = delegated.verify(record, &[sig.clone()]).await?;
-    println!("✓ Delegated auth: {}", if valid { "valid" } else { "invalid" });
+    let valid = delegated.verify(record.as_ref(), &[sig.clone()]).await?;
+    println!(
+        "✓ Delegated auth: {}",
+        if valid { "valid" } else { "invalid" }
+    );
 
     // Threshold authentication (2-of-3)
     let keys = vec![
@@ -91,20 +109,23 @@ async fn example_auth() -> Result<()> {
     ];
     let threshold = ThresholdWriteAuth::new(2, 3, keys)?;
 
-    let sigs = vec![
-        Sig::new(vec![30, 31]),
-        Sig::new(vec![32, 33]),
-    ];
-    let valid = threshold.verify(record, &sigs).await?;
-    println!("✓ Threshold auth (2-of-3): {}", if valid { "valid" } else { "invalid" });
+    let sigs = vec![Sig::new(vec![30, 31]), Sig::new(vec![32, 33])];
+    let valid = threshold.verify(record.as_ref(), &sigs).await?;
+    println!(
+        "✓ Threshold auth (2-of-3): {}",
+        if valid { "valid" } else { "invalid" }
+    );
 
     // Composite authentication (all must pass)
     let auth1 = Box::new(SingleWriteAuth::new(pub_key));
     let auth2 = Box::new(threshold);
     let composite = CompositeWriteAuth::all(vec![auth1, auth2]);
 
-    let valid = composite.verify(record, &[sig]).await?;
-    println!("✓ Composite auth (all): {}", if valid { "valid" } else { "invalid" });
+    let valid = composite.verify(record.as_ref(), &[sig]).await?;
+    println!(
+        "✓ Composite auth (all): {}",
+        if valid { "valid" } else { "invalid" }
+    );
     println!("  Auth type: {}", composite.auth_type());
 
     Ok(())
@@ -144,14 +165,16 @@ async fn example_events() -> Result<()> {
 
     // Watch DHT key
     let key = Key::new([42u8; 32]);
-    let mut dht_sub = events::dht_watch(key).await;
+    let mut dht_sub = events::dht_watch(key.clone()).await;
     println!("✓ Watching DHT key");
 
     // Update DHT key (in background)
     let bus = global_bus();
     tokio::spawn(async move {
         sleep(Duration::from_millis(100)).await;
-        let _ = bus.publish_dht_update(key, Bytes::from(vec![1, 2, 3, 4])).await;
+        let _ = bus
+            .publish_dht_update(key, Bytes::from(vec![1, 2, 3, 4]))
+            .await;
     });
 
     // Receive update
@@ -170,28 +193,27 @@ async fn example_events() -> Result<()> {
 
     // Device forward subscription
     let identity_key = Key::new([99u8; 32]);
-    let mut device_sub = events::device_subscribe(identity_key).await;
+    let mut device_sub = events::device_subscribe(identity_key.clone()).await;
     println!("✓ Subscribed to device forwards");
 
     // Publish forward (in background)
     let bus = global_bus();
-    let identity_key_copy = identity_key;
+    let identity_key_copy = identity_key.clone();
     tokio::spawn(async move {
         sleep(Duration::from_millis(100)).await;
-        let forward = ForwardEvent {
-            identity_key: identity_key_copy,
-            protocol: "quic".to_string(),
-            address: "192.168.1.100:9000".to_string(),
-            expiry: 1234567890,
+        let forward = Forward {
+            proto: "quic".into(),
+            addr: "192.168.1.100:9000".into(),
+            exp: 1234567890,
         };
-        let _ = bus.publish_forward(forward).await;
+        let _ = bus.publish_forward_for(identity_key_copy, forward).await;
     });
 
     // Receive forward
     tokio::select! {
         result = device_sub.recv() => {
             if let Ok(forward) = result {
-                println!("✓ Device forward: {} at {}", forward.protocol, forward.address);
+                println!("✓ Device forward: {} at {}", forward.proto, forward.addr);
             } else {
                 println!("  (No forward received - channel closed)");
             }
@@ -312,25 +334,27 @@ async fn example_api_flow() -> Result<()> {
         auth: Box::new(SingleWriteAuth::new(pubkey)),
     };
 
-    let receipt = dht_put(data_key, data.clone(), &policy).await?;
+    let receipt = dht_put(data_key.clone(), data.clone(), &policy).await?;
     println!("✓ Data stored in DHT");
     println!("  Timestamp: {}", receipt.timestamp);
     println!("  Storing nodes: {} nodes", receipt.storing_nodes.len());
 
     // 5. Retrieve data from DHT
-    let retrieved = dht_get(data_key, 3).await?;
+    let retrieved = dht_get(data_key.clone(), 3).await?;
     println!("✓ Data retrieved from DHT: {} bytes", retrieved.len());
 
     // 6. Watch for changes
-    let mut watch_sub = dht_watch(data_key).await;
+    let mut watch_sub = dht_watch(data_key.clone()).await;
     println!("✓ Watching DHT key for changes");
 
     // Simulate update (in background)
     let bus = global_bus();
-    let data_key_copy = data_key;
+    let data_key_copy = data_key.clone();
     tokio::spawn(async move {
         sleep(Duration::from_millis(100)).await;
-        let _ = bus.publish_dht_update(data_key_copy, Bytes::from("Updated data!")).await;
+        let _ = bus
+            .publish_dht_update(data_key_copy, Bytes::from("Updated data!"))
+            .await;
     });
 
     // Receive update

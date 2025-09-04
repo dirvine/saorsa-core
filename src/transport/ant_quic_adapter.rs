@@ -33,13 +33,13 @@
 //! - Connection state metrics
 //! - Stream performance data
 
+use crate::telemetry::StreamClass;
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use crate::telemetry::StreamClass;
 
 // Import ant-quic types
 use ant_quic::auth::AuthConfig;
@@ -100,7 +100,7 @@ impl P2PNetworkNode {
 
     /// Connect to a peer
     pub async fn connect_to_peer(&self, peer_addr: SocketAddr) -> Result<PeerId> {
-        log::info!("Connecting to peer at {}", peer_addr);
+        tracing::info!("Connecting to peer at {}", peer_addr);
 
         // Use ant-quic's connect_to_bootstrap for direct socket address connection
         let peer_id = self
@@ -112,7 +112,7 @@ impl P2PNetworkNode {
         // Register the peer
         self.add_peer(peer_id, peer_addr).await;
 
-        log::info!("Connected to peer {} at {}", peer_id, peer_addr);
+        tracing::info!("Connected to peer {} at {}", peer_id, peer_addr);
         Ok(peer_id)
     }
 
@@ -127,7 +127,7 @@ impl P2PNetworkNode {
         // Register the peer
         self.add_peer(peer_id, addr).await;
 
-        log::info!("Accepted connection from peer {} at {}", peer_id, addr);
+        tracing::info!("Accepted connection from peer {} at {}", peer_id, addr);
         Ok((peer_id, addr))
     }
 
@@ -196,10 +196,10 @@ impl P2PNetworkNode {
             match self.connect_to_peer(addr).await {
                 Ok(peer_id) => {
                     connected_peers.push(peer_id);
-                    log::info!("Successfully bootstrapped from {}", addr);
+                    tracing::info!("Successfully bootstrapped from {}", addr);
                 }
                 Err(e) => {
-                    log::warn!("Failed to bootstrap from {}: {}", addr, e);
+                    tracing::warn!("Failed to bootstrap from {}: {}", addr, e);
                 }
             }
         }
@@ -439,6 +439,23 @@ impl DualStackNetworkNode {
                 .await;
         }
         res
+    }
+
+    /// Receive from any stack (race IPv6/IPv4)
+    pub async fn receive_any(&self) -> Result<(PeerId, Vec<u8>)> {
+        match (&self.v6, &self.v4) {
+            (Some(v6), Some(v4)) => {
+                let mut v6_fut = Box::pin(v6.receive_from_any_peer());
+                let mut v4_fut = Box::pin(v4.receive_from_any_peer());
+                tokio::select! {
+                    res6 = &mut v6_fut => res6,
+                    res4 = &mut v4_fut => res4,
+                }
+            }
+            (Some(v6), None) => v6.receive_from_any_peer().await,
+            (None, Some(v4)) => v4.receive_from_any_peer().await,
+            (None, None) => Err(anyhow::anyhow!("no listening nodes available")),
+        }
     }
 }
 

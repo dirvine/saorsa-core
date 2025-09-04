@@ -24,11 +24,10 @@ use argon2::{
     Algorithm, Argon2, Params, Version,
     password_hash::{PasswordHasher, SaltString, rand_core::RngCore},
 };
-use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricEncryptedMessage, SymmetricKey};
-// TODO: Replace with saorsa-pqc HKDF once correct import path is found
-use hkdf::Hkdf;
+use saorsa_pqc::{
+    ChaCha20Poly1305Cipher, HkdfSha3_256, SymmetricEncryptedMessage, SymmetricKey, api::traits::Kdf,
+};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 
 /// Size of ChaCha20Poly1305 key in bytes
 const CHACHA_KEY_SIZE: usize = 32;
@@ -170,12 +169,11 @@ pub fn encrypt_with_shared_secret(
     let mut rng = rand::thread_rng();
     rng.fill_bytes(&mut salt);
 
-    // TODO: Use saorsa-pqc HKDF-SHA3 when available
-    let hkdf = Hkdf::<Sha256>::new(Some(&salt), shared_secret);
+    // Use saorsa-pqc HKDF-SHA3 for quantum-resistant key derivation
     let mut key_bytes = [0u8; CHACHA_KEY_SIZE];
-    hkdf.expand(info, &mut key_bytes).map_err(|e| {
+    HkdfSha3_256::derive(shared_secret, Some(&salt), info, &mut key_bytes).map_err(|e| {
         P2PError::Security(SecurityError::KeyGenerationFailed(
-            format!("HKDF-SHA3 expansion failed: {:?}", e).into(),
+            format!("HKDF-SHA3 derivation failed: {:?}", e).into(),
         ))
     })?;
 
@@ -203,14 +201,15 @@ pub fn decrypt_with_shared_secret(
     shared_secret: &[u8; 32],
     info: &[u8],
 ) -> Result<Vec<u8>> {
-    // TODO: Use saorsa-pqc HKDF-SHA3 when available
-    let hkdf = Hkdf::<Sha256>::new(Some(&encrypted.salt), shared_secret);
+    // Use saorsa-pqc HKDF-SHA3 for quantum-resistant key derivation
     let mut key_bytes = [0u8; CHACHA_KEY_SIZE];
-    hkdf.expand(info, &mut key_bytes).map_err(|e| {
-        P2PError::Security(SecurityError::KeyGenerationFailed(
-            format!("HKDF-SHA3 expansion failed: {:?}", e).into(),
-        ))
-    })?;
+    HkdfSha3_256::derive(shared_secret, Some(&encrypted.salt), info, &mut key_bytes).map_err(
+        |e| {
+            P2PError::Security(SecurityError::KeyGenerationFailed(
+                format!("HKDF-SHA3 derivation failed: {:?}", e).into(),
+            ))
+        },
+    )?;
 
     let symmetric_key = SymmetricKey::from_bytes(key_bytes);
 

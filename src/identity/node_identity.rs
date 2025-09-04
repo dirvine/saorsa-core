@@ -152,20 +152,17 @@ impl NodeIdentity {
 
     /// Generate from seed (deterministic)
     pub fn from_seed(seed: &[u8; 32]) -> Result<Self> {
-        // Deterministically derive key material via HKDF-SHA256
-        use hkdf::Hkdf;
-        use sha2::Sha256;
+        // Deterministically derive key material via HKDF-SHA3
+        use saorsa_pqc::{HkdfSha3_256, api::traits::Kdf};
 
         // ML-DSA-65 public/secret key sizes (bytes)
         const ML_DSA_PUB_LEN: usize = 1952;
         const ML_DSA_SEC_LEN: usize = 4032;
 
-        let hk = Hkdf::<Sha256>::new(None, seed);
         let mut derived = vec![0u8; ML_DSA_PUB_LEN + ML_DSA_SEC_LEN];
-        hk.expand(b"saorsa-node-identity-seed", &mut derived)
-            .map_err(|_| {
-                P2PError::Identity(IdentityError::InvalidFormat("HKDF expand failed".into()))
-            })?;
+        HkdfSha3_256::derive(seed, None, b"saorsa-node-identity-seed", &mut derived).map_err(
+            |_| P2PError::Identity(IdentityError::InvalidFormat("HKDF expand failed".into())),
+        )?;
 
         let pub_bytes = &derived[..ML_DSA_PUB_LEN];
         let sec_bytes = &derived[ML_DSA_PUB_LEN..];
@@ -369,8 +366,8 @@ mod tests {
 
         let distance = id1.xor_distance(&id2);
         assert_eq!(distance[0], 0xFF);
-        for i in 1..32 {
-            assert_eq!(distance[i], 0);
+        for byte in &distance[1..] {
+            assert_eq!(*byte, 0);
         }
     }
 

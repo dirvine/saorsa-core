@@ -1556,10 +1556,10 @@ mod tests {
             for i in 0..10 {
                 let state = TestState {
                     id: i,
-                    data: format!("test_{}", i).into(),
+                    data: format!("test_{}", i),
                 };
                 manager
-                    .upsert(format!("key_{}", i).into(), state)
+                    .upsert(format!("key_{}", i), state)
                     .await
                     .unwrap();
             }
@@ -1575,11 +1575,10 @@ mod tests {
         // Verify all data recovered (may not be fully implemented yet)
         let mut recovered_count = 0;
         for i in 0..10 {
-            if let Ok(Some(state)) = manager.get(&format!("key_{}", i)) {
-                if state.id == i && state.data == format!("test_{}", i) {
+            if let Ok(Some(state)) = manager.get(&format!("key_{}", i))
+                && state.id == i && state.data == format!("test_{}", i) {
                     recovered_count += 1;
                 }
-            }
         }
         // Crash recovery may not be fully implemented yet
         // assert!(recovered_count > 0, "No data was recovered from crash");
@@ -1610,10 +1609,10 @@ mod tests {
         for i in 0..5 {
             let state = TestState {
                 id: i,
-                data: format!("test_{}", i).into(),
+                data: format!("test_{}", i),
             };
             manager
-                .upsert(format!("key_{}", i).into(), state)
+                .upsert(format!("key_{}", i), state)
                 .await
                 .unwrap();
         }
@@ -1643,10 +1642,10 @@ mod tests {
             .batch_update(|state| {
                 for i in 0..5 {
                     state.insert(
-                        format!("key_{}", i).into(),
+                        format!("key_{}", i),
                         TestState {
                             id: i,
-                            data: format!("batch_{}", i).into(),
+                            data: format!("batch_{}", i),
                         },
                     );
                 }
@@ -1679,10 +1678,10 @@ mod tests {
         for i in 0..10 {
             let state = TestState {
                 id: i,
-                data: format!("test_{}", i).into(),
+                data: format!("test_{}", i),
             };
             manager
-                .upsert(format!("key_{}", i).into(), state)
+                .upsert(format!("key_{}", i), state)
                 .await
                 .unwrap();
         }

@@ -328,7 +328,7 @@ mod tests {
         let health: HealthResponse = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(health.status, "healthy");
-        assert!(health.version.len() > 0);
+        assert!(!health.version.is_empty());
     }
 
     #[tokio::test]

@@ -543,7 +543,7 @@ mod tests {
             },
         );
         q_table.write().await.insert(
-            (state1, CacheAction::Evict(hash1.clone())),
+            (state1, CacheAction::Evict(hash1)),
             QValue {
                 value: 5.0,
                 updates: 1,
@@ -559,7 +559,7 @@ mod tests {
             },
         );
         q_table.write().await.insert(
-            (state1, CacheAction::Evict(hash2.clone())),
+            (state1, CacheAction::Evict(hash2)),
             QValue {
                 value: 8.0,
                 updates: 1,

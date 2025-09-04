@@ -1,5 +1,6 @@
 // End-to-end encryption for messaging
 
+use super::DhtClient;
 use super::key_exchange::KeyExchange;
 use super::types::*;
 use crate::identity::FourWordAddress;
@@ -28,8 +29,8 @@ pub struct SecureMessaging {
 
 impl SecureMessaging {
     /// Create new secure messaging instance
-    pub fn new(identity: FourWordAddress) -> Result<Self> {
-        let key_exchange = KeyExchange::new(identity.clone())?;
+    pub async fn new(identity: FourWordAddress, dht: DhtClient) -> Result<Self> {
+        let key_exchange = KeyExchange::new(identity.clone(), dht).await?;
 
         Ok(Self {
             identity,
@@ -342,7 +343,8 @@ mod tests {
     #[tokio::test]
     async fn test_message_encryption() {
         let identity = FourWordAddress::from("alice-bob-charlie-david");
-        let secure = SecureMessaging::new(identity.clone()).unwrap();
+        let dht = super::DhtClient::new().unwrap();
+        let secure = SecureMessaging::new(identity.clone(), dht).await.unwrap();
 
         let message = RichMessage::new(
             UserHandle::from(identity.to_string()),
@@ -355,10 +357,11 @@ mod tests {
         assert_eq!(encrypted.id, message.id);
     }
 
-    #[test]
-    fn test_message_signing() {
+    #[tokio::test]
+    async fn test_message_signing() {
         let identity = FourWordAddress::from("alice-bob-charlie-david");
-        let secure = SecureMessaging::new(identity.clone()).unwrap();
+        let dht = super::DhtClient::new().unwrap();
+        let secure = SecureMessaging::new(identity.clone(), dht).await.unwrap();
 
         let message = RichMessage::new(
             UserHandle::from(identity.to_string()),

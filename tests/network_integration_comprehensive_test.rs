@@ -237,7 +237,7 @@ async fn test_peer_discovery_under_load() -> Result<()> {
 
     // Connect nodes in a star topology (all to node 0)
     for i in 1..framework.nodes.len() {
-        let peer_addr = format!("/ip4/127.0.0.1/tcp/9000");
+        let peer_addr = "/ip4/127.0.0.1/tcp/9000".to_string();
         framework.nodes[i].connect_peer(&peer_addr).await?;
     }
 

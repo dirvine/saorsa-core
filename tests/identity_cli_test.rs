@@ -259,7 +259,7 @@ mod cli_integration_tests {
     fn test_cli_binary_integration() {
         // Test actual CLI binary if built
         let output = Command::new("saorsa")
-            .args(&["identity", "--help"])
+            .args(["identity", "--help"])
             .output()
             .expect("Failed to execute saorsa binary");
 

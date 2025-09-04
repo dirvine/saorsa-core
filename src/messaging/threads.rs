@@ -156,7 +156,7 @@ impl ThreadManager {
     pub async fn resolve_thread(&self, thread_id: ThreadId) -> Result<()> {
         // Mark thread as resolved
         // In production, this would update storage
-        log::info!("Thread {:?} resolved", thread_id);
+        tracing::info!("Thread {:?} resolved", thread_id);
         Ok(())
     }
 

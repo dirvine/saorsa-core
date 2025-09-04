@@ -83,8 +83,8 @@ This document establishes performance targets, scalability principles, and optim
 - **Concurrent Operations**: >100 parallel storage operations
 
 #### Cryptographic Performance
-- **Ed25519 Signatures**: >50,000 signatures/second
-- **Ed25519 Verification**: >20,000 verifications/second
+- **ML-DSA Signatures**: PQC performance metrics depend on platform; target >10,000 signatures/second
+- **ML-DSA Verification**: Target >5,000 verifications/second
 - **BLAKE3 Hashing**: >1 GB/second hashing throughput
 - **Encryption/Decryption**: >500 MB/second ChaCha20-Poly1305
 
@@ -238,8 +238,8 @@ pub fn verify_batch(
     signatures: &[Signature],
     public_keys: &[PublicKey],
 ) -> Result<(), CryptoError> {
-    // Use Ed25519 batch verification for better performance
-    ed25519_dalek::verify_batch(
+    // PQC note: batch verification APIs vary by implementation
+    // ML-DSA batch verification to be evaluated with provider support
         messages.iter().map(|m| &m.content),
         signatures,
         public_keys,

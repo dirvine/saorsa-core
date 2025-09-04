@@ -270,7 +270,6 @@ impl EnhancedIdentityManager {
             ml_dsa_public_key: vec![0; 32], // Placeholder Vec<u8>
             ml_kem_public_key: vec![0; 32], // Placeholder Vec<u8>
             frost_public_key: None,
-            legacy_key: None,
             capabilities: CryptoCapabilities::default(),
             created_at: SystemTime::now(),
         };
@@ -308,8 +307,7 @@ impl EnhancedIdentityManager {
             peer_id,
             ml_dsa_public_key: ml_dsa_pub_bytes,
             ml_kem_public_key: ml_kem_pub_bytes,
-            frost_public_key: None,             // Optional threshold key
-            legacy_key: None,                   // Optional legacy key
+            frost_public_key: None, // Optional threshold key
             capabilities,
             created_at: SystemTime::now(),
         };

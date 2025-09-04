@@ -311,7 +311,7 @@ mod tests {
         .unwrap();
 
         let score = metrics.overall_score();
-        assert!(score >= 0.0 && score <= 1.0);
+        assert!((0.0..=1.0).contains(&score));
         assert!(score > 0.8); // Should be high for good metrics
     }
 

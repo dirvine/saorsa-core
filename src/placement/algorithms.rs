@@ -648,7 +648,7 @@ mod tests {
         );
         // Diversity factor calculation may not be fully implemented yet
         // assert!(factor < 1.0); // Should be penalized
-        println!(
+        tracing::debug!(
             "Diversity factor: {}, skipping penalty check for now",
             factor
         );

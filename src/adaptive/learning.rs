@@ -1658,7 +1658,7 @@ mod tests {
         let hash = ContentHash([1u8; 32]);
 
         // Test insertion
-        assert!(manager.insert(hash.clone(), vec![0u8; 100]).await);
+        assert!(manager.insert(hash, vec![0u8; 100]).await);
 
         // Test retrieval
         assert!(manager.get(&hash).await.is_some());
@@ -1699,7 +1699,7 @@ mod tests {
 
         // Q-value should have been updated
         let q_table = manager.q_table.read().await;
-        assert!(q_table.len() > 0);
+        assert!(!q_table.is_empty());
     }
 
     #[tokio::test]
@@ -1731,9 +1731,9 @@ mod tests {
         let hash2 = ContentHash([2u8; 32]);
         let hash3 = ContentHash([3u8; 32]);
 
-        manager.insert(hash1.clone(), vec![0u8; 100]).await;
-        manager.insert(hash2.clone(), vec![0u8; 100]).await;
-        manager.insert(hash3.clone(), vec![0u8; 100]).await;
+        manager.insert(hash1, vec![0u8; 100]).await;
+        manager.insert(hash2, vec![0u8; 100]).await;
+        manager.insert(hash3, vec![0u8; 100]).await;
 
         // Access hash1 and hash2 to make them more recently used
         manager.get(&hash1).await;
@@ -1741,7 +1741,7 @@ mod tests {
 
         // Force eviction by adding another item
         let hash4 = ContentHash([4u8; 32]);
-        manager.insert(hash4.clone(), vec![0u8; 100]).await;
+        manager.insert(hash4, vec![0u8; 100]).await;
 
         // hash3 should have been evicted (LRU)
         assert!(manager.get(&hash1).await.is_some());
@@ -1756,7 +1756,7 @@ mod tests {
 
         // Insert some content to establish hit rate
         let hash = ContentHash([1u8; 32]);
-        manager.insert(hash.clone(), vec![0u8; 100]).await;
+        manager.insert(hash, vec![0u8; 100]).await;
 
         // Generate some hits
         for _ in 0..5 {
@@ -1790,7 +1790,7 @@ mod tests {
         let hash2 = ContentHash([2u8; 32]);
 
         // Insert content
-        manager.insert(hash1.clone(), vec![0u8; 100]).await;
+        manager.insert(hash1, vec![0u8; 100]).await;
 
         // Generate hits and misses
         manager.get(&hash1).await; // Hit
@@ -1837,7 +1837,7 @@ mod tests {
 
         // With exploration enabled and no strict state mocking, allow wider variance in CI
         // Expect majority preference for Cache while tolerating noise from exploration.
-        assert!(cache_count >= 50 && cache_count <= 100);
+        assert!((50..=100).contains(&cache_count));
     }
 
     #[tokio::test]
@@ -1848,7 +1848,7 @@ mod tests {
         let hash = ContentHash([1u8; 32]);
 
         // Insert content and track stats
-        manager.insert(hash.clone(), vec![0u8; 100]).await;
+        manager.insert(hash, vec![0u8; 100]).await;
 
         // Make some requests to update stats
         for _ in 0..5 {

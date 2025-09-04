@@ -47,7 +47,7 @@ The persistence layer provides durable, encrypted, and replicated storage for th
                     │
 ┌─────────────────────────────────────────┐
 │      Encryption & Compression           │
-│     (ML-KEM, AES-256-GCM, Zstd)        │
+│     (ChaCha20-Poly1305, Zstd)          │
 └─────────────────────────────────────────┘
                     │
 ┌─────────────────────────────────────────┐
@@ -182,11 +182,8 @@ pub struct EncryptionConfig {
 }
 
 pub enum EncryptionAlgorithm {
-    /// Quantum-resistant
-    MlKem768Aes256Gcm,
-    
-    /// Traditional (fallback)
-    Aes256Gcm,
+    /// Symmetric encryption (saorsa-pqc)
+    ChaCha20Poly1305,
     
     /// No encryption (testing only)
     None,
@@ -196,7 +193,7 @@ pub enum EncryptionAlgorithm {
 ### Encryption Flow
 1. Derive encryption key from master key
 2. Generate random nonce for each value
-3. Encrypt value with AES-256-GCM
+3. Encrypt value with ChaCha20-Poly1305
 4. Store encrypted value with metadata
 5. Cache decrypted values in memory
 
@@ -408,7 +405,7 @@ ttl_seconds = 3600
 # Encryption
 [persistence.encryption]
 enabled = true
-algorithm = "ml-kem-768-aes-256-gcm"
+algorithm = "chacha20poly1305"
 key_rotation_days = 90
 
 # Replication

@@ -13,59 +13,57 @@
 
 //! Database migration support
 
-use crate::persistence::{Store, Result, PersistenceError};
+use crate::persistence::{PersistenceError, Result, Store};
 
 /// Migration runner
 pub struct MigrationRunner;
 
 impl MigrationRunner {
     /// Apply migrations up to target version
-    pub async fn migrate_to(
-        store: &dyn Store,
-        target_version: u32,
-    ) -> Result<()> {
+    pub async fn migrate_to(store: &dyn Store, target_version: u32) -> Result<()> {
         // Get current version
-        let current = store.get(b"schema_version").await?
+        let current = store
+            .get(b"schema_version")
+            .await?
             .and_then(|v| String::from_utf8(v).ok())
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(0);
-        
+
         if current >= target_version {
             return Ok(());
         }
-        
+
         // Apply migrations
         for version in (current + 1)..=target_version {
             // Apply migration for this version
             let version_bytes = version.to_string().into_bytes();
             store.put(b"schema_version", &version_bytes, None).await?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Rollback to previous version
-    pub async fn rollback(
-        store: &dyn Store,
-        target_version: u32,
-    ) -> Result<()> {
+    pub async fn rollback(store: &dyn Store, target_version: u32) -> Result<()> {
         // Get current version
-        let current = store.get(b"schema_version").await?
+        let current = store
+            .get(b"schema_version")
+            .await?
             .and_then(|v| String::from_utf8(v).ok())
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(0);
-        
+
         if current <= target_version {
             return Ok(());
         }
-        
+
         // Rollback migrations
         for version in (target_version + 1..=current).rev() {
             // Rollback migration for this version
             let version_bytes = (version - 1).to_string().into_bytes();
             store.put(b"schema_version", &version_bytes, None).await?;
         }
-        
+
         Ok(())
     }
 }

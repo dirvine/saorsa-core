@@ -93,8 +93,8 @@ impl WorkloadGenerator {
             }
         };
 
-        let (hash, size) = self.content_pool[idx].clone();
-        self.access_history.push(hash.clone());
+        let (hash, size) = self.content_pool[idx];
+        self.access_history.push(hash);
         (hash, size)
     }
 }
@@ -133,7 +133,7 @@ impl LRUCache {
                     .items
                     .iter()
                     .min_by_key(|(_, (_, last))| last)
-                    .map(|(h, _)| h.clone())
+                    .map(|(h, _)| *h)
                     .unwrap();
 
                 if let Some((evict_size, _)) = self.items.remove(&evict_hash) {
@@ -143,7 +143,7 @@ impl LRUCache {
 
             // Cache if there's space
             if self.usage + size <= self.capacity {
-                self.items.insert(hash.clone(), (size, Instant::now()));
+                self.items.insert(*hash, (size, Instant::now()));
                 self.usage += size;
             }
 
@@ -409,9 +409,9 @@ async fn test_q_learning_handles_mixed_content_sizes() {
     // Train the system
     for i in 0..1000 {
         let (content_hash, content_size) = match i % 10 {
-            0..=5 => (small_content.clone(), small_size), // 60% small
-            6..=8 => (medium_content.clone(), medium_size), // 30% medium
-            _ => (large_content.clone(), large_size),     // 10% large
+            0..=5 => (small_content, small_size), // 60% small
+            6..=8 => (medium_content, medium_size), // 30% medium
+            _ => (large_content, large_size),     // 10% large
         };
 
         let state = q_manager.get_current_state(&content_hash).await.unwrap();
@@ -495,7 +495,7 @@ async fn test_q_learning_convergence() {
         (ContentHash([4u8; 32]), 400 * 1024), // 400KB, accessed very rarely
     ];
 
-    let access_probabilities = vec![0.5, 0.3, 0.15, 0.05];
+    let access_probabilities = [0.5, 0.3, 0.15, 0.05];
 
     // Track Q-values over time
     let mut q_value_history = Vec::new();
@@ -517,7 +517,7 @@ async fn test_q_learning_convergence() {
                 }
             }
 
-            let (content_hash, content_size) = content_items[selected_idx].clone();
+            let (content_hash, content_size) = content_items[selected_idx];
 
             let state = q_manager.get_current_state(&content_hash).await.unwrap();
             let actions = q_manager

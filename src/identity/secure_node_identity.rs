@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn test_secure_identity_generation() {
         let identity = SecureNodeIdentity::generate().unwrap();
-        assert_eq!(identity.node_id().to_string().len() > 0, true);
+        assert!(!identity.node_id().to_string().is_empty());
     }
 
     #[test]

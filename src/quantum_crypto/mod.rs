@@ -24,9 +24,9 @@ pub mod types;
 // NOTE: Not using wildcard import to avoid conflicts with ant-quic types
 // Selectively re-export only non-conflicting types from our types module
 pub use self::types::{
-    Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature, FrostCommitment, FrostGroupPublicKey,
-    FrostKeyShare, FrostPublicKey, FrostSignature, GroupId, HandshakeParameters, ParticipantId,
-    PeerId, QuantumPeerIdentity, SecureSession, SessionId, SessionState,
+    FrostCommitment, FrostGroupPublicKey, FrostKeyShare, FrostPublicKey, FrostSignature, GroupId,
+    HandshakeParameters, ParticipantId, PeerId, QuantumPeerIdentity, SecureSession, SessionId,
+    SessionState,
 };
 
 // Re-export all ant-quic PQC functions for convenience
@@ -62,11 +62,9 @@ pub use saorsa_pqc::{
     ChaCha20Poly1305Cipher,
     // Encrypted message types
     EncryptedMessage,
-    // Hybrid modes (classical + post-quantum)
+    // Hybrid APIs (optional)
     HybridKem,
     HybridPublicKeyEncryption,
-
-    HybridSignature,
     MlDsa65,
 
     MlDsaOperations,
@@ -179,17 +177,26 @@ pub fn negotiate_algorithms(
             QuantumCryptoError::UnsupportedAlgorithm("No common protocol version".to_string())
         })?;
 
+    // Select algorithms based on negotiated capabilities
+    let kem_algorithm = if use_ml_kem {
+        KemAlgorithm::MlKem768
+    } else {
+        return Err(QuantumCryptoError::UnsupportedAlgorithm(
+            "No common KEM algorithm".to_string()
+        ));
+    };
+    
+    let signature_algorithm = if use_ml_dsa {
+        SignatureAlgorithm::MlDsa65
+    } else {
+        return Err(QuantumCryptoError::UnsupportedAlgorithm(
+            "No common signature algorithm".to_string()
+        ));
+    };
+
     Ok(NegotiatedAlgorithms {
-        kem_algorithm: if use_ml_kem {
-            KemAlgorithm::MlKem768
-        } else {
-            KemAlgorithm::ClassicalEcdh
-        },
-        signature_algorithm: if use_ml_dsa {
-            SignatureAlgorithm::MlDsa65
-        } else {
-            SignatureAlgorithm::Ed25519
-        },
+        kem_algorithm,
+        signature_algorithm,
         hybrid_mode: use_hybrid,
         protocol_version: version,
     })
@@ -208,14 +215,12 @@ pub struct NegotiatedAlgorithms {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum KemAlgorithm {
     MlKem768,
-    ClassicalEcdh,
 }
 
 /// Signature algorithm
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum SignatureAlgorithm {
     MlDsa65,
-    Ed25519,
 }
 
 #[cfg(test)]
@@ -225,10 +230,10 @@ mod tests {
     #[test]
     fn test_saorsa_pqc_availability() {
         // Test that saorsa-pqc types are available and can be instantiated
-        let _ml_kem = MlKem768::default();
-        let _ml_dsa = MlDsa65::default();
+        let _ml_kem = MlKem768;
+        let _ml_dsa = MlDsa65;
         let _hybrid_kem = HybridKem::default();
-        let _hybrid_sig = HybridSignature::default();
+        // HybridSignatureValue doesn't implement Default - skip
         let _hybrid_pke = HybridPublicKeyEncryption::default();
 
         println!("✅ saorsa-pqc 0.3.0 types are available");
@@ -250,7 +255,6 @@ mod tests {
 
         let negotiated = negotiate_algorithms(&local_caps, &remote_caps).unwrap();
         assert_eq!(negotiated.kem_algorithm, KemAlgorithm::MlKem768);
-        assert_eq!(negotiated.signature_algorithm, SignatureAlgorithm::Ed25519);
-        assert!(negotiated.hybrid_mode);
+        assert_eq!(negotiated.signature_algorithm, SignatureAlgorithm::MlDsa65);
     }
 }

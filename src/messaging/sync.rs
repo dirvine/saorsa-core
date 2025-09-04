@@ -236,7 +236,7 @@ impl RealtimeSync {
         // Process event based on type
         match &event {
             SyncEvent::NewMessage { .. } => {
-                log::debug!("New message received");
+                tracing::debug!("New message received");
             }
             SyncEvent::TypingIndicator {
                 channel_id,

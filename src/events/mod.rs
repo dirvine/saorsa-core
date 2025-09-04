@@ -17,13 +17,13 @@
 //! state changes throughout the system.
 
 use crate::fwid::Key;
-use bytes::Bytes;
+use crate::types::Forward;
 use anyhow::Result;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
-use crate::types::Forward;
 
 /// A subscription handle for receiving events
 pub struct Subscription<T> {
@@ -133,12 +133,10 @@ impl EventBus {
     pub async fn subscribe_dht_key(&self, key: Key) -> Subscription<Bytes> {
         let mut watches = self.dht_watches.write().await;
 
-        let tx = watches
-            .entry(key)
-            .or_insert_with(|| {
-                let (tx, _) = broadcast::channel(100);
-                tx
-            });
+        let tx = watches.entry(key).or_insert_with(|| {
+            let (tx, _) = broadcast::channel(100);
+            tx
+        });
 
         Subscription::new(tx.subscribe())
     }
@@ -263,9 +261,15 @@ mod tests {
 
         let mut sub = bus.subscribe_forwards(identity_key.clone()).await;
 
-        let fwd = Forward { proto: "ant-quic".to_string(), addr: "quic://example.com:9000".to_string(), exp: 1234567890 };
+        let fwd = Forward {
+            proto: "ant-quic".to_string(),
+            addr: "quic://example.com:9000".to_string(),
+            exp: 1234567890,
+        };
 
-        bus.publish_forward_for(identity_key.clone(), fwd.clone()).await.unwrap();
+        bus.publish_forward_for(identity_key.clone(), fwd.clone())
+            .await
+            .unwrap();
 
         let received = sub.recv().await.unwrap();
         assert_eq!(received.proto, "ant-quic");

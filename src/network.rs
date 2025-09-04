@@ -514,10 +514,9 @@ impl P2PNode {
                     .or(Some(std::net::SocketAddr::from(([0, 0, 0, 0], 0))));
                 let v4: Option<std::net::SocketAddr> = "127.0.0.1:0".parse().ok();
                 let handle = tokio::runtime::Handle::current();
-                let dual_attempt = handle
-                    .block_on(crate::transport::ant_quic_adapter::DualStackNetworkNode::new(
-                        v6, v4,
-                    ));
+                let dual_attempt = handle.block_on(
+                    crate::transport::ant_quic_adapter::DualStackNetworkNode::new(v6, v4),
+                );
                 let dual = match dual_attempt {
                     Ok(d) => d,
                     Err(_e1) => {
@@ -532,11 +531,8 @@ impl P2PNode {
                             Ok(d) => d,
                             Err(e2) => {
                                 return Err(P2PError::Network(NetworkError::BindError(
-                                    format!(
-                                        "Failed to create dual-stack network node: {}",
-                                        e2
-                                    )
-                                    .into(),
+                                    format!("Failed to create dual-stack network node: {}", e2)
+                                        .into(),
                                 )));
                             }
                         }
@@ -985,11 +981,41 @@ impl P2PNode {
 
     /// Start the message receiving system with background tasks
     async fn start_message_receiving_system(&self) -> Result<()> {
-        info!("Message receiving system initialized (background tasks simplified for demo)");
+        info!("Starting message receiving system");
+        let dual = self.dual_node.clone();
+        let event_tx = self.event_tx.clone();
 
-        // For now, we'll rely on the transport layer's message sending and the
-        // publish/subscribe pattern for local message routing
-        // Real message receiving would require deeper transport integration
+        tokio::spawn(async move {
+            loop {
+                match dual.receive_any().await {
+                    Ok((_peer_id, bytes)) => {
+                        // Expect the JSON message wrapper from create_protocol_message
+                        #[allow(clippy::collapsible_if)]
+                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                            if let (Some(protocol), Some(data), Some(from)) = (
+                                value.get("protocol").and_then(|v| v.as_str()),
+                                value.get("data").and_then(|v| v.as_array()),
+                                value.get("from").and_then(|v| v.as_str()),
+                            ) {
+                                let payload: Vec<u8> = data
+                                    .iter()
+                                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                                    .collect();
+                                let _ = event_tx.send(P2PEvent::Message {
+                                    topic: protocol.to_string(),
+                                    source: from.to_string(),
+                                    data: payload,
+                                });
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Receive error: {}", e);
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                }
+            }
+        });
 
         Ok(())
     }

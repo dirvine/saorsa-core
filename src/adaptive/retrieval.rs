@@ -467,7 +467,10 @@ mod tests {
             grid_size: GridSize::Fixed(10, 10),
         };
         let som = Arc::new(SelfOrganizingMap::new(som_config));
-        let router = Arc::new(AdaptiveRouter::new(trust_provider, hyperbolic, som));
+        let router = Arc::new(AdaptiveRouter::new(trust_provider));
+        // Store hyperbolic and som for potential future use
+        let _hyperbolic = hyperbolic;
+        let _som = som;
 
         let temp_dir = TempDir::new().unwrap();
         let storage_config = StorageConfig {
@@ -525,7 +528,7 @@ mod tests {
         // Add to cache
         manager
             .cache_manager
-            .insert(hash.clone(), content.clone())
+            .insert(hash, content.clone())
             .await;
 
         // Retrieve should find it in cache

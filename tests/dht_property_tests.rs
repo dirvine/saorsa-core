@@ -27,7 +27,7 @@ fn arb_key() -> impl Strategy<Value = Key> {
 fn arb_peer_id() -> impl Strategy<Value = NodeId> {
     "[a-zA-Z0-9_-]{3,20}".prop_map(|s| {
         // Create NodeId from string by hashing it
-        let hash_bytes = blake3::hash(s.as_bytes()).as_bytes().clone();
+        let hash_bytes = *blake3::hash(s.as_bytes()).as_bytes();
         NodeId::from_bytes(hash_bytes)
     })
 }
@@ -128,20 +128,20 @@ proptest! {
 
             for record in records {
                 let publisher = record.publisher.to_string();
-                let key = record.key.clone();
+                let key = record.key;
 
                 storage.store(record).await.unwrap();
 
                 publishers_to_keys
                     .entry(publisher.clone())
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .insert(key);
             }
 
             // Verify publisher index consistency
             for (publisher, expected_keys) in publishers_to_keys {
                 let indexed_records = storage.get_records_by_publisher(&publisher, None).await;
-                let indexed_keys: HashSet<_> = indexed_records.iter().map(|r| r.key.clone()).collect();
+                let indexed_keys: HashSet<_> = indexed_records.iter().map(|r| r.key).collect();
 
                 // All indexed keys should be in our expected set
                 // (Due to LRU eviction, expected_keys might be a superset)
@@ -179,7 +179,7 @@ proptest! {
                 prop_assert!(retrieved.is_some(), "Record should be retrievable after storage");
 
                 let retrieved = retrieved.unwrap();
-                prop_assert_eq!(retrieved.key, record.key.clone());
+                prop_assert_eq!(retrieved.key, record.key);
                 prop_assert_eq!(retrieved.value, record.value.clone());
                 prop_assert_eq!(retrieved.publisher, record.publisher.clone());
             }
@@ -255,7 +255,7 @@ proptest! {
                     // Non-expired record might be evicted due to LRU, but if present should be valid
                     if let Some(retrieved_record) = retrieved {
                         prop_assert!(!retrieved_record.is_expired());
-                        prop_assert_eq!(retrieved_record.key, record.key.clone());
+                        prop_assert_eq!(retrieved_record.key, record.key);
                     }
                 }
             }
@@ -297,7 +297,7 @@ proptest! {
             for operation in operations {
                 match operation {
                     DHTOperation::Store(record) => {
-                        let key = record.key.clone();
+                        let key = record.key;
                         storage.store(record).await.unwrap();
                         stored_keys.push(key);
                     }
@@ -449,9 +449,8 @@ mod deterministic_properties {
                 },
                 format!("value_{}", i).into_bytes(),
                 NodeId::from_bytes(
-                    blake3::hash(format!("publisher_{}", i % 3).as_bytes())
-                        .as_bytes()
-                        .clone(),
+                    *blake3::hash(format!("publisher_{}", i % 3).as_bytes())
+                        .as_bytes(),
                 ),
             );
             storage.store(record).await?;
@@ -475,7 +474,7 @@ mod deterministic_properties {
                     key
                 },
                 format!("data_for_{}", publisher).into_bytes(),
-                NodeId::from_bytes(blake3::hash(publisher.as_bytes()).as_bytes().clone()),
+                NodeId::from_bytes(*blake3::hash(publisher.as_bytes()).as_bytes()),
             );
             storage.store(record).await?;
         }
@@ -501,7 +500,7 @@ mod deterministic_properties {
                 key
             },
             b"expired_data".to_vec(),
-            NodeId::from_bytes(blake3::hash(b"expired_publisher").as_bytes().clone()),
+            NodeId::from_bytes(*blake3::hash(b"expired_publisher").as_bytes()),
         );
         expired_record.expires_at = SystemTime::now() - Duration::from_secs(3600);
 

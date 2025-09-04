@@ -13,12 +13,12 @@
 
 //! Replication layer for distributed storage
 
+use crate::persistence::{
+    Migrate, Monitor, NodeId, Query, Replicate, ReplicationConfig, ReplicationStatus, Result,
+    Store, SyncStats,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
-use crate::persistence::{
-    Store, Query, Replicate, Migrate, Monitor, ReplicationConfig,
-    Result, NodeId, ReplicationStatus, SyncStats,
-};
 
 /// Replicated storage wrapper
 pub struct ReplicatedStore {
@@ -44,15 +44,15 @@ impl Replicate for ReplicatedStore {
     async fn replicate(&self, key: &[u8], nodes: Vec<NodeId>) -> Result<()> {
         self.inner.replicate(key, nodes).await
     }
-    
+
     async fn sync_from(&self, peer: NodeId, namespace: &str) -> Result<SyncStats> {
         self.inner.sync_from(peer, namespace).await
     }
-    
+
     async fn replication_status(&self, key: &[u8]) -> Result<ReplicationStatus> {
         self.inner.replication_status(key).await
     }
-    
+
     async fn set_replication_config(&self, config: ReplicationConfig) -> Result<()> {
         self.inner.set_replication_config(config).await
     }

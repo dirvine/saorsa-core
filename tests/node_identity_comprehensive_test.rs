@@ -226,7 +226,7 @@ mod proof_of_work_tests {
 #[cfg(test)]
 mod persistence_tests {
     use super::*;
-    use tokio;
+    
 
     #[tokio::test]
     async fn test_identity_save_and_load() {

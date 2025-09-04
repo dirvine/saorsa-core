@@ -1,0 +1,30 @@
+rules:
+  - id: no-panic-in-prod
+    message: "panic! is forbidden in production code"
+    language: Rust
+    severity: error
+    pattern: panic!($A)
+    constraints:
+      not:
+        inside:
+          pattern: "#[cfg(test)] mod $M { .. }"
+
+  - id: no-unwrap-in-prod
+    message: "unwrap() is forbidden in production code"
+    language: Rust
+    severity: error
+    pattern: $A.unwrap()
+    constraints:
+      not:
+        inside:
+          pattern: "#[cfg(test)] mod $M { .. }"
+
+  - id: no-expect-in-prod
+    message: "expect() is forbidden in production code"
+    language: Rust
+    severity: error
+    pattern: $A.expect($B)
+    constraints:
+      not:
+        inside:
+          pattern: "#[cfg(test)] mod $M { .. }"

@@ -2,8 +2,8 @@
 
 use crate::api::GroupIdentityPacketV1;
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use saorsa_pqc::MlDsaOperations; // bring trait into scope for verify()
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
@@ -23,13 +23,13 @@ pub enum ProofMode {
 /// CBOR-encoded MLS proof (version 1)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MlsProofV1 {
-    pub ver: u8,            // must be 1
-    pub mode: ProofMode,    // "member" or "group"
-    pub cipher: u16,        // ciphersuite id
-    pub epoch: u64,         // epoch being proven
-    pub signer_id: Option<Vec<u8>>, // member id for Member mode
-    pub key_id: Option<Vec<u8>>,    // external key id for Group mode
-    pub sig: Vec<u8>,       // signature bytes
+    pub ver: u8,                      // must be 1
+    pub mode: ProofMode,              // "member" or "group"
+    pub cipher: u16,                  // ciphersuite id
+    pub epoch: u64,                   // epoch being proven
+    pub signer_id: Option<Vec<u8>>,   // member id for Member mode
+    pub key_id: Option<Vec<u8>>,      // external key id for Group mode
+    pub sig: Vec<u8>,                 // signature bytes
     pub roster_hash: Option<Vec<u8>>, // optional roster hash pin
     pub signer_pub: Option<Vec<u8>>,  // optional signer pub override
 }
@@ -72,7 +72,7 @@ impl crate::auth::MlsProofVerifier for DefaultMlsVerifier {
         // Fetch and validate the group identity snapshot
         let group = self.provider.fetch_group_identity(group_id)?;
         // Sanity: group id must match
-        if &*group.id.as_bytes() != group_id {
+        if group.id.as_bytes() != group_id {
             return Ok(false);
         }
 
@@ -87,8 +87,15 @@ impl crate::auth::MlsProofVerifier for DefaultMlsVerifier {
                     pk.as_slice()
                 } else {
                     // Find member by signer_id
-                    let sid = match &proof.signer_id { Some(s) => s, None => return Ok(false) };
-                    let member = match group.members.iter().find(|m| m.member_id.as_bytes() == sid.as_slice()) {
+                    let sid = match &proof.signer_id {
+                        Some(s) => s,
+                        None => return Ok(false),
+                    };
+                    let member = match group
+                        .members
+                        .iter()
+                        .find(|m| m.member_id.as_bytes() == sid.as_slice())
+                    {
                         Some(m) => m,
                         None => return Ok(false),
                     };
@@ -102,7 +109,9 @@ impl crate::auth::MlsProofVerifier for DefaultMlsVerifier {
                 };
                 // Expect fixed ML-DSA-65 signature length
                 const SIG_LEN: usize = 3309;
-                if proof.sig.len() != SIG_LEN { return Ok(false); }
+                if proof.sig.len() != SIG_LEN {
+                    return Ok(false);
+                }
                 let mut arr = [0u8; SIG_LEN];
                 arr.copy_from_slice(&proof.sig);
                 let sig = crate::quantum_crypto::MlDsaSignature(Box::new(arr));
@@ -117,7 +126,9 @@ impl crate::auth::MlsProofVerifier for DefaultMlsVerifier {
                     Err(_) => return Ok(false),
                 };
                 const SIG_LEN: usize = 3309;
-                if proof.sig.len() != SIG_LEN { return Ok(false); }
+                if proof.sig.len() != SIG_LEN {
+                    return Ok(false);
+                }
                 let mut arr = [0u8; SIG_LEN];
                 arr.copy_from_slice(&proof.sig);
                 let sig = crate::quantum_crypto::MlDsaSignature(Box::new(arr));

@@ -56,14 +56,14 @@ async fn test_security_manager_validate_join() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_adaptive_router_routes_with_registered_strategy() -> anyhow::Result<()> {
     let trust = Arc::new(MockTrustProvider::new());
-    let hyper = Arc::new(HyperbolicSpace::new());
-    let som = Arc::new(SelfOrganizingMap::new(SomConfig {
+    let _hyper = Arc::new(HyperbolicSpace::new());
+    let _som = Arc::new(SelfOrganizingMap::new(SomConfig {
         initial_learning_rate: 0.3,
         initial_radius: 5.0,
         iterations: 100,
         grid_size: GridSize::Fixed(4, 4),
     }));
-    let router = AdaptiveRouter::new(trust, hyper, som);
+    let router = AdaptiveRouter::new(trust);
 
     struct DirectStrategy;
     #[async_trait::async_trait]

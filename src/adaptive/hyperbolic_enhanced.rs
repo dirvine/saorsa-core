@@ -619,9 +619,9 @@ mod tests {
         // Perform multiple adjustments
         let mut movements = vec![];
         for _i in 0..10 {
-            let coord_before = space.my_coordinate.read().await.clone();
+            let coord_before = *space.my_coordinate.read().await;
             space.adjust_coordinate_with_hysteresis(&neighbors).await;
-            let coord_after = space.my_coordinate.read().await.clone();
+            let coord_after = *space.my_coordinate.read().await;
 
             let movement = EnhancedHyperbolicSpace::distance_fixed(&coord_before, &coord_after);
             movements.push(movement);

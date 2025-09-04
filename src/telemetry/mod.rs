@@ -205,14 +205,14 @@ impl TelemetryCollector {
             StreamClass::File => "file",
             StreamClass::Media => "media",
         };
-        
+
         // For now, just log the usage - could be extended to track counts
-        log::debug!("Stream class {} opened", class_id);
-        
+        tracing::debug!("Stream class {} opened", class_id);
+
         // Record a bandwidth sample for the class (placeholder value)
         self.record_stream_bandwidth(class, 1024).await;
     }
-    
+
     /// Reset all metrics
     pub async fn reset(&self) {
         self.lookup_latencies.write().await.clear();

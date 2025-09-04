@@ -569,14 +569,10 @@ impl QLearnCacheManager {
         }
 
         // Update access info for existing content on cache hit only
-        if hit {
-            if let Some(info) = stats.access_frequency.get_mut(content_hash) {
-                info.count += 1;
-                info.last_access_secs = Self::current_timestamp_secs();
-                // Notify eviction strategy
-                drop(stats);
-                self.eviction_strategy.write().await.on_access(content_hash);
-            }
+        if hit && let Some(info) = stats.access_frequency.get_mut(content_hash) {
+            info.count += 1;
+            info.last_access_secs = Self::current_timestamp_secs();
+            self.eviction_strategy.write().await.on_access(content_hash);
         }
 
         Ok(())
@@ -777,10 +773,10 @@ mod tests {
         let content_hash = ContentHash([1u8; 32]);
         let node_id = NodeId([2u8; 32]);
 
-        let cache_action = CacheAction::Cache(content_hash.clone());
+        let cache_action = CacheAction::Cache(content_hash);
         assert_eq!(cache_action.action_type(), ActionType::Cache);
 
-        let evict_action = CacheAction::Evict(content_hash.clone());
+        let evict_action = CacheAction::Evict(content_hash);
         assert_eq!(evict_action.action_type(), ActionType::Evict);
 
         let replicate_action = CacheAction::Replicate {
@@ -895,7 +891,7 @@ mod tests {
         let state = StateVector::from_metrics(0.5, 10.0, 300, 1024);
         let content_hash = ContentHash([1u8; 32]);
         let actions = vec![
-            CacheAction::Cache(content_hash.clone()),
+            CacheAction::Cache(content_hash),
             CacheAction::DoNothing,
         ];
 
@@ -950,7 +946,7 @@ mod tests {
         for i in 0..7 {
             let experience = Experience {
                 state,
-                action: CacheAction::Cache(content_hash.clone()),
+                action: CacheAction::Cache(content_hash),
                 reward: i as f64,
                 next_state: state,
                 terminal: false,
@@ -1001,7 +997,7 @@ mod tests {
         // Test good caching decision
         let reward = manager
             .calculate_reward(
-                &CacheAction::Cache(content_hash.clone()),
+                &CacheAction::Cache(content_hash),
                 false,
                 0.3, // low utilization
                 0.4,
@@ -1012,7 +1008,7 @@ mod tests {
         // Test bad caching decision (cache full)
         let reward = manager
             .calculate_reward(
-                &CacheAction::Cache(content_hash.clone()),
+                &CacheAction::Cache(content_hash),
                 false,
                 0.85, // high utilization
                 0.96, // very high after
@@ -1023,7 +1019,7 @@ mod tests {
         // Test good eviction
         let reward = manager
             .calculate_reward(
-                &CacheAction::Evict(content_hash.clone()),
+                &CacheAction::Evict(content_hash),
                 false,
                 0.95, // very high utilization
                 0.85,
@@ -1053,7 +1049,7 @@ mod tests {
         // Test cache action
         manager
             .update_statistics(
-                &CacheAction::Cache(content_hash.clone()),
+                &CacheAction::Cache(content_hash),
                 &content_hash,
                 100,
                 false,
@@ -1079,7 +1075,7 @@ mod tests {
         // Test eviction
         manager
             .update_statistics(
-                &CacheAction::Evict(content_hash.clone()),
+                &CacheAction::Evict(content_hash),
                 &content_hash,
                 100,
                 false,
@@ -1109,7 +1105,7 @@ mod tests {
 
         // Add content to cache
         manager
-            .update_statistics(&CacheAction::Cache(content1.clone()), &content1, 150, false)
+            .update_statistics(&CacheAction::Cache(content1), &content1, 150, false)
             .await?;
 
         // Cache nearly full - should suggest eviction

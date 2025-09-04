@@ -253,7 +253,7 @@ impl IntegrationTestRunner {
         let start_time = Instant::now();
 
         let mut cmd = Command::new("cargo");
-        cmd.args(&["test", "--test", test_file, test_name]);
+        cmd.args(["test", "--test", test_file, test_name]);
         cmd.env("RUST_LOG", &self.config.log_level);
         cmd.env("RUST_BACKTRACE", "1");
 
@@ -371,7 +371,7 @@ impl IntegrationTestRunner {
                 for (metric, value) in &result.performance_metrics {
                     report.push_str(&format!("- {}: {:.2}\n", metric, value));
                 }
-                report.push_str("\n");
+                report.push('\n');
             }
         }
 
@@ -408,9 +408,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_integration_runner() -> Result<()> {
-        let mut config = TestSuiteConfig::default();
-        config.timeout_seconds = 60; // Shorter timeout for testing
-
+        let config = TestSuiteConfig {
+            timeout_seconds: 60,
+            ..Default::default()
+        };
         let runner = IntegrationTestRunner::new(config);
 
         // This would run all tests in a real scenario

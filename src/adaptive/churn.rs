@@ -731,7 +731,6 @@ impl RecoveryManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adaptive::som::{GridSize, SomConfig};
     use crate::adaptive::trust::MockTrustProvider;
     use rand::RngCore;
 
@@ -742,27 +741,9 @@ mod tests {
             Default::default(),
             trust_provider.clone(),
             predictor.clone(),
-            Arc::new(AdaptiveRouter::new(
-                trust_provider.clone(),
-                Arc::new(crate::adaptive::hyperbolic::HyperbolicSpace::new()),
-                Arc::new(crate::adaptive::som::SelfOrganizingMap::new(SomConfig {
-                    initial_learning_rate: 0.3,
-                    initial_radius: 5.0,
-                    iterations: 100,
-                    grid_size: GridSize::Fixed(10, 10),
-                })),
-            )),
+            Arc::new(AdaptiveRouter::new(trust_provider.clone())),
         ));
-        let router = Arc::new(AdaptiveRouter::new(
-            trust_provider.clone(),
-            Arc::new(crate::adaptive::hyperbolic::HyperbolicSpace::new()),
-            Arc::new(crate::adaptive::som::SelfOrganizingMap::new(SomConfig {
-                initial_learning_rate: 0.3,
-                initial_radius: 5.0,
-                iterations: 100,
-                grid_size: GridSize::Fixed(10, 10),
-            })),
-        ));
+        let router = Arc::new(AdaptiveRouter::new(trust_provider.clone()));
         // Create a test NodeId
         use crate::peer_record::UserId;
         let mut hash = [0u8; 32];

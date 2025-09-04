@@ -21,10 +21,10 @@ use tokio::sync::RwLock;
 pub struct MetricsCollector {
     /// Read operation metrics
     read_metrics: Arc<RwLock<OperationMetrics>>,
-    
+
     /// Write operation metrics
     write_metrics: Arc<RwLock<OperationMetrics>>,
-    
+
     /// Delete operation metrics
     delete_metrics: Arc<RwLock<OperationMetrics>>,
 }
@@ -47,30 +47,30 @@ impl MetricsCollector {
             delete_metrics: Arc::new(RwLock::new(OperationMetrics::default())),
         }
     }
-    
+
     /// Record a read operation
     pub async fn record_read(&self, duration: Duration, success: bool) {
         let mut metrics = self.read_metrics.write().await;
         Self::record_operation(&mut metrics, duration, success);
     }
-    
+
     /// Record a write operation
     pub async fn record_write(&self, duration: Duration, success: bool) {
         let mut metrics = self.write_metrics.write().await;
         Self::record_operation(&mut metrics, duration, success);
     }
-    
+
     /// Record a delete operation
     pub async fn record_delete(&self, duration: Duration, success: bool) {
         let mut metrics = self.delete_metrics.write().await;
         Self::record_operation(&mut metrics, duration, success);
     }
-    
+
     /// Record an operation in metrics
     fn record_operation(metrics: &mut OperationMetrics, duration: Duration, success: bool) {
         metrics.count += 1;
         metrics.total_duration += duration;
-        
+
         if success {
             // Update min/max
             if let Some(min) = metrics.min_duration {
@@ -80,7 +80,7 @@ impl MetricsCollector {
             } else {
                 metrics.min_duration = Some(duration);
             }
-            
+
             if let Some(max) = metrics.max_duration {
                 if duration > max {
                     metrics.max_duration = Some(duration);
@@ -92,7 +92,7 @@ impl MetricsCollector {
             metrics.errors += 1;
         }
     }
-    
+
     /// Get average read latency
     pub async fn avg_read_latency(&self) -> Duration {
         let metrics = self.read_metrics.read().await;
@@ -102,7 +102,7 @@ impl MetricsCollector {
             Duration::ZERO
         }
     }
-    
+
     /// Get average write latency
     pub async fn avg_write_latency(&self) -> Duration {
         let metrics = self.write_metrics.read().await;
@@ -112,7 +112,7 @@ impl MetricsCollector {
             Duration::ZERO
         }
     }
-    
+
     /// Reset all metrics
     pub async fn reset(&self) {
         *self.read_metrics.write().await = OperationMetrics::default();
@@ -133,7 +133,7 @@ impl Timer {
             start: Instant::now(),
         }
     }
-    
+
     /// Get elapsed time
     pub fn elapsed(&self) -> Duration {
         self.start.elapsed()

@@ -15,10 +15,10 @@
 //!
 //! Manages user identities, IPv6 binding, and DHT integration for the identity system.
 
+use crate::quantum_crypto::ant_quic_integration::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
 use crate::{P2PError, Result, dht::Key, error::IdentityError, security::IPv6NodeID};
 use base64::Engine;
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey as Ed25519PublicKey};
-use rand::rngs::OsRng;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -46,7 +46,7 @@ pub type UserId = String;
 pub struct UserIdentity {
     /// Unique identifier derived from the user's public key
     pub user_id: UserId,
-    /// Ed25519 public key for signature verification and encryption
+    /// ML-DSA public key bytes
     pub public_key: Vec<u8>,
     /// Truncated display name (first 20 chars) for privacy protection
     pub display_name_hint: String,
@@ -73,7 +73,7 @@ pub struct EncryptedUserProfile {
     pub public_key: Vec<u8>,
     /// AES-GCM encrypted profile data containing personal information
     pub encrypted_data: Vec<u8>,
-    /// Ed25519 signature of the encrypted data for integrity verification
+    /// ML-DSA signature of the encrypted data for integrity verification
     pub signature: Vec<u8>,
     /// Optional proof of IPv6 address binding for network verification
     pub ipv6_binding_proof: Option<IPv6BindingProof>,
@@ -90,7 +90,7 @@ pub struct EncryptedUserProfile {
 pub struct IPv6BindingProof {
     /// The IPv6 address being bound to the identity
     pub ipv6_address: String,
-    /// Ed25519 signature proving ownership of both the identity and IPv6 address
+    /// ML-DSA signature proving ownership of both the identity and IPv6 address
     pub signature: Vec<u8>,
     /// Timestamp when the binding was created for freshness verification
     pub timestamp: SystemTime,
@@ -98,11 +98,7 @@ pub struct IPv6BindingProof {
 
 impl IPv6BindingProof {
     /// Create new IPv6 binding proof
-    pub fn new(
-        ipv6_id: IPv6NodeID,
-        user_keypair: &SigningKey,
-        _ipv6_keypair: &SigningKey,
-    ) -> Result<Self> {
+    pub fn new(ipv6_id: IPv6NodeID, user_secret: &MlDsaSecretKey) -> Result<Self> {
         let ipv6_address = format!("{ipv6_id:?}"); // Placeholder conversion
         let timestamp = SystemTime::now();
 
@@ -117,10 +113,9 @@ impl IPv6BindingProof {
                 )))?
                 .as_secs()
         );
-        let signature = user_keypair
-            .sign(signature_data.as_bytes())
-            .to_bytes()
-            .to_vec();
+        let sig = crate::quantum_crypto::ml_dsa_sign(user_secret, signature_data.as_bytes())
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("{e}").into())))?;
+        let signature = sig.as_bytes().to_vec();
 
         Ok(Self {
             ipv6_address,
@@ -156,7 +151,7 @@ pub struct AccessGrant {
 pub struct ChallengeResponse {
     /// Unique identifier for the challenge being responded to
     pub challenge_id: String,
-    /// Ed25519 signature of the challenge data
+    /// ML-DSA signature of the challenge data
     pub signature: Vec<u8>,
     /// Additional response data specific to the challenge type
     pub response_data: Vec<u8>,
@@ -230,7 +225,7 @@ impl UserProfile {
 impl UserIdentity {
     /// Create new user identity with cryptographic keypair
     ///
-    /// Generates a new Ed25519 keypair and creates a corresponding user identity.
+    /// Generates a new ML-DSA keypair and creates a corresponding user identity.
     /// The user ID is derived from the public key to ensure uniqueness.
     ///
     /// # Arguments
@@ -242,10 +237,12 @@ impl UserIdentity {
     ///
     /// # Errors
     /// Returns error if cryptographic key generation fails
-    pub fn new(display_name: String, three_word_address: String) -> Result<(Self, SigningKey)> {
-        // Generate new keypair using ed25519-dalek directly
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let public_key = signing_key.verifying_key();
+    pub fn new(display_name: String, three_word_address: String) -> Result<Self> {
+        // Generate ML-DSA keypair
+        let (public_key, _secret_key) =
+            crate::quantum_crypto::ant_quic_integration::generate_ml_dsa_keypair().map_err(
+                |e| P2PError::Identity(IdentityError::KeyDerivationFailed(format!("{}", e).into())),
+            )?;
 
         // Derive user ID from public key using SHA-256
         let mut hasher = Sha256::new();
@@ -266,7 +263,7 @@ impl UserIdentity {
             verification_level: VerificationLevel::SelfSigned,
         };
 
-        Ok((identity, signing_key))
+        Ok(identity)
     }
 
     /// Derive deterministic user ID from public key
@@ -276,14 +273,14 @@ impl UserIdentity {
     /// the same user ID.
     ///
     /// # Arguments
-    /// * `public_key` - Ed25519 public key to derive ID from
+    /// * `public_key` - ML-DSA public key to derive ID from
     ///
     /// # Returns
     /// Hexadecimal string representation of the SHA-256 hash
-    pub fn derive_user_id(public_key: &Ed25519PublicKey) -> UserId {
+    pub fn derive_user_id(public_key_bytes: &[u8]) -> UserId {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        hasher.update(public_key.as_bytes());
+        hasher.update(public_key_bytes);
         hex::encode(hasher.finalize())
     }
 
@@ -321,9 +318,9 @@ impl EncryptedUserProfile {
     ///
     /// # Arguments
     /// * `user_id` - User identifier matching an existing identity
-    /// * `public_key` - Ed25519 public key bytes for verification
-    /// * `encrypted_data` - AES-GCM encrypted profile data
-    /// * `signature` - Ed25519 signature of the encrypted data
+    /// * `public_key` - ML-DSA public key bytes for verification
+    /// * `encrypted_data` - ChaCha20Poly1305 encrypted profile data
+    /// * `signature` - ML-DSA signature of the encrypted data
     ///
     /// # Returns
     /// New encrypted profile instance with current timestamp
@@ -351,7 +348,7 @@ impl EncryptedUserProfile {
     /// # Arguments
     /// * `identity` - User identity to associate with the profile
     /// * `profile` - Unencrypted profile data to be secured
-    /// * `keypair` - Ed25519 keypair for signing operations
+    /// * `secret` - ML-DSA secret key for signing operations
     /// * `ipv6_binding` - Optional IPv6 address binding proof
     ///
     /// # Returns
@@ -362,7 +359,7 @@ impl EncryptedUserProfile {
     pub fn new_from_identity(
         identity: &UserIdentity,
         profile: &UserProfile,
-        keypair: &SigningKey,
+        secret: &MlDsaSecretKey,
         ipv6_binding: Option<IPv6BindingProof>,
     ) -> Result<Self> {
         // Serialize the profile data
@@ -372,15 +369,18 @@ impl EncryptedUserProfile {
         // Generate encryption key from keypair deterministically
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        hasher.update(keypair.to_bytes());
+        hasher.update(secret.as_bytes());
         hasher.update(b"profile-encryption-key");
         let encryption_key = hasher.finalize();
 
-        // Encrypt the profile data using AES-GCM
+        // Encrypt the profile data using PQC ChaCha20Poly1305
         let encrypted_data = Self::encrypt_profile_data(&profile_data, &encryption_key)?;
 
         // Create signature of the encrypted data
-        let signature = keypair.sign(&encrypted_data).to_bytes().to_vec();
+        let signature = crate::quantum_crypto::ml_dsa_sign(secret, &encrypted_data)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("{e}").into())))?
+            .as_bytes()
+            .to_vec();
 
         Ok(Self {
             user_id: identity.user_id.clone(),
@@ -392,13 +392,13 @@ impl EncryptedUserProfile {
         })
     }
 
-    /// Generate random 256-bit AES key for profile encryption
+    /// Generate random 256-bit symmetric key for profile encryption
     ///
     /// Creates a cryptographically secure random key for encrypting
     /// profile data. Each profile should have its own unique key.
     ///
     /// # Returns
-    /// 32-byte AES-256 encryption key
+    /// 32-byte key
     pub fn generate_profile_key() -> [u8; 32] {
         rand::random()
     }
@@ -414,40 +414,19 @@ impl EncryptedUserProfile {
     /// # Errors
     /// Returns error if signature verification fails
     pub fn verify_signature(&self) -> Result<bool> {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-        // Parse the public key
-        let public_key_bytes: [u8; 32] = self.public_key.as_slice().try_into().map_err(|_| {
-            P2PError::Identity(IdentityError::InvalidFormat(
-                "Invalid public key length".to_string().into(),
-            ))
-        })?;
-        let public_key = VerifyingKey::from_bytes(&public_key_bytes).map_err(|e| {
-            P2PError::Identity(IdentityError::InvalidFormat(
-                format!("Invalid public key: {e}").into(),
-            ))
-        })?;
-
-        // Parse the signature
-        let signature_bytes: [u8; 64] = self.signature.as_slice().try_into().map_err(|_| {
-            P2PError::Identity(IdentityError::InvalidFormat(
-                "Invalid signature length".to_string().into(),
-            ))
-        })?;
-        let signature = Signature::from_bytes(&signature_bytes);
-
-        // Verify signature against encrypted data
-        match public_key.verify(&self.encrypted_data, &signature) {
-            Ok(()) => Ok(true),
-            Err(_) => Ok(false),
-        }
+        // Parse the ML-DSA public key
+        let public_key = MlDsaPublicKey::from_bytes(&self.public_key)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("{e}").into())))?;
+        // Parse signature
+        let signature = MlDsaSignature::from_bytes(&self.signature)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("{e}").into())))?;
+        crate::quantum_crypto::ml_dsa_verify(&public_key, &self.encrypted_data, &signature)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("{e}").into())))
     }
 
-    /// Encrypt profile data using AES-GCM
+    /// Encrypt profile data using ChaCha20Poly1305 from saorsa-pqc
     fn encrypt_profile_data(data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{AeadInPlace, Aes256Gcm, KeyInit, Nonce};
-        use rand::RngCore;
-
+        use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricKey};
         if key.len() != 32 {
             return Err(P2PError::Identity(IdentityError::InvalidFormat(
                 "Invalid encryption key length - must be 32 bytes"
@@ -455,38 +434,22 @@ impl EncryptedUserProfile {
                     .into(),
             )));
         }
-
-        let cipher_key = aes_gcm::Key::<Aes256Gcm>::from_slice(key);
-        let cipher = Aes256Gcm::new(cipher_key);
-
-        // Generate random 96-bit nonce
-        let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // Encrypt the data
-        let mut ciphertext = data.to_vec();
-        let tag = cipher
-            .encrypt_in_place_detached(nonce, b"", &mut ciphertext)
-            .map_err(|e| {
-                P2PError::Identity(IdentityError::InvalidFormat(
-                    format!("Profile encryption failed: {e}").into(),
-                ))
-            })?;
-
-        // Combine nonce + ciphertext + tag
-        let mut result = Vec::with_capacity(12 + ciphertext.len() + 16);
-        result.extend_from_slice(&nonce_bytes);
-        result.extend_from_slice(&ciphertext);
-        result.extend_from_slice(&tag);
-
-        Ok(result)
+        let mut k = [0u8; 32];
+        k.copy_from_slice(&key[..32]);
+        let sk = SymmetricKey::from_bytes(k);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
+        let (ciphertext, nonce) = cipher
+            .encrypt(data, None)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("{e}").into())))?;
+        let mut out = Vec::with_capacity(nonce.len() + ciphertext.len());
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
     }
 
-    /// Decrypt profile data using AES-GCM
+    /// Decrypt profile data using ChaCha20Poly1305 from saorsa-pqc
     fn decrypt_profile_data(encrypted: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{AeadInPlace, Aes256Gcm, KeyInit, Nonce};
-
+        use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricKey};
         if key.len() != 32 {
             return Err(P2PError::Identity(IdentityError::InvalidFormat(
                 "Invalid decryption key length - must be 32 bytes"
@@ -494,34 +457,23 @@ impl EncryptedUserProfile {
                     .into(),
             )));
         }
-
-        if encrypted.len() < 28 {
+        if encrypted.len() < 12 {
             return Err(P2PError::Identity(IdentityError::InvalidFormat(
                 "Invalid encrypted profile data - too short"
                     .to_string()
                     .into(),
             )));
         }
-
-        let cipher_key = aes_gcm::Key::<Aes256Gcm>::from_slice(key);
-        let cipher = Aes256Gcm::new(cipher_key);
-
-        // Extract components
-        let nonce = Nonce::from_slice(&encrypted[0..12]);
-        let tag_start = encrypted.len() - 16;
-        let tag = &encrypted[tag_start..];
-        let mut plaintext = encrypted[12..tag_start].to_vec();
-
-        // Decrypt the data
+        let (nonce_slice, ciphertext) = encrypted.split_at(12);
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(nonce_slice);
+        let mut k = [0u8; 32];
+        k.copy_from_slice(&key[..32]);
+        let sk = SymmetricKey::from_bytes(k);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
         cipher
-            .decrypt_in_place_detached(nonce, b"", &mut plaintext, tag.into())
-            .map_err(|e| {
-                P2PError::Identity(IdentityError::InvalidFormat(
-                    format!("Profile decryption failed: {e}").into(),
-                ))
-            })?;
-
-        Ok(plaintext)
+            .decrypt(ciphertext, &nonce, None)
+            .map_err(|e| P2PError::Identity(IdentityError::InvalidFormat(format!("{e}").into())))
     }
 
     /// Decrypt the encrypted profile data using provided key
@@ -585,7 +537,7 @@ impl EncryptedUserProfile {
     ///
     /// # Arguments
     /// * `user_id` - User ID to grant access to
-    /// * `public_key_bytes` - Public key of the user for encryption
+    /// * `public_key_bytes` - Public key of the user for encryption (ML-DSA)
     /// * `permissions` - Specific permissions to grant
     /// * `profile_key` - Profile encryption key for re-encryption
     /// * `keypair` - Keypair for signing the access grant
@@ -601,7 +553,6 @@ impl EncryptedUserProfile {
         _public_key_bytes: &[u8],
         permissions: ProfilePermissions,
         _profile_key: &[u8; 32],
-        _keypair: &SigningKey,
     ) -> Result<()> {
         // Implementation note: This method now properly encrypts access grants
         // The actual encryption is handled by the IdentityManager in identity_manager.rs
@@ -701,20 +652,24 @@ impl IdentityChallenge {
     /// ownership of the corresponding private key.
     ///
     /// # Arguments
-    /// * `_keypair` - Ed25519 keypair to sign the challenge with
+    /// * `secret` - ML-DSA secret key to sign the challenge with
     ///
     /// # Returns
     /// Signed challenge response for verification
-    pub fn create_response(&self, keypair: &ed25519_dalek::SigningKey) -> ChallengeResponse {
+    pub fn create_response(&self, secret: &MlDsaSecretKey) -> Result<ChallengeResponse> {
         let mut signed_data = self.challenge_id.as_bytes().to_vec();
         signed_data.extend_from_slice(&self.challenge_data);
-        let signature = keypair.sign(&signed_data);
+        let signature = crate::quantum_crypto::ml_dsa_sign(secret, &signed_data).map_err(|e| {
+            P2PError::Identity(crate::error::IdentityError::InvalidFormat(
+                format!("{}", e).into(),
+            ))
+        })?;
 
-        ChallengeResponse {
+        Ok(ChallengeResponse {
             challenge_id: self.challenge_id.clone(),
-            signature: signature.to_bytes().to_vec(),
+            signature: signature.as_bytes().to_vec(),
             response_data: Vec::new(),
-        }
+        })
     }
 }
 
@@ -741,7 +696,7 @@ pub struct ContactRequest {
     pub created_at: SystemTime,
     /// Timestamp when request expires
     pub expires_at: SystemTime,
-    /// Ed25519 signature of the request data
+    /// ML-DSA signature of the request data
     pub signature: Vec<u8>,
     /// Current status of the request
     pub status: ContactRequestStatus,
@@ -979,7 +934,7 @@ pub struct ChallengeProof {
     pub challenge_id: String,
     /// Additional proof data specific to challenge type
     pub proof_data: Vec<u8>,
-    /// Ed25519 signature of the challenge data
+    /// ML-DSA signature of the challenge data
     pub signature: Vec<u8>,
     /// Public key used for signature verification
     pub public_key: Vec<u8>,
@@ -1018,38 +973,22 @@ impl ChallengeProof {
             return Ok(false);
         }
 
-        // Verify the signature of the challenge data
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-        // Parse the public key
-        let public_key_bytes: [u8; 32] = self.public_key.as_slice().try_into().map_err(|_| {
-            P2PError::Identity(IdentityError::VerificationFailed(
-                "Invalid public key length in proof".to_string().into(),
-            ))
+        // Verify the signature of the challenge data using ML-DSA
+        let public_key = MlDsaPublicKey::from_bytes(&self.public_key).map_err(|e| {
+            P2PError::Identity(IdentityError::VerificationFailed(format!("{e}").into()))
         })?;
-        let public_key = VerifyingKey::from_bytes(&public_key_bytes).map_err(|e| {
-            P2PError::Identity(IdentityError::VerificationFailed(
-                format!("Invalid public key in proof: {}", e).into(),
-            ))
+        let signature = MlDsaSignature::from_bytes(&self.signature).map_err(|e| {
+            P2PError::Identity(IdentityError::VerificationFailed(format!("{e}").into()))
         })?;
-
-        // Parse the signature
-        let signature_bytes: [u8; 64] = self.signature.as_slice().try_into().map_err(|_| {
-            P2PError::Identity(IdentityError::VerificationFailed(
-                "Invalid signature length in proof".to_string().into(),
-            ))
-        })?;
-        let signature = Signature::from_bytes(&signature_bytes);
 
         // Create the signed data: challenge_id + proof_data
         let mut signed_data = challenge.challenge_id.as_bytes().to_vec();
         signed_data.extend_from_slice(&self.proof_data);
 
         // Verify signature
-        match public_key.verify(&signed_data, &signature) {
-            Ok(()) => Ok(true),
-            Err(_) => Ok(false),
-        }
+        crate::quantum_crypto::ml_dsa_verify(&public_key, &signed_data, &signature).map_err(|e| {
+            P2PError::Identity(IdentityError::VerificationFailed(format!("{e}").into()))
+        })
     }
 }
 
@@ -1094,9 +1033,9 @@ impl IdentityManager {
         display_name: String,
         three_word_address: String,
         _ipv6_identity: Option<IPv6NodeID>,
-        _ipv6_keypair: Option<&SigningKey>,
+        _ipv6_keypair: Option<&MlDsaSecretKey>,
     ) -> Result<UserIdentity> {
-        let (identity, _keypair) = UserIdentity::new(display_name, three_word_address)?;
+        let identity = UserIdentity::new(display_name, three_word_address)?;
 
         // Store the identity in the manager
         let mut identities = self.identities.write().await;
@@ -1156,40 +1095,17 @@ impl IdentityManager {
             return Ok(false);
         }
 
-        // In a full implementation, we would store challenges and verify against them.
-        // For now, we verify the signature structure is valid
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-        // Parse the public key
-        let public_key_bytes: [u8; 32] = proof.public_key.as_slice().try_into().map_err(|_| {
-            P2PError::Identity(IdentityError::VerificationFailed(
-                "Invalid public key length in proof".to_string().into(),
-            ))
+        // ML-DSA verification
+        let public_key = MlDsaPublicKey::from_bytes(&proof.public_key).map_err(|e| {
+            P2PError::Identity(IdentityError::VerificationFailed(format!("{e}").into()))
         })?;
-        let public_key = VerifyingKey::from_bytes(&public_key_bytes).map_err(|e| {
-            P2PError::Identity(IdentityError::VerificationFailed(
-                format!("Invalid public key in proof: {}", e).into(),
-            ))
+        let signature = MlDsaSignature::from_bytes(&proof.signature).map_err(|e| {
+            P2PError::Identity(IdentityError::VerificationFailed(format!("{e}").into()))
         })?;
-
-        // Parse the signature
-        let signature_bytes: [u8; 64] = proof.signature.as_slice().try_into().map_err(|_| {
-            P2PError::Identity(IdentityError::VerificationFailed(
-                "Invalid signature length in proof".to_string().into(),
-            ))
-        })?;
-        let signature = Signature::from_bytes(&signature_bytes);
-
-        // Verify signature against proof data (basic structural verification)
         let signed_data = proof.proof_data.clone();
-        // In test/CI environments, allow zeroed placeholder signatures to pass structural checks
-        if proof.signature.iter().all(|&b| b == 0) {
-            return Ok(true);
-        }
-        match public_key.verify(&signed_data, &signature) {
-            Ok(()) => Ok(true),
-            Err(_) => Ok(false),
-        }
+        crate::quantum_crypto::ml_dsa_verify(&public_key, &signed_data, &signature).map_err(|e| {
+            P2PError::Identity(IdentityError::VerificationFailed(format!("{e}").into()))
+        })
     }
 }
 
@@ -1260,24 +1176,37 @@ mod tests {
         let config = IdentityManagerConfig::default();
         let manager = IdentityManager::new(config);
 
-        let identity = manager
-            .create_identity(
-                "Test User".to_string(),
-                "test.user.example".to_string(),
-                None,
-                None,
-            )
-            .await
-            .expect("Should create identity for challenge test");
+        // Generate a keypair for testing
+        let (public_key, secret_key) =
+            crate::quantum_crypto::ant_quic_integration::generate_ml_dsa_keypair()
+                .expect("Should generate ML-DSA keypair for test");
+
+        // Create identity manually for test
+        let identity = UserIdentity {
+            user_id: "test_user_id".to_string(),
+            public_key: public_key.as_bytes().to_vec(),
+            display_name_hint: "Test".to_string(),
+            three_word_address: "test.user.example".to_string(),
+            created_at: SystemTime::now(),
+            version: 1,
+            verification_level: VerificationLevel::SelfSigned,
+        };
 
         // Create challenge
         let challenge = manager.create_challenge(Duration::from_secs(300)).await;
+
+        // Sign the challenge data with the secret key
+        let signature = crate::quantum_crypto::ant_quic_integration::ml_dsa_sign(
+            &secret_key,
+            &challenge.challenge_data,
+        )
+        .expect("Should sign challenge data");
 
         // Create proof for challenge
         let proof = ChallengeProof {
             challenge_id: challenge.challenge_id.clone(),
             proof_data: challenge.challenge_data.clone(),
-            signature: vec![0; 64], // Placeholder signature
+            signature: signature.as_bytes().to_vec(),
             public_key: identity.public_key.clone(),
             timestamp: SystemTime::now(),
         };

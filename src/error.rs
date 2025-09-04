@@ -1,9 +1,15 @@
 // Copyright (c) 2025 Saorsa Labs Limited
 
-// This file is part of the Saorsa P2P network.
-
-// Licensed under the AGPL-3.0 license:
-// <https://www.gnu.org/licenses/agpl-3.0.html>
+// This software is dual-licensed under:
+// - GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
+// - Commercial License
+//
+// For AGPL-3.0 license, see LICENSE-AGPL-3.0
+// For commercial licensing, contact: saorsalabs@gmail.com
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under these licenses is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -607,7 +613,7 @@ impl P2PError {
 impl P2PError {
     /// Log error with appropriate level
     pub fn log(&self) {
-        use log::{error, warn};
+        use tracing::{error, warn};
 
         match self {
             P2PError::Network(NetworkError::Timeout) | P2PError::Timeout(_) => warn!("{}", self),
@@ -620,7 +626,7 @@ impl P2PError {
 
     /// Log error with context
     pub fn log_with_context(&self, context: &str) {
-        use log::error;
+        use tracing::error;
         error!("{}: {}", context, self);
     }
 }

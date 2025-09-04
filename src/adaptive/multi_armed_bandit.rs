@@ -1,5 +1,4 @@
 // Copyright 2024 Saorsa Labs Limited
-//
 // This software is dual-licensed under:
 // - GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
 // - Commercial License
@@ -30,6 +29,8 @@ use crate::{P2PError, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+type LegacyStatsFormat = (HashMap<(RouteId, ContentType), RouteStatistics>, MABMetrics);
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -418,12 +419,11 @@ impl MultiArmedBandit {
             .map_err(P2PError::Io)?;
 
         // Try legacy tuple format first
-        let parsed_legacy: Result<(HashMap<(RouteId, ContentType), RouteStatistics>, MABMetrics)> =
-            serde_json::from_str(&data).map_err(|e| {
-                P2PError::Storage(crate::error::StorageError::Database(
-                    format!("Failed to deserialize legacy statistics: {}", e).into(),
-                ))
-            });
+        let parsed_legacy: Result<LegacyStatsFormat> = serde_json::from_str(&data).map_err(|e| {
+            P2PError::Storage(crate::error::StorageError::Database(
+                format!("Failed to deserialize legacy statistics: {}", e).into(),
+            ))
+        });
 
         let (statistics, metrics) = if let Ok((stats, metrics)) = parsed_legacy {
             (stats, metrics)

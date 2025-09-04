@@ -420,13 +420,13 @@ impl Config {
         }
 
         // Validate storage path only if it exists; skip strict checks in non-existent dirs
-        if self.storage.path.exists() {
-            if let Err(e) = validate_file_path(&self.storage.path) {
-                errors.push(P2PError::Config(ConfigError::InvalidValue {
-                    field: "storage.path".to_string().into(),
-                    reason: e.to_string().into(),
-                }));
-            }
+        if self.storage.path.exists()
+            && let Err(e) = validate_file_path(&self.storage.path)
+        {
+            errors.push(P2PError::Config(ConfigError::InvalidValue {
+                field: "storage.path".to_string().into(),
+                reason: format!("{:?}: {}", self.storage.path, e).into(),
+            }));
         }
 
         // Validate storage size format

@@ -30,21 +30,20 @@
 //! - Async key generation for non-blocking operations
 
 use crate::error::SecurityError;
+use crate::quantum_crypto::ant_quic_integration::{MlDsaPublicKey, MlDsaSecretKey};
 use crate::secure_memory::SecureMemory;
 use crate::{P2PError, Result};
-use ed25519_dalek::{SigningKey, VerifyingKey};
-use hkdf::Hkdf;
 use rand::{RngCore, thread_rng};
-use sha2::Sha256;
+use saorsa_pqc::{HkdfSha3_256, api::traits::Kdf};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 /// Size of master seed in bytes (256 bits for security)
 const MASTER_SEED_SIZE: usize = 32;
 
-/// Size of derived key material (32 bytes for Ed25519)
-#[allow(dead_code)]
-const DERIVED_KEY_SIZE: usize = 32;
+/// Sizes for ML-DSA-65 keys
+const ML_DSA_PUB_LEN: usize = 1952;
+const ML_DSA_SEC_LEN: usize = 4032;
 
 /// Maximum derivation depth to prevent stack overflow
 const MAX_DERIVATION_DEPTH: usize = 10;
@@ -75,14 +74,10 @@ pub struct DerivationPath {
 
 /// Derived key material with metadata
 pub struct DerivedKey {
-    /// Ed25519 signing key
-    pub secret_key: SigningKey,
-    /// Ed25519 verifying key
-    pub public_key: VerifyingKey,
-    /// X25519 secret key (for key exchange)
-    pub x25519_secret: [u8; 32],
-    /// X25519 public key (for key exchange)
-    pub x25519_public: [u8; 32],
+    /// ML-DSA secret key (wrapped in Arc to avoid clone issues)
+    pub secret_key: std::sync::Arc<MlDsaSecretKey>,
+    /// ML-DSA public key
+    pub public_key: MlDsaPublicKey,
     /// Derivation path used
     pub path: DerivationPath,
     /// Creation timestamp
@@ -93,16 +88,9 @@ pub struct DerivedKey {
 
 impl Clone for DerivedKey {
     fn clone(&self) -> Self {
-        // Create new Ed25519 key from bytes
-        let signing_key = SigningKey::from_bytes(self.secret_key.as_bytes());
-        let verifying_key =
-            VerifyingKey::from_bytes(self.public_key.as_bytes()).unwrap_or(self.public_key);
-
         Self {
-            secret_key: signing_key,
-            public_key: verifying_key,
-            x25519_secret: self.x25519_secret,
-            x25519_public: self.x25519_public,
+            secret_key: std::sync::Arc::clone(&self.secret_key),
+            public_key: self.public_key.clone(),
             path: self.path.clone(),
             created_at: self.created_at,
             usage_counter: self.usage_counter,
@@ -438,25 +426,27 @@ impl HierarchicalKeyDerivation {
         Ok(derived_key)
     }
 
-    /// Internal key derivation implementation
+    /// Internal key derivation implementation (PQC: ML-DSA keys)
     fn derive_key_internal(&self, path: &DerivationPath) -> Result<DerivedKey> {
         let mut current_key = self.master_seed.seed_material().to_vec();
         let mut current_chaincode = [0u8; 32];
 
         // Initial HKDF from master seed
-        let hkdf = Hkdf::<Sha256>::new(None, &current_key);
-        hkdf.expand(b"ed25519 seed", &mut current_key)
-            .map_err(|_| {
+        let mut temp_key = [0u8; 32];
+        HkdfSha3_256::derive(&current_key, None, b"ml-dsa seed", &mut temp_key).map_err(|_| {
+            P2PError::Security(SecurityError::InvalidKey(
+                "HKDF derivation failed".to_string().into(),
+            ))
+        })?;
+        current_key.copy_from_slice(&temp_key);
+
+        HkdfSha3_256::derive(&current_key, None, b"chaincode", &mut current_chaincode).map_err(
+            |_| {
                 P2PError::Security(SecurityError::InvalidKey(
-                    "HKDF expansion failed".to_string().into(),
+                    "HKDF derivation failed".to_string().into(),
                 ))
-            })?;
-        hkdf.expand(b"chaincode", &mut current_chaincode)
-            .map_err(|_| {
-                P2PError::Security(SecurityError::InvalidKey(
-                    "HKDF expansion failed".to_string().into(),
-                ))
-            })?;
+            },
+        )?;
 
         // Derive through each path component
         for &component in path.components() {
@@ -466,80 +456,80 @@ impl HierarchicalKeyDerivation {
             current_chaincode = new_chaincode;
         }
 
-        // Generate Ed25519 key pair
-        let signing_key = SigningKey::from_bytes(&current_key[..32].try_into().map_err(|_| {
+        // Derive ML-DSA key material deterministically
+        let mut derived = vec![0u8; ML_DSA_PUB_LEN + ML_DSA_SEC_LEN];
+        HkdfSha3_256::derive(
+            &current_key,
+            Some(&current_chaincode),
+            b"ml-dsa keypair",
+            &mut derived,
+        )
+        .map_err(|_| {
             P2PError::Security(SecurityError::InvalidKey(
-                "Invalid Ed25519 secret key length".to_string().into(),
-            ))
-        })?);
-        let verifying_key = signing_key.verifying_key();
-
-        // Generate X25519 key pair for key exchange
-        let x25519_secret: [u8; 32] = current_key[..32].try_into().map_err(|_| {
-            P2PError::Security(SecurityError::InvalidKey(
-                "Invalid X25519 secret key".to_string().into(),
+                "HKDF derivation failed".to_string().into(),
             ))
         })?;
-        let x25519_public = x25519_dalek::PublicKey::from(x25519_secret).to_bytes();
+        let pub_bytes = &derived[..ML_DSA_PUB_LEN];
+        let sec_bytes = &derived[ML_DSA_PUB_LEN..];
+        let public_key = MlDsaPublicKey::from_bytes(pub_bytes).map_err(|e| {
+            P2PError::Security(SecurityError::InvalidKey(
+                format!("Invalid ML-DSA public key: {e}").into(),
+            ))
+        })?;
+        let secret_key = MlDsaSecretKey::from_bytes(sec_bytes).map_err(|e| {
+            P2PError::Security(SecurityError::InvalidKey(
+                format!("Invalid ML-DSA secret key: {e}").into(),
+            ))
+        })?;
 
         // Zeroize temporary key material
         current_key.zeroize();
         current_chaincode.zeroize();
+        derived.zeroize();
 
         Ok(DerivedKey {
-            secret_key: signing_key,
-            public_key: verifying_key,
-            x25519_secret,
-            x25519_public,
+            secret_key: std::sync::Arc::new(secret_key),
+            public_key,
             path: path.clone(),
             created_at: current_timestamp(),
             usage_counter: 0,
         })
     }
 
-    /// Derive child key from parent
+    /// Derive child key from parent (PQC-friendly HKDF)
     fn derive_child_key(
         &self,
         parent_key: &[u8],
         parent_chaincode: &[u8],
         index: u32,
     ) -> Result<(Vec<u8>, [u8; 32])> {
-        let mut data = Vec::new();
-
-        if index >= HARDENED_OFFSET {
-            // Hardened derivation
-            data.push(0x00);
-            data.extend_from_slice(parent_key);
-        } else {
-            // Non-hardened derivation
-            let signing_key =
-                SigningKey::from_bytes(&parent_key[..32].try_into().map_err(|_| {
-                    P2PError::Security(SecurityError::InvalidKey(
-                        "Invalid parent key length".to_string().into(),
-                    ))
-                })?);
-            let verifying_key = signing_key.verifying_key();
-            data.extend_from_slice(verifying_key.as_bytes());
-        }
-
+        // Combine parent key, parent chaincode and index deterministically
+        let mut data = Vec::with_capacity(parent_key.len() + parent_chaincode.len() + 4);
+        data.extend_from_slice(parent_key);
+        data.extend_from_slice(parent_chaincode);
         data.extend_from_slice(&index.to_be_bytes());
 
-        let hkdf = Hkdf::<Sha256>::new(Some(parent_chaincode), &data);
-
-        let mut child_key = vec![0u8; 32];
+        let mut child_key = vec![0u8; parent_key.len().max(32)];
         let mut child_chaincode = [0u8; 32];
 
-        hkdf.expand(b"key", &mut child_key).map_err(|_| {
+        HkdfSha3_256::derive(&data, Some(parent_chaincode), b"key", &mut child_key).map_err(
+            |_| {
+                P2PError::Security(SecurityError::InvalidKey(
+                    "Child key derivation failed".to_string().into(),
+                ))
+            },
+        )?;
+        HkdfSha3_256::derive(
+            &data,
+            Some(parent_chaincode),
+            b"chaincode",
+            &mut child_chaincode,
+        )
+        .map_err(|_| {
             P2PError::Security(SecurityError::InvalidKey(
-                "Child key derivation failed".to_string().into(),
+                "Child chaincode derivation failed".to_string().into(),
             ))
         })?;
-        hkdf.expand(b"chaincode", &mut child_chaincode)
-            .map_err(|_| {
-                P2PError::Security(SecurityError::InvalidKey(
-                    "Child chaincode derivation failed".to_string().into(),
-                ))
-            })?;
 
         // Zeroize temporary data
         data.zeroize();
@@ -614,14 +604,12 @@ impl DerivedKey {
         self.usage_counter += 1;
     }
 
-    /// Get Ed25519 key pair
-    pub fn ed25519_keypair(&self) -> (SigningKey, VerifyingKey) {
-        (self.secret_key.clone(), self.public_key)
-    }
-
-    /// Get X25519 key pair
-    pub fn x25519_keypair(&self) -> ([u8; 32], [u8; 32]) {
-        (self.x25519_secret, self.x25519_public)
+    /// Get ML-DSA key pair
+    pub fn ml_dsa_keypair(&self) -> (MlDsaPublicKey, std::sync::Arc<MlDsaSecretKey>) {
+        (
+            self.public_key.clone(),
+            std::sync::Arc::clone(&self.secret_key),
+        )
     }
 }
 
@@ -686,8 +674,9 @@ mod tests {
         let derived_key = derivation.derive_key(&path).unwrap();
 
         assert_eq!(derived_key.path, path);
-        assert_eq!(derived_key.x25519_secret.len(), 32);
-        assert_eq!(derived_key.x25519_public.len(), 32);
+        // Validate ML-DSA key sizes
+        assert_eq!(derived_key.public_key.as_bytes().len(), ML_DSA_PUB_LEN);
+        assert_eq!(derived_key.secret_key.as_bytes().len(), ML_DSA_SEC_LEN);
     }
 
     #[test]
@@ -757,7 +746,6 @@ mod tests {
 
         let hardened_key = derivation.derive_key(&hardened_path).unwrap();
         let normal_key = derivation.derive_key(&normal_path).unwrap();
-
         // Keys should be different
         assert_ne!(
             hardened_key.secret_key.as_bytes(),

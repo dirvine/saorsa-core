@@ -95,7 +95,7 @@ impl NetworkAddress {
         match FourWordAdaptiveEncoder::new().and_then(|enc| enc.encode(&addr.to_string())) {
             Ok(s) => Some(s.replace(' ', "-")),
             Err(e) => {
-                log::warn!("Failed to encode address {addr}: {e}");
+                tracing::warn!("Failed to encode address {addr}: {e}");
                 None
             }
         }
@@ -160,6 +160,7 @@ impl FromStr for NetworkAddress {
         if s.starts_with("/ip4/") || s.starts_with("/ip6/") {
             let parts: Vec<&str> = s.split('/').filter(|p| !p.is_empty()).collect();
             // Expect: ["ip4"|"ip6", ip, "tcp", port]
+            #[allow(clippy::collapsible_if)]
             if parts.len() >= 4 && (parts[0] == "ip4" || parts[0] == "ip6") && parts[2] == "tcp" {
                 if let Ok(port) = parts[3].parse::<u16>() {
                     // Parse IP

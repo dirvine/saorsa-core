@@ -103,16 +103,7 @@ async fn test_replication_manager_basic() -> anyhow::Result<()> {
     let config = ReplicationConfig::default();
     let trust_provider = Arc::new(MockTrustProvider::new());
     let churn_predictor = Arc::new(ChurnPredictor::new());
-    let router = Arc::new(AdaptiveRouter::new(
-        trust_provider.clone(),
-        Arc::new(HyperbolicSpace::new()),
-        Arc::new(SelfOrganizingMap::new(SomConfig {
-            initial_learning_rate: 0.5,
-            initial_radius: 3.0,
-            iterations: 1000,
-            grid_size: GridSize::Fixed(10, 10),
-        })),
-    ));
+    let router = Arc::new(AdaptiveRouter::new(trust_provider.clone()));
 
     let replication = ReplicationManager::new(config, trust_provider, churn_predictor, router);
 

@@ -983,7 +983,7 @@ impl IntegrityVerifier {
 
     /// Verify signature (placeholder)
     pub async fn verify_signature(&self, _message: &[u8], _signature: &[u8]) -> bool {
-        // In a real implementation, would verify Ed25519 signature
+        // In a real implementation, would verify ML-DSA signature
         // For now, always return true
         true
     }

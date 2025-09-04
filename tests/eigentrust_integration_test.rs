@@ -555,7 +555,7 @@ mod eigentrust_tests {
         // Access trust through trait
         let trust = provider.get_trust(&nodes[1]);
         assert!(
-            trust >= 0.0 && trust <= 1.0,
+            (0.0..=1.0).contains(&trust),
             "Trust should be in valid range"
         );
 

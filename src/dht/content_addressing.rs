@@ -160,7 +160,7 @@ impl ContentDefinedChunker {
         // Force boundary at max chunk size (or end of buffer if smaller)
         if data.len() >= self.config.max_chunk_size {
             Some(self.config.max_chunk_size)
-        } else if data.len() > 0 {
+        } else if !data.is_empty() {
             Some(data.len())
         } else {
             None

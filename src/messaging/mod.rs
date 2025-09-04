@@ -84,7 +84,7 @@ impl MessagingService {
         let reactions = ReactionManager::new(store.clone());
         let media = MediaProcessor::new()?;
         let search = MessageSearch::new(store.clone()).await?;
-        let encryption = SecureMessaging::new(identity.clone())?;
+        let encryption = SecureMessaging::new(identity.clone(), dht_client.clone()).await?;
         let sync = RealtimeSync::new(dht_client.clone()).await?;
 
         Ok(Self {
@@ -111,7 +111,7 @@ impl MessagingService {
         let reactions = ReactionManager::new(store.clone());
         let media = MediaProcessor::new()?;
         let search = MessageSearch::new(store.clone()).await?;
-        let encryption = SecureMessaging::new(identity.clone())?;
+        let encryption = SecureMessaging::new(identity.clone(), dht_client.clone()).await?;
         let sync = RealtimeSync::new(dht_client).await?;
 
         Ok(Self {
@@ -483,7 +483,7 @@ impl MessagingService {
     /// Handle mention notification
     async fn handle_mention(&self, message: &RichMessage) -> Result<()> {
         // Create notification
-        log::info!("Mentioned in message: {:?}", message.id);
+        tracing::info!("Mentioned in message: {:?}", message.id);
         // TODO: Trigger system notification
         Ok(())
     }

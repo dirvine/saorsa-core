@@ -275,14 +275,14 @@ mod tests {
         let beta_1_b = BetaDistribution::new(1.0, 3.0).unwrap();
         for _ in 0..100 {
             let sample = beta_1_b.sample(&mut rng);
-            assert!(sample >= 0.0 && sample <= 1.0);
+            assert!((0.0..=1.0).contains(&sample));
         }
 
         // Beta(α, 1)
         let beta_a_1 = BetaDistribution::new(3.0, 1.0).unwrap();
         for _ in 0..100 {
             let sample = beta_a_1.sample(&mut rng);
-            assert!(sample >= 0.0 && sample <= 1.0);
+            assert!((0.0..=1.0).contains(&sample));
         }
     }
 

@@ -60,7 +60,7 @@ impl Key {
 
     /// Convert to hex string
     pub fn to_hex(&self) -> String {
-        hex::encode(&self.0)
+        hex::encode(self.0)
     }
 
     /// Create from hex string
@@ -150,7 +150,7 @@ mod tests {
         ];
         // Don't assert the result since we don't know if these are valid dictionary words
         let _ = fw_check(test_words);
-        
+
         // Test with empty strings (definitely invalid)
         let invalid = [
             "".to_string(),
@@ -175,7 +175,7 @@ mod tests {
         // This should fail since the words aren't in the dictionary
         let result = fw_to_key(invalid_words);
         assert!(result.is_err());
-        
+
         // Test that if we had valid words, it would be deterministic
         // For now, we can't test the success case without knowing valid dictionary words
     }

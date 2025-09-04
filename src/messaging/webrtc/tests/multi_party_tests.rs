@@ -78,11 +78,11 @@ mod tests {
         // Test architecture selection logic
 
         // 2 participants (including caller) = 2 total -> Mesh
-        let small_group = vec![FourWordAddress::from("bob-charlie-david-eve")];
+        let small_group = [FourWordAddress::from("bob-charlie-david-eve")];
         assert_eq!(small_group.len() + 1, 2); // +1 for caller
 
         // 4 participants (including caller) = 4 total -> Mesh (at limit)
-        let medium_group = vec![
+        let medium_group = [
             FourWordAddress::from("bob-charlie-david-eve"),
             FourWordAddress::from("charlie-david-eve-frank"),
             FourWordAddress::from("david-eve-frank-grace"),
@@ -90,7 +90,7 @@ mod tests {
         assert_eq!(medium_group.len() + 1, 4); // +1 for caller
 
         // 5 participants (including caller) = 5 total -> SFU
-        let large_group = vec![
+        let large_group = [
             FourWordAddress::from("bob-charlie-david-eve"),
             FourWordAddress::from("charlie-david-eve-frank"),
             FourWordAddress::from("david-eve-frank-grace"),

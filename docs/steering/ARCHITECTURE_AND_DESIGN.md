@@ -109,13 +109,13 @@ This document establishes the architectural principles, design patterns, and tec
 **Purpose**: High-level services and user-facing functionality.
 
 **Components**:
-- **Identity Management**: Ed25519-based with four-word addresses
+- **Identity Management**: ML-DSA-based with four-word addresses
 - **Messaging**: End-to-end encrypted communication
 - **File Storage**: Distributed storage with versioning
 - **WebRTC Integration**: Real-time audio/video communication
 
 **Key Decisions**:
-- Ed25519 provides strong security with good performance
+- ML-DSA provides quantum-resistant security with strong performance
 - Four-word addresses improve usability over raw cryptographic identifiers
 - WebRTC enables real-time applications on top of P2P infrastructure
 
@@ -230,11 +230,11 @@ mod tests {
 
 ### Cryptography: Post-Quantum Ready
 
-**Current**: Ed25519, X25519, AES-256-GCM, BLAKE3
+**Current**: ML-DSA, ML-KEM, ChaCha20-Poly1305, BLAKE3
 **Future**: ML-KEM, ML-DSA for quantum resistance
 
 **Rationale**:
-- Ed25519 provides 128-bit security with excellent performance
+- ML-DSA provides quantum-resistant security with strong performance
 - BLAKE3 is faster than SHA-2 with parallel processing
 - Post-quantum algorithms prepare for cryptographically relevant quantum computers
 

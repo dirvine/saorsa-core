@@ -162,7 +162,7 @@ async fn test_adaptive_strategy_with_q_learning() {
         },
     );
     q_table.write().await.insert(
-        (state, CacheAction::Evict(popular_recent.clone())),
+        (state, CacheAction::Evict(popular_recent)),
         QValue {
             value: -5.0,
             updates: 10,
@@ -171,7 +171,7 @@ async fn test_adaptive_strategy_with_q_learning() {
 
     // Make evicting stale_old valuable
     q_table.write().await.insert(
-        (state, CacheAction::Evict(stale_old.clone())),
+        (state, CacheAction::Evict(stale_old)),
         QValue {
             value: 8.0,
             updates: 10,

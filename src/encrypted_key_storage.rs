@@ -37,12 +37,9 @@ use crate::error::{SecurityError, StorageError};
 use crate::key_derivation::MasterSeed;
 use crate::secure_memory::{SecureMemory, SecureString};
 use crate::{P2PError, Result};
-use aes_gcm::{
-    Aes256Gcm, Key, Nonce,
-    aead::{Aead, KeyInit},
-};
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::SaltString};
 use rand::{RngCore, thread_rng};
+use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -108,7 +105,7 @@ pub struct StorageHeader {
     pub argon2_config: Argon2ConfigSerialized,
     /// Salt for password-based key derivation
     pub salt: [u8; SALT_SIZE],
-    /// Nonce for AES-GCM encryption
+    /// Nonce for encryption (12 bytes)
     pub nonce: [u8; AES_NONCE_SIZE],
     /// Timestamp when storage was created
     pub created_at: u64,
@@ -748,7 +745,7 @@ impl EncryptedKeyStorageManager {
         &self,
         password: &SecureString,
         salt: &[u8; SALT_SIZE],
-        nonce: &[u8; AES_NONCE_SIZE],
+        _nonce: &[u8; AES_NONCE_SIZE],
         key_data: &KeyStorageData,
     ) -> Result<()> {
         // Derive encryption key
@@ -758,24 +755,27 @@ impl EncryptedKeyStorageManager {
         let serialized_data = bincode::serialize(key_data)
             .map_err(|e| P2PError::Storage(StorageError::Database(e.to_string().into())))?;
 
-        // Encrypt data
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(derived_key.as_slice()));
-        let nonce_obj = Nonce::from_slice(nonce);
+        // Encrypt data using saorsa-pqc ChaCha20Poly1305
+        let mut k = [0u8; 32];
+        k.copy_from_slice(derived_key.as_slice());
+        let sk = SymmetricKey::from_bytes(k);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
+        let (encrypted_data, nonce_vec) = cipher.encrypt(&serialized_data, None).map_err(|e| {
+            P2PError::Security(crate::error::SecurityError::EncryptionFailed(
+                format!("{e}").into(),
+            ))
+        })?;
 
-        let encrypted_data = cipher
-            .encrypt(nonce_obj, serialized_data.as_ref())
-            .map_err(|e| {
-                P2PError::Security(crate::error::SecurityError::DecryptionFailed(
-                    format!("AES-GCM encryption failed: {e}").into(),
-                ))
-            })?;
+        // Overwrite provided nonce with generated nonce
+        let mut nonce_arr = [0u8; AES_NONCE_SIZE];
+        nonce_arr.copy_from_slice(&nonce_vec[..AES_NONCE_SIZE]);
 
         // Create storage header
         let header = StorageHeader {
             version: STORAGE_FORMAT_VERSION,
             argon2_config: self.argon2_config.to_serialized(),
             salt: *salt,
-            nonce: *nonce,
+            nonce: nonce_arr,
             created_at: current_timestamp(),
             updated_at: current_timestamp(),
             encrypted_size: encrypted_data.len() as u64,
@@ -842,15 +842,16 @@ impl EncryptedKeyStorageManager {
         // Derive decryption key
         let derived_key = self.derive_key(password, &storage.header.salt).await?;
 
-        // Decrypt data
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(derived_key.as_slice()));
-        let nonce_obj = Nonce::from_slice(&storage.header.nonce);
-
+        // Decrypt data using saorsa-pqc ChaCha20Poly1305
+        let mut k = [0u8; 32];
+        k.copy_from_slice(derived_key.as_slice());
+        let sk = SymmetricKey::from_bytes(k);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
         let decrypted_data = cipher
-            .decrypt(nonce_obj, storage.encrypted_data.as_ref())
+            .decrypt(&storage.encrypted_data, &storage.header.nonce, None)
             .map_err(|e| {
                 P2PError::Security(crate::error::SecurityError::DecryptionFailed(
-                    format!("AES-GCM decryption failed: {e}").into(),
+                    format!("{e}").into(),
                 ))
             })?;
 

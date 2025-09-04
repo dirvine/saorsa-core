@@ -141,6 +141,12 @@ impl From<anyhow::Error> for AdaptiveNetworkError {
     }
 }
 
+impl From<crate::error::P2PError> for AdaptiveNetworkError {
+    fn from(e: crate::error::P2PError) -> Self {
+        AdaptiveNetworkError::Network(std::io::Error::other(e.to_string()))
+    }
+}
+
 /// Content hash type used throughout the network
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ContentHash(pub [u8; 32]);

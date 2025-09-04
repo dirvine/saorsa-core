@@ -45,10 +45,10 @@ async fn test_four_word_address_generation() -> Result<()> {
     for (seed, _expected_pattern) in &test_cases {
         let identity = create_test_identity(*seed);
         let node_id = identity.node_id();
-        let four_word_addr = FourWordAddress::from_node_id(&node_id);
+        let four_word_addr = FourWordAddress::from_node_id(node_id);
 
         // Four-word address should be deterministic for same node ID
-        let four_word_addr2 = FourWordAddress::from_node_id(&node_id);
+        let four_word_addr2 = FourWordAddress::from_node_id(node_id);
         assert_eq!(
             four_word_addr, four_word_addr2,
             "Four-word address should be deterministic"
@@ -87,7 +87,7 @@ async fn test_four_word_address_generation() -> Result<()> {
     for seed in 0..1000 {
         let identity = create_test_identity(seed);
         let node_id = identity.node_id();
-        let addr = FourWordAddress::from_node_id(&node_id);
+        let addr = FourWordAddress::from_node_id(node_id);
         let addr_string = addr.to_string();
 
         assert!(
@@ -115,7 +115,7 @@ async fn test_node_identity_cryptography() -> Result<()> {
     let _signing_key = identity.secret_key_bytes();
 
     // Node ID should be derived from public key
-    let expected_node_id = NodeId::from_public_key(&public_key);
+    let expected_node_id = NodeId::from_public_key(public_key);
     assert_eq!(
         *node_id, expected_node_id,
         "Node ID should match public key derivation"
@@ -127,7 +127,7 @@ async fn test_node_identity_cryptography() -> Result<()> {
 
     // Should verify with identity's public key
     assert!(
-        ml_dsa_verify(&public_key, test_message, &signature).unwrap_or(false),
+        ml_dsa_verify(public_key, test_message, &signature).unwrap_or(false),
         "Signature should verify with identity's public key"
     );
 
@@ -135,14 +135,14 @@ async fn test_node_identity_cryptography() -> Result<()> {
     let other_identity = create_test_identity(43);
     let other_public_key = other_identity.public_key();
     assert!(
-        !ml_dsa_verify(&other_public_key, test_message, &signature).unwrap_or(true),
+        !ml_dsa_verify(other_public_key, test_message, &signature).unwrap_or(true),
         "Signature should not verify with different public key"
     );
 
     // Test message tamper detection
     let tampered_message = b"Hello P2P Network?"; // Changed ! to ?
     assert!(
-        !ml_dsa_verify(&public_key, tampered_message, &signature).unwrap_or(true),
+        !ml_dsa_verify(public_key, tampered_message, &signature).unwrap_or(true),
         "Signature should not verify with tampered message"
     );
 
@@ -151,7 +151,7 @@ async fn test_node_identity_cryptography() -> Result<()> {
     // ML-DSA signatures are deterministic, so they should be the same
     // We can't directly compare signatures, so verify both work
     assert!(
-        ml_dsa_verify(&public_key, test_message, &signature2).unwrap_or(false),
+        ml_dsa_verify(public_key, test_message, &signature2).unwrap_or(false),
         "Second signature should also be valid"
     );
 
@@ -162,11 +162,11 @@ async fn test_node_identity_cryptography() -> Result<()> {
         .expect("signing should succeed");
     // Verify the signature works for the other message but not the original
     assert!(
-        ml_dsa_verify(&public_key, other_message, &other_signature).unwrap_or(false),
+        ml_dsa_verify(public_key, other_message, &other_signature).unwrap_or(false),
         "Signature should work for its message"
     );
     assert!(
-        !ml_dsa_verify(&public_key, test_message, &other_signature).unwrap_or(true),
+        !ml_dsa_verify(public_key, test_message, &other_signature).unwrap_or(true),
         "Signature should not work for different message"
     );
 
@@ -190,17 +190,17 @@ async fn test_node_id_properties() -> Result<()> {
     let id3 = id3_identity.node_id();
 
     // XOR distance should be symmetric
-    let dist_12 = id1.xor_distance(&id2);
-    let dist_21 = id2.xor_distance(&id1);
+    let dist_12 = id1.xor_distance(id2);
+    let dist_21 = id2.xor_distance(id1);
     assert_eq!(dist_12, dist_21, "XOR distance should be symmetric");
 
     // XOR distance to self should be zero
-    let self_dist = id1.xor_distance(&id1);
+    let self_dist = id1.xor_distance(id1);
     assert_eq!(self_dist, [0u8; 32], "XOR distance to self should be zero");
 
     // Triangle inequality: d(a,c) <= d(a,b) + d(b,c)
-    let dist_13 = id1.xor_distance(&id3);
-    let dist_23 = id2.xor_distance(&id3);
+    let dist_13 = id1.xor_distance(id3);
+    let dist_23 = id2.xor_distance(id3);
 
     // In XOR metric, triangle inequality is actually: d(a,c) = d(a,b) ⊕ d(b,c)
     let computed_dist = xor_arrays(&dist_12, &dist_23);
@@ -408,8 +408,8 @@ async fn test_identity_consistency() -> Result<()> {
     );
 
     // Test four-word address consistency
-    let addr1 = FourWordAddress::from_node_id(&identity1.node_id());
-    let addr2 = FourWordAddress::from_node_id(&identity2.node_id());
+    let addr1 = FourWordAddress::from_node_id(identity1.node_id());
+    let addr2 = FourWordAddress::from_node_id(identity2.node_id());
     assert_eq!(
         addr1, addr2,
         "Same node ID should produce same four-word address"
@@ -417,7 +417,7 @@ async fn test_identity_consistency() -> Result<()> {
 
     // Test cross-system consistency (node ID -> four words -> parse -> verify)
     let original_node_id = identity1.node_id();
-    let four_word_addr = FourWordAddress::from_node_id(&original_node_id);
+    let four_word_addr = FourWordAddress::from_node_id(original_node_id);
     let addr_string = four_word_addr.to_string();
     let parsed_addr = FourWordAddress::parse_str(&addr_string)?;
 
@@ -486,7 +486,7 @@ async fn test_identity_performance() -> Result<()> {
     let mut addresses = Vec::new();
 
     for identity in &identities {
-        let addr = FourWordAddress::from_node_id(&identity.node_id());
+        let addr = FourWordAddress::from_node_id(identity.node_id());
         addresses.push(addr);
     }
 
@@ -712,7 +712,7 @@ async fn test_identity_system_integration() -> Result<()> {
     println!("  Phase 1: Network bootstrap");
     for i in 0..network_size {
         let identity = create_test_identity(1000 + i as u64);
-        let four_word_addr = FourWordAddress::from_node_id(&identity.node_id());
+        let four_word_addr = FourWordAddress::from_node_id(identity.node_id());
 
         // Ensure no collisions in four-word addresses
         let addr_string = four_word_addr.to_string();

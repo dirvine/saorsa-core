@@ -22,7 +22,7 @@ use crate::quantum_crypto::types::*;
 /// Generate ML-KEM keypair using ant-quic's implementation
 pub fn generate_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
     use crate::quantum_crypto::ant_quic_integration;
-    
+
     ant_quic_integration::generate_ml_kem_keypair()
         .map_err(|e| QuantumCryptoError::KeyGenerationError(e.to_string()))
 }
@@ -30,30 +30,32 @@ pub fn generate_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
 /// Encapsulate a shared secret using ML-KEM public key
 pub fn encapsulate(public_key: &[u8]) -> Result<(Vec<u8>, SharedSecret)> {
     use crate::quantum_crypto::ant_quic_integration;
-    
+
     let (ciphertext, shared_secret_bytes) = ant_quic_integration::ml_kem_encapsulate(public_key)
         .map_err(|e| QuantumCryptoError::MlKemError(e.to_string()))?;
-    
+
     // Convert raw bytes to our SharedSecret type
-    let shared_secret = SharedSecret(shared_secret_bytes.try_into().map_err(|_| {
-        QuantumCryptoError::MlKemError("Invalid shared secret length".to_string())
-    })?);
-    
+    let shared_secret =
+        SharedSecret(shared_secret_bytes.try_into().map_err(|_| {
+            QuantumCryptoError::MlKemError("Invalid shared secret length".to_string())
+        })?);
+
     Ok((ciphertext, shared_secret))
 }
 
 /// Decapsulate shared secret using ML-KEM private key
 pub fn decapsulate(private_key: &[u8], ciphertext: &[u8]) -> Result<SharedSecret> {
     use crate::quantum_crypto::ant_quic_integration;
-    
+
     let shared_secret_bytes = ant_quic_integration::ml_kem_decapsulate(private_key, ciphertext)
         .map_err(|e| QuantumCryptoError::MlKemError(e.to_string()))?;
-    
+
     // Convert raw bytes to our SharedSecret type
-    let shared_secret = SharedSecret(shared_secret_bytes.try_into().map_err(|_| {
-        QuantumCryptoError::MlKemError("Invalid shared secret length".to_string())
-    })?);
-    
+    let shared_secret =
+        SharedSecret(shared_secret_bytes.try_into().map_err(|_| {
+            QuantumCryptoError::MlKemError("Invalid shared secret length".to_string())
+        })?);
+
     Ok(shared_secret)
 }
 
@@ -172,16 +174,14 @@ impl HybridKeyExchange {
         })?;
 
         // Combine using HKDF
-        use hkdf::Hkdf;
-        use sha2::Sha256;
+        use saorsa_pqc::{HkdfSha3_256, api::traits::Kdf};
 
         let mut combined = Vec::new();
         combined.extend_from_slice(ml_kem_secret.as_bytes());
         combined.extend_from_slice(classical_secret);
 
-        let hkdf = Hkdf::<Sha256>::new(None, &combined);
         let mut output = [0u8; 32];
-        hkdf.expand(b"hybrid-key-exchange", &mut output)
+        HkdfSha3_256::derive(&combined, None, b"hybrid-key-exchange", &mut output)
             .map_err(|e| QuantumCryptoError::MlKemError(format!("HKDF failed: {e}")))?;
 
         Ok(output)

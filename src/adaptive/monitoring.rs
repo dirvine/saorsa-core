@@ -465,186 +465,184 @@ impl MonitoringSystem {
         };
 
         #[cfg(feature = "metrics")]
-        let registry = custom_registry.unwrap_or_else(Registry::new);
+        let registry = custom_registry.unwrap_or_default();
 
         // Initialize metrics - use custom registry if provided
         #[cfg(feature = "metrics")]
         let metrics = if is_test {
             // For tests, register metrics with the custom registry
-            use prometheus::{IntGauge, IntCounter, Counter, Gauge, Histogram, HistogramOpts, Opts};
-            
+            use prometheus::{Counter, Gauge, Histogram, HistogramOpts, IntCounter, IntGauge};
+
             // Node metrics
             let connected_nodes = IntGauge::new(
                 format!("{}connected_nodes", metric_prefix),
-                "Number of connected nodes"
+                "Number of connected nodes",
             )?;
             registry.register(Box::new(connected_nodes.clone()))?;
-            
+
             let active_nodes = IntGauge::new(
                 format!("{}active_nodes", metric_prefix),
-                "Number of active nodes"
+                "Number of active nodes",
             )?;
             registry.register(Box::new(active_nodes.clone()))?;
-            
+
             let suspicious_nodes = IntGauge::new(
                 format!("{}suspicious_nodes", metric_prefix),
-                "Number of suspicious nodes"
+                "Number of suspicious nodes",
             )?;
             registry.register(Box::new(suspicious_nodes.clone()))?;
-            
+
             let failed_nodes = IntGauge::new(
                 format!("{}failed_nodes", metric_prefix),
-                "Number of failed nodes"
+                "Number of failed nodes",
             )?;
             registry.register(Box::new(failed_nodes.clone()))?;
 
             // Routing metrics
             let routing_requests = Counter::new(
                 format!("{}routing_requests_total", metric_prefix),
-                "Total routing requests"
+                "Total routing requests",
             )?;
             registry.register(Box::new(routing_requests.clone()))?;
-            
+
             let routing_success = Counter::new(
                 format!("{}routing_success_total", metric_prefix),
-                "Successful routing requests"
+                "Successful routing requests",
             )?;
             registry.register(Box::new(routing_success.clone()))?;
-            
-            let routing_latency = Histogram::with_opts(
-                HistogramOpts::new(
-                    format!("{}routing_latency_seconds", metric_prefix),
-                    "Routing request latency in seconds"
-                )
-            )?;
+
+            let routing_latency = Histogram::with_opts(HistogramOpts::new(
+                format!("{}routing_latency_seconds", metric_prefix),
+                "Routing request latency in seconds",
+            ))?;
             registry.register(Box::new(routing_latency.clone()))?;
 
             // Storage metrics
             let stored_items = IntGauge::new(
                 format!("{}stored_items", metric_prefix),
-                "Number of stored items"
+                "Number of stored items",
             )?;
             registry.register(Box::new(stored_items.clone()))?;
-            
+
             let storage_bytes = IntGauge::new(
                 format!("{}storage_bytes", metric_prefix),
-                "Total storage in bytes"
+                "Total storage in bytes",
             )?;
             registry.register(Box::new(storage_bytes.clone()))?;
-            
+
             let replication_factor = Gauge::new(
                 format!("{}replication_factor", metric_prefix),
-                "Average replication factor"
+                "Average replication factor",
             )?;
             registry.register(Box::new(replication_factor.clone()))?;
 
             // Network traffic metrics
             let messages_sent = Counter::new(
                 format!("{}messages_sent_total", metric_prefix),
-                "Total messages sent"
+                "Total messages sent",
             )?;
             registry.register(Box::new(messages_sent.clone()))?;
-            
+
             let messages_received = Counter::new(
                 format!("{}messages_received_total", metric_prefix),
-                "Total messages received"
+                "Total messages received",
             )?;
             registry.register(Box::new(messages_received.clone()))?;
-            
+
             let bytes_sent = Counter::new(
                 format!("{}bytes_sent_total", metric_prefix),
-                "Total bytes sent"
+                "Total bytes sent",
             )?;
             registry.register(Box::new(bytes_sent.clone()))?;
-            
+
             let bytes_received = Counter::new(
                 format!("{}bytes_received_total", metric_prefix),
-                "Total bytes received"
+                "Total bytes received",
             )?;
             registry.register(Box::new(bytes_received.clone()))?;
 
             // Cache metrics
             let cache_hits = Counter::new(
                 format!("{}cache_hits_total", metric_prefix),
-                "Total cache hits"
+                "Total cache hits",
             )?;
             registry.register(Box::new(cache_hits.clone()))?;
-            
+
             let cache_misses = Counter::new(
                 format!("{}cache_misses_total", metric_prefix),
-                "Total cache misses"
+                "Total cache misses",
             )?;
             registry.register(Box::new(cache_misses.clone()))?;
-            
+
             let cache_size = IntGauge::new(
                 format!("{}cache_size_bytes", metric_prefix),
-                "Cache size in bytes"
+                "Cache size in bytes",
             )?;
             registry.register(Box::new(cache_size.clone()))?;
-            
+
             let cache_evictions = Counter::new(
                 format!("{}cache_evictions_total", metric_prefix),
-                "Total cache evictions"
+                "Total cache evictions",
             )?;
             registry.register(Box::new(cache_evictions.clone()))?;
 
             // Learning metrics
             let thompson_selections = IntCounter::new(
                 format!("{}thompson_selections_total", metric_prefix),
-                "Thompson sampling strategy selections"
+                "Thompson sampling strategy selections",
             )?;
             registry.register(Box::new(thompson_selections.clone()))?;
-            
+
             let qlearn_updates = Counter::new(
                 format!("{}qlearn_updates_total", metric_prefix),
-                "Q-learning updates"
+                "Q-learning updates",
             )?;
             registry.register(Box::new(qlearn_updates.clone()))?;
-            
+
             let churn_predictions = Counter::new(
                 format!("{}churn_predictions_total", metric_prefix),
-                "Churn predictions made"
+                "Churn predictions made",
             )?;
             registry.register(Box::new(churn_predictions.clone()))?;
 
             // Gossip metrics
             let gossip_messages = Counter::new(
                 format!("{}gossip_messages_total", metric_prefix),
-                "Total gossip messages"
+                "Total gossip messages",
             )?;
             registry.register(Box::new(gossip_messages.clone()))?;
-            
+
             let mesh_size = IntGauge::new(
                 format!("{}gossip_mesh_size", metric_prefix),
-                "Gossip mesh size"
+                "Gossip mesh size",
             )?;
             registry.register(Box::new(mesh_size.clone()))?;
-            
+
             let topic_count = IntGauge::new(
                 format!("{}gossip_topics", metric_prefix),
-                "Number of gossip topics"
+                "Number of gossip topics",
             )?;
             registry.register(Box::new(topic_count.clone()))?;
 
             // Performance metrics
             let cpu_usage = Gauge::new(
                 format!("{}cpu_usage_percent", metric_prefix),
-                "CPU usage percentage"
+                "CPU usage percentage",
             )?;
             registry.register(Box::new(cpu_usage.clone()))?;
-            
+
             let memory_usage = IntGauge::new(
                 format!("{}memory_usage_bytes", metric_prefix),
-                "Memory usage in bytes"
+                "Memory usage in bytes",
             )?;
             registry.register(Box::new(memory_usage.clone()))?;
-            
+
             let thread_count = IntGauge::new(
                 format!("{}thread_count", metric_prefix),
-                "Number of threads"
+                "Number of threads",
             )?;
             registry.register(Box::new(thread_count.clone()))?;
-            
+
             NetworkMetrics {
                 connected_nodes,
                 active_nodes,

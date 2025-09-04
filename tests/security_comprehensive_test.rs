@@ -24,6 +24,12 @@ pub struct MockInputValidator {
     validation_count: Arc<AtomicUsize>,
 }
 
+impl Default for MockInputValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockInputValidator {
     pub fn new() -> Self {
         Self {
@@ -152,6 +158,12 @@ pub struct AuthToken {
     permissions: Vec<String>,
 }
 
+impl Default for MockAuthService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockAuthService {
     pub fn new() -> Self {
         Self {
@@ -208,6 +220,12 @@ pub struct MockSecureStorage {
     access_count: Arc<AtomicUsize>,
 }
 
+impl Default for MockSecureStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockSecureStorage {
     pub fn new() -> Self {
         Self {
@@ -257,6 +275,12 @@ pub struct SecurityTestSuite {
     rate_limiter: MockRateLimiter,
     auth_service: MockAuthService,
     secure_storage: MockSecureStorage,
+}
+
+impl Default for SecurityTestSuite {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SecurityTestSuite {

@@ -588,11 +588,11 @@ impl RoutingStrategy for SOMRoutingStrategy {
 mod tests {
     use super::*;
     
-    /// Create a test verifying key
-    fn create_test_verifying_key() -> ed25519_dalek::VerifyingKey {
-        // For tests, we can use a dummy key with all zeros
-        ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32])
-            .expect("Test key creation should not fail")
+    /// Create a test ML-DSA public key
+    fn create_test_public_key() -> crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey {
+        let (pk, _sk) = crate::quantum_crypto::ant_quic_integration::generate_ml_dsa_keypair()
+            .expect("PQ keygen should not fail in tests");
+        pk
     }
     
     #[test]
@@ -622,7 +622,7 @@ mod tests {
         
         let node = NodeDescriptor {
             id: node_id.clone(),
-            public_key: create_test_verifying_key(),
+            public_key: create_test_public_key(),
             addresses: vec![], // No hardcoded addresses in tests
             hyperbolic: None,
             som_position: None,
@@ -667,7 +667,7 @@ mod tests {
         
         let node = NodeDescriptor {
             id: node_id,
-            public_key: create_test_verifying_key(),
+            public_key: create_test_public_key(),
             addresses: vec![],
             hyperbolic: None,
             som_position: None,
@@ -707,7 +707,7 @@ mod tests {
             
             let node = NodeDescriptor {
                 id: node_id,
-                public_key: create_test_verifying_key(),
+                public_key: create_test_public_key(),
                 addresses: vec![],
                 hyperbolic: None,
                 som_position: None,
@@ -749,7 +749,7 @@ mod tests {
         for (id, storage) in [(local_id.clone(), 100), (target_id.clone(), 900)] {
             let node = NodeDescriptor {
                 id: id.clone(),
-                public_key: create_test_verifying_key(),
+                public_key: create_test_public_key(),
                 addresses: vec![],
                 hyperbolic: None,
                 som_position: None,

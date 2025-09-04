@@ -587,11 +587,9 @@ For commercial licensing, contact: saorsalabs@gmail.com
 - `rustls` - TLS support
 
 ### Cryptography
-- `ed25519-dalek` - Digital signatures
+- `saorsa-pqc` - Post-quantum cryptography (ML-DSA, ML-KEM, ChaCha20-Poly1305)
 - `blake3` - Hashing
 - `rand` - Random number generation
-- `x25519-dalek` - Key exchange
-- `aes-gcm` - Symmetric encryption
 
 ### Storage & Database
 - `sqlx` - Database operations

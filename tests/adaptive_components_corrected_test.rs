@@ -102,11 +102,9 @@ async fn test_multi_armed_bandit_real_api() -> anyhow::Result<()> {
     let mab = MultiArmedBandit::new(config).await?;
 
     // Create test destinations and strategies
-    let destinations = vec![
-        NodeId { hash: [1u8; 32] },
+    let destinations = [NodeId { hash: [1u8; 32] },
         NodeId { hash: [2u8; 32] },
-        NodeId { hash: [3u8; 32] },
-    ];
+        NodeId { hash: [3u8; 32] }];
 
     let strategies = vec![
         StrategyChoice::Kademlia,
@@ -265,16 +263,7 @@ async fn test_replication_manager_real_api() -> anyhow::Result<()> {
     let config = ReplicationConfig::default();
     let trust_provider = Arc::new(MockTrustProvider::new());
     let churn_predictor = Arc::new(ChurnPredictor::new());
-    let router = Arc::new(AdaptiveRouter::new(
-        trust_provider.clone(),
-        Arc::new(HyperbolicSpace::new()),
-        Arc::new(SelfOrganizingMap::new(SomConfig {
-            initial_learning_rate: 0.5,
-            initial_radius: 3.0,
-            iterations: 1000,
-            grid_size: GridSize::Fixed(10, 10),
-        })),
-    ));
+    let router = Arc::new(AdaptiveRouter::new(trust_provider.clone()));
 
     let replication = ReplicationManager::new(config, trust_provider, churn_predictor, router);
 

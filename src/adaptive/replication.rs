@@ -489,17 +489,16 @@ mod tests {
         let config = ReplicationConfig::default();
         let trust_provider = Arc::new(MockTrustProvider::new());
         let churn_predictor = Arc::new(ChurnPredictor::new());
-        let router = Arc::new(AdaptiveRouter::new(
-            trust_provider.clone(),
-            Arc::new(crate::adaptive::hyperbolic::HyperbolicSpace::new()),
-            Arc::new(crate::adaptive::som::SelfOrganizingMap::new(
-                crate::adaptive::som::SomConfig {
-                    initial_learning_rate: 0.5,
-                    initial_radius: 3.0,
-                    iterations: 1000,
-                    grid_size: crate::adaptive::som::GridSize::Fixed(10, 10),
-                },
-            )),
+        let router = Arc::new(AdaptiveRouter::new(trust_provider.clone()));
+        // Store hyperbolic and som for potential future use
+        let _hyperbolic = Arc::new(crate::adaptive::hyperbolic::HyperbolicSpace::new());
+        let _som = Arc::new(crate::adaptive::som::SelfOrganizingMap::new(
+            crate::adaptive::som::SomConfig {
+                initial_learning_rate: 0.5,
+                initial_radius: 3.0,
+                iterations: 1000,
+                grid_size: crate::adaptive::som::GridSize::Fixed(10, 10),
+            },
         ));
 
         ReplicationManager::new(config, trust_provider, churn_predictor, router)
@@ -649,7 +648,7 @@ mod tests {
             .replica_map
             .write()
             .await
-            .insert(content_hash.clone(), replica_info);
+            .insert(content_hash, replica_info);
 
         // Handle departure
         manager.handle_node_departure(&departed_node).await.unwrap();

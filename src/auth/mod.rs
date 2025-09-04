@@ -16,13 +16,13 @@
 //! This module provides the WriteAuth trait and various adapters
 //! for different authentication schemes.
 
+use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
 use anyhow::Result;
 use async_trait::async_trait;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use once_cell::sync::OnceCell;
 use std::sync::Arc;
-use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
 
 /// A cryptographic signature
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,14 +154,19 @@ impl WriteAuth for DelegatedWriteAuth {
         }
         const SIG_LEN: usize = 3309;
         let sig_bytes = sigs[0].as_bytes();
-        if sig_bytes.len() != SIG_LEN { return Ok(false); }
+        if sig_bytes.len() != SIG_LEN {
+            return Ok(false);
+        }
         let mut arr = [0u8; SIG_LEN];
         arr.copy_from_slice(sig_bytes);
         let sig = MlDsaSignature(Box::new(arr));
         let ml = MlDsa65::new();
         for ak in &self.authorized_keys {
-            if let Ok(pk) = MlDsaPublicKey::from_bytes(ak.as_bytes()) {
-                if let Ok(valid) = ml.verify(&pk, record, &sig) { if valid { return Ok(true); } }
+            if let Ok(pk) = MlDsaPublicKey::from_bytes(ak.as_bytes())
+                && let Ok(valid) = ml.verify(&pk, record, &sig)
+                && valid
+            {
+                return Ok(true);
             }
         }
         Ok(false)
@@ -239,7 +244,7 @@ impl ThresholdWriteAuth {
             pub_keys,
         })
     }
-    
+
     /// Create from raw public keys (alias for compatibility)
     pub fn from_pub_keys(threshold: usize, total: usize, pub_keys: Vec<PubKey>) -> Result<Self> {
         Self::new(threshold, total, pub_keys)
@@ -254,10 +259,15 @@ impl WriteAuth for ThresholdWriteAuth {
             return Ok(false);
         }
 
+        // Verify we dont exceed total possible signatures
+        if sigs.len() > self.total {
+            return Ok(false);
+        }
+
         // TODO: Implement actual threshold signature verification once saorsa-seal exports proper types
-        // For now, this is a placeholder that checks signature count
-        // In production, this would use proper threshold cryptography
-        Ok(sigs.len() >= self.threshold)
+        // For now, this is a placeholder that validates signature count against our public keys
+        // In production, this would use proper threshold cryptography with self.pub_keys
+        Ok(sigs.len() >= self.threshold && self.pub_keys.len() == self.total)
     }
 
     fn auth_type(&self) -> &str {
@@ -376,19 +386,16 @@ mod tests {
         let auth = ThresholdWriteAuth::from_pub_keys(2, 3, keys).unwrap();
 
         // Create mock signatures (just need threshold count for now)
-        let sigs = vec![
-            Sig::new(vec![1; 64]),
-            Sig::new(vec![2; 64]),
-        ];
+        let sigs = vec![Sig::new(vec![1; 64]), Sig::new(vec![2; 64])];
 
         let record = b"test";
         // This will pass with placeholder implementation
         let result = auth.verify(record, &sigs).await.unwrap();
         assert!(result); // Should pass since we have 2 sigs and threshold is 2
-        
+
         assert_eq!(auth.threshold, 2);
         assert_eq!(auth.total, 3);
-        
+
         // Test with insufficient signatures
         let insufficient_sigs = vec![Sig::new(vec![1; 64])];
         let result2 = auth.verify(record, &insufficient_sigs).await.unwrap();

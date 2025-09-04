@@ -47,14 +47,14 @@ This document establishes the security principles, trust models, and cryptograph
 ### Current Cryptographic Primitives
 
 #### Digital Signatures
-- **Algorithm**: Ed25519
+- **Algorithm**: ML-DSA (post-quantum)
 - **Security Level**: 128-bit equivalent
 - **Performance**: ~70,000 signatures/second, ~25,000 verifications/second
 - **Key Size**: 32-byte public keys, 64-byte signatures
 - **Rationale**: Excellent performance, resistance to timing attacks, deterministic signatures
 
 #### Key Exchange
-- **Algorithm**: X25519 (Curve25519 ECDH)
+- **Algorithm**: ML-KEM (post-quantum key encapsulation)
 - **Security Level**: 128-bit equivalent
 - **Performance**: ~100,000 operations/second
 - **Key Size**: 32-byte keys
@@ -90,7 +90,7 @@ This document establishes the security principles, trust models, and cryptograph
 #### Key Exchange (Future)
 - **Algorithm**: ML-KEM (Kyber)
 - **Security Level**: NIST Level 3
-- **Implementation**: Hybrid with X25519 for backward compatibility
+- **Implementation**: PQC-only via saorsa-pqc and ant-quic
 - **Timeline**: Deployment by 2027 based on quantum computer development
 
 ### Cryptographic Key Management

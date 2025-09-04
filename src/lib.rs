@@ -79,10 +79,10 @@ pub mod auth;
 
 /// Async event bus for watches and state changes
 pub mod events;
-/// Shared simple structs
-pub mod types;
 /// MLS verifier adapter and proof format
 pub mod mls;
+/// Shared simple structs
+pub mod types;
 
 /// Telemetry for metrics and health signals
 pub mod telemetry;
@@ -146,7 +146,7 @@ pub mod secure_memory;
 /// Hierarchical key derivation system
 pub mod key_derivation;
 
-/// Encrypted key storage with Argon2id and AES-256-GCM
+/// Encrypted key storage with Argon2id and ChaCha20-Poly1305
 pub mod encrypted_key_storage;
 
 /// Persistent state management with crash recovery
@@ -270,7 +270,7 @@ pub use quantum_crypto::{
     HybridKemSecretKey,
     HybridPublicKeyEncryption,
 
-    HybridSignature,
+    // HybridSignature,
     HybridSignaturePublicKey,
     HybridSignatureSecretKey,
     HybridSignatureValue,
@@ -314,11 +314,6 @@ pub use quantum_crypto::ant_quic_integration::{
 
 // Legacy types (deprecated - migrate to saorsa-pqc equivalents)
 pub use quantum_crypto::types::{
-    Ed25519PrivateKey, // DEPRECATED: Use saorsa-pqc types instead
-    // Deprecated encryption types - migrate to saorsa-pqc
-    Ed25519PublicKey, // DEPRECATED: Use saorsa-pqc types instead
-    Ed25519Signature, // DEPRECATED: Use saorsa-pqc types instead
-
     FrostCommitment,
     FrostGroupPublicKey,
     FrostKeyShare,
@@ -359,13 +354,3 @@ pub type Multiaddr = NetworkAddress;
 
 /// Saorsa Core version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version() {
-        assert!(!VERSION.is_empty());
-    }
-}

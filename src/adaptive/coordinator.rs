@@ -277,11 +277,10 @@ impl NetworkCoordinator {
         }));
 
         // Create adaptive router
-        let router = Arc::new(AdaptiveRouter::new(
-            trust_engine.clone(),
-            hyperbolic_space.clone(),
-            som.clone(),
-        ));
+        let router = Arc::new(AdaptiveRouter::new(trust_engine.clone()));
+        // Store references for potential future use
+        let _hyperbolic_space = hyperbolic_space.clone();
+        let _som = som.clone();
 
         // Initialize DHT
         let dht_config = crate::dht::DHTConfig::default();

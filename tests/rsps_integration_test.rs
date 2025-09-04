@@ -33,11 +33,11 @@ async fn test_store_and_find_provider() -> Result<()> {
     // Store provider
     storage
         .store_provider(
-            root_cid.clone(),
+            root_cid,
             provider.clone(),
             vec![],
             saorsa_rsps::Rsps::new(
-                root_cid.clone(),
+                root_cid,
                 0,
                 &[],
                 &saorsa_rsps::RspsConfig::default(),
@@ -65,11 +65,11 @@ async fn test_cache_admission_control() -> Result<()> {
     let provider = "provider-1".to_string();
     storage
         .store_provider(
-            included_root.clone(),
+            included_root,
             provider.clone(),
             vec![],
             saorsa_rsps::Rsps::new(
-                included_root.clone(),
+                included_root,
                 0,
                 &[],
                 &saorsa_rsps::RspsConfig::default(),
@@ -87,7 +87,7 @@ async fn test_cache_admission_control() -> Result<()> {
     assert!(
         storage
             .cache_if_allowed(
-                included_root.clone(),
+                included_root,
                 included_cid,
                 included_content.clone()
             )
@@ -98,7 +98,7 @@ async fn test_cache_admission_control() -> Result<()> {
     assert!(
         !storage
             .cache_if_allowed(
-                excluded_root.clone(),
+                excluded_root,
                 excluded_cid,
                 excluded_content.clone()
             )
@@ -118,11 +118,11 @@ async fn test_witness_receipt_generation() -> Result<()> {
     let provider = "provider-1".to_string();
     storage
         .store_provider(
-            root_cid.clone(),
+            root_cid,
             provider.clone(),
             vec![],
             saorsa_rsps::Rsps::new(
-                root_cid.clone(),
+                root_cid,
                 0,
                 &[],
                 &saorsa_rsps::RspsConfig::default(),
@@ -154,11 +154,11 @@ async fn test_ttl_extension_on_receipts() -> Result<()> {
     let _initial_ttl = Duration::from_secs(3600);
     storage
         .store_provider(
-            root_cid.clone(),
+            root_cid,
             provider.clone(),
             vec![],
             saorsa_rsps::Rsps::new(
-                root_cid.clone(),
+                root_cid,
                 0,
                 &[],
                 &saorsa_rsps::RspsConfig::default(),
@@ -192,11 +192,11 @@ async fn test_rsps_update_with_new_content() -> Result<()> {
     // Store initial provider
     storage
         .store_provider(
-            root_cid.clone(),
+            root_cid,
             provider.clone(),
             vec![],
             saorsa_rsps::Rsps::new(
-                root_cid.clone(),
+                root_cid,
                 0,
                 &[],
                 &saorsa_rsps::RspsConfig::default(),
@@ -216,7 +216,7 @@ async fn test_rsps_update_with_new_content() -> Result<()> {
         // Cache the content (simulating actual DHT storage)
         let cid = Cid::from(blake3::hash(b"content-idx").as_bytes().to_owned());
         storage
-            .cache_if_allowed(root_cid.clone(), cid, content.clone())
+            .cache_if_allowed(root_cid, cid, content.clone())
             .await?;
 
         // Generate receipt
@@ -239,11 +239,11 @@ async fn test_expired_entries_cleanup() -> Result<()> {
     // Store provider with very short TTL
     storage
         .store_provider(
-            root_cid.clone(),
+            root_cid,
             provider.clone(),
             vec![],
             saorsa_rsps::Rsps::new(
-                root_cid.clone(),
+                root_cid,
                 0,
                 &[],
                 &saorsa_rsps::RspsConfig::default(),
@@ -280,11 +280,11 @@ async fn test_multiple_providers_per_root() -> Result<()> {
     for provider in &providers {
         storage
             .store_provider(
-                root_cid.clone(),
+                root_cid,
                 provider.clone(),
                 vec![],
                 saorsa_rsps::Rsps::new(
-                    root_cid.clone(),
+                    root_cid,
                     0,
                     &[],
                     &saorsa_rsps::RspsConfig::default(),
@@ -321,11 +321,11 @@ async fn test_concurrent_operations() -> Result<()> {
             // Store provider
             storage_clone
                 .store_provider(
-                    root_cid.clone(),
+                    root_cid,
                     provider.clone(),
                     vec![],
                     saorsa_rsps::Rsps::new(
-                        root_cid.clone(),
+                        root_cid,
                         0,
                         &[],
                         &saorsa_rsps::RspsConfig::default(),
@@ -366,11 +366,11 @@ async fn test_cache_eviction_respects_rsps() -> Result<()> {
 
         storage
             .store_provider(
-                root_cid.clone(),
+                root_cid,
                 provider.clone(),
                 vec![],
                 saorsa_rsps::Rsps::new(
-                    root_cid.clone(),
+                    root_cid,
                     0,
                     &[],
                     &saorsa_rsps::RspsConfig::default(),
@@ -383,7 +383,7 @@ async fn test_cache_eviction_respects_rsps() -> Result<()> {
         if i % 2 == 0 {
             let content = Cid::from(blake3::hash(b"content-idx").as_bytes().to_owned());
             let _ = storage
-                .cache_if_allowed(root_cid.clone(), content, vec![])
+                .cache_if_allowed(root_cid, content, vec![])
                 .await?;
         }
     }
@@ -407,11 +407,11 @@ async fn test_receipt_validation() -> Result<()> {
     let provider = format!("peer-{}", 0);
     storage
         .store_provider(
-            root_cid.clone(),
+            root_cid,
             provider.clone(),
             vec![],
             saorsa_rsps::Rsps::new(
-                root_cid.clone(),
+                root_cid,
                 0,
                 &[],
                 &saorsa_rsps::RspsConfig::default(),

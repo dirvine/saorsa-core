@@ -4,12 +4,12 @@ use super::types::*;
 use super::{DhtClient, KeyExchange, MessageStore, MessageTransport};
 use crate::identity::FourWordAddress;
 use crate::messaging::user_handle::UserHandle;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{Duration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// High-level messaging service that coordinates all messaging components
 pub struct MessagingService {
@@ -50,9 +50,14 @@ impl MessagingService {
         let network = Arc::new(crate::network::P2PNode::new_for_tests()?);
 
         #[cfg(not(test))]
-        let network = Arc::new(crate::network::P2PNode::new_for_tests()?); // Using test version for now
+        let network = {
+            // Use a real P2P node with defaults for production wiring
+            let config = crate::network::NodeConfig::new()?;
+            let node = crate::network::P2PNode::new(config).await?;
+            Arc::new(node)
+        };
         let transport = Arc::new(MessageTransport::new(network, dht_client.clone()).await?);
-        let key_exchange = Arc::new(KeyExchange::new(identity.clone())?);
+        let key_exchange = Arc::new(KeyExchange::new(identity.clone(), dht_client.clone()).await?);
 
         let (event_tx, _) = broadcast::channel(1000);
 
@@ -101,17 +106,14 @@ impl MessagingService {
             // Get or establish encryption key
             let encryption_key = match self.key_exchange.get_session_key(recipient).await {
                 Ok(key) => key,
-                Err(_) => {
-                    // Initiate key exchange if no session exists
-                    let _kex_msg = self
-                        .key_exchange
-                        .initiate_exchange(recipient.clone())
-                        .await?;
-                    // In production, send kex_msg via transport
-                    debug!("Initiated key exchange with {}", recipient);
-
-                    // For now, use a placeholder key
-                    vec![0u8; 32]
+                Err(e) => {
+                    // Attempt to initiate PQC key exchange; if unavailable, error out
+                    let _ = self.key_exchange.initiate_exchange(recipient.clone()).await;
+                    return Err(anyhow::anyhow!(
+                        "No session key established for {}: {}",
+                        recipient,
+                        e
+                    ));
                 }
             };
 
@@ -285,24 +287,18 @@ impl MessagingService {
         message: &RichMessage,
         key: &[u8],
     ) -> Result<EncryptedMessage> {
-        use chacha20poly1305::{
-            ChaCha20Poly1305, Nonce,
-            aead::{Aead, KeyInit, OsRng},
-        };
-        use rand::RngCore;
+        use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricKey};
 
-        // Serialize message
         let plaintext = serde_json::to_vec(message)?;
-
-        // Generate nonce
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // Encrypt
-        let cipher = ChaCha20Poly1305::new_from_slice(key).context("Invalid key length")?;
-        let ciphertext = cipher
-            .encrypt(nonce, plaintext.as_ref())
+        let mut k = [0u8; 32];
+        if key.len() != 32 {
+            return Err(anyhow::anyhow!("Invalid session key length"));
+        }
+        k.copy_from_slice(&key[..32]);
+        let sk = SymmetricKey::from_bytes(k);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
+        let (ciphertext, nonce) = cipher
+            .encrypt(&plaintext, None)
             .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
 
         Ok(EncryptedMessage {
@@ -310,7 +306,7 @@ impl MessagingService {
             channel_id: message.channel_id,
             sender: self.identity.clone(),
             ciphertext,
-            nonce: nonce_bytes.to_vec(),
+            nonce: nonce.to_vec(),
             key_id: format!("key_{}", self.identity),
         })
     }
@@ -320,23 +316,29 @@ impl MessagingService {
         encrypted: &EncryptedMessage,
         key_exchange: &Arc<KeyExchange>,
     ) -> Result<RichMessage> {
-        use chacha20poly1305::{
-            ChaCha20Poly1305, Nonce,
-            aead::{Aead, KeyInit},
-        };
+        use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricKey};
 
         // Get decryption key
         let key = key_exchange
             .get_session_key(&encrypted.sender)
             .await
-            .unwrap_or_else(|_| vec![0u8; 32]); // Placeholder
-
-        // Decrypt
-        let cipher = ChaCha20Poly1305::new_from_slice(&key).context("Invalid key length")?;
-        let nonce = Nonce::from_slice(&encrypted.nonce);
-
+            .map_err(|e| anyhow::anyhow!("No session key for {}: {}", encrypted.sender, e))?;
+        if key.len() != 32 {
+            return Err(anyhow::anyhow!("Invalid session key length"));
+        }
+        let mut k = [0u8; 32];
+        k.copy_from_slice(&key[..32]);
+        let sk = SymmetricKey::from_bytes(k);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
+        // Convert Vec<u8> nonce back to [u8; 12] array
+        if encrypted.nonce.len() != 12 {
+            return Err(anyhow::anyhow!("Invalid nonce length: expected 12, got {}", encrypted.nonce.len()));
+        }
+        let mut nonce_array = [0u8; 12];
+        nonce_array.copy_from_slice(&encrypted.nonce);
+        
         let plaintext = cipher
-            .decrypt(nonce, encrypted.ciphertext.as_ref())
+            .decrypt(&encrypted.ciphertext, &nonce_array, None)
             .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
 
         // Deserialize

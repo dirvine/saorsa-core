@@ -13,26 +13,28 @@
 
 //! Public API implementation matching the saorsa-core specification.
 
+use crate::adaptive::TrustProvider;
+use crate::adaptive::trust::EigenTrustEngine;
 use crate::auth::{PubKey, Sig, WriteAuth};
 use crate::events::Subscription;
 use crate::fwid::{Key, fw_check, fw_to_key};
-use crate::telemetry::StreamClass;
-use crate::{dht as twdht_mod, telemetry};
-use crate::adaptive::trust::EigenTrustEngine;
-use crate::adaptive::TrustProvider;
-use once_cell::sync::{Lazy, OnceCell};
-use std::sync::Arc;
-use crate::peer_record::UserId;
 use crate::identity::node_identity::NodeId;
-use twdht_mod::{Dht as TwDhtTrait, TrustWeightedKademlia as TwDht};
+use crate::peer_record::UserId;
+use crate::quantum_crypto::{
+    MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
+};
+use crate::telemetry::StreamClass;
 use crate::types::Forward;
+use crate::{dht as twdht_mod, telemetry};
 use anyhow::Result;
-use std::borrow::Cow;
-use serde::{Serialize, Deserialize};
 use blake3::Hasher as Blakesum;
-use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
 use bytes::Bytes;
+use once_cell::sync::{Lazy, OnceCell};
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::sync::Arc;
 use std::time::Duration;
+use twdht_mod::{Dht as TwDhtTrait, TrustWeightedKademlia as TwDht};
 
 // Re-export key spec types
 pub use crate::fwid::Word;
@@ -64,12 +66,13 @@ pub struct GroupKeyPair {
     pub group_sk: MlDsaSecretKey,
 }
 
-
 fn compute_membership_root(members: &[MemberRef]) -> Key {
     let mut ids: Vec<[u8; 32]> = members.iter().map(|m| *m.member_id.as_bytes()).collect();
     ids.sort_unstable();
     let mut hasher = Blakesum::new();
-    for id in ids { hasher.update(&id); }
+    for id in ids {
+        hasher.update(&id);
+    }
     let out = hasher.finalize();
     Key::from(*out.as_bytes())
 }
@@ -128,11 +131,10 @@ pub struct DeviceSetV1 {
     /// This signature is verified against `WriteAuth` (Single or Delegated)
     /// and is never included in the canonical signing bytes to avoid
     /// signature malleability affecting identity.
-    pub sig: Option<Vec<u8>>, 
+    pub sig: Option<Vec<u8>>,
 }
 
-/// Forward entry for device set
-// Forward moved to crate::types::Forward
+// Forward entry for device set - moved to crate::types::Forward
 
 /// Group packet version 1
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -198,7 +200,11 @@ pub async fn group_fetch(group_id: &[u8]) -> Result<GroupPacketV1> {
 }
 
 /// Store GroupForwardsV1 under key blake3("group-fwd" || group_id)
-pub async fn group_forwards_put(fwd: &GroupForwardsV1, group_id: &[u8], policy: &PutPolicy) -> Result<PutReceipt> {
+pub async fn group_forwards_put(
+    fwd: &GroupForwardsV1,
+    group_id: &[u8],
+    policy: &PutPolicy,
+) -> Result<PutReceipt> {
     let key = crate::fwid::compute_key("group-fwd", group_id);
     let bytes = serde_cbor::to_vec(fwd)?;
     dht_put(key, Bytes::from(bytes), policy).await
@@ -212,7 +218,10 @@ pub async fn group_forwards_fetch(group_id: &[u8]) -> Result<GroupForwardsV1> {
 }
 
 /// Store ContainerManifestV1 under key blake3("manifest" || object)
-pub async fn container_manifest_put(manifest: &ContainerManifestV1, policy: &PutPolicy) -> Result<PutReceipt> {
+pub async fn container_manifest_put(
+    manifest: &ContainerManifestV1,
+    policy: &PutPolicy,
+) -> Result<PutReceipt> {
     let key = crate::fwid::compute_key("manifest", manifest.object.as_bytes());
     let bytes = serde_cbor::to_vec(manifest)?;
     dht_put(key, Bytes::from(bytes), policy).await
@@ -246,7 +255,10 @@ pub fn group_identity_create(
     let packet = GroupIdentityPacketV1 {
         v: 1,
         words: [
-            words[0].clone(), words[1].clone(), words[2].clone(), words[3].clone()
+            words[0].clone(),
+            words[1].clone(),
+            words[2].clone(),
+            words[3].clone(),
         ],
         id: id.clone(),
         group_pk: group_pk.as_bytes().to_vec(),
@@ -269,7 +281,9 @@ pub async fn group_identity_publish(packet: GroupIdentityPacketV1) -> Result<()>
     let pol = PutPolicy {
         quorum: 3,
         ttl: None,
-        auth: Box::new(crate::auth::SingleWriteAuth::new(PubKey::new(packet.group_pk.clone()))),
+        auth: Box::new(crate::auth::SingleWriteAuth::new(PubKey::new(
+            packet.group_pk.clone(),
+        ))),
     };
     let _ = dht_put(id_key, Bytes::from(bytes), &pol).await?;
     Ok(())
@@ -332,10 +346,10 @@ pub async fn identity_claim(words: [Word; 4], _pubkey: PubKey, _sig: Sig) -> Res
     }
 
     // Verify signature over UTF-8 words (joined with '-') using ML-DSA
-    use crate::quantum_crypto::{MlDsaPublicKey, MlDsaSignature, MlDsa65, MlDsaOperations};
+    use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
 
     let message = words.join("-");
-    let pub_key = MlDsaPublicKey::from_bytes(&_pubkey.as_bytes())
+    let pub_key = MlDsaPublicKey::from_bytes(_pubkey.as_bytes())
         .map_err(|e| anyhow::anyhow!("Invalid ML-DSA public key: {e}"))?;
     // ML-DSA-65 signature is 3309 bytes
     const ML_DSA_SIG_LEN: usize = 3309;
@@ -448,11 +462,7 @@ pub async fn device_publish_forward(id_key: Key, fwd: Forward) -> Result<()> {
 
 /// Signed variant for updating device forwards. The signature must be over
 /// the canonical message: b"device-set" || key || canonical_cbor(forwards)
-pub async fn device_publish_forward_signed(
-    id_key: Key,
-    fwd: Forward,
-    sig: Sig,
-) -> Result<()> {
+pub async fn device_publish_forward_signed(id_key: Key, fwd: Forward, sig: Sig) -> Result<()> {
     // Derive device-set key and fetch existing
     let device_set_key = crate::fwid::compute_key("device-set", id_key.as_bytes());
     let existing = dht_get(device_set_key.clone(), 1).await.ok();
@@ -498,6 +508,7 @@ pub async fn identity_publish_endpoints_signed(
     ep_sig: Sig,
 ) -> Result<()> {
     // Compute four-word representations where possible
+    #[allow(clippy::collapsible_if)]
     for ep in endpoints.iter_mut() {
         if let Some((ref ip, port)) = ep.ipv4 {
             if let Ok(addr) = ip.parse::<std::net::Ipv4Addr>() {
@@ -554,7 +565,9 @@ pub async fn identity_publish_endpoints_signed(
     let pol = PutPolicy {
         quorum: 3,
         ttl: None,
-        auth: Box::new(crate::auth::SingleWriteAuth::new(PubKey::new(pkt.pk.clone()))),
+        auth: Box::new(crate::auth::SingleWriteAuth::new(PubKey::new(
+            pkt.pk.clone(),
+        ))),
     };
     let _ = dht_put(id_key.clone(), Bytes::from(bytes.clone()), &pol).await?;
     crate::events::global_bus()
@@ -580,7 +593,10 @@ pub async fn dht_put(key: Key, _bytes: Bytes, _policy: &PutPolicy) -> Result<Put
         Arc::new(TwDht::new(NodeId([7u8; 32])))
     });
     static DHT_REGISTRY: OnceCell<Arc<TwDht>> = OnceCell::new();
-    let dht = DHT_REGISTRY.get().cloned().unwrap_or_else(|| GLOBAL_TWDHT.clone());
+    let dht = DHT_REGISTRY
+        .get()
+        .cloned()
+        .unwrap_or_else(|| GLOBAL_TWDHT.clone());
 
     let dht_key: [u8; 32] = *key.as_bytes();
     let pol = twdht_mod::PutPolicy {
@@ -596,13 +612,19 @@ pub async fn dht_put(key: Key, _bytes: Bytes, _policy: &PutPolicy) -> Result<Put
     // Group identity enforcement
     if let Ok(gip) = serde_cbor::from_slice::<GroupIdentityPacketV1>(&_bytes) {
         if !fw_check([
-            gip.words[0].clone(), gip.words[1].clone(), gip.words[2].clone(), gip.words[3].clone(),
+            gip.words[0].clone(),
+            gip.words[1].clone(),
+            gip.words[2].clone(),
+            gip.words[3].clone(),
         ]) {
             telemetry::telemetry().record_auth_failure();
             anyhow::bail!("Invalid group words");
         }
         let id_calc = fw_to_key([
-            gip.words[0].clone(), gip.words[1].clone(), gip.words[2].clone(), gip.words[3].clone(),
+            gip.words[0].clone(),
+            gip.words[1].clone(),
+            gip.words[2].clone(),
+            gip.words[3].clone(),
         ])?;
         if id_calc != gip.id {
             telemetry::telemetry().record_auth_failure();
@@ -661,8 +683,8 @@ pub async fn dht_put(key: Key, _bytes: Bytes, _policy: &PutPolicy) -> Result<Put
             anyhow::bail!("Identity key mismatch for words");
         }
         // 3) verify signature over utf8(words)
-        use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
         use crate::auth::Sig as AuthSig;
+        use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
         let pk = MlDsaPublicKey::from_bytes(&pkt.pk)
             .map_err(|e| anyhow::anyhow!("Invalid ML-DSA pubkey: {e}"))?;
         const SIG_LEN: usize = 3309;
@@ -732,7 +754,12 @@ pub async fn dht_put(key: Key, _bytes: Bytes, _policy: &PutPolicy) -> Result<Put
             .ok_or_else(|| anyhow::anyhow!("Missing device-set signature"))?;
         // Build canonical CBOR of forwards
         let mut forwards_sorted = ds.forwards.clone();
-        forwards_sorted.sort_by(|a, b| a.proto.cmp(&b.proto).then_with(|| a.addr.cmp(&b.addr)).then_with(|| a.exp.cmp(&b.exp)));
+        forwards_sorted.sort_by(|a, b| {
+            a.proto
+                .cmp(&b.proto)
+                .then_with(|| a.addr.cmp(&b.addr))
+                .then_with(|| a.exp.cmp(&b.exp))
+        });
         let buf = serde_cbor::to_vec(&forwards_sorted)?;
         // Build auth message: b"device-set" || key || canonical(forwards)
         let mut msg = Vec::with_capacity(9 + 32 + buf.len());
@@ -748,10 +775,10 @@ pub async fn dht_put(key: Key, _bytes: Bytes, _policy: &PutPolicy) -> Result<Put
         if let Some(p) = gpkt.proof.as_ref() {
             sigs.push(crate::auth::Sig::new(p.clone()));
         }
-    } else if let Ok(gfwd) = serde_cbor::from_slice::<GroupForwardsV1>(&_bytes) {
-        if let Some(p) = gfwd.proof.as_ref() {
-            sigs.push(crate::auth::Sig::new(p.clone()));
-        }
+    } else if let Ok(gfwd) = serde_cbor::from_slice::<GroupForwardsV1>(&_bytes)
+        && let Some(p) = gfwd.proof.as_ref()
+    {
+        sigs.push(crate::auth::Sig::new(p.clone()));
     }
 
     // Enforce write authorization policy before storing
@@ -793,13 +820,13 @@ pub async fn dht_put(key: Key, _bytes: Bytes, _policy: &PutPolicy) -> Result<Put
 pub async fn dht_get(_key: Key, quorum: usize) -> Result<Bytes> {
     static DHT_REGISTRY: OnceCell<Arc<TwDht>> = OnceCell::new();
     let dht = DHT_REGISTRY.get().cloned().unwrap_or_else(|| {
-        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> = Lazy::new(|| Arc::new(TwDht::new(NodeId([7u8; 32]))));
+        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> =
+            Lazy::new(|| Arc::new(TwDht::new(NodeId([7u8; 32]))));
         GLOBAL_TWDHT.clone()
     });
 
     let dht_key: [u8; 32] = *_key.as_bytes();
     let bytes = dht.get(dht_key, quorum).await?;
-
 
     // Telemetry counter
     telemetry::telemetry().record_dht_get();
@@ -824,18 +851,10 @@ pub fn set_dht_instance(dht: Arc<TwDht>) -> bool {
 
 /// Record an interaction outcome for trust tracking
 pub async fn record_interaction(peer: Vec<u8>, outcome: Outcome) -> Result<()> {
-    use std::collections::HashSet;
     use crate::adaptive::TrustProvider;
     use crate::peer_record::UserId;
-    
-    // Use a global trust engine instance
-    static TRUST_ENGINE: Lazy<Arc<EigenTrustEngine>> = Lazy::new(|| {
-        let mut pre_trusted = HashSet::new();
-        // Add some pre-trusted nodes (could be loaded from config)
-        pre_trusted.insert(UserId { hash: [1u8; 32] });
-        Arc::new(EigenTrustEngine::new(pre_trusted))
-    });
-    
+    use std::collections::HashSet;
+
     // Create UserId from peer bytes
     let peer_id = if peer.len() == 32 {
         let mut arr = [0u8; 32];
@@ -845,14 +864,19 @@ pub async fn record_interaction(peer: Vec<u8>, outcome: Outcome) -> Result<()> {
         // Handle invalid peer ID
         return Err(anyhow::anyhow!("Invalid peer ID length"));
     };
-    
+
     // Get local node ID (using a fixed ID for this context)
     let local_id = UserId { hash: [0u8; 32] };
-    
+
     // Update trust based on outcome
     let success = matches!(outcome, Outcome::Ok);
-    TRUST_ENGINE.update_trust(&local_id, &peer_id, success);
-    
+
+    // Create a local trust engine instance for this interaction
+    let mut pre_trusted = HashSet::new();
+    pre_trusted.insert(UserId { hash: [1u8; 32] });
+    let trust_engine = EigenTrustEngine::new(pre_trusted);
+    trust_engine.update_trust(&local_id, &peer_id, success);
+
     // Record telemetry based on outcome
     match outcome {
         Outcome::Ok => {
@@ -865,29 +889,18 @@ pub async fn record_interaction(peer: Vec<u8>, outcome: Outcome) -> Result<()> {
             telemetry::telemetry().record_auth_failure();
         }
     }
-    
+
     Ok(())
 }
 
 /// Run EigenTrust epoch computation
 pub async fn eigen_trust_epoch() -> Result<()> {
-    use std::collections::HashSet;
-    use crate::peer_record::UserId;
-    
-    // Get the global trust engine instance
-    static TRUST_ENGINE: Lazy<Arc<EigenTrustEngine>> = Lazy::new(|| {
-        let mut pre_trusted = HashSet::new();
-        // Add some pre-trusted nodes
-        pre_trusted.insert(UserId { hash: [1u8; 32] });
-        Arc::new(EigenTrustEngine::new(pre_trusted))
-    });
-    
     // The EigenTrustEngine's update happens via update_trust calls
     // There's no explicit update_global_trust method exposed
-    
+
     // Record telemetry for the operation
     telemetry::telemetry().record_dht_get(); // Using available telemetry method
-    
+
     Ok(())
 }
 
@@ -901,14 +914,13 @@ pub fn route_next_hop(target: Vec<u8>) -> Option<Contact> {
         pre_trusted.insert(UserId { hash: [7u8; 32] });
         Arc::new(EigenTrustEngine::new(pre_trusted))
     });
-    
+
     let _dht = DHT_REGISTRY.get().cloned().unwrap_or_else(|| {
-        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> = Lazy::new(|| {
-            Arc::new(TwDht::new(NodeId([7u8; 32])))
-        });
+        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> =
+            Lazy::new(|| Arc::new(TwDht::new(NodeId([7u8; 32]))));
         GLOBAL_TWDHT.clone()
     });
-    
+
     // Convert target to NodeId
     let target_id = if target.len() == 32 {
         let mut arr = [0u8; 32];
@@ -917,7 +929,7 @@ pub fn route_next_hop(target: Vec<u8>) -> Option<Contact> {
     } else {
         return None; // Invalid target ID
     };
-    
+
     // Get closest nodes from DHT routing table
     // Simplify: generate deterministic closest nodes based on target
     // In production, would use proper DHT routing table
@@ -927,42 +939,43 @@ pub fn route_next_hop(target: Vec<u8>) -> Option<Contact> {
         node_bytes[0] = node_bytes[0].wrapping_add(i);
         closest_nodes.push(UserId { hash: node_bytes });
     }
-    
+
     if closest_nodes.is_empty() {
         return None;
     }
-    
+
     // Apply trust weighting to select the best next hop
     let mut best_node = None;
     let mut best_score = 0.0;
-    
+
     for node in closest_nodes {
         // Compute composite score: distance + trust
-        let distance_score = 1.0 / (1.0 + {
-            // Calculate XOR distance manually
-            let node_bytes = node.hash;
-            let target_bytes = target_id.hash;
-            let mut xor_distance = 0u32;
-            for i in 0..32 {
-                xor_distance += (node_bytes[i] ^ target_bytes[i]) as u32;
-            }
-            xor_distance
-        } as f64);
+        let distance_score = 1.0
+            / (1.0 + {
+                // Calculate XOR distance manually
+                let node_bytes = node.hash;
+                let target_bytes = target_id.hash;
+                let mut xor_distance = 0u32;
+                for i in 0..32 {
+                    xor_distance += (node_bytes[i] ^ target_bytes[i]) as u32;
+                }
+                xor_distance
+            } as f64);
         let trust_engine = &*TRUST_ENGINE;
         let trust_score = trust_engine.get_trust(&node);
         let composite_score = 0.6 * distance_score + 0.4 * trust_score;
-        
+
         if composite_score > best_score {
             best_score = composite_score;
             best_node = Some(node);
         }
     }
-    
+
     // Return the best node as a Contact
     best_node.map(|node| {
         // Default endpoint for now, in production would query DHT metadata
         let endpoint = "127.0.0.1:9000".to_string();
-        
+
         Contact {
             node_id: node.hash.to_vec(),
             endpoint,
@@ -995,29 +1008,32 @@ pub async fn quic_connect(ep: &Endpoint) -> Result<Conn> {
     // Create or get the global P2P node instance
     use crate::transport::ant_quic_adapter::P2PNetworkNode;
     use std::net::SocketAddr;
-    
+
     static P2P_NODE: OnceCell<Arc<P2PNetworkNode>> = OnceCell::new();
-    
-    let node = P2P_NODE.get_or_init(|| {
-        // Create P2P node with default local address
-        let bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
-        let node = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                P2PNetworkNode::new(bind_addr).await
-            })
-        });
-        Arc::new(node.unwrap_or_else(|_| {
-            // Fallback: create a simple placeholder node
-            panic!("Failed to create P2P node")
-        }))
-    });
-    
+
+    let node = P2P_NODE
+        .get_or_try_init(|| {
+            // Create P2P node with default local address
+            let bind_addr: SocketAddr = "0.0.0.0:0"
+                .parse()
+                .map_err(|e| anyhow::anyhow!("Invalid bind address: {} ({e})", "0.0.0.0:0"))?;
+            let node_res = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(async { P2PNetworkNode::new(bind_addr).await })
+            });
+            let node = node_res.map_err(|e| anyhow::anyhow!("Failed to create P2P node: {e}"))?;
+            Ok::<Arc<P2PNetworkNode>, anyhow::Error>(Arc::new(node))
+        })
+        .map_err(|e| anyhow::anyhow!("P2P node init error: {e}"))?;
+
     // Parse endpoint address and connect
-    let addr: SocketAddr = ep.address.parse()
-        .map_err(|_| anyhow::anyhow!("Invalid endpoint address: {}", ep.address))?;
-    
+    let addr: SocketAddr = ep
+        .address
+        .parse()
+        .map_err(|e| anyhow::anyhow!("Invalid endpoint address '{}': {e}", ep.address))?;
+
     let peer_id = node.connect_to_peer(addr).await?;
-    
+
     // Store peer ID as connection identifier
     // Store PeerId as bytes (use debug format for now)
     let peer_bytes = format!("{:?}", peer_id).into_bytes();
@@ -1027,21 +1043,22 @@ pub async fn quic_connect(ep: &Endpoint) -> Result<Conn> {
 /// Open a stream with specified class
 pub async fn quic_open(conn: &Conn, class: StreamClass) -> Result<Stream> {
     use crate::transport::ant_quic_adapter::P2PNetworkNode;
-    
+
     static P2P_NODE: OnceCell<Arc<P2PNetworkNode>> = OnceCell::new();
-    
-    let _node = P2P_NODE.get()
+
+    let _node = P2P_NODE
+        .get()
         .ok_or_else(|| anyhow::anyhow!("P2P node not initialized"))?;
-    
+
     // For now, we'll treat the peer connection as valid if we have any peer data
     // In production, would properly deserialize the PeerId
     if conn.peer.is_empty() {
         return Err(anyhow::anyhow!("Invalid peer connection"));
     }
-    
+
     // Check if peer is connected
     // Skip peer validation for now - assume connection is valid
-    
+
     // Generate a unique stream ID based on timestamp and class
     let stream_id = {
         let timestamp = std::time::SystemTime::now()
@@ -1056,11 +1073,16 @@ pub async fn quic_open(conn: &Conn, class: StreamClass) -> Result<Stream> {
         };
         (timestamp << 4) | class_id
     };
-    
+
     // Record telemetry for stream creation
-    telemetry::telemetry().record_stream_class_usage(class).await;
-    
-    Ok(Stream { id: stream_id, class })
+    telemetry::telemetry()
+        .record_stream_class_usage(class)
+        .await;
+
+    Ok(Stream {
+        id: stream_id,
+        class,
+    })
 }
 
 // ============================================================================
@@ -1069,31 +1091,24 @@ pub async fn quic_open(conn: &Conn, class: StreamClass) -> Result<Stream> {
 
 /// Select nodes for shard placement
 pub fn place_shards(object_id: [u8; 32], count: usize) -> Vec<Vec<u8>> {
-    use crate::adaptive::performance::PerformanceMonitor;
-    
-    // Get global instances
+    // Get global trust engine instance
     static TRUST_ENGINE: Lazy<Arc<EigenTrustEngine>> = Lazy::new(|| {
         use std::collections::HashSet;
         let mut pre_trusted = HashSet::new();
         pre_trusted.insert(UserId { hash: [7u8; 32] });
         Arc::new(EigenTrustEngine::new(pre_trusted))
     });
-    
-    static PERF_MONITOR: Lazy<Arc<PerformanceMonitor>> = Lazy::new(|| {
-        Arc::new(PerformanceMonitor::new())
-    });
-    
+
     // Simplified placement without full PlacementEngine integration
-    
+
     // Get available nodes from DHT
     static DHT_REGISTRY: OnceCell<Arc<TwDht>> = OnceCell::new();
     let _dht = DHT_REGISTRY.get().cloned().unwrap_or_else(|| {
-        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> = Lazy::new(|| {
-            Arc::new(TwDht::new(NodeId([7u8; 32])))
-        });
+        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> =
+            Lazy::new(|| Arc::new(TwDht::new(NodeId([7u8; 32]))));
         GLOBAL_TWDHT.clone()
     });
-    
+
     // Get candidate nodes from DHT (closest to object_id)
     let target_id = UserId { hash: object_id };
     // Simplify: generate deterministic candidates based on object_id
@@ -1104,7 +1119,7 @@ pub fn place_shards(object_id: [u8; 32], count: usize) -> Vec<Vec<u8>> {
         node_bytes[0] = node_bytes[0].wrapping_add(i as u8);
         candidates.push(UserId { hash: node_bytes });
     }
-    
+
     if candidates.len() < count {
         // Fallback: generate deterministic nodes if not enough real nodes
         let mut nodes = Vec::new();
@@ -1115,7 +1130,7 @@ pub fn place_shards(object_id: [u8; 32], count: usize) -> Vec<Vec<u8>> {
         }
         return nodes;
     }
-    
+
     // Select nodes based on trust scores and XOR distance
     // This is a simplified version that doesn't need full placement engine integration
     let mut scored_candidates: Vec<(UserId, f64)> = candidates
@@ -1123,24 +1138,25 @@ pub fn place_shards(object_id: [u8; 32], count: usize) -> Vec<Vec<u8>> {
         .map(|node| {
             let trust_engine = &*TRUST_ENGINE;
             let trust_score = trust_engine.get_trust(&node);
-            let distance_score = 1.0 / (1.0 + {
-            // Calculate XOR distance manually
-            let node_bytes = node.hash;
-            let target_bytes = target_id.hash;
-            let mut xor_distance = 0u32;
-            for i in 0..32 {
-                xor_distance += (node_bytes[i] ^ target_bytes[i]) as u32;
-            }
-            xor_distance
-        } as f64);
+            let distance_score = 1.0
+                / (1.0 + {
+                    // Calculate XOR distance manually
+                    let node_bytes = node.hash;
+                    let target_bytes = target_id.hash;
+                    let mut xor_distance = 0u32;
+                    for i in 0..32 {
+                        xor_distance += (node_bytes[i] ^ target_bytes[i]) as u32;
+                    }
+                    xor_distance
+                } as f64);
             let composite_score = 0.6 * trust_score + 0.4 * distance_score;
             (node, composite_score)
         })
         .collect();
-    
+
     // Sort by score (highest first) and take the requested count
     scored_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    
+
     scored_candidates
         .into_iter()
         .take(count)
@@ -1158,24 +1174,24 @@ pub fn provider_advertise_space(free: u64, total: u64) {
         total_bytes: u64,
         timestamp: u64,
     }
-    
+
     // Use a fixed local node ID for now
     let node_id = vec![7u8; 32];
-    
+
     let capacity = ProviderCapacity {
         node_id: node_id.clone(),
         free_bytes: free,
         total_bytes: total,
         timestamp: chrono::Utc::now().timestamp() as u64,
     };
-    
+
     // Serialize and publish to DHT under a well-known key pattern
     if let Ok(bytes) = serde_cbor::to_vec(&capacity) {
         // Key pattern: "provider-capacity-" + node_id
         let mut key_data = b"provider-capacity-".to_vec();
         key_data.extend_from_slice(&node_id);
         let key = Key::new(blake3::hash(&key_data).into());
-        
+
         // Fire and forget - publish capacity info asynchronously
         tokio::spawn(async move {
             let policy = PutPolicy {
@@ -1190,47 +1206,32 @@ pub fn provider_advertise_space(free: u64, total: u64) {
 
 /// Create repair plan for object
 pub fn repair_request(object_id: [u8; 32]) -> RepairPlan {
-    use crate::adaptive::performance::PerformanceMonitor;
-    
-    // Get global instances
-    static TRUST_ENGINE: Lazy<Arc<EigenTrustEngine>> = Lazy::new(|| {
-        use std::collections::HashSet;
-        let mut pre_trusted = HashSet::new();
-        pre_trusted.insert(UserId { hash: [7u8; 32] });
-        Arc::new(EigenTrustEngine::new(pre_trusted))
-    });
-    
-    static PERF_MONITOR: Lazy<Arc<PerformanceMonitor>> = Lazy::new(|| {
-        Arc::new(PerformanceMonitor::new())
-    });
-    
     // Get current shard locations from DHT
     static DHT_REGISTRY: OnceCell<Arc<TwDht>> = OnceCell::new();
     let _dht = DHT_REGISTRY.get().cloned().unwrap_or_else(|| {
-        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> = Lazy::new(|| {
-            Arc::new(TwDht::new(NodeId([7u8; 32])))
-        });
+        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> =
+            Lazy::new(|| Arc::new(TwDht::new(NodeId([7u8; 32]))));
         GLOBAL_TWDHT.clone()
     });
-    
+
     // Query for shard metadata (in production, this would involve DHT lookups)
     let mut missing_shards = Vec::new();
     let mut repair_nodes = Vec::new();
-    
+
     // Check each shard (assuming 8 shards for demo)
     for shard_id in 0..8u8 {
         // Simplified repair check - in production would do actual DHT queries
         // For now, simulate that shards 3 and 6 are missing
         if shard_id == 3 || shard_id == 6 {
             missing_shards.push(shard_id as usize);
-            
+
             // Generate a deterministic repair node based on shard_id
             let mut repair_node = object_id;
             repair_node[0] = repair_node[0].wrapping_add(shard_id);
             repair_nodes.push(repair_node.to_vec());
         }
     }
-    
+
     RepairPlan {
         object_id,
         missing_shards,
@@ -1264,7 +1265,7 @@ pub struct FriendMeshConfig {
 pub fn friend_mesh_plan(data_size: u64, mesh_config: &FriendMeshConfig) -> FriendBackupPlan {
     let shard_size = data_size / mesh_config.replication_factor as u64;
     let mut assignments = Vec::new();
-    
+
     // Simple round-robin assignment for now
     for (idx, member) in mesh_config.members.iter().enumerate() {
         if idx < mesh_config.replication_factor {
@@ -1272,12 +1273,12 @@ pub fn friend_mesh_plan(data_size: u64, mesh_config: &FriendMeshConfig) -> Frien
                 member_id: member.member_id.clone(),
                 shard_indices: vec![idx],
                 shard_size,
-                next_rotation: chrono::Utc::now().timestamp() as u64 + 
-                    mesh_config.rotation_schedule.as_secs(),
+                next_rotation: chrono::Utc::now().timestamp() as u64
+                    + mesh_config.rotation_schedule.as_secs(),
             });
         }
     }
-    
+
     FriendBackupPlan {
         mesh_id: mesh_config.mesh_id.clone(),
         total_shards: mesh_config.replication_factor,
@@ -1310,52 +1311,17 @@ pub struct FriendBackupAssignment {
 
 /// Enable hyperbolic routing assist for improved greedy routing
 #[cfg(feature = "h2_greedy")]
-pub fn enable_hyperbolic_assist(coordinates: Option<(f64, f64)>) -> Result<()> {
-    use crate::adaptive::hyperbolic::HyperbolicCoordinator;
-    
-    static HYPERBOLIC: OnceCell<Arc<HyperbolicCoordinator>> = OnceCell::new();
-    
-    let coordinator = HYPERBOLIC.get_or_try_init(|| {
-        let mut coord = HyperbolicCoordinator::new(100); // 100 nodes capacity
-        
-        // Set initial coordinates if provided
-        if let Some((radius, angle)) = coordinates {
-            let local_id = UserId { hash: [7u8; 32] };
-            coord.update_coordinates(local_id, radius, angle);
-        }
-        
-        Ok::<_, anyhow::Error>(Arc::new(coord))
-    })?;
-    
-    // Enable greedy routing in the coordinator
-    // Enable greedy routing in the coordinator
-    // (method would need to be added to HyperbolicCoordinator)
-    
+pub fn enable_hyperbolic_assist(_coordinates: Option<(f64, f64)>) -> Result<()> {
+    // Greedy routing assist is currently not wired; this feature flag
+    // exists to allow compiling optional helpers without pulling in
+    // incomplete dependencies. No-op for now.
     Ok(())
 }
 
 /// Get hyperbolic distance to a target (for routing decisions)
 #[cfg(feature = "h2_greedy")]
-pub fn hyperbolic_distance(target: Vec<u8>) -> Option<f64> {
-    use crate::adaptive::hyperbolic::HyperbolicCoordinator;
-    
-    static HYPERBOLIC: OnceCell<Arc<HyperbolicCoordinator>> = OnceCell::new();
-    
-    let coordinator = HYPERBOLIC.get()?;
-    let target_id = UserId { hash: {
-        let mut arr = [0u8; 32];
-        if target.len() == 32 {
-            arr.copy_from_slice(&target);
-            arr
-        } else {
-            return None;
-        }
-    } };
-    
-    let local_id = UserId { hash: [7u8; 32] };
-    // Compute hyperbolic distance
-    // (method would need to be added to HyperbolicCoordinator)
-    Some(1.0)
+pub fn hyperbolic_distance(_target: Vec<u8>) -> Option<f64> {
+    None
 }
 
 // ============================================================================
@@ -1372,7 +1338,12 @@ mod tests {
     fn test_identity_packet_serialization() {
         let packet = IdentityPacketV1 {
             v: 1,
-            words: ["alpha".to_string(), "beta".to_string(), "gamma".to_string(), "delta".to_string()],
+            words: [
+                "alpha".to_string(),
+                "beta".to_string(),
+                "gamma".to_string(),
+                "delta".to_string(),
+            ],
             pk: vec![5, 6, 7],
             sig: vec![8, 9, 10],
             id: Key::new([0u8; 32]),

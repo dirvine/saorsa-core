@@ -86,9 +86,6 @@ pub struct QuantumPeerIdentity {
     /// Optional FROST public key for threshold operations
     pub frost_public_key: Option<FrostPublicKey>,
 
-    /// Classical Ed25519 key for backward compatibility
-    pub legacy_key: Option<Ed25519PublicKey>,
-
     /// Supported cryptographic capabilities
     pub capabilities: crate::quantum_crypto::CryptoCapabilities,
 
@@ -128,17 +125,39 @@ impl fmt::Debug for FrostKeyShare {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrostCommitment(pub Vec<u8>);
 
-/// Ed25519 public key for backward compatibility
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Ed25519PublicKey(pub [u8; 32]);
+/// Ed25519 private key for testing (sensitive data)
+#[derive(Clone)]
+pub struct Ed25519PrivateKey(pub [u8; 64]);
 
-/// Ed25519 private key
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Ed25519PrivateKey(#[serde(with = "serde_big_array::BigArray")] pub [u8; 64]);
+impl serde::Serialize for Ed25519PrivateKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Ed25519PrivateKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes: Vec<u8> = Vec::deserialize(deserializer)?;
+        if bytes.len() != 64 {
+            return Err(serde::de::Error::custom("Ed25519PrivateKey must be 64 bytes"));
+        }
+        let mut arr = [0u8; 64];
+        arr.copy_from_slice(&bytes);
+        Ok(Ed25519PrivateKey(arr))
+    }
+}
 
 impl fmt::Debug for Ed25519PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Ed25519PrivateKey").field(&"***").finish()
+        f.debug_struct("Ed25519PrivateKey")
+            .field("key", &"***")
+            .finish()
     }
 }
 
@@ -148,17 +167,7 @@ impl fmt::Debug for Ed25519PrivateKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrostSignature(pub Vec<u8>);
 
-/// Ed25519 signature
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Ed25519Signature(#[serde(with = "serde_big_array::BigArray")] pub [u8; 64]);
-
-/// Combined signature for hybrid mode
-/// NOTE: Use ant-quic::crypto::pqc::HybridSignature instead
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HybridSignature {
-    pub classical: Ed25519Signature,
-    pub post_quantum: Vec<u8>, // Serialized ant-quic MlDsaSignature
-}
+// Hybrid signature is available via ant-quic integration if needed
 
 // NOTE: MlKemCiphertext removed - use ant-quic::crypto::pqc::types::MlKemCiphertext
 

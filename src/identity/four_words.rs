@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct FourWordAddress(String);
+pub struct FourWordAddress(pub String);
 
 impl FourWordAddress {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {

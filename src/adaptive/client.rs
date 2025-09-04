@@ -382,7 +382,10 @@ impl Client {
                 grid_size: crate::adaptive::som::GridSize::Fixed(10, 10),
             },
         ));
-        let router = Arc::new(AdaptiveRouter::new(trust_provider.clone(), hyperbolic, som));
+        let router = Arc::new(AdaptiveRouter::new(trust_provider.clone()));
+        // Store hyperbolic and som for potential future use
+        let _hyperbolic = hyperbolic;
+        let _som = som;
 
         // Create gossip protocol
         let node_id = NodeId { hash: [0u8; 32] }; // Temporary node ID
@@ -809,7 +812,10 @@ mod tests {
                 grid_size: crate::adaptive::som::GridSize::Fixed(10, 10),
             },
         ));
-        let router = Arc::new(AdaptiveRouter::new(trust_provider.clone(), hyperbolic, som));
+        let router = Arc::new(AdaptiveRouter::new(trust_provider.clone()));
+        // Store hyperbolic and som for potential future use
+        let _hyperbolic = hyperbolic;
+        let _som = som;
 
         let node_id = NodeId { hash: [0u8; 32] };
         let gossip = Arc::new(AdaptiveGossipSub::new(

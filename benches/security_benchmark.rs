@@ -16,7 +16,6 @@
 //! Benchmarks for security features including cryptographic operations and peer ID generation.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use rand;
 use saorsa_core::peer_record::UserId;
 use std::net::Ipv6Addr;
 
@@ -61,13 +60,11 @@ fn ipv6_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("ipv6_operations");
 
     // Benchmark IPv6 address parsing
-    let test_ips = vec![
-        "2001:db8:85a3::8a2e:370:7334",
+    let test_ips = ["2001:db8:85a3::8a2e:370:7334",
         "2001:db8:85a3:1234:5678:8a2e:370:7334",
         "fe80::1234:5678:8a2e:370",
         "2001:db8::1",
-        "::1",
-    ];
+        "::1"];
 
     for (i, ip_str) in test_ips.iter().enumerate() {
         group.bench_with_input(BenchmarkId::new("ipv6_parsing", i), ip_str, |b, ip_str| {

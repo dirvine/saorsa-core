@@ -282,7 +282,10 @@ mod tests {
             }
 
             // First page
-            let page1 = store.range(b"page:000", b"page:999", 10, false).await.unwrap();
+            let page1 = store
+                .range(b"page:000", b"page:999", 10, false)
+                .await
+                .unwrap();
             assert_eq!(page1.len(), 10);
             assert_eq!(page1[0].0, b"page:000");
             assert_eq!(page1[9].0, b"page:009");
@@ -444,7 +447,7 @@ mod tests {
 
             // Verify complete removal
             assert!(!store.exists(&key).await.unwrap());
-            
+
             // Verify overwritten in storage
             let raw = store.get_raw(&key).await.unwrap();
             assert_eq!(raw, None);
@@ -470,7 +473,7 @@ mod tests {
 
             let duration = start.elapsed();
             let ops_per_sec = count as f64 / duration.as_secs_f64();
-            
+
             println!("Write throughput: {:.0} ops/sec", ops_per_sec);
             assert!(ops_per_sec > 1000.0); // Minimum 1000 ops/sec
         }
@@ -492,7 +495,7 @@ mod tests {
 
             latencies.sort();
             let p99 = latencies[990];
-            
+
             println!("Read latency P99: {:?}", p99);
             assert!(p99 < Duration::from_millis(1)); // Sub-millisecond P99
         }
@@ -515,7 +518,7 @@ mod tests {
                 .unwrap();
 
             let duration = start.elapsed();
-            
+
             assert_eq!(results.len(), 1000);
             println!("Range query (1000 items): {:?}", duration);
             assert!(duration < Duration::from_millis(100));
@@ -549,17 +552,17 @@ mod tests {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async {
                     let store = create_test_store().await;
-                    
+
                     // Delete non-existent key should succeed
                     store.delete(&key).await.unwrap();
-                    
+
                     // Add and delete
                     store.put(&key, b"value", None).await.unwrap();
                     store.delete(&key).await.unwrap();
-                    
+
                     // Delete again should succeed
                     store.delete(&key).await.unwrap();
-                    
+
                     assert!(!store.exists(&key).await.unwrap());
                 });
             }
@@ -583,10 +586,10 @@ mod tests {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async {
                     let store = create_test_store().await;
-                    
+
                     // Execute batch
                     let result = store.batch(ops.clone()).await;
-                    
+
                     if result.is_ok() {
                         // Verify all operations applied
                         for op in ops {
@@ -648,7 +651,7 @@ mod tests {
             // Verify final state
             let version = store.get(b"version").await.unwrap();
             assert_eq!(version, Some(b"2".to_vec()));
-            
+
             let index = store.get(b"index:created").await.unwrap();
             assert_eq!(index, Some(b"true".to_vec()));
         }
@@ -660,9 +663,7 @@ mod tests {
             let migration = Migration {
                 version: 1,
                 description: "Failing migration".to_string(),
-                up: |_s| {
-                    Err(PersistenceError::Migration("Intentional failure".into()))
-                },
+                up: |_s| Err(PersistenceError::Migration("Intentional failure".into())),
                 down: |_s| Ok(()),
             };
 
@@ -683,16 +684,18 @@ mod tests {
         async fn test_crash_recovery() {
             // Simulate crash during write
             let store = create_test_store().await;
-            
+
             // Start transaction
-            let tx_result = store.transaction(|tx| {
-                tx.put(b"before_crash", b"value1", None)?;
-                // Simulate crash
-                panic!("Simulated crash");
-            }).await;
+            let tx_result = store
+                .transaction(|tx| {
+                    tx.put(b"before_crash", b"value1", None)?;
+                    // Simulate crash
+                    panic!("Simulated crash");
+                })
+                .await;
 
             assert!(tx_result.is_err());
-            
+
             // Verify transaction rolled back
             assert!(!store.exists(b"before_crash").await.unwrap());
         }
@@ -700,7 +703,7 @@ mod tests {
         #[tokio::test]
         async fn test_wal_recovery() {
             let store = create_rocksdb_store().await;
-            
+
             // Write data
             for i in 0..100 {
                 let key = format!("wal:{}", i).into_bytes();
@@ -726,7 +729,7 @@ mod tests {
     async fn create_encrypted_store() -> Arc<dyn Store> {
         let config = EncryptionConfig {
             kdf: KeyDerivationFunction::Argon2,
-            algorithm: EncryptionAlgorithm::MlKem768Aes256Gcm,
+            algorithm: EncryptionAlgorithm::ChaCha20Poly1305,
             rotation: KeyRotationPolicy::Days(90),
         };
         Arc::new(EncryptedStore::new(MemoryStore::new(), config))

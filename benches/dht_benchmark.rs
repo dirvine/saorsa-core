@@ -16,7 +16,6 @@
 //! Comprehensive benchmarks for measuring Saorsa Core DHT performance.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use rand;
 use saorsa_core::dht::{Key, PeerId, Record};
 use saorsa_core::identity::node_identity::NodeId;
 use std::net::SocketAddr;

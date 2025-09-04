@@ -25,7 +25,7 @@ fn create_test_record(key_suffix: &str, publisher: &str, value: &str) -> Record 
     };
     let value = value.as_bytes().to_vec();
     // Create NodeId from publisher string by hashing it
-    let publisher_bytes = blake3::hash(publisher.as_bytes()).as_bytes().clone();
+    let publisher_bytes = *blake3::hash(publisher.as_bytes()).as_bytes();
     let publisher = NodeId::from_bytes(publisher_bytes);
     Record::new(key, value, publisher)
 }
@@ -56,7 +56,7 @@ async fn test_basic_crud_operations() -> Result<()> {
 
     // Test store and retrieve
     let record = create_test_record("basic", "test_publisher", "test_value");
-    let key = record.key.clone();
+    let key = record.key;
 
     storage.store(record.clone()).await?;
 
@@ -171,7 +171,7 @@ async fn test_expired_record_handling() -> Result<()> {
 
     // Store expired record
     let expired_record = create_expired_record("expired", "test_publisher", "expired_value");
-    let expired_key = expired_record.key.clone();
+    let expired_key = expired_record.key;
 
     storage.store(expired_record).await?;
 
@@ -228,7 +228,7 @@ async fn test_publisher_index_consistency() -> Result<()> {
     let storage = OptimizedDHTStorage::new(config);
 
     // Store records from multiple publishers
-    let publishers = vec!["alice", "bob", "charlie"];
+    let publishers = ["alice", "bob", "charlie"];
     let mut expected_counts = HashMap::new();
     let mut publisher_node_ids = HashMap::new();
 
@@ -236,7 +236,7 @@ async fn test_publisher_index_consistency() -> Result<()> {
         let publisher_name = &publishers[i % 3];
         let mut record = record;
         // Create NodeId from publisher string by hashing it
-        let publisher_bytes = blake3::hash(publisher_name.as_bytes()).as_bytes().clone();
+        let publisher_bytes = *blake3::hash(publisher_name.as_bytes()).as_bytes();
         let node_id = NodeId::from_bytes(publisher_bytes);
         let node_id_str = node_id.to_string();
 
@@ -404,7 +404,7 @@ async fn test_concurrent_access_safety() -> Result<()> {
 
                 // Publisher query - convert to NodeId string representation
                 let publisher_str = format!("task_{}", task_id);
-                let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+                let publisher_bytes = *blake3::hash(publisher_str.as_bytes()).as_bytes();
                 let publisher_node_id = NodeId::from_bytes(publisher_bytes);
                 let publisher_records = storage_clone
                     .get_records_by_publisher(&publisher_node_id.to_string(), None)
@@ -442,7 +442,7 @@ async fn test_concurrent_access_safety() -> Result<()> {
     // Verify some records from each task exist
     for task_id in 0..10 {
         let publisher_str = format!("task_{}", task_id);
-        let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+        let publisher_bytes = *blake3::hash(publisher_str.as_bytes()).as_bytes();
         let publisher_node_id = NodeId::from_bytes(publisher_bytes);
         let publisher_records = storage
             .get_records_by_publisher(&publisher_node_id.to_string(), None)
@@ -589,7 +589,7 @@ async fn test_performance_characteristics() -> Result<()> {
     let test_publishers: Vec<_> = (0..5)
         .map(|i| {
             let publisher_str = format!("publisher_{}", i);
-            let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+            let publisher_bytes = *blake3::hash(publisher_str.as_bytes()).as_bytes();
             let publisher_node_id = NodeId::from_bytes(publisher_bytes);
             publisher_node_id.to_string()
         })
@@ -682,7 +682,7 @@ async fn test_stress_scenarios() -> Result<()> {
     let test_publishers: Vec<_> = test_publisher_names
         .iter()
         .map(|name| {
-            let publisher_bytes = blake3::hash(name.as_bytes()).as_bytes().clone();
+            let publisher_bytes = *blake3::hash(name.as_bytes()).as_bytes();
             let publisher_node_id = NodeId::from_bytes(publisher_bytes);
             publisher_node_id.to_string()
         })
@@ -739,7 +739,7 @@ async fn test_stress_scenarios() -> Result<()> {
                 // Publisher query every 10 operations
                 if i % 10 == 0 {
                     let publisher_str = format!("task_{}", task_id);
-                    let publisher_bytes = blake3::hash(publisher_str.as_bytes()).as_bytes().clone();
+                    let publisher_bytes = *blake3::hash(publisher_str.as_bytes()).as_bytes();
                     let publisher_node_id = NodeId::from_bytes(publisher_bytes);
                     let _ = storage_clone
                         .get_records_by_publisher(&publisher_node_id.to_string(), Some(5))
@@ -831,7 +831,7 @@ async fn test_dht_system_integration() -> Result<()> {
             let target_node = &nodes[target_node_idx];
 
             // Query for the target node's data - convert to NodeId string representation
-            let target_publisher_bytes = blake3::hash(target_node.id.as_bytes()).as_bytes().clone();
+            let target_publisher_bytes = *blake3::hash(target_node.id.as_bytes()).as_bytes();
             let target_publisher_node_id = NodeId::from_bytes(target_publisher_bytes);
             let target_records = storage
                 .get_records_by_publisher(&target_publisher_node_id.to_string(), Some(5))
@@ -883,7 +883,7 @@ async fn test_dht_system_integration() -> Result<()> {
     let mut total_node_records = 0;
     for node in &nodes {
         // Convert node.id to NodeId string representation
-        let node_publisher_bytes = blake3::hash(node.id.as_bytes()).as_bytes().clone();
+        let node_publisher_bytes = *blake3::hash(node.id.as_bytes()).as_bytes();
         let node_publisher_node_id = NodeId::from_bytes(node_publisher_bytes);
         let node_records = storage
             .get_records_by_publisher(&node_publisher_node_id.to_string(), None)

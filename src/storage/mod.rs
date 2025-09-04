@@ -18,10 +18,7 @@
 
 use crate::dht::{DHT, DhtKey};
 use crate::identity::enhanced::EnhancedIdentity;
-use aes_gcm::{
-    Aes256Gcm, Key as AesKey, Nonce,
-    aead::{Aead, KeyInit},
-};
+use saorsa_pqc::{ChaCha20Poly1305Cipher, SymmetricKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{Duration, SystemTime};
@@ -192,7 +189,7 @@ impl StorageManager {
         // Create encrypted wrapper
         let wrapper = EncryptedData {
             ciphertext: encrypted.0,
-            nonce: encrypted.1.to_vec(),
+            nonce: encrypted.1,
             key_id: "v1".to_string(),
             timestamp: SystemTime::now(),
             metadata,
@@ -291,31 +288,25 @@ impl StorageManager {
         Ok(vec![])
     }
 
-    /// Encrypt data using AES-256-GCM
-    fn encrypt(&self, plaintext: &[u8]) -> Result<(Vec<u8>, [u8; 12])> {
-        let cipher = Aes256Gcm::new(AesKey::<Aes256Gcm>::from_slice(&self.master_key));
-
-        // Generate random nonce
-        let nonce_bytes = rand::random::<[u8; 12]>();
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        let ciphertext = cipher
-            .encrypt(nonce, plaintext)
-            .map_err(|e| StorageError::EncryptionError(e.to_string()))?;
-
-        Ok((ciphertext, nonce_bytes))
+    /// Encrypt data using ChaCha20Poly1305 (saorsa-pqc)
+    fn encrypt(&self, plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+        let sk = SymmetricKey::from_bytes(self.master_key);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
+        let (ciphertext, nonce) = cipher
+            .encrypt(plaintext, None)
+            .map_err(|e| StorageError::EncryptionError(format!("{e}")))?;
+        Ok((ciphertext, nonce.to_vec()))
     }
 
     /// Decrypt data
     fn decrypt(&self, ciphertext: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
-        let cipher = Aes256Gcm::new(AesKey::<Aes256Gcm>::from_slice(&self.master_key));
-        let nonce = Nonce::from_slice(nonce);
-
-        let plaintext = cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| StorageError::EncryptionError(e.to_string()))?;
-
-        Ok(plaintext)
+        let sk = SymmetricKey::from_bytes(self.master_key);
+        let cipher = ChaCha20Poly1305Cipher::new(&sk);
+        let mut nonce_array = [0u8; 12];
+        nonce_array.copy_from_slice(&nonce[..12]);
+        cipher
+            .decrypt(ciphertext, &nonce_array, None)
+            .map_err(|e| StorageError::EncryptionError(format!("{e}")))
     }
 }
 

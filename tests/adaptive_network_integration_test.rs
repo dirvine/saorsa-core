@@ -1,4 +1,3 @@
-#![allow(unused_variables, unused_mut)]
 #![allow(unused_variables, unused_mut, unused_imports)]
 //! Comprehensive integration tests for the adaptive network components
 //! Tests all adaptive features including Thompson Sampling, MAB routing,
@@ -232,7 +231,7 @@ async fn test_multi_armed_bandit_routing() -> anyhow::Result<()> {
 
     // Verify MAB is learning optimal routes
     assert!(overall_success_rate >= 0.0);
-    assert!(route_attempts.len() > 0);
+    assert!(!route_attempts.is_empty());
 
     // Get final metrics
     let metrics = mab.get_metrics().await;
@@ -298,9 +297,7 @@ async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
                 saorsa_core::adaptive::q_learning_cache::CacheAction::Cache(_)
             ) {
                 if hit { 1.0 } else { -0.1 } // Reward for caching useful content
-            } else {
-                if hit { -0.5 } else { 0.1 } // Penalty for not caching needed content
-            };
+            } else if hit { -0.5 } else { 0.1 };
 
             q_cache
                 .update_statistics(&action, content_hash, content_data.len() as u64, hit)
@@ -325,7 +322,7 @@ async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
 
     // Verify cache is working
     assert!(stats.capacity > 0);
-    assert!(hit_rate >= 0.0 && hit_rate <= 1.0);
+    assert!((0.0..=1.0).contains(&hit_rate));
 
     network.stop_all().await?;
     Ok(())

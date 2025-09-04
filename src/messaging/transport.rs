@@ -102,16 +102,37 @@ impl MessageTransport {
 
     /// Receive messages from the network
     pub async fn receive_messages(&self) -> broadcast::Receiver<ReceivedMessage> {
-        let (tx, rx) = broadcast::channel(100);
+        let (tx, rx) = broadcast::channel(256);
 
-        // TODO: Implement actual network event subscription
-        // This would integrate with the real network layer
-        let _tx_clone = tx.clone();
-
+        // Subscribe to network events and forward "messaging" topic messages
+        let mut events = self.network.subscribe_events();
         tokio::spawn(async move {
-            // Placeholder for network event handling
-            // In production, this would subscribe to actual network events
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            while let Ok(event) = events.recv().await {
+                #[allow(clippy::collapsible_if)]
+                if let crate::network::P2PEvent::Message {
+                    topic,
+                    source,
+                    data,
+                } = event
+                {
+                    if topic == "messaging" {
+                        // Repackage for messaging consumers
+                        let encrypted_msg = EncryptedMessage {
+                            id: MessageId::new(),
+                            channel_id: ChannelId::new(),
+                            sender: FourWordAddress::parse_str(&source)
+                                .unwrap_or_else(|_| FourWordAddress("unknown".to_string())),
+                            ciphertext: data,
+                            nonce: vec![], // TODO: Generate proper nonce
+                            key_id: "default".to_string(),
+                        };
+                        let _ = tx.send(ReceivedMessage {
+                            message: encrypted_msg,
+                            received_at: Utc::now(),
+                        });
+                    }
+                }
+            }
         });
 
         rx
@@ -202,33 +223,62 @@ impl MessageTransport {
         // Check if peer is online
         let pool = self.connections.read().await;
 
-        if let Some(connection) = pool.get_connection(recipient) {
-            // Send via existing connection
-            let data = serde_json::to_vec(message)?;
+        // Serialize payload
+        let data = serde_json::to_vec(message)?;
 
-            match connection.send(data).await {
-                Ok(_) => {
-                    debug!("Message {} delivered directly to {}", message.id, recipient);
-                    Ok(DeliveryStatus::Delivered(Utc::now()))
-                }
-                Err(e) => {
-                    warn!("Failed to send to {}: {}", recipient, e);
-                    Err(anyhow::anyhow!("Delivery failed: {}", e))
+        // Try existing pool connection first (best-effort info-only cache)
+        if let Some(_connection) = pool.get_connection(recipient) {
+            // We route via the network node to ensure real delivery
+            // Resolve and connect using DHT-discovered endpoints
+            let peer_info = self.resolve_peer_address(recipient).await?;
+            for addr in &peer_info.addresses {
+                if let Ok(peer_id) = self.network.connect_peer(addr).await {
+                    // Use a stable protocol label for routing
+                    if let Err(e) = self
+                        .network
+                        .send_message(&peer_id, "messaging", data.clone())
+                        .await
+                    {
+                        warn!("Failed sending to {} via {}: {}", recipient, addr, e);
+                        continue;
+                    }
+                    debug!(
+                        "Message {} delivered to {} (peer {})",
+                        message.id, recipient, peer_id
+                    );
+                    return Ok(DeliveryStatus::Delivered(Utc::now()));
                 }
             }
-        } else {
-            // Try to establish connection
-            match self.connect_to_peer(recipient).await {
-                Ok(_) => {
-                    // Retry with new connection
-                    Box::pin(self.try_direct_delivery(recipient, message)).await
+            // Fall through to queue if all endpoints failed
+            return Err(anyhow::anyhow!("All endpoints failed for {recipient}"));
+        }
+
+        // No cached connection: resolve and send via network
+        let peer_info = self.resolve_peer_address(recipient).await?;
+        for addr in &peer_info.addresses {
+            match self.network.connect_peer(addr).await {
+                Ok(peer_id) => {
+                    if let Err(e) = self
+                        .network
+                        .send_message(&peer_id, "messaging", data.clone())
+                        .await
+                    {
+                        warn!("Failed sending to {} via {}: {}", recipient, addr, e);
+                        continue;
+                    }
+                    debug!(
+                        "Message {} delivered to {} (peer {})",
+                        message.id, recipient, peer_id
+                    );
+                    return Ok(DeliveryStatus::Delivered(Utc::now()));
                 }
                 Err(e) => {
-                    debug!("Cannot connect to {}: {}", recipient, e);
-                    Err(e)
+                    debug!("Cannot connect to {} at {}: {}", recipient, addr, e);
                 }
             }
         }
+
+        Err(anyhow::anyhow!("Delivery failed: no reachable endpoints"))
     }
 
     /// Queue message for later delivery
@@ -350,9 +400,8 @@ struct PeerConnection {
 }
 
 impl PeerConnection {
+    #[allow(dead_code)]
     async fn send(&self, _data: Vec<u8>) -> Result<()> {
-        // TODO: Implement actual network send
-        // This would use the underlying QUIC/TCP transport
         Ok(())
     }
 }
@@ -533,7 +582,7 @@ mod tests {
     async fn test_transport_creation() {
         // This would need a mock network and DHT client
         // For now, just verify the types compile
-        assert_eq!(std::mem::size_of::<MessageTransport>() > 0, true);
+        assert!(std::mem::size_of::<MessageTransport>() > 0);
     }
 
     #[tokio::test]
@@ -575,12 +624,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_network_metrics() {
-        let mut metrics = NetworkMetrics::default();
-
-        metrics.messages_sent = 100;
-        metrics.messages_received = 95;
-        metrics.packet_loss = 0.02;
-
+        let metrics = NetworkMetrics {
+            messages_sent: 100,
+            messages_received: 95,
+            packet_loss: 0.02,
+            ..Default::default()
+        };
         assert_eq!(metrics.messages_sent, 100);
         assert!(metrics.packet_loss < 0.05); // Less than 5% loss
     }
