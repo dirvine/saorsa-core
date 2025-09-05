@@ -145,7 +145,9 @@ impl<'de> serde::Deserialize<'de> for Ed25519PrivateKey {
     {
         let bytes: Vec<u8> = Vec::deserialize(deserializer)?;
         if bytes.len() != 64 {
-            return Err(serde::de::Error::custom("Ed25519PrivateKey must be 64 bytes"));
+            return Err(serde::de::Error::custom(
+                "Ed25519PrivateKey must be 64 bytes",
+            ));
         }
         let mut arr = [0u8; 64];
         arr.copy_from_slice(&bytes);

@@ -160,6 +160,15 @@ Purpose: Claim and fetch identities, publish reachability and device forwards, a
 - device_subscribe(id_key: Key) -> Subscription<Forward>
   - Subscribes to forward updates for an identity.
 
+- identity_set_website_root(id_key: Key, website_root: Key, sig: Sig) -> Result<()>
+  - Updates an identity's website root with signature verification.
+  - Canonical signing: Message bytes: `b"saorsa-identity:website_root:v1" || id || pk || CBOR(website_root)`
+  - Verifies `sig` matches canonical message using stored identity `pk`, then updates IdentityPacketV1.
+
+- group_identity_canonical_sign_bytes(id: &Key, membership_root: &Key) -> Vec<u8>
+  - Returns canonical bytes for group identity signing: `b"saorsa-group:identity:v1" || id || membership_root`
+  - Used for consistent signature verification across group operations.
+
 Notes
 - `WriteAuth` enforces signatures at `dht_put` time. For identity and group canonical records, signatures are verified against canonical bytes to prevent malleability.
 - `NetworkEndpoint { ipv4, ipv6, fw4, fw6 }` supports both raw and four-word display addressing.
@@ -187,6 +196,24 @@ Purpose: Create and publish group identities, maintain group state, endpoints, a
   - Stores current group epoch/control record under `blake3("group" || group_id)`.
 
 - group_fetch(group_id: &[u8]) -> Result<GroupPacketV1>
+
+- group_identity_update_members_signed(id_key: Key, new_members: Vec<MemberRef>, group_pk: Vec<u8>, group_sig: Sig) -> Result<()>
+  - Updates group membership with signature verification.
+  - Canonical signing: Message bytes: `group_identity_canonical_sign_bytes(id, new_root)`
+  - Verifies `group_sig` with `group_pk`, replaces members, recomputes `membership_root`, stores updated packet.
+
+- group_member_add(id_key: Key, member: MemberRef, group_pk: Vec<u8>, group_sig: Sig) -> Result<()>
+  - Convenience function to add a member to existing group.
+  - Internally fetches current packet, adds member, calls `group_identity_update_members_signed`.
+
+- group_member_remove(id_key: Key, member_id: Key, group_pk: Vec<u8>, group_sig: Sig) -> Result<()>
+  - Convenience function to remove a member from existing group.
+  - Internally fetches current packet, removes member, calls `group_identity_update_members_signed`.
+
+- group_epoch_bump(id_key: Key, proof: Option<Vec<u8>>, group_pk: Vec<u8>, group_sig: Sig) -> Result<()>
+  - Increments group epoch with signature verification.
+  - Canonical signing: Message bytes: `b"saorsa-group:epoch:v1" || id || epoch`
+  - Verifies `group_sig` with `group_pk`, increments epoch, stores updated GroupPacketV1.
 
 Conventions
 - Group storage containers are referenced via `GroupPacketV1.container_root` and described by `ContainerManifestV1`.
@@ -329,6 +356,99 @@ Provides high-level audio/video calling with WebRTC-over-QUIC transport, support
   - `BackgroundEffect = { None, Blur, Image(data), Video(data) }`
 
 
+## Virtual Disk API
+
+Every entity (individual, group, organization, channel) can have two virtual disks: private (encrypted) and public (website). This API provides file system operations over the DHT with FEC protection.
+
+### Core Virtual Disk Operations
+
+- disk_create(entity_id: Key, disk_type: DiskType, config: DiskConfig) -> Result<DiskHandle>
+  - `DiskType = { Private, Website }`
+  - `DiskConfig { fec_params: FecParams, encryption: EncryptionConfig, cache_policy: CachePolicy }`
+  - Creates virtual disk root and initializes metadata
+
+- disk_mount(entity_id: Key, disk_type: DiskType) -> Result<DiskHandle>
+  - Mounts existing virtual disk for operations
+
+- disk_write(handle: DiskHandle, path: &str, content: &[u8], metadata: FileMetadata) -> Result<WriteReceipt>
+  - Writes file to path with automatic FEC sealing and DHT distribution
+  - `FileMetadata { mime_type, permissions, created_at, tags }`
+
+- disk_read(handle: DiskHandle, path: &str) -> Result<Vec<u8>>
+  - Reads file, reconstructing from FEC shards if needed
+
+- disk_list(handle: DiskHandle, path: &str, recursive: bool) -> Result<Vec<FileEntry>>
+  - Lists directory contents with metadata
+  - `FileEntry { path, size, modified_at, file_type, permissions }`
+
+- disk_delete(handle: DiskHandle, path: &str) -> Result<()>
+  - Marks file as deleted and schedules shard cleanup
+
+- disk_sync(handle: DiskHandle) -> Result<SyncStatus>
+  - Forces synchronization of pending changes to DHT
+  - Returns `SyncStatus { pending_writes, conflicts, last_sync }`
+
+### Website Publishing Operations
+
+- website_set_home(handle: DiskHandle, markdown_content: &str, assets: Vec<Asset>) -> Result<()>
+  - Sets `home.md` as website entry point with linked assets
+  - `Asset { path, content, mime_type }` for images, CSS, etc.
+
+- website_publish(entity_id: Key, website_root: Key) -> Result<PublishReceipt>
+  - Updates entity's IdentityPacket with new website_root
+  - Makes website publicly accessible via four-word address
+
+- website_get_manifest(website_root: Key) -> Result<WebsiteManifest>
+  - Retrieves website structure and asset references
+  - `WebsiteManifest { home_md_key, assets: Vec<AssetRef>, navigation, metadata }`
+
+### Collaborative Operations
+
+- disk_share(handle: DiskHandle, path: &str, permissions: Permissions, members: Vec<Key>) -> Result<ShareToken>
+  - Shares file/directory with specific members
+  - `Permissions { read, write, admin }` with role-based access
+
+- disk_collaborate(handle: DiskHandle, path: &str, session_id: SessionId) -> Result<CollabSession>
+  - Initiates real-time collaborative editing session
+  - Returns conflict-free replicated data type (CRDT) session
+
+- disk_resolve_conflict(handle: DiskHandle, conflict: FileConflict, resolution: ConflictResolution) -> Result<()>
+  - Resolves file conflicts using specified strategy
+  - `ConflictResolution = { TakeLocal, TakeRemote, Merge(strategy), Manual(content) }`
+
+### Advanced Operations
+
+- disk_snapshot(handle: DiskHandle, name: &str) -> Result<SnapshotId>
+  - Creates immutable snapshot of current disk state
+
+- disk_restore(handle: DiskHandle, snapshot_id: SnapshotId) -> Result<()>
+  - Restores disk to previous snapshot state
+
+- disk_encrypt_for_group(handle: DiskHandle, group_id: Key, mls_key: &[u8]) -> Result<()>
+  - Re-encrypts disk content for group access using MLS derived keys
+
+## Virtual Disks and Websites
+
+Every entity (individual, group, organization, channel) can expose two logical disks:
+
+1) Private Disk (entity-scoped, group-encrypted)
+   - Root Key: `disk_root = compute_key("disk", entity_id.as_bytes())`
+   - Organization: content addressed by path → object key mapping using `ContainerManifestV1` for each root object.
+   - Encryption: MLS or group ML-DSA derived symmetric keys; objects are sealed and sharded with FEC `(k,m,shard_size)` across DHT, with optional member-local caches.
+   - Access: membership governed; members reconstruct via DHT + local caches.
+
+2) Website Disk (public)
+   - Root Key: `website_root` in `IdentityPacketV1` or `compute_key("website", entity_id.as_bytes())` if not set.
+   - Convention: `home.md` is the entry file (Markdown-only web). Assets referenced by relative paths resolve to `assets/` keyed objects in the same container or sibling keys.
+   - Publishing: write manifests and assets to DHT under context keys, set/refresh `website_root` on identity.
+   - Browsing: agents fetch `IdentityPacketV1`, read `website_root`, fetch `ContainerManifestV1` at root, then fetch `home.md` and linked assets.
+
+Addressing Examples
+- Individual disk: `disk_root = blake3("disk" || ID)` where `ID = blake3(words)`.
+- Group disk: same construction with the group's `id` from `GroupIdentityPacketV1`.
+- Channel disk: derive channel key: `channel_id = compute_key("channel", group_id.as_bytes())` then `disk_root = compute_key("disk", channel_id.as_bytes())`.
+
+
 ## Storage Control API
 
 High-level placement and maintenance helpers for FEC-sealed content.
@@ -462,6 +582,14 @@ Construction
 Send & Receive
 - send_message(recipients: Vec<FourWordAddress>, content: MessageContent, channel_id: ChannelId, options: SendOptions) -> Result<(MessageId, DeliveryReceipt)>
   - Encrypts per recipient and sends via transport (DHT + direct), stores locally first.
+
+- MessagingService::send_message_to_channel(channel_id: ChannelId, content: MessageContent, options: SendOptions) -> Result<(MessageId, DeliveryReceipt)>
+  - Sends message to all members of a channel by resolving recipients from channel membership.
+  - Internally calls `send_message()` with resolved recipient list from `channel_recipients()`.
+
+- channel_recipients(channel_id: &ChannelId) -> Result<Vec<FourWordAddress>>
+  - Helper function to resolve channel members to their four-word addresses.
+  - Loads channel, maps member user_ids to FourWordAddress for messaging.
 
 - subscribe_messages(channel_filter: Option<ChannelId>) -> Receiver<ReceivedMessage>
   - Async stream of inbound messages (decrypted and persisted before delivery).
@@ -653,6 +781,184 @@ let (_id, receipt) = svc.send_message(vec![peer_fw], MessageContent::Text("Hi".i
 ```
 
 
+## Comprehensive Usage Examples
+
+### Identity Website Root Update
+
+```rust
+use saorsa_core::api::*;
+use saorsa_core::quantum_crypto::{MlDsa65, MlDsaOperations};
+
+// Update an identity's website root
+let id_key = Key::from([1u8; 32]);
+let website_root = Key::from([2u8; 32]);
+let ml = MlDsa65::new();
+let (pk, sk) = ml.generate_keypair().unwrap();
+
+// Build canonical message
+let mut msg = Vec::new();
+msg.extend_from_slice(CANONICAL_IDENTITY_WEBSITE_ROOT);
+msg.extend_from_slice(id_key.as_bytes());
+msg.extend_from_slice(pk.as_bytes());
+let website_root_cbor = serde_cbor::to_vec(&website_root).unwrap();
+msg.extend_from_slice(&website_root_cbor);
+
+// Sign and update
+let sig = ml.sign(&sk, &msg).unwrap();
+identity_set_website_root(id_key, website_root, Sig::new(sig.as_bytes().to_vec())).await?;
+```
+
+### Group Membership Update
+
+```rust
+use saorsa_core::api::*;
+
+// Update group membership
+let group_id = Key::from([1u8; 32]);
+let new_members = vec![
+    MemberRef {
+        member_id: Key::from([2u8; 32]),
+        member_pk: vec![1, 2, 3],
+    }
+];
+
+// Get canonical signing bytes
+let membership_root = compute_membership_root(&new_members);
+let sign_bytes = group_identity_canonical_sign_bytes(&group_id, &membership_root);
+
+// Sign with group key
+let ml = MlDsa65::new();
+let group_pk = vec![4, 5, 6]; // From group creation
+let group_sk = ml.generate_keypair().unwrap().1; // In practice, use stored key
+let sig = ml.sign(&group_sk, &sign_bytes).unwrap();
+
+// Update membership
+group_identity_update_members_signed(
+    group_id,
+    new_members,
+    group_pk,
+    Sig::new(sig.as_bytes().to_vec())
+).await?;
+```
+
+### Virtual Disk Operations
+
+```rust
+use saorsa_core::virtual_disk::*;
+
+// Create and use a virtual disk
+let entity_id = Key::from([1u8; 32]);
+let config = DiskConfig::default();
+
+// Create disk
+let handle = disk_create(entity_id, DiskType::Private, config).await?;
+
+// Write file
+let content = b"Hello, Virtual Disk!";
+let metadata = FileMetadata::default();
+disk_write(&handle, "hello.txt", content, metadata).await?;
+
+// Read file
+let read_content = disk_read(&handle, "hello.txt").await?;
+assert_eq!(read_content, content);
+
+// List directory
+let files = disk_list(&handle, ".", false).await?;
+println!("Files: {:?}", files);
+
+// Sync changes
+let sync_status = disk_sync(&handle).await?;
+println!("Sync status: {:?}", sync_status);
+```
+
+### Website Publishing
+
+```rust
+use saorsa_core::virtual_disk::*;
+
+// Create and publish a website
+let entity_id = Key::from([1u8; 32]);
+let handle = disk_create(entity_id.clone(), DiskType::Website, DiskConfig::default()).await?;
+
+// Set home page with assets
+let markdown = "# Welcome\n\nThis is my website.";
+let assets = vec![
+    Asset {
+        path: "style.css".to_string(),
+        content: b"body { font-family: sans-serif; }".to_vec(),
+        mime_type: "text/css".to_string(),
+    }
+];
+
+website_set_home(&handle, markdown, assets).await?;
+
+// Publish website
+let website_root = Key::from([2u8; 32]);
+let receipt = website_publish(entity_id, website_root).await?;
+println!("Website published: {:?}", receipt);
+```
+
+### Channel Messaging
+
+```rust
+use saorsa_core::messaging::service::*;
+use saorsa_core::messaging::types::*;
+
+// Send message to channel
+let channel_id = ChannelId::new();
+let content = MessageContent::Text("Hello, channel!".to_string());
+let options = SendOptions::default();
+
+// Send to all channel members
+let messaging = MessagingService::new(four_word_address, dht_client).await?;
+let (message_id, receipt) = messaging.send_message_to_channel(
+    channel_id,
+    content,
+    options
+).await?;
+
+// Get channel recipients
+let recipients = channel_recipients(&channel_id).await?;
+println!("Channel has {} recipients", recipients.len());
+```
+
+### Group Member Management
+
+```rust
+use saorsa_core::api::*;
+
+// Add member to group
+let group_id = Key::from([1u8; 32]);
+let new_member = MemberRef {
+    member_id: Key::from([2u8; 32]),
+    member_pk: vec![1, 2, 3],
+};
+
+// Sign with group key (simplified)
+let group_pk = vec![4, 5, 6];
+let group_sig = Sig::new(vec![7, 8, 9]); // In practice, compute proper signature
+
+group_member_add(group_id, new_member, group_pk, group_sig).await?;
+
+// Remove member
+let member_to_remove = Key::from([2u8; 32]);
+group_member_remove(group_id, member_to_remove, group_pk, group_sig).await?;
+```
+
+### Group Epoch Bump
+
+```rust
+use saorsa_core::api::*;
+
+// Bump group epoch
+let group_id = Key::from([1u8; 32]);
+let proof = Some(vec![1, 2, 3]); // Optional proof data
+let group_pk = vec![4, 5, 6];
+let group_sig = Sig::new(vec![7, 8, 9]); // Proper signature required
+
+group_epoch_bump(group_id, proof, group_pk, group_sig).await?;
+```
+
 ## Anti-Phishing and Name Safety
 
 - Four-word addresses are validated against the FWN dictionary and encoding. Because words map through a checksum-bearing scheme, close-word collisions are minimized and detectable.
@@ -664,6 +970,35 @@ let (_id, receipt) = svc.send_message(vec![peer_fw], MessageContent::Text("Hi".i
 
 - All APIs return explicit `Result<T, E>`; production code never panics. Errors include descriptive messages and can carry machine-parsable codes.
 - `tracing` emits JSON-structured events for: DHT puts/gets, auth failures, timeouts, stream class usage, and message delivery outcomes.
+
+### Extended Error Types
+
+The following error variants have been added to support new API functionality:
+
+**Identity Errors:**
+- `InvalidSignature` - Signature verification failed
+- `InvalidCanonicalBytes` - Canonical message format invalid
+- `MembershipConflict` - Group membership operation conflict
+- `MissingGroupKey` - Required group key not found
+- `WebsiteRootUpdateRefused` - Website root update rejected
+
+**Usage Examples:**
+```rust
+use saorsa_core::error::{P2PError, IdentityError};
+
+// Handle identity-specific errors
+match result {
+    Err(P2PError::Identity(IdentityError::InvalidSignature)) => {
+        // Handle signature verification failure
+        log::warn!("Signature verification failed for identity operation");
+    }
+    Err(P2PError::Identity(IdentityError::WebsiteRootUpdateRefused)) => {
+        // Handle website root update rejection
+        log::error!("Website root update was refused");
+    }
+    // ... other error handling
+}
+```
 
 
 ## Security Notes
@@ -683,9 +1018,11 @@ let (_id, receipt) = svc.send_message(vec![peer_fw], MessageContent::Text("Hi".i
 
 ## Quick Reference (Calls)
 
-- Identity: `identity_claim`, `identity_fetch`, `identity_publish_endpoints_signed`, `device_publish_forward`, `device_publish_forward_signed`, `device_subscribe`.
-- Groups: `group_identity_create`, `group_identity_publish`, `group_identity_fetch`, `group_forwards_put`, `group_forwards_fetch`, `group_put`, `group_fetch`.
+- Identity: `identity_claim`, `identity_fetch`, `identity_publish_endpoints_signed`, `identity_set_website_root`, `device_publish_forward`, `device_publish_forward_signed`, `device_subscribe`, `group_identity_canonical_sign_bytes`.
+- Groups: `group_identity_create`, `group_identity_publish`, `group_identity_fetch`, `group_identity_update_members_signed`, `group_member_add`, `group_member_remove`, `group_epoch_bump`, `group_forwards_put`, `group_forwards_fetch`, `group_put`, `group_fetch`.
 - DHT: `dht_put`, `dht_get`, `dht_watch`, `set_dht_instance`.
+- Virtual Disk: `disk_create`, `disk_mount`, `disk_write`, `disk_read`, `disk_list`, `disk_delete`, `disk_sync`, `website_set_home`, `website_publish`, `website_get_manifest`, `disk_share`, `disk_collaborate`, `disk_resolve_conflict`, `disk_snapshot`, `disk_restore`, `disk_encrypt_for_group`.
+- Messaging: `MessagingService::new`, `send_message`, `send_message_to_channel`, `channel_recipients`, `subscribe_messages`, `get_message_status`, `get_message`, `mark_user_online`, `mark_delivered`, `process_message_queue`, `encrypt_message`, `decrypt_message`.
 - Routing & Trust: `record_interaction`, `eigen_trust_epoch`, `route_next_hop`.
 - Transport: `quic_connect`, `quic_open`.
 - Storage Control: `place_shards`, `provider_advertise_space`, `repair_request`.

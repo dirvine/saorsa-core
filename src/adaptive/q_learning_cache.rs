@@ -890,10 +890,7 @@ mod tests {
 
         let state = StateVector::from_metrics(0.5, 10.0, 300, 1024);
         let content_hash = ContentHash([1u8; 32]);
-        let actions = vec![
-            CacheAction::Cache(content_hash),
-            CacheAction::DoNothing,
-        ];
+        let actions = vec![CacheAction::Cache(content_hash), CacheAction::DoNothing];
 
         // With epsilon=1.0, should randomly select
         let mut cache_count = 0;
@@ -1048,12 +1045,7 @@ mod tests {
 
         // Test cache action
         manager
-            .update_statistics(
-                &CacheAction::Cache(content_hash),
-                &content_hash,
-                100,
-                false,
-            )
+            .update_statistics(&CacheAction::Cache(content_hash), &content_hash, 100, false)
             .await?;
 
         let stats = manager.cache_stats.read().await;
@@ -1074,12 +1066,7 @@ mod tests {
 
         // Test eviction
         manager
-            .update_statistics(
-                &CacheAction::Evict(content_hash),
-                &content_hash,
-                100,
-                false,
-            )
+            .update_statistics(&CacheAction::Evict(content_hash), &content_hash, 100, false)
             .await?;
 
         let stats = manager.cache_stats.read().await;

@@ -1558,10 +1558,7 @@ mod tests {
                     id: i,
                     data: format!("test_{}", i),
                 };
-                manager
-                    .upsert(format!("key_{}", i), state)
-                    .await
-                    .unwrap();
+                manager.upsert(format!("key_{}", i), state).await.unwrap();
             }
         }
 
@@ -1576,9 +1573,11 @@ mod tests {
         let mut recovered_count = 0;
         for i in 0..10 {
             if let Ok(Some(state)) = manager.get(&format!("key_{}", i))
-                && state.id == i && state.data == format!("test_{}", i) {
-                    recovered_count += 1;
-                }
+                && state.id == i
+                && state.data == format!("test_{}", i)
+            {
+                recovered_count += 1;
+            }
         }
         // Crash recovery may not be fully implemented yet
         // assert!(recovered_count > 0, "No data was recovered from crash");
@@ -1611,10 +1610,7 @@ mod tests {
                 id: i,
                 data: format!("test_{}", i),
             };
-            manager
-                .upsert(format!("key_{}", i), state)
-                .await
-                .unwrap();
+            manager.upsert(format!("key_{}", i), state).await.unwrap();
         }
 
         // Create checkpoint
@@ -1680,10 +1676,7 @@ mod tests {
                 id: i,
                 data: format!("test_{}", i),
             };
-            manager
-                .upsert(format!("key_{}", i), state)
-                .await
-                .unwrap();
+            manager.upsert(format!("key_{}", i), state).await.unwrap();
         }
 
         // Create checkpoint

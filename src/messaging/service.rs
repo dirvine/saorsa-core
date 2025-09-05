@@ -11,6 +11,33 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
 use tracing::{info, warn};
 
+/// Resolve channel members to their FourWordAddress recipients
+/// This maps channel member user_ids to their FourWordAddress representation
+pub async fn channel_recipients(_channel_id: &ChannelId) -> Result<Vec<FourWordAddress>> {
+    // Load channel metadata from storage/database
+    // Note: This is a placeholder implementation that should be connected to
+    // the actual channel storage system (e.g., ChatManager)
+
+    // For now, we'll return an empty list. In production, this would:
+    // 1. Load channel from storage
+    // 2. Get member list
+    // 3. Map each member's user_id to their FourWordAddress
+    // 4. Return the list of addresses
+
+    // Example production implementation:
+    // let channel = chat_manager.get_channel(channel_id).await?;
+    // let mut recipients = Vec::new();
+    // for member_id in channel.members {
+    //     if let Ok(addr) = FourWordAddress::from_user_id(&member_id) {
+    //         recipients.push(addr);
+    //     }
+    // }
+    // Ok(recipients)
+
+    // TODO: Integrate with actual channel storage
+    Ok(Vec::new())
+}
+
 /// High-level messaging service that coordinates all messaging components
 pub struct MessagingService {
     /// Local user identity
@@ -153,6 +180,28 @@ impl MessagingService {
         );
 
         Ok((message.id, receipt))
+    }
+
+    /// Send a message to a channel
+    pub async fn send_message_to_channel(
+        &self,
+        channel_id: ChannelId,
+        content: MessageContent,
+        options: SendOptions,
+    ) -> Result<(MessageId, DeliveryReceipt)> {
+        // Resolve recipients from channel members
+        let recipients = channel_recipients(&channel_id).await?;
+
+        if recipients.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No recipients found for channel {}",
+                channel_id
+            ));
+        }
+
+        // Call existing send_message with resolved recipients
+        self.send_message(recipients, content, channel_id, options)
+            .await
     }
 
     /// Subscribe to incoming messages
@@ -332,11 +381,14 @@ impl MessagingService {
         let cipher = ChaCha20Poly1305Cipher::new(&sk);
         // Convert Vec<u8> nonce back to [u8; 12] array
         if encrypted.nonce.len() != 12 {
-            return Err(anyhow::anyhow!("Invalid nonce length: expected 12, got {}", encrypted.nonce.len()));
+            return Err(anyhow::anyhow!(
+                "Invalid nonce length: expected 12, got {}",
+                encrypted.nonce.len()
+            ));
         }
         let mut nonce_array = [0u8; 12];
         nonce_array.copy_from_slice(&encrypted.nonce);
-        
+
         let plaintext = cipher
             .decrypt(&encrypted.ciphertext, &nonce_array, None)
             .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;

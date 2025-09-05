@@ -409,9 +409,9 @@ async fn test_q_learning_handles_mixed_content_sizes() {
     // Train the system
     for i in 0..1000 {
         let (content_hash, content_size) = match i % 10 {
-            0..=5 => (small_content, small_size), // 60% small
+            0..=5 => (small_content, small_size),   // 60% small
             6..=8 => (medium_content, medium_size), // 30% medium
-            _ => (large_content, large_size),     // 10% large
+            _ => (large_content, large_size),       // 10% large
         };
 
         let state = q_manager.get_current_state(&content_hash).await.unwrap();

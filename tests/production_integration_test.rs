@@ -92,9 +92,10 @@ impl ProductionTestFramework {
             if let Ok(hash) = self.clients[0].store(value.clone()).await {
                 // Retrieve from another client using the hash
                 if let Ok(retrieved) = self.clients[1].retrieve(&hash).await
-                    && retrieved == value {
-                        successful_operations += 1;
-                    }
+                    && retrieved == value
+                {
+                    successful_operations += 1;
+                }
             }
         }
 

@@ -167,6 +167,13 @@ pub mod geographic_enhanced_network;
 /// Placement Loop & Storage Orchestration System
 pub mod placement;
 
+/// Virtual disk for encrypted file storage
+pub mod virtual_disk;
+
+/// Mock DHT for testing
+#[cfg(any(test, feature = "test-utils"))]
+pub mod mock_dht;
+
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
 

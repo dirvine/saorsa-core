@@ -278,6 +278,18 @@ pub enum IdentityError {
     #[error("Invalid signature")]
     InvalidSignature,
 
+    #[error("Invalid canonical bytes")]
+    InvalidCanonicalBytes,
+
+    #[error("Membership conflict")]
+    MembershipConflict,
+
+    #[error("Missing group key")]
+    MissingGroupKey,
+
+    #[error("Website root update refused")]
+    WebsiteRootUpdateRefused,
+
     #[error("Key derivation failed: {0}")]
     KeyDerivationFailed(Cow<'static, str>),
 

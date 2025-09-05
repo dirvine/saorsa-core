@@ -182,15 +182,15 @@ pub fn negotiate_algorithms(
         KemAlgorithm::MlKem768
     } else {
         return Err(QuantumCryptoError::UnsupportedAlgorithm(
-            "No common KEM algorithm".to_string()
+            "No common KEM algorithm".to_string(),
         ));
     };
-    
+
     let signature_algorithm = if use_ml_dsa {
         SignatureAlgorithm::MlDsa65
     } else {
         return Err(QuantumCryptoError::UnsupportedAlgorithm(
-            "No common signature algorithm".to_string()
+            "No common signature algorithm".to_string(),
         ));
     };
 

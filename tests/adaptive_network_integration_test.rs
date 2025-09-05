@@ -297,7 +297,11 @@ async fn test_q_learning_cache_optimization() -> anyhow::Result<()> {
                 saorsa_core::adaptive::q_learning_cache::CacheAction::Cache(_)
             ) {
                 if hit { 1.0 } else { -0.1 } // Reward for caching useful content
-            } else if hit { -0.5 } else { 0.1 };
+            } else if hit {
+                -0.5
+            } else {
+                0.1
+            };
 
             q_cache
                 .update_statistics(&action, content_hash, content_data.len() as u64, hit)

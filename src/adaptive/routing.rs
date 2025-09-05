@@ -20,12 +20,12 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
-use std::sync::Arc;
+use super::AdaptiveNetworkError;
 use super::NodeId;
 use super::Result;
-use super::{RoutingStrategy, TrustProvider, HyperbolicCoordinate};
 use super::learning::ThompsonSampling;
-use super::AdaptiveNetworkError;
+use super::{HyperbolicCoordinate, RoutingStrategy, TrustProvider};
+use std::sync::Arc;
 
 // Re-export types that other modules need
 pub use super::{ContentType, StrategyChoice};
@@ -106,7 +106,11 @@ impl AdaptiveRouter {
     }
 
     /// Route a message to a target using the best strategy
-    pub async fn route(&self, target: &NodeId, content_type: ContentType) -> std::result::Result<Vec<NodeId>, AdaptiveNetworkError> {
+    pub async fn route(
+        &self,
+        target: &NodeId,
+        content_type: ContentType,
+    ) -> std::result::Result<Vec<NodeId>, AdaptiveNetworkError> {
         // Select strategy using multi-armed bandit
         let strategy_choice = self
             .bandit
@@ -472,11 +476,18 @@ impl MockRoutingStrategy {
 #[cfg(test)]
 #[async_trait]
 impl RoutingStrategy for MockRoutingStrategy {
-    async fn find_closest_nodes(&self, _target: &super::ContentHash, count: usize) -> std::result::Result<Vec<NodeId>, AdaptiveNetworkError> {
+    async fn find_closest_nodes(
+        &self,
+        _target: &super::ContentHash,
+        count: usize,
+    ) -> std::result::Result<Vec<NodeId>, AdaptiveNetworkError> {
         Ok(self.nodes.iter().take(count).cloned().collect())
     }
 
-    async fn find_path(&self, target: &NodeId) -> std::result::Result<Vec<NodeId>, AdaptiveNetworkError> {
+    async fn find_path(
+        &self,
+        target: &NodeId,
+    ) -> std::result::Result<Vec<NodeId>, AdaptiveNetworkError> {
         let mut path = vec![NodeId { hash: [0u8; 32] }]; // Start node
         if self.nodes.contains(target) {
             path.push(target.clone());
@@ -493,13 +504,15 @@ impl RoutingStrategy for MockRoutingStrategy {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
-    use super::{AdaptiveRouter, TrustProvider, ThompsonSampling, NodeId, ContentType, StrategyChoice, HyperbolicCoordinate, HyperbolicRouting};
-    use std::sync::Arc;
+    use super::{
+        AdaptiveRouter, ContentType, HyperbolicCoordinate, HyperbolicRouting, NodeId,
+        StrategyChoice, ThompsonSampling, TrustProvider,
+    };
     use rand::RngCore;
+    use std::sync::Arc;
     #[tokio::test]
     async fn test_adaptive_router_creation() {
         struct MockTrustProvider;
@@ -516,7 +529,7 @@ mod tests {
 
         let mut hash = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut hash);
-        let node_id = NodeId { hash };  // Create proper NodeId
+        let node_id = NodeId { hash }; // Create proper NodeId
         let trust_provider = Arc::new(MockTrustProvider);
         let router = AdaptiveRouter::new_with_id(node_id, trust_provider);
 

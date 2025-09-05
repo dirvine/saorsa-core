@@ -526,10 +526,11 @@ impl AdaptiveNode {
         let base_latency = self.base_latency;
 
         if let Some(spike_end) = *self.latency_spike.read().await
-            && std::time::Instant::now() < spike_end {
-                // During spike, return much higher latency
-                return Ok(base_latency * 10);
-            }
+            && std::time::Instant::now() < spike_end
+        {
+            // During spike, return much higher latency
+            return Ok(base_latency * 10);
+        }
 
         Ok(base_latency)
     }

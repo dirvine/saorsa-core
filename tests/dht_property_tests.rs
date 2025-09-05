@@ -449,8 +449,7 @@ mod deterministic_properties {
                 },
                 format!("value_{}", i).into_bytes(),
                 NodeId::from_bytes(
-                    *blake3::hash(format!("publisher_{}", i % 3).as_bytes())
-                        .as_bytes(),
+                    *blake3::hash(format!("publisher_{}", i % 3).as_bytes()).as_bytes(),
                 ),
             );
             storage.store(record).await?;

@@ -131,7 +131,10 @@ mod tests {
         sleep(Duration::from_millis(100)).await;
 
         // Verify Alice receives rejection
-        if let Ok(WebRtcEvent::Call(CallEvent::CallRejected { call_id: rejected_id })) = alice_events.try_recv() {
+        if let Ok(WebRtcEvent::Call(CallEvent::CallRejected {
+            call_id: rejected_id,
+        })) = alice_events.try_recv()
+        {
             assert_eq!(rejected_id, call_id);
         }
 

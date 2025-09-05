@@ -102,9 +102,11 @@ async fn test_multi_armed_bandit_real_api() -> anyhow::Result<()> {
     let mab = MultiArmedBandit::new(config).await?;
 
     // Create test destinations and strategies
-    let destinations = [NodeId { hash: [1u8; 32] },
+    let destinations = [
+        NodeId { hash: [1u8; 32] },
         NodeId { hash: [2u8; 32] },
-        NodeId { hash: [3u8; 32] }];
+        NodeId { hash: [3u8; 32] },
+    ];
 
     let strategies = vec![
         StrategyChoice::Kademlia,

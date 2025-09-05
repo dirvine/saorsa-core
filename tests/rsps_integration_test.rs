@@ -36,13 +36,7 @@ async fn test_store_and_find_provider() -> Result<()> {
             root_cid,
             provider.clone(),
             vec![],
-            saorsa_rsps::Rsps::new(
-                root_cid,
-                0,
-                &[],
-                &saorsa_rsps::RspsConfig::default(),
-            )
-            .unwrap(),
+            saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default()).unwrap(),
         )
         .await?;
 
@@ -68,13 +62,8 @@ async fn test_cache_admission_control() -> Result<()> {
             included_root,
             provider.clone(),
             vec![],
-            saorsa_rsps::Rsps::new(
-                included_root,
-                0,
-                &[],
-                &saorsa_rsps::RspsConfig::default(),
-            )
-            .unwrap(),
+            saorsa_rsps::Rsps::new(included_root, 0, &[], &saorsa_rsps::RspsConfig::default())
+                .unwrap(),
         )
         .await?;
 
@@ -86,22 +75,14 @@ async fn test_cache_admission_control() -> Result<()> {
     let included_cid = Cid::from(blake3::hash(b"included-content").as_bytes().to_owned());
     assert!(
         storage
-            .cache_if_allowed(
-                included_root,
-                included_cid,
-                included_content.clone()
-            )
+            .cache_if_allowed(included_root, included_cid, included_content.clone())
             .await?
     );
 
     let excluded_cid = Cid::from(blake3::hash(b"excluded-content").as_bytes().to_owned());
     assert!(
         !storage
-            .cache_if_allowed(
-                excluded_root,
-                excluded_cid,
-                excluded_content.clone()
-            )
+            .cache_if_allowed(excluded_root, excluded_cid, excluded_content.clone())
             .await?
     );
 
@@ -121,13 +102,7 @@ async fn test_witness_receipt_generation() -> Result<()> {
             root_cid,
             provider.clone(),
             vec![],
-            saorsa_rsps::Rsps::new(
-                root_cid,
-                0,
-                &[],
-                &saorsa_rsps::RspsConfig::default(),
-            )
-            .unwrap(),
+            saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default()).unwrap(),
         )
         .await?;
 
@@ -157,13 +132,7 @@ async fn test_ttl_extension_on_receipts() -> Result<()> {
             root_cid,
             provider.clone(),
             vec![],
-            saorsa_rsps::Rsps::new(
-                root_cid,
-                0,
-                &[],
-                &saorsa_rsps::RspsConfig::default(),
-            )
-            .unwrap(),
+            saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default()).unwrap(),
         )
         .await?;
 
@@ -195,13 +164,7 @@ async fn test_rsps_update_with_new_content() -> Result<()> {
             root_cid,
             provider.clone(),
             vec![],
-            saorsa_rsps::Rsps::new(
-                root_cid,
-                0,
-                &[],
-                &saorsa_rsps::RspsConfig::default(),
-            )
-            .unwrap(),
+            saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default()).unwrap(),
         )
         .await?;
 
@@ -242,13 +205,7 @@ async fn test_expired_entries_cleanup() -> Result<()> {
             root_cid,
             provider.clone(),
             vec![],
-            saorsa_rsps::Rsps::new(
-                root_cid,
-                0,
-                &[],
-                &saorsa_rsps::RspsConfig::default(),
-            )
-            .unwrap(),
+            saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default()).unwrap(),
         )
         .await?;
 
@@ -283,13 +240,8 @@ async fn test_multiple_providers_per_root() -> Result<()> {
                 root_cid,
                 provider.clone(),
                 vec![],
-                saorsa_rsps::Rsps::new(
-                    root_cid,
-                    0,
-                    &[],
-                    &saorsa_rsps::RspsConfig::default(),
-                )
-                .unwrap(),
+                saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default())
+                    .unwrap(),
             )
             .await?;
     }
@@ -324,13 +276,8 @@ async fn test_concurrent_operations() -> Result<()> {
                     root_cid,
                     provider.clone(),
                     vec![],
-                    saorsa_rsps::Rsps::new(
-                        root_cid,
-                        0,
-                        &[],
-                        &saorsa_rsps::RspsConfig::default(),
-                    )
-                    .unwrap(),
+                    saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default())
+                        .unwrap(),
                 )
                 .await
                 .unwrap();
@@ -369,22 +316,15 @@ async fn test_cache_eviction_respects_rsps() -> Result<()> {
                 root_cid,
                 provider.clone(),
                 vec![],
-                saorsa_rsps::Rsps::new(
-                    root_cid,
-                    0,
-                    &[],
-                    &saorsa_rsps::RspsConfig::default(),
-                )
-                .unwrap(),
+                saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default())
+                    .unwrap(),
             )
             .await?;
 
         // Only cache some content items
         if i % 2 == 0 {
             let content = Cid::from(blake3::hash(b"content-idx").as_bytes().to_owned());
-            let _ = storage
-                .cache_if_allowed(root_cid, content, vec![])
-                .await?;
+            let _ = storage.cache_if_allowed(root_cid, content, vec![]).await?;
         }
     }
 
@@ -410,13 +350,7 @@ async fn test_receipt_validation() -> Result<()> {
             root_cid,
             provider.clone(),
             vec![],
-            saorsa_rsps::Rsps::new(
-                root_cid,
-                0,
-                &[],
-                &saorsa_rsps::RspsConfig::default(),
-            )
-            .unwrap(),
+            saorsa_rsps::Rsps::new(root_cid, 0, &[], &saorsa_rsps::RspsConfig::default()).unwrap(),
         )
         .await?;
 

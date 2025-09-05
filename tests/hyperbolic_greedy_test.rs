@@ -211,10 +211,11 @@ async fn test_stretch_on_scale_free_graph() {
         let target = &nodes[rand::random::<usize>() % nodes.len()];
 
         if source != target
-            && let Some(stretch) = calculate_stretch(&embedding, source, target, &edges).await {
-                total_stretch += stretch;
-                valid_pairs += 1;
-            }
+            && let Some(stretch) = calculate_stretch(&embedding, source, target, &edges).await
+        {
+            total_stretch += stretch;
+            valid_pairs += 1;
+        }
     }
 
     if valid_pairs > 0 {

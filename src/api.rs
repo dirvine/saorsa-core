@@ -16,6 +16,7 @@
 use crate::adaptive::TrustProvider;
 use crate::adaptive::trust::EigenTrustEngine;
 use crate::auth::{PubKey, Sig, WriteAuth};
+use crate::dht::Dht as DhtTrait;
 use crate::events::Subscription;
 use crate::fwid::{Key, fw_check, fw_to_key};
 use crate::identity::node_identity::NodeId;
@@ -34,10 +35,23 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
-use twdht_mod::{Dht as TwDhtTrait, TrustWeightedKademlia as TwDht};
+use twdht_mod::TrustWeightedKademlia as TwDht;
 
 // Re-export key spec types
 pub use crate::fwid::Word;
+
+// ============================================================================
+// CANONICAL BYTE CONSTANTS
+// ============================================================================
+
+/// Canonical message prefix for identity website root updates
+pub const CANONICAL_IDENTITY_WEBSITE_ROOT: &[u8] = b"saorsa-identity:website_root:v1";
+
+/// Canonical message prefix for group identity operations  
+pub const CANONICAL_GROUP_IDENTITY: &[u8] = b"saorsa-group:identity:v1";
+
+/// Canonical message prefix for group epoch bumps
+pub const CANONICAL_GROUP_EPOCH: &[u8] = b"saorsa-group:epoch:v1";
 
 /// Group member reference (snapshot entry)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -77,10 +91,14 @@ fn compute_membership_root(members: &[MemberRef]) -> Key {
     Key::from(*out.as_bytes())
 }
 
+/// Public helper for getting canonical signing bytes for group identity
+pub fn group_identity_canonical_sign_bytes(id: &Key, membership_root: &Key) -> Vec<u8> {
+    group_identity_canonical_message(id, membership_root)
+}
+
 fn group_identity_canonical_message(id: &Key, membership_root: &Key) -> Vec<u8> {
-    const DST: &[u8] = b"saorsa-group:identity:v1";
-    let mut msg = Vec::with_capacity(DST.len() + 64);
-    msg.extend_from_slice(DST);
+    let mut msg = Vec::with_capacity(CANONICAL_GROUP_IDENTITY.len() + 64);
+    msg.extend_from_slice(CANONICAL_GROUP_IDENTITY);
     msg.extend_from_slice(id.as_bytes());
     msg.extend_from_slice(membership_root.as_bytes());
     msg
@@ -187,16 +205,39 @@ pub struct FecParams {
 // Convenience helpers for CBOR+Keyed storage of Group and Container types
 /// Store GroupPacketV1 under key blake3("group" || group_id)
 pub async fn group_put(pkt: &GroupPacketV1, policy: &PutPolicy) -> Result<PutReceipt> {
-    let key = crate::fwid::compute_key("group", &pkt.group_id);
-    let bytes = serde_cbor::to_vec(pkt)?;
-    dht_put(key, Bytes::from(bytes), policy).await
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        crate::mock_dht::mock_ops::group_put(pkt, policy).await?;
+        return Ok(PutReceipt {
+            key: crate::fwid::compute_key("group", &pkt.group_id),
+            timestamp: 0,
+            storing_nodes: vec![],
+        });
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let key = crate::fwid::compute_key("group", &pkt.group_id);
+        let bytes = serde_cbor::to_vec(pkt)?;
+        dht_put(key, Bytes::from(bytes), policy).await
+    }
 }
 
 /// Fetch GroupPacketV1 by group_id
 pub async fn group_fetch(group_id: &[u8]) -> Result<GroupPacketV1> {
-    let key = crate::fwid::compute_key("group", group_id);
-    let bytes = dht_get(key, 1).await?;
-    Ok(serde_cbor::from_slice(&bytes)?)
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        let key = crate::fwid::compute_key("group", group_id);
+        let bytes = crate::mock_dht::mock_ops::dht_get(key, 1).await?;
+        return Ok(serde_cbor::from_slice(&bytes)?);
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let key = crate::fwid::compute_key("group", group_id);
+        let bytes = dht_get(key, 1).await?;
+        Ok(serde_cbor::from_slice(&bytes)?)
+    }
 }
 
 /// Store GroupForwardsV1 under key blake3("group-fwd" || group_id)
@@ -207,14 +248,38 @@ pub async fn group_forwards_put(
 ) -> Result<PutReceipt> {
     let key = crate::fwid::compute_key("group-fwd", group_id);
     let bytes = serde_cbor::to_vec(fwd)?;
-    dht_put(key, Bytes::from(bytes), policy).await
+
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        crate::mock_dht::mock_ops::dht_put(key.clone(), Bytes::from(bytes), policy).await?;
+        return Ok(PutReceipt {
+            key,
+            timestamp: 0,
+            storing_nodes: vec![],
+        });
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        dht_put(key, Bytes::from(bytes), policy).await
+    }
 }
 
 /// Fetch GroupForwardsV1 by group_id
 pub async fn group_forwards_fetch(group_id: &[u8]) -> Result<GroupForwardsV1> {
     let key = crate::fwid::compute_key("group-fwd", group_id);
-    let bytes = dht_get(key, 1).await?;
-    Ok(serde_cbor::from_slice(&bytes)?)
+
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        let bytes = crate::mock_dht::mock_ops::dht_get(key, 1).await?;
+        return Ok(serde_cbor::from_slice(&bytes)?);
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let bytes = dht_get(key, 1).await?;
+        Ok(serde_cbor::from_slice(&bytes)?)
+    }
 }
 
 /// Store ContainerManifestV1 under key blake3("manifest" || object)
@@ -222,16 +287,37 @@ pub async fn container_manifest_put(
     manifest: &ContainerManifestV1,
     policy: &PutPolicy,
 ) -> Result<PutReceipt> {
-    let key = crate::fwid::compute_key("manifest", manifest.object.as_bytes());
-    let bytes = serde_cbor::to_vec(manifest)?;
-    dht_put(key, Bytes::from(bytes), policy).await
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        crate::mock_dht::mock_ops::container_manifest_put(manifest, policy).await?;
+        return Ok(PutReceipt {
+            key: crate::fwid::compute_key("manifest", manifest.object.as_bytes()),
+            timestamp: 0,
+            storing_nodes: vec![],
+        });
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let key = crate::fwid::compute_key("manifest", manifest.object.as_bytes());
+        let bytes = serde_cbor::to_vec(manifest)?;
+        dht_put(key, Bytes::from(bytes), policy).await
+    }
 }
 
 /// Fetch ContainerManifestV1 by object root
 pub async fn container_manifest_fetch(object: &[u8; 32]) -> Result<ContainerManifestV1> {
-    let key = crate::fwid::compute_key("manifest", object);
-    let bytes = dht_get(key, 1).await?;
-    Ok(serde_cbor::from_slice(&bytes)?)
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        return crate::mock_dht::mock_ops::container_manifest_fetch(object).await;
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let key = crate::fwid::compute_key("manifest", object);
+        let bytes = dht_get(key, 1).await?;
+        Ok(serde_cbor::from_slice(&bytes)?)
+    }
 }
 
 /// Create a new group identity and return the packet + keypair
@@ -276,23 +362,39 @@ pub fn group_identity_create(
 
 /// Publish a group identity (validated) to DHT
 pub async fn group_identity_publish(packet: GroupIdentityPacketV1) -> Result<()> {
-    let id_key = packet.id.clone();
-    let bytes = serde_cbor::to_vec(&packet)?;
-    let pol = PutPolicy {
-        quorum: 3,
-        ttl: None,
-        auth: Box::new(crate::auth::SingleWriteAuth::new(PubKey::new(
-            packet.group_pk.clone(),
-        ))),
-    };
-    let _ = dht_put(id_key, Bytes::from(bytes), &pol).await?;
-    Ok(())
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        return crate::mock_dht::mock_ops::group_identity_publish(packet).await;
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let id_key = packet.id.clone();
+        let bytes = serde_cbor::to_vec(&packet)?;
+        let pol = PutPolicy {
+            quorum: 3,
+            ttl: None,
+            auth: Box::new(crate::auth::SingleWriteAuth::new(PubKey::new(
+                packet.group_pk.clone(),
+            ))),
+        };
+        let _ = dht_put(id_key, Bytes::from(bytes), &pol).await?;
+        Ok(())
+    }
 }
 
 /// Fetch a group identity packet by id key
 pub async fn group_identity_fetch(id_key: Key) -> Result<GroupIdentityPacketV1> {
-    let bytes = dht_get(id_key, 1).await?;
-    Ok(serde_cbor::from_slice(&bytes)?)
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        return crate::mock_dht::mock_ops::group_identity_fetch(id_key).await;
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let bytes = dht_get(id_key, 1).await?;
+        Ok(serde_cbor::from_slice(&bytes)?)
+    }
 }
 
 /// DHT put policy
@@ -407,9 +509,17 @@ pub async fn identity_claim(words: [Word; 4], _pubkey: PubKey, _sig: Sig) -> Res
 
 /// Fetch an identity packet
 pub async fn identity_fetch(key: Key) -> Result<IdentityPacketV1> {
-    let bytes = dht_get(key.clone(), 1).await?;
-    let pkt: IdentityPacketV1 = serde_cbor::from_slice(&bytes)?;
-    Ok(pkt)
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        return crate::mock_dht::mock_ops::identity_fetch(key).await;
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let bytes = dht_get(key.clone(), 1).await?;
+        let pkt: IdentityPacketV1 = serde_cbor::from_slice(&bytes)?;
+        Ok(pkt)
+    }
 }
 
 /// Publish a device forward
@@ -582,256 +692,521 @@ pub async fn device_subscribe(id_key: Key) -> Subscription<Forward> {
     crate::events::device_subscribe(id_key).await
 }
 
+/// Update the website root for an identity
+pub async fn identity_set_website_root(id_key: Key, website_root: Key, sig: Sig) -> Result<()> {
+    // Load existing identity packet
+    let mut pkt = identity_fetch(id_key.clone()).await?;
+
+    // Build canonical message for signature verification
+    // Message bytes: CANONICAL_IDENTITY_WEBSITE_ROOT || id || pk || CBOR(website_root)
+    let mut msg = Vec::new();
+    msg.extend_from_slice(CANONICAL_IDENTITY_WEBSITE_ROOT);
+    msg.extend_from_slice(id_key.as_bytes());
+    msg.extend_from_slice(&pkt.pk);
+    let website_root_cbor = serde_cbor::to_vec(&website_root)?;
+    msg.extend_from_slice(&website_root_cbor);
+
+    // Verify signature using stored identity pk
+    use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
+    let pk = MlDsaPublicKey::from_bytes(&pkt.pk)
+        .map_err(|e| anyhow::anyhow!("Invalid ML-DSA pubkey: {e}"))?;
+
+    const SIG_LEN: usize = 3309;
+    if sig.as_bytes().len() != SIG_LEN {
+        anyhow::bail!("Invalid signature length for website_root update");
+    }
+    let mut arr = [0u8; SIG_LEN];
+    arr.copy_from_slice(sig.as_bytes());
+    let ml_sig = MlDsaSignature(Box::new(arr));
+
+    let ml = MlDsa65::new();
+    let ok = ml
+        .verify(&pk, &msg, &ml_sig)
+        .map_err(|e| anyhow::anyhow!("Website root signature verify failed: {e}"))?;
+    if !ok {
+        anyhow::bail!("Website root signature invalid");
+    }
+
+    // Update packet with new website_root
+    pkt.website_root = Some(website_root);
+
+    // Store updated packet
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        crate::mock_dht::mock_ops::identity_publish(pkt).await?;
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let bytes = serde_cbor::to_vec(&pkt)?;
+        let pol = PutPolicy {
+            quorum: 3,
+            ttl: None,
+            auth: Box::new(crate::auth::SingleWriteAuth::new(PubKey::new(
+                pkt.pk.clone(),
+            ))),
+        };
+        let _ = dht_put(id_key.clone(), Bytes::from(bytes.clone()), &pol).await?;
+        crate::events::global_bus()
+            .publish_dht_update(id_key, Bytes::from(bytes))
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// Update group members with signature verification
+pub async fn group_identity_update_members_signed(
+    id_key: Key,
+    new_members: Vec<MemberRef>,
+    group_pk: Vec<u8>,
+    group_sig: Sig,
+) -> Result<()> {
+    // Fetch existing group identity packet
+    let mut packet = group_identity_fetch(id_key.clone()).await?;
+
+    // Compute new membership root
+    let new_root = compute_membership_root(&new_members);
+
+    // Get canonical signing bytes
+    let sign_bytes = group_identity_canonical_sign_bytes(&id_key, &new_root);
+
+    // Verify group signature
+    use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
+    let pk = MlDsaPublicKey::from_bytes(&group_pk)
+        .map_err(|e| anyhow::anyhow!("Invalid group ML-DSA pubkey: {e}"))?;
+
+    const SIG_LEN: usize = 3309;
+    if group_sig.as_bytes().len() != SIG_LEN {
+        anyhow::bail!("Invalid group signature length");
+    }
+    let mut arr = [0u8; SIG_LEN];
+    arr.copy_from_slice(group_sig.as_bytes());
+    let ml_sig = MlDsaSignature(Box::new(arr));
+
+    let ml = MlDsa65::new();
+    let ok = ml
+        .verify(&pk, &sign_bytes, &ml_sig)
+        .map_err(|e| anyhow::anyhow!("Group signature verify failed: {e}"))?;
+    if !ok {
+        anyhow::bail!("Group signature invalid");
+    }
+
+    // Update packet
+    packet.members = new_members;
+    packet.membership_root = new_root;
+    packet.group_sig = group_sig.as_bytes().to_vec();
+
+    // Store updated packet with quorum and publish event
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        // Store in mock DHT for tests
+        crate::mock_dht::mock_ops::group_identity_publish(packet).await?;
+    }
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        let bytes = serde_cbor::to_vec(&packet)?;
+        let pol = PutPolicy {
+            quorum: 3,
+            ttl: None,
+            auth: Box::new(crate::auth::DelegatedWriteAuth::new(vec![])),
+        };
+        let _ = dht_put(id_key.clone(), Bytes::from(bytes.clone()), &pol).await?;
+        crate::events::global_bus()
+            .publish_dht_update(id_key, Bytes::from(bytes))
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// Add a member to a group (convenience method)
+pub async fn group_member_add(
+    id_key: Key,
+    member: MemberRef,
+    group_pk: Vec<u8>,
+    group_sig: Sig,
+) -> Result<()> {
+    // Fetch current packet
+    let packet = group_identity_fetch(id_key.clone()).await?;
+
+    // Add member if not already present
+    let mut members = packet.members;
+    if !members.iter().any(|m| m.member_id == member.member_id) {
+        members.push(member);
+    }
+
+    // Call update with new member list
+    group_identity_update_members_signed(id_key, members, group_pk, group_sig).await
+}
+
+/// Remove a member from a group (convenience method)
+pub async fn group_member_remove(
+    id_key: Key,
+    member_id: Key,
+    group_pk: Vec<u8>,
+    group_sig: Sig,
+) -> Result<()> {
+    // Fetch current packet
+    let packet = group_identity_fetch(id_key.clone()).await?;
+
+    // Remove member
+    let members: Vec<MemberRef> = packet
+        .members
+        .into_iter()
+        .filter(|m| m.member_id != member_id)
+        .collect();
+
+    // Call update with new member list
+    group_identity_update_members_signed(id_key, members, group_pk, group_sig).await
+}
+
+/// Bump the epoch of a group (optional)
+pub async fn group_epoch_bump(
+    id_key: Key,
+    proof: Option<Vec<u8>>,
+    group_pk: Vec<u8>,
+    group_sig: Sig,
+) -> Result<()> {
+    // Fetch group packet (not identity packet, but the GroupPacketV1)
+    #[cfg(any(test, feature = "test-utils"))]
+    let mut packet: GroupPacketV1 = {
+        let key = crate::fwid::compute_key("group", id_key.as_bytes());
+        let bytes = crate::mock_dht::mock_ops::dht_get(key, 1).await?;
+        serde_cbor::from_slice(&bytes)?
+    };
+
+    #[cfg(not(any(test, feature = "test-utils")))]
+    let mut packet: GroupPacketV1 = {
+        let key = crate::fwid::compute_key("group", id_key.as_bytes());
+        let bytes = dht_get(key.clone(), 1).await?;
+        serde_cbor::from_slice(&bytes)?
+    };
+
+    // Increment epoch
+    packet.epoch += 1;
+
+    // Build canonical message for epoch bump
+    // Message bytes: CANONICAL_GROUP_EPOCH || id || epoch
+    let mut msg = Vec::new();
+    msg.extend_from_slice(CANONICAL_GROUP_EPOCH);
+    msg.extend_from_slice(id_key.as_bytes());
+    msg.extend_from_slice(&packet.epoch.to_le_bytes());
+
+    // Verify signature
+    use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
+    let pk = MlDsaPublicKey::from_bytes(&group_pk)
+        .map_err(|e| anyhow::anyhow!("Invalid group ML-DSA pubkey: {e}"))?;
+
+    const SIG_LEN: usize = 3309;
+    if group_sig.as_bytes().len() != SIG_LEN {
+        anyhow::bail!("Invalid group signature length for epoch bump");
+    }
+    let mut arr = [0u8; SIG_LEN];
+    arr.copy_from_slice(group_sig.as_bytes());
+    let ml_sig = MlDsaSignature(Box::new(arr));
+
+    let ml = MlDsa65::new();
+    let ok = ml
+        .verify(&pk, &msg, &ml_sig)
+        .map_err(|e| anyhow::anyhow!("Group epoch signature verify failed: {e}"))?;
+    if !ok {
+        anyhow::bail!("Group epoch signature invalid");
+    }
+
+    // Update proof if provided
+    if let Some(p) = proof {
+        packet.proof = Some(p);
+    }
+
+    // Store updated packet
+    group_put(
+        &packet,
+        &PutPolicy {
+            quorum: 3,
+            ttl: None,
+            auth: Box::new(crate::auth::DelegatedWriteAuth::new(vec![])),
+        },
+    )
+    .await?;
+
+    Ok(())
+}
+
 // ============================================================================
 // DHT API
 // ============================================================================
 
 /// Store data in the DHT with policy
 pub async fn dht_put(key: Key, _bytes: Bytes, _policy: &PutPolicy) -> Result<PutReceipt> {
-    static GLOBAL_TWDHT: Lazy<Arc<TwDht>> = Lazy::new(|| {
-        // Use a deterministic local NodeId for the embedded DHT instance
-        Arc::new(TwDht::new(NodeId([7u8; 32])))
-    });
-    static DHT_REGISTRY: OnceCell<Arc<TwDht>> = OnceCell::new();
-    let dht = DHT_REGISTRY
-        .get()
-        .cloned()
-        .unwrap_or_else(|| GLOBAL_TWDHT.clone());
-
-    let dht_key: [u8; 32] = *key.as_bytes();
-    let pol = twdht_mod::PutPolicy {
-        ttl: _policy.ttl,
-        quorum: _policy.quorum,
-    };
-
-    // Attempt to extract signatures from known CBOR records
-    let mut sigs: Vec<crate::auth::Sig> = Vec::new();
-    // By default verify over raw bytes; some records override this with
-    // canonical content to avoid including signatures (malleability).
-    let mut record_for_auth: Cow<'_, [u8]> = Cow::Borrowed(&_bytes);
-    // Group identity enforcement
-    if let Ok(gip) = serde_cbor::from_slice::<GroupIdentityPacketV1>(&_bytes) {
-        if !fw_check([
-            gip.words[0].clone(),
-            gip.words[1].clone(),
-            gip.words[2].clone(),
-            gip.words[3].clone(),
-        ]) {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Invalid group words");
-        }
-        let id_calc = fw_to_key([
-            gip.words[0].clone(),
-            gip.words[1].clone(),
-            gip.words[2].clone(),
-            gip.words[3].clone(),
-        ])?;
-        if id_calc != gip.id {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Group id mismatch");
-        }
-        let root_calc = compute_membership_root(&gip.members);
-        if root_calc != gip.membership_root {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("membership_root mismatch");
-        }
-        const SIG_LEN: usize = 3309;
-        if gip.group_sig.len() != SIG_LEN {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Invalid group signature length");
-        }
-        let pk = MlDsaPublicKey::from_bytes(&gip.group_pk)
-            .map_err(|e| anyhow::anyhow!("Invalid group public key: {e}"))?;
-        let mut arr = [0u8; SIG_LEN];
-        arr.copy_from_slice(&gip.group_sig);
-        let sig = MlDsaSignature(Box::new(arr));
-        let ml = MlDsa65::new();
-        let msg = group_identity_canonical_message(&gip.id, &gip.membership_root);
-        let ok = ml
-            .verify(&pk, &msg, &sig)
-            .map_err(|e| anyhow::anyhow!("Group signature verify failed: {e}"))?;
-        if !ok {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Group signature invalid");
-        }
-        // Use canonical bytes for WriteAuth
-        record_for_auth = Cow::Owned(msg);
-        sigs.push(crate::auth::Sig::new(gip.group_sig.clone()));
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        crate::mock_dht::mock_ops::dht_put(key.clone(), _bytes, _policy).await?;
+        return Ok(PutReceipt {
+            key,
+            timestamp: 0,
+            storing_nodes: vec![],
+        });
     }
 
-    // Identity verification: enforce words validity, id match, and signature over utf8(words)
-    if let Ok(pkt) = serde_cbor::from_slice::<IdentityPacketV1>(&_bytes) {
-        // 1) validate words via four-word networking
-        if !fw_check([
-            pkt.words[0].clone(),
-            pkt.words[1].clone(),
-            pkt.words[2].clone(),
-            pkt.words[3].clone(),
-        ]) {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Invalid four words in identity packet");
-        }
-        // 2) ensure id matches blake3(utf8(words))
-        let id_calc = fw_to_key([
-            pkt.words[0].clone(),
-            pkt.words[1].clone(),
-            pkt.words[2].clone(),
-            pkt.words[3].clone(),
-        ])?;
-        if id_calc != pkt.id {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Identity key mismatch for words");
-        }
-        // 3) verify signature over utf8(words)
-        use crate::auth::Sig as AuthSig;
-        use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
-        let pk = MlDsaPublicKey::from_bytes(&pkt.pk)
-            .map_err(|e| anyhow::anyhow!("Invalid ML-DSA pubkey: {e}"))?;
-        const SIG_LEN: usize = 3309;
-        if pkt.sig.len() != SIG_LEN {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Invalid ML-DSA signature length");
-        }
-        let mut arr = [0u8; SIG_LEN];
-        arr.copy_from_slice(&pkt.sig);
-        let sig = MlDsaSignature(Box::new(arr));
-        let ml = MlDsa65::new();
-        let msg = pkt.words.join("-");
-        let ok = ml
-            .verify(&pk, msg.as_bytes(), &sig)
-            .map_err(|e| anyhow::anyhow!("ML-DSA verify failed: {e}"))?;
-        if !ok {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Identity signature invalid");
-        }
-        // Prepare sigs vector for WriteAuth verification and switch to message utf8(words)
-        sigs.push(AuthSig::new(pkt.sig.clone()));
-        record_for_auth = Cow::Owned(pkt.words.join("-").into_bytes());
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> = Lazy::new(|| {
+            // Use a deterministic local NodeId for the embedded DHT instance
+            Arc::new(TwDht::new(NodeId([7u8; 32])))
+        });
+        static DHT_REGISTRY: OnceCell<Arc<TwDht>> = OnceCell::new();
+        let dht = DHT_REGISTRY
+            .get()
+            .cloned()
+            .unwrap_or_else(|| GLOBAL_TWDHT.clone());
 
-        // If endpoints present, ep_sig must be present and valid
-        if !pkt.endpoints.is_empty() {
-            let ep_sig = pkt
-                .ep_sig
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("Missing endpoints signature"))?;
-            // verify ep_sig over (id || pk || CBOR(endpoints))
+        let dht_key: [u8; 32] = *key.as_bytes();
+        let pol = twdht_mod::PutPolicy {
+            ttl: _policy.ttl,
+            quorum: _policy.quorum,
+        };
+
+        // Attempt to extract signatures from known CBOR records
+        let mut sigs: Vec<crate::auth::Sig> = Vec::new();
+        // By default verify over raw bytes; some records override this with
+        // canonical content to avoid including signatures (malleability).
+        let mut record_for_auth: Cow<'_, [u8]> = Cow::Borrowed(&_bytes);
+        // Group identity enforcement
+        if let Ok(gip) = serde_cbor::from_slice::<GroupIdentityPacketV1>(&_bytes) {
+            if !fw_check([
+                gip.words[0].clone(),
+                gip.words[1].clone(),
+                gip.words[2].clone(),
+                gip.words[3].clone(),
+            ]) {
+                telemetry::telemetry().record_auth_failure();
+                anyhow::bail!("Invalid group words");
+            }
+            let id_calc = fw_to_key([
+                gip.words[0].clone(),
+                gip.words[1].clone(),
+                gip.words[2].clone(),
+                gip.words[3].clone(),
+            ])?;
+            if id_calc != gip.id {
+                telemetry::telemetry().record_auth_failure();
+                anyhow::bail!("Group id mismatch");
+            }
+            let root_calc = compute_membership_root(&gip.members);
+            if root_calc != gip.membership_root {
+                telemetry::telemetry().record_auth_failure();
+                anyhow::bail!("membership_root mismatch");
+            }
+            const SIG_LEN: usize = 3309;
+            if gip.group_sig.len() != SIG_LEN {
+                telemetry::telemetry().record_auth_failure();
+                anyhow::bail!("Invalid group signature length");
+            }
+            let pk = MlDsaPublicKey::from_bytes(&gip.group_pk)
+                .map_err(|e| anyhow::anyhow!("Invalid group public key: {e}"))?;
+            let mut arr = [0u8; SIG_LEN];
+            arr.copy_from_slice(&gip.group_sig);
+            let sig = MlDsaSignature(Box::new(arr));
+            let ml = MlDsa65::new();
+            let msg = group_identity_canonical_message(&gip.id, &gip.membership_root);
+            let ok = ml
+                .verify(&pk, &msg, &sig)
+                .map_err(|e| anyhow::anyhow!("Group signature verify failed: {e}"))?;
+            if !ok {
+                telemetry::telemetry().record_auth_failure();
+                anyhow::bail!("Group signature invalid");
+            }
+            // Use canonical bytes for WriteAuth
+            record_for_auth = Cow::Owned(msg);
+            sigs.push(crate::auth::Sig::new(gip.group_sig.clone()));
+        }
+
+        // Identity verification: enforce words validity, id match, and signature over utf8(words)
+        if let Ok(pkt) = serde_cbor::from_slice::<IdentityPacketV1>(&_bytes) {
+            // 1) validate words via four-word networking
+            if !fw_check([
+                pkt.words[0].clone(),
+                pkt.words[1].clone(),
+                pkt.words[2].clone(),
+                pkt.words[3].clone(),
+            ]) {
+                telemetry::telemetry().record_auth_failure();
+                anyhow::bail!("Invalid four words in identity packet");
+            }
+            // 2) ensure id matches blake3(utf8(words))
+            let id_calc = fw_to_key([
+                pkt.words[0].clone(),
+                pkt.words[1].clone(),
+                pkt.words[2].clone(),
+                pkt.words[3].clone(),
+            ])?;
+            if id_calc != pkt.id {
+                telemetry::telemetry().record_auth_failure();
+                anyhow::bail!("Identity key mismatch for words");
+            }
+            // 3) verify signature over utf8(words)
+            use crate::auth::Sig as AuthSig;
             use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
             let pk = MlDsaPublicKey::from_bytes(&pkt.pk)
                 .map_err(|e| anyhow::anyhow!("Invalid ML-DSA pubkey: {e}"))?;
             const SIG_LEN: usize = 3309;
-            if ep_sig.len() != SIG_LEN {
+            if pkt.sig.len() != SIG_LEN {
                 telemetry::telemetry().record_auth_failure();
-                anyhow::bail!("Invalid endpoints signature length");
+                anyhow::bail!("Invalid ML-DSA signature length");
             }
             let mut arr = [0u8; SIG_LEN];
-            arr.copy_from_slice(ep_sig);
+            arr.copy_from_slice(&pkt.sig);
             let sig = MlDsaSignature(Box::new(arr));
             let ml = MlDsa65::new();
-            let mut msg = Vec::with_capacity(32 + pkt.pk.len() + 64);
-            msg.extend_from_slice(pkt.id.as_bytes());
-            msg.extend_from_slice(&pkt.pk);
-            let ep_cbor = serde_cbor::to_vec(&pkt.endpoints)?;
-            msg.extend_from_slice(&ep_cbor);
+            let msg = pkt.words.join("-");
             let ok = ml
-                .verify(&pk, &msg, &sig)
-                .map_err(|e| anyhow::anyhow!("Endpoints signature verify failed: {e}"))?;
+                .verify(&pk, msg.as_bytes(), &sig)
+                .map_err(|e| anyhow::anyhow!("ML-DSA verify failed: {e}"))?;
             if !ok {
                 telemetry::telemetry().record_auth_failure();
-                anyhow::bail!("Endpoints signature invalid");
+                anyhow::bail!("Identity signature invalid");
             }
-            // Include ep_sig in sigs vector for WriteAuth if needed
-            sigs.push(AuthSig::new(ep_sig.clone()));
+            // Prepare sigs vector for WriteAuth verification and switch to message utf8(words)
+            sigs.push(AuthSig::new(pkt.sig.clone()));
+            record_for_auth = Cow::Owned(pkt.words.join("-").into_bytes());
+
+            // If endpoints present, ep_sig must be present and valid
+            if !pkt.endpoints.is_empty() {
+                let ep_sig = pkt
+                    .ep_sig
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Missing endpoints signature"))?;
+                // verify ep_sig over (id || pk || CBOR(endpoints))
+                use crate::quantum_crypto::{
+                    MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature,
+                };
+                let pk = MlDsaPublicKey::from_bytes(&pkt.pk)
+                    .map_err(|e| anyhow::anyhow!("Invalid ML-DSA pubkey: {e}"))?;
+                const SIG_LEN: usize = 3309;
+                if ep_sig.len() != SIG_LEN {
+                    telemetry::telemetry().record_auth_failure();
+                    anyhow::bail!("Invalid endpoints signature length");
+                }
+                let mut arr = [0u8; SIG_LEN];
+                arr.copy_from_slice(ep_sig);
+                let sig = MlDsaSignature(Box::new(arr));
+                let ml = MlDsa65::new();
+                let mut msg = Vec::with_capacity(32 + pkt.pk.len() + 64);
+                msg.extend_from_slice(pkt.id.as_bytes());
+                msg.extend_from_slice(&pkt.pk);
+                let ep_cbor = serde_cbor::to_vec(&pkt.endpoints)?;
+                msg.extend_from_slice(&ep_cbor);
+                let ok = ml
+                    .verify(&pk, &msg, &sig)
+                    .map_err(|e| anyhow::anyhow!("Endpoints signature verify failed: {e}"))?;
+                if !ok {
+                    telemetry::telemetry().record_auth_failure();
+                    anyhow::bail!("Endpoints signature invalid");
+                }
+                // Include ep_sig in sigs vector for WriteAuth if needed
+                sigs.push(AuthSig::new(ep_sig.clone()));
+            }
         }
-    }
 
-    // DeviceSet verification: verify signature over canonical content that excludes signature field
-    if let Ok(ds) = serde_cbor::from_slice::<DeviceSetV1>(&_bytes) {
-        use crate::auth::Sig as AuthSig;
-        // Require signature
-        let ds_sig = ds
-            .sig
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Missing device-set signature"))?;
-        // Build canonical CBOR of forwards
-        let mut forwards_sorted = ds.forwards.clone();
-        forwards_sorted.sort_by(|a, b| {
-            a.proto
-                .cmp(&b.proto)
-                .then_with(|| a.addr.cmp(&b.addr))
-                .then_with(|| a.exp.cmp(&b.exp))
-        });
-        let buf = serde_cbor::to_vec(&forwards_sorted)?;
-        // Build auth message: b"device-set" || key || canonical(forwards)
-        let mut msg = Vec::with_capacity(9 + 32 + buf.len());
-        msg.extend_from_slice(b"device-set");
-        msg.extend_from_slice(key.as_bytes());
-        msg.extend_from_slice(&buf);
-        record_for_auth = Cow::Owned(msg);
-        sigs.push(AuthSig::new(ds_sig.clone()));
-    }
+        // DeviceSet verification: verify signature over canonical content that excludes signature field
+        if let Ok(ds) = serde_cbor::from_slice::<DeviceSetV1>(&_bytes) {
+            use crate::auth::Sig as AuthSig;
+            // Require signature
+            let ds_sig = ds
+                .sig
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Missing device-set signature"))?;
+            // Build canonical CBOR of forwards
+            let mut forwards_sorted = ds.forwards.clone();
+            forwards_sorted.sort_by(|a, b| {
+                a.proto
+                    .cmp(&b.proto)
+                    .then_with(|| a.addr.cmp(&b.addr))
+                    .then_with(|| a.exp.cmp(&b.exp))
+            });
+            let buf = serde_cbor::to_vec(&forwards_sorted)?;
+            // Build auth message: b"device-set" || key || canonical(forwards)
+            let mut msg = Vec::with_capacity(9 + 32 + buf.len());
+            msg.extend_from_slice(b"device-set");
+            msg.extend_from_slice(key.as_bytes());
+            msg.extend_from_slice(&buf);
+            record_for_auth = Cow::Owned(msg);
+            sigs.push(AuthSig::new(ds_sig.clone()));
+        }
 
-    // If Group types, extract MLS proof and include in sigs for WriteAuth
-    if let Ok(gpkt) = serde_cbor::from_slice::<GroupPacketV1>(&_bytes) {
-        if let Some(p) = gpkt.proof.as_ref() {
+        // If Group types, extract MLS proof and include in sigs for WriteAuth
+        if let Ok(gpkt) = serde_cbor::from_slice::<GroupPacketV1>(&_bytes) {
+            if let Some(p) = gpkt.proof.as_ref() {
+                sigs.push(crate::auth::Sig::new(p.clone()));
+            }
+        } else if let Ok(gfwd) = serde_cbor::from_slice::<GroupForwardsV1>(&_bytes)
+            && let Some(p) = gfwd.proof.as_ref()
+        {
             sigs.push(crate::auth::Sig::new(p.clone()));
         }
-    } else if let Ok(gfwd) = serde_cbor::from_slice::<GroupForwardsV1>(&_bytes)
-        && let Some(p) = gfwd.proof.as_ref()
-    {
-        sigs.push(crate::auth::Sig::new(p.clone()));
-    }
 
-    // Enforce write authorization policy before storing
-    match _policy.auth.verify(&record_for_auth, &sigs).await {
-        Ok(true) => {}
-        Ok(false) => {
-            telemetry::telemetry().record_auth_failure();
-            anyhow::bail!("Write authorization failed")
+        // Enforce write authorization policy before storing
+        match _policy.auth.verify(&record_for_auth, &sigs).await {
+            Ok(true) => {}
+            Ok(false) => {
+                telemetry::telemetry().record_auth_failure();
+                anyhow::bail!("Write authorization failed")
+            }
+            Err(e) => {
+                telemetry::telemetry().record_auth_failure();
+                return Err(e);
+            }
         }
-        Err(e) => {
-            telemetry::telemetry().record_auth_failure();
-            return Err(e);
-        }
-    }
 
-    let rec = dht.put(dht_key, _bytes.clone(), pol).await?;
-    // Notify watchers for this key
-    crate::events::global_bus()
-        .publish_dht_update(key.clone(), _bytes.clone())
-        .await?;
+        let rec = dht.put(dht_key, _bytes.clone(), pol).await?;
+        // Notify watchers for this key
+        crate::events::global_bus()
+            .publish_dht_update(key.clone(), _bytes.clone())
+            .await?;
 
-    // Telemetry counter
-    telemetry::telemetry().record_dht_put();
+        // Telemetry counter
+        telemetry::telemetry().record_dht_put();
 
-    let storing_nodes = rec
-        .providers
-        .into_iter()
-        .map(|nid| nid.0.to_vec())
-        .collect();
+        let storing_nodes = rec
+            .providers
+            .into_iter()
+            .map(|nid| nid.0.to_vec())
+            .collect();
 
-    Ok(PutReceipt {
-        key,
-        timestamp: chrono::Utc::now().timestamp() as u64,
-        storing_nodes,
-    })
+        Ok(PutReceipt {
+            key,
+            timestamp: chrono::Utc::now().timestamp() as u64,
+            storing_nodes,
+        })
+    } // End of #[cfg(not(any(test, feature = "test-utils")))]
 }
 
 /// Retrieve data from the DHT
 pub async fn dht_get(_key: Key, quorum: usize) -> Result<Bytes> {
-    static DHT_REGISTRY: OnceCell<Arc<TwDht>> = OnceCell::new();
-    let dht = DHT_REGISTRY.get().cloned().unwrap_or_else(|| {
-        static GLOBAL_TWDHT: Lazy<Arc<TwDht>> =
-            Lazy::new(|| Arc::new(TwDht::new(NodeId([7u8; 32]))));
-        GLOBAL_TWDHT.clone()
-    });
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        return crate::mock_dht::mock_ops::dht_get(_key, quorum as u8).await;
+    }
 
-    let dht_key: [u8; 32] = *_key.as_bytes();
-    let bytes = dht.get(dht_key, quorum).await?;
+    #[cfg(not(any(test, feature = "test-utils")))]
+    {
+        static DHT_REGISTRY: OnceCell<Arc<TwDht>> = OnceCell::new();
+        let dht = DHT_REGISTRY.get().cloned().unwrap_or_else(|| {
+            static GLOBAL_TWDHT: Lazy<Arc<TwDht>> =
+                Lazy::new(|| Arc::new(TwDht::new(NodeId([7u8; 32]))));
+            GLOBAL_TWDHT.clone()
+        });
 
-    // Telemetry counter
-    telemetry::telemetry().record_dht_get();
+        let dht_key: [u8; 32] = *_key.as_bytes();
+        let bytes = dht.get(dht_key, quorum).await?;
 
-    Ok(bytes)
+        // Telemetry counter
+        telemetry::telemetry().record_dht_get();
+
+        Ok(bytes)
+    }
 }
 
 /// Watch a DHT key for changes
@@ -1330,7 +1705,7 @@ pub fn hyperbolic_distance(_target: Vec<u8>) -> Option<f64> {
 
 pub use crate::events::subscribe_topology;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 mod tests {
     use super::*;
 

@@ -526,10 +526,7 @@ mod tests {
         let hash = ContentStore::calculate_hash(&content);
 
         // Add to cache
-        manager
-            .cache_manager
-            .insert(hash, content.clone())
-            .await;
+        manager.cache_manager.insert(hash, content.clone()).await;
 
         // Retrieve should find it in cache
         let retrieved = manager
