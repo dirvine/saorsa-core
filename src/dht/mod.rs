@@ -29,6 +29,12 @@ pub use capacity_signaling::{CapacityGossip, CapacityHistogram, CapacityManager,
 // Re-export telemetry
 pub use telemetry::{DhtTelemetry, OperationStats, OperationType, TelemetryStats};
 
+// Re-export replication grace period types
+pub use replication_grace_period::{ReplicationGracePeriodConfig, FailedNodeInfo, NodeFailureReason, ReplicationError, EndpointRegistration};
+
+// Re-export node failure tracker
+pub use node_failure_tracker::{NodeFailureTracker, DefaultNodeFailureTracker, DhtClient};
+
 // Re-export existing DHT components
 pub use core_engine::{DhtCoreEngine, DhtKey, NodeCapacity, NodeId as DhtNodeId, NodeInfo};
 
@@ -123,8 +129,10 @@ pub mod geographic_routing;
 pub mod geographic_routing_table;
 pub mod latency_aware_selection;
 pub mod network_integration;
+pub mod node_failure_tracker;
 pub mod optimized_storage;
 pub mod reed_solomon;
+pub mod replication_grace_period;
 pub mod rsps_integration;
 pub mod skademlia;
 pub mod witness;

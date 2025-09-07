@@ -38,6 +38,8 @@ pub struct ReplicationConfig {
     pub repair_interval: Duration,
     /// Maximum concurrent repair operations
     pub max_repair_concurrent: usize,
+    /// Grace period configuration for replication
+    pub grace_period_config: crate::dht::ReplicationGracePeriodConfig,
 }
 
 impl Default for ReplicationConfig {
@@ -50,6 +52,7 @@ impl Default for ReplicationConfig {
             repair_threshold: 5,
             repair_interval: Duration::from_secs(300), // 5 minutes
             max_repair_concurrent: 3,
+            grace_period_config: crate::dht::ReplicationGracePeriodConfig::default(),
         }
     }
 }

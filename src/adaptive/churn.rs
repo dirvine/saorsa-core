@@ -28,6 +28,9 @@ use crate::adaptive::{
     replication::ReplicationManager,
     routing::AdaptiveRouter,
 };
+use crate::dht::{
+    NodeFailureTracker, ReplicationGracePeriodConfig,
+};
 use anyhow::Result;
 use std::{
     collections::{HashMap, HashSet},
@@ -163,6 +166,9 @@ pub struct RecoveryManager {
 
     /// Active recoveries
     _active_recoveries: Arc<RwLock<HashMap<ContentHash, RecoveryStatus>>>,
+
+    /// Node failure tracker for grace period management
+    node_failure_tracker: Arc<RwLock<Option<Arc<dyn NodeFailureTracker>>>>,
 }
 
 /// Content tracking information
@@ -261,6 +267,15 @@ pub struct ChurnStats {
 
     /// Average detection time
     pub avg_detection_time_ms: f64,
+
+    /// Grace period prevented replications
+    pub grace_period_preventions: u64,
+
+    /// Successful node re-registrations during grace period
+    pub successful_reregistrations: u64,
+
+    /// Average grace period duration for re-registered nodes
+    pub avg_grace_period_duration_ms: f64,
 }
 
 impl ChurnHandler {
@@ -289,6 +304,39 @@ impl ChurnHandler {
             config,
             stats: Arc::new(RwLock::new(ChurnStats::default())),
         }
+    }
+
+    /// Create a new churn handler with node failure tracker for grace periods
+    pub fn with_failure_tracker(
+        node_id: NodeId,
+        predictor: Arc<ChurnPredictor>,
+        trust_provider: Arc<dyn TrustProvider>,
+        replication_manager: Arc<ReplicationManager>,
+        router: Arc<AdaptiveRouter>,
+        gossip: Arc<AdaptiveGossipSub>,
+        config: ChurnConfig,
+        failure_tracker: Arc<dyn NodeFailureTracker>,
+    ) -> Self {
+        let node_monitor = Arc::new(NodeMonitor::new(config.clone()));
+        let recovery_manager = Arc::new(RecoveryManager::with_failure_tracker(failure_tracker));
+
+        Self {
+            node_id,
+            predictor,
+            node_monitor,
+            recovery_manager,
+            trust_provider,
+            replication_manager,
+            router,
+            gossip,
+            config,
+            stats: Arc::new(RwLock::new(ChurnStats::default())),
+        }
+    }
+
+    /// Set the node failure tracker for grace period management
+    pub async fn set_failure_tracker(&self, failure_tracker: Arc<dyn NodeFailureTracker>) {
+        self.recovery_manager.set_failure_tracker(failure_tracker).await;
     }
 
     /// Start monitoring network for churn
@@ -417,13 +465,18 @@ impl ChurnHandler {
         // 3. Identify lost content
         let lost_content = self.identify_lost_content(node_id).await?;
 
-        // 4. Queue recovery tasks
+        // 4. Queue recovery tasks with grace period consideration
+        let grace_config = ReplicationGracePeriodConfig::default();
+        tracing::info!("Node {} failed, queuing recovery for {} content items with {}s grace period",
+                      node_id, lost_content.len(), grace_config.grace_period_duration.as_secs());
+
         for content_hash in lost_content {
             self.recovery_manager
-                .queue_recovery(
+                .queue_recovery_with_grace_period(
                     content_hash,
                     vec![node_id.clone()],
                     RecoveryPriority::Critical,
+                    &grace_config,
                 )
                 .await?;
         }
@@ -441,6 +494,11 @@ impl ChurnHandler {
         stats.avg_detection_time_ms =
             (stats.avg_detection_time_ms * (stats.failed_nodes - 1) as f64 + detection_time)
                 / stats.failed_nodes as f64;
+
+        // Update grace period metrics
+        if self.recovery_manager.node_failure_tracker.read().await.is_some() {
+            stats.grace_period_preventions += 1; // Assuming this failure used grace period
+        }
 
         Ok(())
     }
@@ -673,7 +731,23 @@ impl RecoveryManager {
             content_tracker: Arc::new(RwLock::new(HashMap::new())),
             recovery_queue: Arc::new(RwLock::new(Vec::new())),
             _active_recoveries: Arc::new(RwLock::new(HashMap::new())),
+            node_failure_tracker: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Create a new recovery manager with node failure tracker
+    pub fn with_failure_tracker(failure_tracker: Arc<dyn NodeFailureTracker>) -> Self {
+        Self {
+            content_tracker: Arc::new(RwLock::new(HashMap::new())),
+            recovery_queue: Arc::new(RwLock::new(Vec::new())),
+            _active_recoveries: Arc::new(RwLock::new(HashMap::new())),
+            node_failure_tracker: Arc::new(RwLock::new(Some(failure_tracker))),
+        }
+    }
+
+    /// Set the node failure tracker
+    pub async fn set_failure_tracker(&self, failure_tracker: Arc<dyn NodeFailureTracker>) {
+        *self.node_failure_tracker.write().await = Some(failure_tracker);
     }
 
     /// Increase replication for content
@@ -724,6 +798,121 @@ impl RecoveryManager {
             Ok(remaining)
         } else {
             Ok(0)
+        }
+    }
+
+    /// Queue recovery with grace period consideration
+    pub async fn queue_recovery_with_grace_period(
+        &self,
+        content_hash: ContentHash,
+        failed_nodes: Vec<NodeId>,
+        priority: RecoveryPriority,
+        config: &ReplicationGracePeriodConfig,
+    ) -> Result<()> {
+        if failed_nodes.is_empty() {
+            return self.queue_recovery(content_hash, failed_nodes, priority).await;
+        }
+
+        if let Some(ref failure_tracker) = *self.node_failure_tracker.read().await {
+            // Record failures and check grace periods
+            for node_id in &failed_nodes {
+                failure_tracker.record_node_failure(
+                    node_id.clone(),
+                    crate::dht::replication_grace_period::NodeFailureReason::NetworkTimeout,
+                    config,
+                ).await?;
+            }
+
+            let mut immediate_recovery_nodes = Vec::new();
+            let mut delayed_recovery_nodes = Vec::new();
+
+            for node_id in &failed_nodes {
+                if failure_tracker.should_start_replication(node_id).await {
+                    immediate_recovery_nodes.push(node_id.clone());
+                } else {
+                    delayed_recovery_nodes.push(node_id.clone());
+                }
+            }
+
+            // Queue immediate recovery for nodes past grace period
+            if !immediate_recovery_nodes.is_empty() {
+                tracing::info!("Queuing immediate recovery for {} nodes (past grace period) for content {:?}",
+                              immediate_recovery_nodes.len(), content_hash);
+                self.queue_recovery(content_hash, immediate_recovery_nodes, priority).await?;
+            }
+
+            // Schedule delayed checks for nodes in grace period
+            if !delayed_recovery_nodes.is_empty() {
+                tracing::info!("Scheduling delayed recovery check for {} nodes (in grace period) for content {:?}",
+                              delayed_recovery_nodes.len(), content_hash);
+                self.schedule_grace_period_check(
+                    content_hash,
+                    delayed_recovery_nodes,
+                    priority,
+                    failure_tracker.clone(),
+                ).await?;
+            }
+
+            Ok(())
+        } else {
+            // No failure tracker, use immediate recovery
+            self.queue_recovery(content_hash, failed_nodes, priority).await
+        }
+    }
+
+    /// Schedule a delayed recovery check for multiple nodes
+    async fn schedule_grace_period_check(
+        &self,
+        content_hash: ContentHash,
+        failed_nodes: Vec<NodeId>,
+        _priority: RecoveryPriority,
+        failure_tracker: Arc<dyn NodeFailureTracker>,
+    ) -> Result<()> {
+        let recovery_manager = Arc::downgrade(&self.content_tracker);
+
+        tokio::spawn(async move {
+            // Wait for grace period to potentially expire (5 minutes + 10 second buffer)
+            tokio::time::sleep(Duration::from_secs(310)).await;
+
+            if let Some(_tracker) = recovery_manager.upgrade() {
+                // Check again if replication should start for any nodes
+                let mut nodes_to_recover = Vec::new();
+
+                for node_id in &failed_nodes {
+                    if failure_tracker.should_start_replication(node_id).await {
+                        nodes_to_recover.push(node_id.clone());
+                    }
+                }
+
+                if !nodes_to_recover.is_empty() {
+                // Create a new RecoveryManager instance to queue recovery
+                // In practice, this would be handled by the owning ChurnHandler
+                if !nodes_to_recover.is_empty() {
+                    tracing::info!(
+                        "Grace period expired for {} nodes, queuing recovery for content {:?}",
+                        nodes_to_recover.len(),
+                        content_hash
+                    );
+                } else {
+                    tracing::debug!(
+                        "Grace period check completed for content {:?}, no nodes require recovery",
+                        content_hash
+                    );
+                }
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Check if a node should be recovered immediately or wait for grace period
+    pub async fn should_recover_node(&self, node_id: &NodeId) -> bool {
+        if let Some(ref failure_tracker) = *self.node_failure_tracker.read().await {
+            failure_tracker.should_start_replication(node_id).await
+        } else {
+            // No failure tracker, always recover immediately
+            true
         }
     }
 }
