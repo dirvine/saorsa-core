@@ -30,6 +30,10 @@ cargo bench --bench dht_benchmark  # Run specific benchmark
 
 # Documentation
 cargo doc --open                    # Build and open documentation
+
+# Local CI Pipeline (safe, read-only checks)
+./scripts/local_ci.sh               # Run full CI pipeline locally
+./scripts/check_no_panic_unwrap.sh  # Check for forbidden patterns
 ```
 
 ### Adaptive Network Testing Suite
@@ -67,70 +71,9 @@ let result = some_result.expect("failed");
 
 ## Architecture Overview
 
-### Multi-Layer P2P Architecture with ML-Driven Adaptive Routing
-
-The system combines distributed hash table (DHT) storage with machine learning for optimal routing decisions based on network conditions.
-
-#### 1. Transport Layer (`src/transport/`)
-- **Primary**: `ant-quic` (0.6+) for QUIC transport with NAT traversal
-- **Adapter**: `ant_quic_adapter.rs` provides `P2PNetworkNode` integration
-- **Security**: Post-quantum cryptography support via feature flag
-
-#### 2. Adaptive Network Layer (`src/adaptive/`)
-Central to the system's intelligence, using ML for dynamic strategy selection:
-
-- **Coordinator** (`coordinator.rs`): Orchestrates all adaptive components
-- **Multi-Armed Bandit** (`multi_armed_bandit.rs`): Thompson Sampling for strategy selection
-- **Beta Distribution** (`beta_distribution.rs`): Statistical modeling for bandit
-- **Routing Strategies**:
-  - Kademlia DHT routing
-  - Hyperbolic routing for low-latency paths
-  - Trust-based routing with EigenTrust++
-  - Self-Organizing Maps (SOM) for topology
-- **ML Components**:
-  - Q-Learning cache optimization
-  - Churn prediction for node stability
-  - Performance tracking and metrics
-
-#### 3. DHT Layer (`src/dht/`)
-Distributed storage with geographic awareness:
-
-- **Core Engine** (`core_engine.rs`): Kademlia-based with K=8 replication
-- **Geographic Routing** (`geographic_routing.rs`): Region-aware peer selection
-- **Latency-Aware Selection** (`latency_aware_selection.rs`): Smart peer choice
-- **Network Integration** (`network_integration.rs`): Protocol handling
-- **Witness System** (`witness.rs`): Byzantine fault tolerance
-- **Optimizations**: RSPS (Root-Scoped Provider Summaries) via `saorsa-rsps`
-
-#### 4. Identity System (`src/identity/`)
-- **Cryptography**: Ed25519 for signatures, X25519 for key exchange
-- **Four-Word Addresses**: Human-readable via `four-word-networking` crate
-- **Quantum Resistance**: ML-DSA support (feature flag)
-
-#### 5. Storage & Persistence (`src/storage/`)
-- SQLite via SQLx for message persistence
-- Encrypted DHT storage
-- Multi-device synchronization
-
-#### 6. Placement System (`src/placement/`)
-Advanced storage orchestration with EigenTrust integration:
-
-- **Placement Engine** (`mod.rs`): Main orchestrator for shard placement
-- **Weighted Algorithms** (`algorithms.rs`): Efraimidis-Spirakis sampling with formula `w_i = (τ_i^α) * (p_i^β) * (c_i^γ) * d_i`
-- **DHT Records** (`dht_records.rs`): NODE_AD, GROUP_BEACON, DATA_POINTER, REGISTER_POINTER (≤512B)
-- **Storage Orchestrator** (`orchestrator.rs`): Audit and repair systems with hysteresis
-- **Geographic Diversity** (`types.rs`): Location-aware placement constraints
-- **Byzantine Tolerance**: Configurable f-out-of-3f+1 fault tolerance
-- **Zero-Panic Code**: Comprehensive error handling with recovery patterns
-
-#### 7. Application Features
-- **Chat** (`src/chat/`): Slack-like messaging
-- **Discuss** (`src/discuss/`): Forum system
-- **Projects** (`src/projects/`): Hierarchical organization
-
-## Key Architectural Patterns
-
 ### New Clean API (v0.3.16+)
+
+The codebase provides a simplified multi-device API for decentralized identity, presence, and storage:
 
 #### Identity and Presence Registration
 ```rust
@@ -144,7 +87,7 @@ let handle = register_identity(words, &keypair).await?;
 // Register devices (multi-device support)
 let device = Device {
     id: DeviceId::generate(),
-    device_type: DeviceType::Active,
+    device_type: DeviceType::Active,  // or Headless for storage nodes
     storage_gb: 100,
     endpoint: Endpoint {
         protocol: "quic".to_string(),
@@ -178,123 +121,66 @@ let storage_handle = store_with_fec(&handle, data, 8, 4).await?;
 let retrieved = get_data(&storage_handle).await?;
 ```
 
-### Network Node Creation (Low-Level)
-```rust
-use saorsa_core::transport::ant_quic_adapter::P2PNetworkNode;
+Storage strategies are automatically selected based on group size:
+- **1 user**: Direct storage
+- **2 users**: Full replication
+- **3-5 users**: FEC(3,2) encoding
+- **6-10 users**: FEC(4,3) encoding
+- **11-20 users**: FEC(6,4) encoding
+- **20+ users**: FEC(8,5) encoding
 
-let bind_addr = "127.0.0.1:0".parse()?;
-let node = P2PNetworkNode::new(bind_addr).await?;
-```
+### Multi-Layer P2P Architecture
 
-### DHT Operations with Consistency Levels
-```rust
-use saorsa_core::dht::core_engine::{DhtCoreEngine, ConsistencyLevel};
+The system combines distributed hash table (DHT) storage with machine learning for optimal routing:
 
-// Store with quorum consistency
-engine.store_with_consistency(
-    key,
-    value,
-    ConsistencyLevel::Quorum,
-    Duration::from_secs(3600)
-).await?;
+#### 1. Transport Layer (`src/transport/`)
+- **Primary**: `ant-quic` (0.8+) for QUIC transport with NAT traversal
+- **Security**: Post-quantum cryptography (ML-DSA-65, ML-KEM-768)
 
-// Retrieve with eventual consistency
-let data = engine.retrieve_with_consistency(
-    key,
-    ConsistencyLevel::Eventual
-).await?;
-```
+#### 2. Adaptive Network Layer (`src/adaptive/`)
+Central to the system's intelligence, using ML for dynamic strategy selection:
+- **Multi-Armed Bandit**: Thompson Sampling for strategy selection
+- **Routing Strategies**: Kademlia DHT, Hyperbolic routing, Trust-based routing
+- **ML Components**: Q-Learning cache optimization, Churn prediction
 
-### Adaptive Strategy Selection
-```rust
-use saorsa_core::adaptive::coordinator::AdaptiveCoordinator;
+#### 3. DHT Layer (`src/dht/`)
+Distributed storage with geographic awareness:
+- **Core Engine**: Kademlia-based with K=8 replication
+- **Geographic Routing**: Region-aware peer selection
+- **Witness System**: Byzantine fault tolerance
+- **Optimizations**: RSPS (Root-Scoped Provider Summaries) via `saorsa-rsps`
 
-// Coordinator automatically selects best strategy
-let strategy = coordinator.select_strategy(
-    &network_conditions,
-    &content_type
-).await?;
-```
+#### 4. Identity System (`src/identity/`)
+- **Cryptography**: ML-DSA-65 for post-quantum signatures
+- **Four-Word Addresses**: Human-readable via `four-word-networking` crate
+- **No PoW**: Pure cryptographic identity without proof-of-work
 
-### Four-Word Address Usage
-```rust
-use saorsa_core::NetworkAddress;
-
-// Parse from four-word format
-let addr = NetworkAddress::from_four_words("alpha-beta-gamma-delta")?;
-
-// Convert IP to four-words
-let addr = NetworkAddress::from_ipv4("192.168.1.1".parse()?, 9000);
-if let Some(words) = addr.four_words() {
-    println!("Address: {}", words);
-}
-```
-
-### Placement System Usage
-```rust
-use saorsa_core::placement::{
-    PlacementEngine, PlacementConfig, PlacementOrchestrator,
-    OptimizationWeights, GeographicLocation, NetworkRegion
-};
-
-// Configure placement with EigenTrust integration
-let config = PlacementConfig {
-    replication_factor: (3, 8).into(),
-    byzantine_tolerance: 2.into(),
-    placement_timeout: Duration::from_secs(30),
-    geographic_diversity: true,
-    weights: OptimizationWeights {
-        trust_weight: 0.4,        // EigenTrust reputation
-        performance_weight: 0.3,   // Node performance metrics  
-        capacity_weight: 0.2,      // Available storage capacity
-        diversity_bonus: 0.1,      // Geographic/network diversity
-    },
-};
-
-// Create placement orchestrator
-let orchestrator = PlacementOrchestrator::new(
-    config,
-    dht_engine,
-    trust_system,
-    performance_monitor,
-    churn_predictor,
-).await?;
-
-// Start audit and repair systems
-orchestrator.start().await?;
-
-// Place data with optimal shard distribution
-let decision = orchestrator.place_data(
-    data,
-    8, // replication factor
-    Some(NetworkRegion::Europe),
-).await?;
-```
+#### 5. Placement System (`src/placement/`)
+Advanced storage orchestration with EigenTrust integration:
+- **Weighted Selection Formula**: `w_i = (τ_i^α) * (p_i^β) * (c_i^γ) * d_i`
+- **Byzantine Tolerance**: Configurable f-out-of-3f+1 fault tolerance
+- **DHT Records**: NODE_AD, GROUP_BEACON, DATA_POINTER (≤512B)
 
 ## External Crate Dependencies
 
 ### Saorsa Ecosystem
 - `saorsa-rsps` (0.1.0): DHT optimization with provider summaries
-- `saorsa-fec`: Forward error correction (prefer over `reed-solomon-erasure`)
+- `saorsa-fec`: Forward error correction
+- `saorsa-seal`: Encryption library
 - `four-word-networking` (2.3+): Human-readable addresses
-- `ant-quic` (0.6+): QUIC transport with NAT traversal
+- `ant-quic` (0.8+): QUIC transport with NAT traversal
 
 ### Feature Flags
 ```toml
-default = ["dht", "ant-quic"]
-dht = []                    # Distributed Hash Table
-ant-quic = []               # QUIC transport (recommended)
-quantum-resistant = []      # Post-quantum cryptography
-threshold = []              # Threshold cryptography
-metrics = []                # Prometheus metrics
+default = ["metrics"]
+metrics = ["dep:prometheus", "ant-quic/prometheus"]  # Prometheus monitoring
 ```
 
 ## Testing Infrastructure
 
 ### Test Organization
 - **Unit Tests**: In-module `#[cfg(test)]` blocks
-- **Integration Tests**: `tests/` directory (38 test files)
-- **Disabled Tests**: Files with `.disabled` extension (API compatibility issues)
+- **Integration Tests**: `tests/` directory
 - **Property Tests**: Using `proptest` for randomized testing
 
 ### Key Integration Tests
@@ -307,41 +193,10 @@ cargo test --test storage_tests                  # Storage strategies & FEC
 cargo test --test ant_quic_integration_test      # QUIC transport
 cargo test --test dht_core_operations_test        # DHT operations
 cargo test --test adaptive_components_test        # Adaptive networking
-cargo test --test four_word_integration_test      # Address system
 
 # Security & trust
 cargo test --test eigentrust_integration_test     # Trust system
 cargo test --test security_comprehensive_test     # Security validation
-
-# Network simulation
-cargo test --test full_network_simulation         # End-to-end simulation
-cargo test --test gossipsub_integration_test      # Gossip protocol
-```
-
-## CI/CD Pipeline
-
-GitHub Actions enforces quality standards on every commit:
-
-1. **Format Check**: `cargo fmt --all -- --check`
-2. **Clippy Linting**: `cargo clippy --all-features -- -D warnings`
-3. **Security Audit**: `cargo audit`
-4. **Test Matrix**: Stable and nightly Rust
-5. **Code Coverage**: via `cargo-llvm-cov`
-6. **System Dependencies**: Audio/video libraries for WebRTC
-
-## System Dependencies
-
-Required for local development:
-```bash
-# Ubuntu/Debian
-sudo apt-get install -y \
-  pkg-config \
-  libssl-dev \
-  libasound2-dev \
-  libpulse-dev \
-  libdbus-1-dev \
-  portaudio19-dev \
-  build-essential
 ```
 
 ## Common Development Workflows
@@ -359,8 +214,6 @@ sudo apt-get install -y \
 3. Ensure geographic diversity compliance
 4. Add EigenTrust integration hooks
 5. Write comprehensive tests with property-based testing
-6. Benchmark placement performance
-7. Document algorithm complexity and trade-offs
 
 ### DHT Operation with Witnesses
 ```rust
@@ -374,15 +227,6 @@ let receipt = engine.store_with_witnesses(
 ).await?;
 ```
 
-### Network Monitoring
-```rust
-use saorsa_core::adaptive::performance::PerformanceMonitor;
-
-let monitor = PerformanceMonitor::new();
-monitor.record_latency(peer_id, Duration::from_millis(50));
-let metrics = monitor.get_metrics(peer_id)?;
-```
-
 ## Important Implementation Details
 
 ### DHT Configuration
@@ -391,12 +235,6 @@ let metrics = monitor.get_metrics(peer_id)?;
 - **Geographic Awareness**: Regional peer preference
 - **Witness System**: Byzantine fault tolerance
 
-### Adaptive Network Behavior
-- **Thompson Sampling**: Balances exploration vs exploitation
-- **Q-Learning**: Optimizes cache decisions
-- **Churn Prediction**: Anticipates node departures
-- **Strategy Selection**: Based on network conditions and content type
-
 ### Placement System Configuration
 - **Weighted Selection Formula**: `w_i = (τ_i^α) * (p_i^β) * (c_i^γ) * d_i`
   - `τ_i`: EigenTrust reputation score (0.0-1.0)
@@ -404,18 +242,14 @@ let metrics = monitor.get_metrics(peer_id)?;
   - `c_i`: Capacity score (0.0-1.0)
   - `d_i`: Diversity bonus multiplier (1.0-2.0)
 - **Byzantine Tolerance**: f-out-of-3f+1 nodes (configurable f)
-- **DHT Record Limits**: ≤512 bytes with proof-of-work (~18 bits)
+- **DHT Record Limits**: ≤512 bytes
 - **Audit Frequency**: 5-minute intervals with concurrent limits
-- **Repair Hysteresis**: 10% band to prevent repair storms
-- **Geographic Regions**: 7 major regions with ASN diversity
 
 ### Performance Optimizations
 - **Connection Pooling**: Max 100 connections with LRU eviction
 - **Message Batching**: 10ms window, 64KB max batch
 - **Caching**: LRU caches throughout with configurable TTL
 - **Hashing**: BLAKE3 for speed, SHA2 for compatibility
-- **Placement Decisions**: <1s for 8-node selection
-- **Shard Repair**: Lazy repair with 1-hour cooldown
 
 ## Licensing
 
