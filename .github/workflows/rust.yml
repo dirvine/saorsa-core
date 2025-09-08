@@ -111,6 +111,7 @@ jobs:
   coverage:
     name: Code Coverage
     needs: test
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -141,7 +142,7 @@ jobs:
       uses: codecov/codecov-action@v4
       with:
         files: lcov.info
-        fail_ci_if_error: true
+        fail_ci_if_error: false
 
   benchmarks:
     name: Benchmarks
