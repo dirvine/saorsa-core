@@ -392,6 +392,31 @@ impl ChatManager {
         Self { storage, identity }
     }
 
+    /// Add a member to a channel
+    pub async fn add_member(
+        &mut self,
+        channel_id: &ChannelId,
+        user_id: UserId,
+        role: ChannelRole,
+    ) -> Result<()> {
+        let mut ch = self.get_channel(channel_id).await?;
+        if !ch.members.iter().any(|m| m.user_id == user_id) {
+            ch.members.push(ChannelMember {
+                user_id: user_id.clone(),
+                role,
+                joined_at: SystemTime::now(),
+                last_read: None,
+                notifications: NotificationSettings::default(),
+            });
+            // Persist updated channel
+            let key = keys::chat_channel(&ch.id.0);
+            self.storage
+                .store_encrypted(&key, &ch, ttl::PROFILE, None)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// Create a new channel
     pub async fn create_channel(
         &mut self,

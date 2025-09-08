@@ -130,7 +130,55 @@ Advanced storage orchestration with EigenTrust integration:
 
 ## Key Architectural Patterns
 
-### Network Node Creation
+### New Clean API (v0.3.16+)
+
+#### Identity and Presence Registration
+```rust
+use saorsa_core::{register_identity, register_presence, MlDsaKeyPair, Device, DeviceType, DeviceId, Endpoint};
+
+// One-time identity registration
+let words = ["welfare", "absurd", "king", "ridge"];
+let keypair = MlDsaKeyPair::generate()?;
+let handle = register_identity(words, &keypair).await?;
+
+// Register devices (multi-device support)
+let device = Device {
+    id: DeviceId::generate(),
+    device_type: DeviceType::Active,
+    storage_gb: 100,
+    endpoint: Endpoint {
+        protocol: "quic".to_string(),
+        address: "192.168.1.100:9000".to_string(),
+    },
+    capabilities: Default::default(),
+};
+
+let device_id = device.id;
+register_presence(&handle, vec![device], device_id).await?;
+```
+
+#### Storage with Automatic Strategy Selection
+```rust
+use saorsa_core::{store_data, store_dyad, store_with_fec, get_data};
+
+// Single user - Direct storage
+let data = b"Private data".to_vec();
+let storage_handle = store_data(&handle, data, 1).await?;
+
+// Two users - Full replication  
+let storage_handle = store_dyad(&handle1, handle2.key(), data).await?;
+
+// Group - Automatic FEC based on size
+let storage_handle = store_data(&handle, data, 10).await?; // FEC(4,3)
+
+// Custom FEC parameters
+let storage_handle = store_with_fec(&handle, data, 8, 4).await?;
+
+// Retrieve (automatic decryption/reconstruction)
+let retrieved = get_data(&storage_handle).await?;
+```
+
+### Network Node Creation (Low-Level)
 ```rust
 use saorsa_core::transport::ant_quic_adapter::P2PNetworkNode;
 
@@ -251,7 +299,11 @@ metrics = []                # Prometheus metrics
 
 ### Key Integration Tests
 ```bash
-# Core functionality
+# New API Tests (v0.3.16+)
+cargo test --test api_implementation_tests       # Clean API implementation
+cargo test --test storage_tests                  # Storage strategies & FEC
+
+# Core functionality  
 cargo test --test ant_quic_integration_test      # QUIC transport
 cargo test --test dht_core_operations_test        # DHT operations
 cargo test --test adaptive_components_test        # Adaptive networking

@@ -2,7 +2,7 @@
 //
 // Mock DHT implementation for testing
 
-use crate::api::PutPolicy;
+use crate::dht::PutPolicy;
 use crate::fwid::Key;
 use anyhow::Result;
 use bytes::Bytes;
@@ -74,9 +74,25 @@ pub fn get_mock_dht() -> Arc<MockDht> {
     MOCK_DHT_INSTANCE.clone()
 }
 
+// Stub types for packet structures
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IdentityPacketV1 {
+    pub id: Key,
+    pub public_key: Vec<u8>,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GroupPacketV1 {
+    pub group_id: Vec<u8>,
+    pub members: Vec<Key>,
+    pub signature: Vec<u8>,
+}
+
 /// Mock DHT operations that replace real DHT calls in tests
 pub mod mock_ops {
     use super::*;
+    use crate::mls::GroupIdentityPacketV1;
 
     /// Mock dht_put for testing
     pub async fn dht_put(key: Key, value: Bytes, policy: &PutPolicy) -> Result<()> {
@@ -92,7 +108,7 @@ pub mod mock_ops {
 
     /// Mock container_manifest_put for testing
     pub async fn container_manifest_put(
-        manifest: &crate::api::ContainerManifestV1,
+        manifest: &crate::virtual_disk::ContainerManifestV1,
         policy: &PutPolicy,
     ) -> Result<()> {
         let key = crate::fwid::compute_key("container", manifest.object.as_bytes());
@@ -103,52 +119,50 @@ pub mod mock_ops {
     /// Mock container_manifest_fetch for testing
     pub async fn container_manifest_fetch(
         object: &[u8],
-    ) -> Result<crate::api::ContainerManifestV1> {
+    ) -> Result<crate::virtual_disk::ContainerManifestV1> {
         let key = crate::fwid::compute_key("container", object);
         let bytes = dht_get(key, 1).await?;
         Ok(serde_cbor::from_slice(&bytes)?)
     }
 
     /// Mock identity_publish for testing
-    pub async fn identity_publish(packet: crate::api::IdentityPacketV1) -> Result<()> {
+    pub async fn identity_publish(packet: super::IdentityPacketV1) -> Result<()> {
         let key = crate::fwid::compute_key("identity", packet.id.as_bytes());
         let bytes = serde_cbor::to_vec(&packet)?;
         let policy = PutPolicy {
             quorum: 3,
             ttl: None,
-            auth: Box::new(crate::auth::DelegatedWriteAuth::new(vec![])),
         };
         dht_put(key, Bytes::from(bytes), &policy).await
     }
 
     /// Mock identity_fetch for testing
-    pub async fn identity_fetch(id_key: Key) -> Result<crate::api::IdentityPacketV1> {
+    pub async fn identity_fetch(id_key: Key) -> Result<super::IdentityPacketV1> {
         let key = crate::fwid::compute_key("identity", id_key.as_bytes());
         let bytes = dht_get(key, 1).await?;
         Ok(serde_cbor::from_slice(&bytes)?)
     }
 
     /// Mock group_identity_publish for testing
-    pub async fn group_identity_publish(packet: crate::api::GroupIdentityPacketV1) -> Result<()> {
+    pub async fn group_identity_publish(packet: GroupIdentityPacketV1) -> Result<()> {
         let key = crate::fwid::compute_key("group-identity", packet.id.as_bytes());
         let bytes = serde_cbor::to_vec(&packet)?;
         let policy = PutPolicy {
             quorum: 3,
             ttl: None,
-            auth: Box::new(crate::auth::DelegatedWriteAuth::new(vec![])),
         };
         dht_put(key, Bytes::from(bytes), &policy).await
     }
 
     /// Mock group_identity_fetch for testing
-    pub async fn group_identity_fetch(id_key: Key) -> Result<crate::api::GroupIdentityPacketV1> {
+    pub async fn group_identity_fetch(id_key: Key) -> Result<GroupIdentityPacketV1> {
         let key = crate::fwid::compute_key("group-identity", id_key.as_bytes());
         let bytes = dht_get(key, 1).await?;
         Ok(serde_cbor::from_slice(&bytes)?)
     }
 
     /// Mock group_put for testing
-    pub async fn group_put(packet: &crate::api::GroupPacketV1, policy: &PutPolicy) -> Result<()> {
+    pub async fn group_put(packet: &super::GroupPacketV1, policy: &PutPolicy) -> Result<()> {
         let key = crate::fwid::compute_key("group", &packet.group_id);
         let bytes = serde_cbor::to_vec(packet)?;
         dht_put(key, Bytes::from(bytes), policy).await
@@ -169,7 +183,6 @@ mod tests {
         let policy = PutPolicy {
             quorum: 1,
             ttl: None,
-            auth: Box::new(crate::auth::DelegatedWriteAuth::new(vec![])),
         };
 
         dht.put(key.clone(), data.clone(), &policy).await.unwrap();
@@ -197,7 +210,6 @@ mod tests {
             let policy = PutPolicy {
                 quorum: 1,
                 ttl: None,
-                auth: Box::new(crate::auth::DelegatedWriteAuth::new(vec![])),
             };
             dht.put(key, data, &policy).await.unwrap();
         }

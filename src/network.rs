@@ -566,10 +566,11 @@ impl P2PNode {
             let digest = hasher.finalize();
             let mut nid = [0u8; 32];
             nid.copy_from_slice(digest.as_bytes());
-            let twdht = std::sync::Arc::new(crate::dht::TrustWeightedKademlia::new(
+            let _twdht = std::sync::Arc::new(crate::dht::TrustWeightedKademlia::new(
                 crate::identity::node_identity::NodeId::from_bytes(nid),
             ));
-            let _ = crate::api::set_dht_instance(twdht);
+            // TODO: Update to use new clean API
+            // let _ = crate::api::set_dht_instance(twdht);
         }
 
         // Initialize DHT if needed

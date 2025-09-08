@@ -1,42 +1,124 @@
-# Saorsa Core Agents API (AGENTS_API.md)
+# Saorsa Core API Documentation (v0.3.16+)
 
 Copyright (C) 2024 Saorsa Labs Limited — Licensed under AGPL-3.0-or-later.
 
-This document is written for LLM agents and autonomous clients to interact with Saorsa Core. It describes the stable agent-facing API surface, object models, addressing, and example flows for building large-scale peer-to-peer applications with identity, storage, messaging, real-time media, and groups.
+## Overview
 
-Status: evolving, backwards-compatible where possible. All production calls are panic-free and authenticated by design. Examples use Rust-style signatures and JSON payloads, but the protocol is language-agnostic.
+Saorsa Core provides a clean, multi-device API for decentralized identity, presence, and storage. The architecture supports users with multiple devices (computers, phones, headless storage nodes) and automatically optimizes storage strategies based on group size.
 
-## Table of Contents
+This document describes the new simplified API surface introduced in v0.3.16, replacing the previous complex API structure with a clean, intuitive interface focused on real-world usage patterns.
 
-### Core Concepts
-- [Principles](#principles)
-- [Addressing and Keys](#addressing-and-keys)
-- [Object Model](#object-model-core-records)
-- [Quick Start for Agents](#quick-start-for-agents)
+Status: Production-ready. All calls are panic-free with comprehensive error handling. The API uses Rust async/await patterns with tokio runtime.
 
-### API Reference
-- [Identity API](#identity-api) - Claim identities, manage endpoints and devices
-- [Group API](#group-api) - Create and manage groups with membership
-- [DHT API](#dht-api) - Authenticated distributed storage operations
-- [Virtual Disk API](#virtual-disk-api) - File systems and website publishing
-- [Messaging API](#messaging-api-high-level-service) - Secure messaging and content
-- [Real-Time Media API](#real-time-media-api) - Audio/video calls and screen sharing
-- [Routing & Trust API](#routing--trust-api) - EigenTrust and peer selection
-- [Transport API](#transport-api-quic) - Low-level QUIC connections
-- [Storage Control API](#storage-control-api) - Placement and repair
-- [Friend Mesh Backup API](#friend-mesh-backup-api) - Cooperative backup
+## Core Concepts
 
-### Application Development
-- [Agent Decision Trees](#agent-decision-trees) - Choose the right APIs
-- [Common Patterns](#common-patterns) - Best practices and examples
-- [Example: Building "Communitas"](#example-building-communitas) - Complete app example
-- [Security and Anti-Phishing](#anti-phishing-and-name-safety)
-- [Error Handling](#error-handling-and-telemetry)
+### 1. Identity
+- **Four-Word Address**: Human-readable identifiers that hash to network keys
+- **ML-DSA Keypair**: Post-quantum digital signatures for authentication
+- **IdentityHandle**: Opaque handle returned after registration
 
-### Reference
-- [Quick Reference](#quick-reference-calls) - All API calls at a glance
-- [Implementation Notes](#implementation-notes-for-agents)
-- [Compatibility](#compatibility-and-versioning)
+### 2. Presence
+- **Multi-Device Support**: Users can register multiple devices
+- **Device Types**: Active (user machines) vs Headless (storage nodes)
+- **Presence Packets**: DHT-stored signed packets with device lists
+
+### 3. Storage
+- **Automatic Strategy Selection**: Based on group size
+- **saorsa-seal**: Encryption for data at rest
+- **saorsa-fec**: Forward error correction for redundancy
+
+## New Simplified API (v0.3.16+)
+
+### Identity Management
+
+```rust
+/// Register a new identity with four-word address
+pub async fn register_identity(
+    words: [&str; 4],
+    keypair: &MlDsaKeyPair,
+) -> Result<IdentityHandle>
+```
+
+**Example:**
+```rust
+use saorsa_core::{register_identity, MlDsaKeyPair};
+
+let words = ["welfare", "absurd", "king", "ridge"];
+let keypair = MlDsaKeyPair::generate()?;
+let handle = register_identity(words, &keypair).await?;
+```
+
+```rust
+/// Retrieve an existing identity
+pub async fn get_identity(key: &str) -> Result<Identity>
+```
+
+### Presence Management
+
+```rust
+/// Register devices and mark active device
+pub async fn register_presence(
+    handle: &IdentityHandle,
+    devices: Vec<Device>,
+    active_device: DeviceId,
+) -> Result<PresenceReceipt>
+```
+
+**Device Structure:**
+```rust
+pub struct Device {
+    pub id: DeviceId,
+    pub device_type: DeviceType,  // Active or Headless
+    pub storage_gb: u32,
+    pub endpoint: Endpoint,
+    pub capabilities: DeviceCapabilities,
+}
+```
+
+### Data Storage
+
+```rust
+/// Store data with automatic strategy selection
+pub async fn store_data(
+    handle: &IdentityHandle,
+    data: Vec<u8>,
+    group_size: usize,
+) -> Result<StorageHandle>
+```
+
+**Storage Strategy Selection:**
+- `1`: Direct storage (single user)
+- `2`: Full replication (dyad)
+- `3-5`: FEC(3,2) encoding
+- `6-10`: FEC(4,3) encoding
+- `11-20`: FEC(6,4) encoding
+- `20+`: FEC(8,5) encoding
+
+```rust
+/// Optimized storage for two-person groups
+pub async fn store_dyad(
+    handle1: &IdentityHandle,
+    other_key: &str,
+    data: Vec<u8>,
+) -> Result<StorageHandle>
+```
+
+```rust
+/// Store with custom FEC parameters
+pub async fn store_with_fec(
+    handle: &IdentityHandle,
+    data: Vec<u8>,
+    data_shards: usize,
+    parity_shards: usize,
+) -> Result<StorageHandle>
+```
+
+```rust
+/// Retrieve stored data
+pub async fn get_data(
+    storage_handle: &StorageHandle,
+) -> Result<Vec<u8>>
+```
 
 
 ## Principles

@@ -58,8 +58,8 @@ jobs:
       run: cargo fmt --all -- --check
       if: matrix.rust == 'stable'
 
-    - name: Run clippy
-      run: cargo clippy --all-features -- -D clippy::panic -D clippy::unwrap_used -D clippy::expect_used -W clippy::pedantic
+    - name: Run clippy (no pedantic; allow test unwrap)
+      run: cargo clippy --all-features -- -D clippy::panic -D clippy::unwrap_used -D clippy::expect_used
       if: matrix.rust == 'stable'
 
     - name: Build

@@ -61,6 +61,8 @@ pub mod api;
 
 /// Network address types
 pub mod address;
+/// User directory mapping (UserId <-> FourWordAddress)
+pub mod address_book;
 
 /// Network core functionality
 pub mod network;
@@ -97,6 +99,20 @@ pub mod identity;
 
 /// DHT-based storage for multi-device sync
 pub mod storage;
+
+// Re-export main API functions
+pub use api::{
+    // Identity API
+    register_identity, get_identity, identity_fetch,
+    // Presence API
+    register_presence, get_presence, register_headless, set_active_device,
+    // Storage API
+    store_data, store_dyad, store_with_fec, get_data,
+    // Group API
+    group_identity_canonical_sign_bytes, group_identity_create, group_identity_publish,
+    group_identity_fetch, group_identity_update_members_signed, GroupKeyPair, MemberRef,
+    set_dht_client,
+};
 
 /// Chat system (Slack-like)
 pub mod chat;
@@ -176,6 +192,9 @@ pub mod mock_dht;
 
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
+pub use address_book::{
+    address_book, get_user_by_four_words, get_user_four_words, register_user_address,
+};
 
 // New spec-compliant API exports
 pub use auth::{

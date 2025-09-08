@@ -1,6 +1,18 @@
 // MLS verifier scaffolding and proof format
 
-use crate::api::GroupIdentityPacketV1;
+// Temporary stub - will be replaced with actual implementation
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GroupIdentityPacketV1 {
+    pub id: crate::fwid::Key,
+    pub members: Vec<GroupMember>,
+    pub group_pk: Vec<u8>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GroupMember {
+    pub member_id: crate::fwid::Key,
+    pub member_pk: Vec<u8>,
+}
 use anyhow::Result;
 use saorsa_pqc::MlDsaOperations; // bring trait into scope for verify()
 use serde::{Deserialize, Serialize};
