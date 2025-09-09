@@ -2,7 +2,7 @@ use four_word_networking::FourWordEncoder;
 
 fn main() {
     let encoder = FourWordEncoder::new();
-    
+
     // Try to encode some IP addresses to get valid words
     let test_ips = vec![
         (std::net::Ipv4Addr::new(192, 168, 1, 1), 8080),
@@ -23,7 +23,7 @@ fn main() {
         (std::net::Ipv4Addr::new(172, 16, 2, 1), 5000),
         (std::net::Ipv4Addr::new(192, 168, 4, 1), 8080),
     ];
-    
+
     for (ip, port) in test_ips {
         match encoder.encode_ipv4(ip, port) {
             Ok(encoding) => {
@@ -31,14 +31,16 @@ fn main() {
                 // Use Display trait to get the words
                 let words_str = format!("{}", encoding);
                 println!("  Words string: {}", words_str);
-                
+
                 // Parse back to get individual words
                 let words: Vec<&str> = words_str.split(' ').collect();
                 if words.len() == 4 {
-                    println!("  Words array: [\"{}\", \"{}\", \"{}\", \"{}\"]", 
-                        words[0], words[1], words[2], words[3]);
+                    println!(
+                        "  Words array: [\"{}\", \"{}\", \"{}\", \"{}\"]",
+                        words[0], words[1], words[2], words[3]
+                    );
                 }
-                
+
                 // Test decoding back
                 let result = encoder.decode_ipv4(&encoding);
                 if result.is_ok() {

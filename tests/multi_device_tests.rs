@@ -15,7 +15,7 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
     // Test storage across multiple users with multiple devices
     let mut handles = vec![];
     let mut all_devices = vec![];
-    
+
     // Create 4 users with varying device configurations
     for i in 0..4 {
         let words = match i {
@@ -24,16 +24,16 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
             2 => ["india", "juliet", "kilo", "lima"],
             _ => ["mike", "november", "oscar", "papa"],
         };
-        
+
         let keypair = MlDsaKeyPair::generate()?;
         let handle = register_identity(words, &keypair).await?;
-        
+
         // User 0: 1 active + 2 headless
         // User 1: 1 active + 1 headless
         // User 2: 2 active devices
         // User 3: 1 active + 3 headless (storage farm)
         let mut user_devices = vec![];
-        
+
         // Active device
         let active = Device {
             id: DeviceId::generate(),
@@ -46,7 +46,7 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
             capabilities: DeviceCapabilities::default(),
         };
         user_devices.push(active.clone());
-        
+
         // Add headless devices based on user
         let headless_count = match i {
             0 => 2,
@@ -55,7 +55,7 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
             3 => 3,
             _ => 0,
         };
-        
+
         if i == 2 {
             // User 2 gets second active device
             let active2 = Device {
@@ -70,7 +70,7 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
             };
             user_devices.push(active2);
         }
-        
+
         for j in 0..headless_count {
             let headless = Device {
                 id: DeviceId::generate(),
@@ -90,17 +90,17 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
             };
             user_devices.push(headless);
         }
-        
+
         register_presence(&handle, user_devices.clone(), active.id).await?;
-        
+
         handles.push(handle);
         all_devices.extend(user_devices);
     }
-    
+
     // Store data using FEC across all users' devices
     let data = vec![0xABu8; 100_000]; // 100KB
     let storage_handle = store_with_fec(&handles[0], data.clone(), 8, 4).await?;
-    
+
     // Verify shards are distributed across multiple users' devices
     let unique_users = storage_handle
         .shard_map
@@ -118,14 +118,14 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
             None
         })
         .collect::<std::collections::HashSet<_>>();
-    
+
     // Should use devices from multiple users for redundancy
     assert!(unique_users.len() >= 2);
-    
+
     // Retrieve and verify
     let retrieved = get_data(&storage_handle).await?;
     assert_eq!(retrieved, data);
-    
+
     Ok(())
 }
 
@@ -135,7 +135,7 @@ async fn test_headless_node_preference() -> Result<()> {
     let words = ["quebec", "romeo", "sierra", "tango"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     // Mix of device types
     let active1 = Device {
         id: DeviceId::generate(),
@@ -147,7 +147,7 @@ async fn test_headless_node_preference() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     let mobile = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Mobile,
@@ -163,7 +163,7 @@ async fn test_headless_node_preference() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let mut headless_devices = vec![];
     for i in 0..3 {
         headless_devices.push(Device {
@@ -183,39 +183,39 @@ async fn test_headless_node_preference() -> Result<()> {
             },
         });
     }
-    
+
     let mut all_devices = vec![active1.clone(), mobile.clone()];
     all_devices.extend(headless_devices.clone());
-    
+
     register_presence(&handle, all_devices, active1.id).await?;
-    
+
     // Store data with FEC
     let data = vec![0xFFu8; 50_000];
     let storage_handle = store_with_fec(&handle, data.clone(), 4, 2).await?;
-    
+
     // Count shards on each device type
     let mut headless_shards = 0;
     let mut active_shards = 0;
     let mut mobile_shards = 0;
-    
+
     for device in &headless_devices {
         if let Some(shards) = storage_handle.shard_map.device_shards(&device.id) {
             headless_shards += shards.len();
         }
     }
-    
+
     if let Some(shards) = storage_handle.shard_map.device_shards(&active1.id) {
         active_shards = shards.len();
     }
-    
+
     if let Some(shards) = storage_handle.shard_map.device_shards(&mobile.id) {
         mobile_shards = shards.len();
     }
-    
+
     // Headless should have most shards, mobile least
     assert!(headless_shards > active_shards);
     assert!(active_shards >= mobile_shards);
-    
+
     Ok(())
 }
 
@@ -225,7 +225,7 @@ async fn test_device_failure_recovery() -> Result<()> {
     let words = ["uniform", "victor", "whiskey", "xray"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     // Start with 6 devices for redundancy
     let mut devices = vec![];
     for i in 0..6 {
@@ -249,13 +249,13 @@ async fn test_device_failure_recovery() -> Result<()> {
             },
         });
     }
-    
+
     register_presence(&handle, devices.clone(), devices[0].id).await?;
-    
+
     // Store with FEC (4 data, 2 parity = can lose 2 devices)
     let data = b"Critical data with redundancy".to_vec();
     let storage_handle = store_with_fec(&handle, data.clone(), 4, 2).await?;
-    
+
     // Simulate 2 devices going offline by updating presence
     let online_devices = vec![
         devices[0].clone(),
@@ -264,11 +264,11 @@ async fn test_device_failure_recovery() -> Result<()> {
         devices[4].clone(),
     ];
     register_presence(&handle, online_devices, devices[0].id).await?;
-    
+
     // Should still be able to retrieve data
     let retrieved = get_data(&storage_handle).await?;
     assert_eq!(retrieved, data);
-    
+
     Ok(())
 }
 
@@ -278,7 +278,7 @@ async fn test_dynamic_device_addition() -> Result<()> {
     let words = ["yankee", "zulu", "alpha", "bravo"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     // Start with minimal devices
     let initial_device = Device {
         id: DeviceId::generate(),
@@ -290,14 +290,14 @@ async fn test_dynamic_device_addition() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     register_presence(&handle, vec![initial_device.clone()], initial_device.id).await?;
-    
+
     // Store initial data (no FEC, single device)
     let data1 = b"Initial data on single device".to_vec();
     let storage1 = store_data(&handle, data1.clone(), 1).await?;
     assert!(matches!(storage1.strategy, StorageStrategy::Direct));
-    
+
     // Add headless nodes dynamically
     let headless1_id = register_headless(
         &handle,
@@ -308,7 +308,7 @@ async fn test_dynamic_device_addition() -> Result<()> {
         },
     )
     .await?;
-    
+
     let headless2_id = register_headless(
         &handle,
         1000,
@@ -318,22 +318,25 @@ async fn test_dynamic_device_addition() -> Result<()> {
         },
     )
     .await?;
-    
+
     // Store new data with FEC now that we have redundancy
     let data2 = vec![0x42u8; 50_000];
     let storage2 = store_with_fec(&handle, data2.clone(), 3, 2).await?;
-    
+
     // Verify FEC is used with new devices
-    assert!(matches!(storage2.strategy, StorageStrategy::FecEncoded { .. }));
-    
+    assert!(matches!(
+        storage2.strategy,
+        StorageStrategy::FecEncoded { .. }
+    ));
+
     // Verify new devices are being used
     let presence = get_presence(handle.key()).await?;
     assert_eq!(presence.devices.len(), 3);
-    
+
     let has_headless1_shards = storage2.shard_map.device_shards(&headless1_id).is_some();
     let has_headless2_shards = storage2.shard_map.device_shards(&headless2_id).is_some();
     assert!(has_headless1_shards || has_headless2_shards);
-    
+
     Ok(())
 }
 
@@ -343,15 +346,15 @@ async fn test_cross_user_collaboration() -> Result<()> {
     let words1 = ["charlie", "delta", "echo", "foxtrot"];
     let words2 = ["golf", "hotel", "india", "juliet"];
     let words3 = ["kilo", "lima", "mike", "november"];
-    
+
     let keypair1 = MlDsaKeyPair::generate()?;
     let keypair2 = MlDsaKeyPair::generate()?;
     let keypair3 = MlDsaKeyPair::generate()?;
-    
+
     let handle1 = register_identity(words1, &keypair1).await?;
     let handle2 = register_identity(words2, &keypair2).await?;
     let handle3 = register_identity(words3, &keypair3).await?;
-    
+
     // Each user registers devices
     for (i, handle) in [&handle1, &handle2, &handle3].iter().enumerate() {
         let active = Device {
@@ -364,7 +367,7 @@ async fn test_cross_user_collaboration() -> Result<()> {
             },
             capabilities: DeviceCapabilities::default(),
         };
-        
+
         let headless = Device {
             id: DeviceId::generate(),
             device_type: DeviceType::Headless,
@@ -380,14 +383,14 @@ async fn test_cross_user_collaboration() -> Result<()> {
                 ..Default::default()
             },
         };
-        
+
         register_presence(handle, vec![active.clone(), headless], active.id).await?;
     }
-    
+
     // Store shared group data using devices from all users
     let group_data = b"Shared collaborative document".to_vec();
     let storage_handle = store_data(&handle1, group_data.clone(), 3).await?;
-    
+
     // Verify strategy is appropriate for 3-person group
     match storage_handle.strategy {
         StorageStrategy::FecEncoded {
@@ -400,11 +403,11 @@ async fn test_cross_user_collaboration() -> Result<()> {
         }
         _ => panic!("Expected FEC encoding for 3-person group"),
     }
-    
+
     // All users should be able to retrieve
     let retrieved = get_data(&storage_handle).await?;
     assert_eq!(retrieved, group_data);
-    
+
     Ok(())
 }
 
@@ -414,7 +417,7 @@ async fn test_mobile_device_handling() -> Result<()> {
     let words = ["oscar", "papa", "quebec", "romeo"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     // Mix of device types including mobile
     let desktop = Device {
         id: DeviceId::generate(),
@@ -430,7 +433,7 @@ async fn test_mobile_device_handling() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let mobile1 = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Mobile,
@@ -449,7 +452,7 @@ async fn test_mobile_device_handling() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let mobile2 = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Mobile,
@@ -468,7 +471,7 @@ async fn test_mobile_device_handling() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let headless = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Headless,
@@ -485,18 +488,23 @@ async fn test_mobile_device_handling() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     register_presence(
         &handle,
-        vec![desktop.clone(), mobile1.clone(), mobile2.clone(), headless.clone()],
+        vec![
+            desktop.clone(),
+            mobile1.clone(),
+            mobile2.clone(),
+            headless.clone(),
+        ],
         desktop.id,
     )
     .await?;
-    
+
     // Store data - should avoid mobile for FEC
     let data = vec![0x55u8; 30_000];
     let storage_handle = store_with_fec(&handle, data.clone(), 3, 2).await?;
-    
+
     // Mobile devices should have minimal or no shards
     let mobile1_shards = storage_handle
         .shard_map
@@ -513,10 +521,10 @@ async fn test_mobile_device_handling() -> Result<()> {
         .device_shards(&headless.id)
         .map(|s| s.len())
         .unwrap_or(0);
-    
+
     // Headless should have more shards than mobile devices combined
     assert!(headless_shards > mobile1_shards + mobile2_shards);
-    
+
     Ok(())
 }
 
@@ -526,7 +534,7 @@ async fn test_storage_farm_scenario() -> Result<()> {
     let words = ["sierra", "tango", "uniform", "victor"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     // One active device and 10 headless nodes (storage farm)
     let active = Device {
         id: DeviceId::generate(),
@@ -538,9 +546,9 @@ async fn test_storage_farm_scenario() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     let mut devices = vec![active.clone()];
-    
+
     // Add 10 headless storage nodes
     for i in 0..10 {
         devices.push(Device {
@@ -562,13 +570,13 @@ async fn test_storage_farm_scenario() -> Result<()> {
             },
         });
     }
-    
+
     register_presence(&handle, devices.clone(), active.id).await?;
-    
+
     // Store large data with high redundancy
     let large_data = vec![0xFFu8; 1_000_000]; // 1MB
     let storage_handle = store_with_fec(&handle, large_data.clone(), 6, 4).await?;
-    
+
     // Verify shards are well distributed across storage farm
     let mut devices_with_shards = 0;
     for device in &devices[1..] {
@@ -577,14 +585,14 @@ async fn test_storage_farm_scenario() -> Result<()> {
             devices_with_shards += 1;
         }
     }
-    
+
     // Should use multiple storage nodes for distribution
     assert!(devices_with_shards >= 5);
-    
+
     // Verify total storage capacity
     let presence = get_presence(handle.key()).await?;
     assert_eq!(presence.total_storage_gb(), 20050); // 50 + 10*2000
-    
+
     Ok(())
 }
 
@@ -594,7 +602,7 @@ async fn test_device_capability_based_selection() -> Result<()> {
     let words = ["whiskey", "xray", "yankee", "zulu"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     // Devices with varying capabilities
     let high_perf = Device {
         id: DeviceId::generate(),
@@ -613,7 +621,7 @@ async fn test_device_capability_based_selection() -> Result<()> {
             supports_seal: true,
         },
     };
-    
+
     let medium_perf = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Headless,
@@ -631,7 +639,7 @@ async fn test_device_capability_based_selection() -> Result<()> {
             supports_seal: true,
         },
     };
-    
+
     let low_perf = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -649,18 +657,18 @@ async fn test_device_capability_based_selection() -> Result<()> {
             supports_seal: true,
         },
     };
-    
+
     register_presence(
         &handle,
         vec![low_perf.clone(), medium_perf.clone(), high_perf.clone()],
         low_perf.id,
     )
     .await?;
-    
+
     // Store data requiring high performance
     let data = vec![0x88u8; 200_000];
     let storage_handle = store_with_fec(&handle, data, 4, 2).await?;
-    
+
     // High performance device should get more shards
     let high_shards = storage_handle
         .shard_map
@@ -677,11 +685,11 @@ async fn test_device_capability_based_selection() -> Result<()> {
         .device_shards(&low_perf.id)
         .map(|s| s.len())
         .unwrap_or(0);
-    
+
     // Higher capability devices should generally have more shards
     assert!(high_shards >= medium_shards);
     assert!(medium_shards >= low_shards);
-    
+
     Ok(())
 }
 
@@ -691,7 +699,7 @@ async fn test_geographic_distribution() -> Result<()> {
     let words = ["alpha", "charlie", "echo", "golf"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     // Devices in different geographic locations (inferred from IP)
     let us_east = Device {
         id: DeviceId::generate(),
@@ -708,7 +716,7 @@ async fn test_geographic_distribution() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let eu_west = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Headless,
@@ -724,7 +732,7 @@ async fn test_geographic_distribution() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let asia_pac = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Headless,
@@ -740,7 +748,7 @@ async fn test_geographic_distribution() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let active = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -751,26 +759,31 @@ async fn test_geographic_distribution() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     register_presence(
         &handle,
-        vec![active.clone(), us_east.clone(), eu_west.clone(), asia_pac.clone()],
+        vec![
+            active.clone(),
+            us_east.clone(),
+            eu_west.clone(),
+            asia_pac.clone(),
+        ],
         active.id,
     )
     .await?;
-    
+
     // Store data with geographic distribution
     let data = vec![0x77u8; 60_000];
     let storage_handle = store_with_fec(&handle, data.clone(), 3, 2).await?;
-    
+
     // Should distribute shards across regions for resilience
     let regions_used = [us_east.id, eu_west.id, asia_pac.id]
         .iter()
         .filter(|id| storage_handle.shard_map.device_shards(id).is_some())
         .count();
-    
+
     // Should use multiple geographic regions
     assert!(regions_used >= 2);
-    
+
     Ok(())
 }

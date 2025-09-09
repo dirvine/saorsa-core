@@ -32,7 +32,11 @@ pub struct FecParams {
     pub shard_size: usize,
 }
 #[allow(dead_code)]
-async fn container_manifest_put(_: &ContainerManifestV1, _: &FecParams, _: &PutPolicy) -> Result<Key> {
+async fn container_manifest_put(
+    _: &ContainerManifestV1,
+    _: &FecParams,
+    _: &PutPolicy,
+) -> Result<Key> {
     unimplemented!("Virtual disk not yet migrated")
 }
 #[allow(dead_code)]

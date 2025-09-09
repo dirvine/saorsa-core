@@ -28,9 +28,7 @@ use crate::adaptive::{
     replication::ReplicationManager,
     routing::AdaptiveRouter,
 };
-use crate::dht::{
-    NodeFailureTracker, ReplicationGracePeriodConfig,
-};
+use crate::dht::{NodeFailureTracker, ReplicationGracePeriodConfig};
 use anyhow::Result;
 use std::{
     collections::{HashMap, HashSet},
@@ -336,7 +334,9 @@ impl ChurnHandler {
 
     /// Set the node failure tracker for grace period management
     pub async fn set_failure_tracker(&self, failure_tracker: Arc<dyn NodeFailureTracker>) {
-        self.recovery_manager.set_failure_tracker(failure_tracker).await;
+        self.recovery_manager
+            .set_failure_tracker(failure_tracker)
+            .await;
     }
 
     /// Start monitoring network for churn
@@ -467,8 +467,12 @@ impl ChurnHandler {
 
         // 4. Queue recovery tasks with grace period consideration
         let grace_config = ReplicationGracePeriodConfig::default();
-        tracing::info!("Node {} failed, queuing recovery for {} content items with {}s grace period",
-                      node_id, lost_content.len(), grace_config.grace_period_duration.as_secs());
+        tracing::info!(
+            "Node {} failed, queuing recovery for {} content items with {}s grace period",
+            node_id,
+            lost_content.len(),
+            grace_config.grace_period_duration.as_secs()
+        );
 
         for content_hash in lost_content {
             self.recovery_manager
@@ -496,7 +500,13 @@ impl ChurnHandler {
                 / stats.failed_nodes as f64;
 
         // Update grace period metrics
-        if self.recovery_manager.node_failure_tracker.read().await.is_some() {
+        if self
+            .recovery_manager
+            .node_failure_tracker
+            .read()
+            .await
+            .is_some()
+        {
             stats.grace_period_preventions += 1; // Assuming this failure used grace period
         }
 
@@ -810,17 +820,21 @@ impl RecoveryManager {
         config: &ReplicationGracePeriodConfig,
     ) -> Result<()> {
         if failed_nodes.is_empty() {
-            return self.queue_recovery(content_hash, failed_nodes, priority).await;
+            return self
+                .queue_recovery(content_hash, failed_nodes, priority)
+                .await;
         }
 
         if let Some(ref failure_tracker) = *self.node_failure_tracker.read().await {
             // Record failures and check grace periods
             for node_id in &failed_nodes {
-                failure_tracker.record_node_failure(
-                    node_id.clone(),
-                    crate::dht::replication_grace_period::NodeFailureReason::NetworkTimeout,
-                    config,
-                ).await?;
+                failure_tracker
+                    .record_node_failure(
+                        node_id.clone(),
+                        crate::dht::replication_grace_period::NodeFailureReason::NetworkTimeout,
+                        config,
+                    )
+                    .await?;
             }
 
             let mut immediate_recovery_nodes = Vec::new();
@@ -836,27 +850,36 @@ impl RecoveryManager {
 
             // Queue immediate recovery for nodes past grace period
             if !immediate_recovery_nodes.is_empty() {
-                tracing::info!("Queuing immediate recovery for {} nodes (past grace period) for content {:?}",
-                              immediate_recovery_nodes.len(), content_hash);
-                self.queue_recovery(content_hash, immediate_recovery_nodes, priority).await?;
+                tracing::info!(
+                    "Queuing immediate recovery for {} nodes (past grace period) for content {:?}",
+                    immediate_recovery_nodes.len(),
+                    content_hash
+                );
+                self.queue_recovery(content_hash, immediate_recovery_nodes, priority)
+                    .await?;
             }
 
             // Schedule delayed checks for nodes in grace period
             if !delayed_recovery_nodes.is_empty() {
-                tracing::info!("Scheduling delayed recovery check for {} nodes (in grace period) for content {:?}",
-                              delayed_recovery_nodes.len(), content_hash);
+                tracing::info!(
+                    "Scheduling delayed recovery check for {} nodes (in grace period) for content {:?}",
+                    delayed_recovery_nodes.len(),
+                    content_hash
+                );
                 self.schedule_grace_period_check(
                     content_hash,
                     delayed_recovery_nodes,
                     priority,
                     failure_tracker.clone(),
-                ).await?;
+                )
+                .await?;
             }
 
             Ok(())
         } else {
             // No failure tracker, use immediate recovery
-            self.queue_recovery(content_hash, failed_nodes, priority).await
+            self.queue_recovery(content_hash, failed_nodes, priority)
+                .await
         }
     }
 
@@ -885,20 +908,20 @@ impl RecoveryManager {
                 }
 
                 if !nodes_to_recover.is_empty() {
-                // Create a new RecoveryManager instance to queue recovery
-                // In practice, this would be handled by the owning ChurnHandler
-                if !nodes_to_recover.is_empty() {
-                    tracing::info!(
-                        "Grace period expired for {} nodes, queuing recovery for content {:?}",
-                        nodes_to_recover.len(),
-                        content_hash
-                    );
-                } else {
-                    tracing::debug!(
-                        "Grace period check completed for content {:?}, no nodes require recovery",
-                        content_hash
-                    );
-                }
+                    // Create a new RecoveryManager instance to queue recovery
+                    // In practice, this would be handled by the owning ChurnHandler
+                    if !nodes_to_recover.is_empty() {
+                        tracing::info!(
+                            "Grace period expired for {} nodes, queuing recovery for content {:?}",
+                            nodes_to_recover.len(),
+                            content_hash
+                        );
+                    } else {
+                        tracing::debug!(
+                            "Grace period check completed for content {:?}, no nodes require recovery",
+                            content_hash
+                        );
+                    }
                 }
             }
         });

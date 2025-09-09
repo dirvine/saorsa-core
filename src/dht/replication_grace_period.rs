@@ -16,9 +16,9 @@
 //! before starting DHT replication when nodes fail, allowing time for endpoint
 //! re-registration during upgrades or port changes.
 
+use crate::peer_record::UserId as NodeId;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
-use crate::peer_record::UserId as NodeId;
 
 /// Configuration for replication grace period
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,8 +41,8 @@ impl Default for ReplicationGracePeriodConfig {
         Self {
             grace_period_duration: Duration::from_secs(300), // 5 minutes
             enable_endpoint_check: true,
-            min_grace_period: Duration::from_secs(60),      // 1 minute
-            max_grace_period: Duration::from_secs(1800),    // 30 minutes
+            min_grace_period: Duration::from_secs(60), // 1 minute
+            max_grace_period: Duration::from_secs(1800), // 30 minutes
         }
     }
 }
@@ -51,15 +51,19 @@ impl ReplicationGracePeriodConfig {
     /// Validate configuration bounds
     pub fn validate(&self) -> Result<(), ReplicationError> {
         if self.grace_period_duration < self.min_grace_period {
-            return Err(ReplicationError::InvalidConfiguration(
-                format!("Grace period {} is below minimum {}", self.grace_period_duration.as_secs(), self.min_grace_period.as_secs())
-            ));
+            return Err(ReplicationError::InvalidConfiguration(format!(
+                "Grace period {} is below minimum {}",
+                self.grace_period_duration.as_secs(),
+                self.min_grace_period.as_secs()
+            )));
         }
 
         if self.grace_period_duration > self.max_grace_period {
-            return Err(ReplicationError::InvalidConfiguration(
-                format!("Grace period {} exceeds maximum {}", self.grace_period_duration.as_secs(), self.max_grace_period.as_secs())
-            ));
+            return Err(ReplicationError::InvalidConfiguration(format!(
+                "Grace period {} exceeds maximum {}",
+                self.grace_period_duration.as_secs(),
+                self.max_grace_period.as_secs()
+            )));
         }
 
         Ok(())

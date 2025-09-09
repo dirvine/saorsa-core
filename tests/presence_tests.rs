@@ -15,7 +15,7 @@ async fn test_single_device_presence() -> Result<()> {
     let words = ["welfare", "absurd", "kingdom", "ridge"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     let device = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -26,12 +26,12 @@ async fn test_single_device_presence() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     let receipt = register_presence(&handle, vec![device.clone()], device.id).await?;
-    
+
     assert_eq!(receipt.identity, handle.key());
     assert!(!receipt.storing_nodes.is_empty());
-    
+
     Ok(())
 }
 
@@ -41,7 +41,7 @@ async fn test_multi_device_presence() -> Result<()> {
     let words = ["regime", "abstract", "aaron", "ancient"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     let active_device = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -52,7 +52,7 @@ async fn test_multi_device_presence() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     let headless_device = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Headless,
@@ -67,7 +67,7 @@ async fn test_multi_device_presence() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let mobile_device = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Mobile,
@@ -84,19 +84,19 @@ async fn test_multi_device_presence() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     let devices = vec![active_device.clone(), headless_device, mobile_device];
     let receipt = register_presence(&handle, devices.clone(), active_device.id).await?;
-    
+
     assert_eq!(receipt.identity, handle.key());
-    
+
     // Fetch and verify presence
     let presence = get_presence(handle.key()).await?;
     assert_eq!(presence.devices.len(), 3);
     assert_eq!(presence.active_device, Some(active_device.id));
     assert!(presence.has_headless_nodes());
     assert_eq!(presence.total_storage_gb(), 1060); // 50 + 1000 + 10
-    
+
     Ok(())
 }
 
@@ -106,7 +106,7 @@ async fn test_headless_node_registration() -> Result<()> {
     let words = ["court", "absurd", "aaron", "picture"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     // Register initial presence with active device
     let active_device = Device {
         id: DeviceId::generate(),
@@ -118,9 +118,9 @@ async fn test_headless_node_registration() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     register_presence(&handle, vec![active_device.clone()], active_device.id).await?;
-    
+
     // Add headless node
     let headless_id = register_headless(
         &handle,
@@ -131,16 +131,16 @@ async fn test_headless_node_registration() -> Result<()> {
         },
     )
     .await?;
-    
+
     // Verify headless node was added
     let presence = get_presence(handle.key()).await?;
     assert_eq!(presence.devices.len(), 2);
-    
+
     let headless = presence.headless_devices();
     assert_eq!(headless.len(), 1);
     assert_eq!(headless[0].id, headless_id);
     assert_eq!(headless[0].storage_gb, 2000);
-    
+
     Ok(())
 }
 
@@ -150,7 +150,7 @@ async fn test_active_device_switching() -> Result<()> {
     let words = ["welfare", "absurd", "kinshasa", "ridge"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     let device1 = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -161,7 +161,7 @@ async fn test_active_device_switching() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     let device2 = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -172,19 +172,19 @@ async fn test_active_device_switching() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     // Register with device1 active
     register_presence(&handle, vec![device1.clone(), device2.clone()], device1.id).await?;
-    
+
     let presence1 = get_presence(handle.key()).await?;
     assert_eq!(presence1.active_device, Some(device1.id));
-    
+
     // Switch to device2
     set_active_device(&handle, device2.id).await?;
-    
+
     let presence2 = get_presence(handle.key()).await?;
     assert_eq!(presence2.active_device, Some(device2.id));
-    
+
     Ok(())
 }
 
@@ -194,7 +194,7 @@ async fn test_device_capabilities() -> Result<()> {
     let words = ["huge", "yours", "zurich", "picture"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     let high_perf_device = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Headless,
@@ -205,14 +205,14 @@ async fn test_device_capabilities() -> Result<()> {
         },
         capabilities: DeviceCapabilities {
             storage_bytes: 5_000_000_000_000, // 5TB
-            bandwidth_mbps: 1000,              // 1Gbps
+            bandwidth_mbps: 1000,             // 1Gbps
             cpu_cores: 16,
             always_online: true,
             supports_fec: true,
             supports_seal: true,
         },
     };
-    
+
     let low_perf_device = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Mobile,
@@ -230,16 +230,16 @@ async fn test_device_capabilities() -> Result<()> {
             supports_seal: true,
         },
     };
-    
+
     register_presence(
         &handle,
         vec![high_perf_device.clone(), low_perf_device.clone()],
         high_perf_device.id,
     )
     .await?;
-    
+
     let presence = get_presence(handle.key()).await?;
-    
+
     // Find devices that support FEC
     let fec_capable: Vec<_> = presence
         .devices
@@ -248,7 +248,7 @@ async fn test_device_capabilities() -> Result<()> {
         .collect();
     assert_eq!(fec_capable.len(), 1);
     assert_eq!(fec_capable[0].id, high_perf_device.id);
-    
+
     // Find always-online devices
     let always_online: Vec<_> = presence
         .devices
@@ -256,7 +256,7 @@ async fn test_device_capabilities() -> Result<()> {
         .filter(|d| d.capabilities.always_online)
         .collect();
     assert_eq!(always_online.len(), 1);
-    
+
     Ok(())
 }
 
@@ -266,7 +266,7 @@ async fn test_presence_signature_verification() -> Result<()> {
     let words = ["thrive", "scott", "liechtenstein", "ridge"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     let device = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -277,17 +277,17 @@ async fn test_presence_signature_verification() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     register_presence(&handle, vec![device.clone()], device.id).await?;
-    
+
     let presence = get_presence(handle.key()).await?;
-    
+
     // Signature should be present and non-empty
     assert!(!presence.signature.is_empty());
-    
+
     // TODO: Verify signature with identity's public key
     // This would require exposing the canonical presence bytes function
-    
+
     Ok(())
 }
 
@@ -297,7 +297,7 @@ async fn test_presence_update() -> Result<()> {
     let words = ["addition", "almaty", "kite", "almaty"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     let device1 = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -308,13 +308,13 @@ async fn test_presence_update() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     // Initial presence with one device
     register_presence(&handle, vec![device1.clone()], device1.id).await?;
-    
+
     let presence1 = get_presence(handle.key()).await?;
     assert_eq!(presence1.devices.len(), 1);
-    
+
     // Update with additional device
     let device2 = Device {
         id: DeviceId::generate(),
@@ -329,13 +329,13 @@ async fn test_presence_update() -> Result<()> {
             ..Default::default()
         },
     };
-    
+
     register_presence(&handle, vec![device1.clone(), device2], device1.id).await?;
-    
+
     let presence2 = get_presence(handle.key()).await?;
     assert_eq!(presence2.devices.len(), 2);
     assert_eq!(presence2.total_storage_gb(), 550);
-    
+
     Ok(())
 }
 
@@ -345,7 +345,7 @@ async fn test_presence_timestamp() -> Result<()> {
     let words = ["bless", "abstract", "assess", "abstract"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
-    
+
     let device = Device {
         id: DeviceId::generate(),
         device_type: DeviceType::Active,
@@ -356,22 +356,22 @@ async fn test_presence_timestamp() -> Result<()> {
         },
         capabilities: DeviceCapabilities::default(),
     };
-    
+
     let before = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    
+
     let device_id = device.id;
     register_presence(&handle, vec![device], device_id).await?;
-    
+
     let after = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    
+
     let presence = get_presence(handle.key()).await?;
-    
+
     assert!(presence.timestamp >= before);
     assert!(presence.timestamp <= after);
-    
+
     Ok(())
 }

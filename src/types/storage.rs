@@ -105,8 +105,11 @@ impl ShardMap {
 
     /// Add shard assignment to a device
     pub fn assign_shard(&mut self, device: DeviceId, shard_index: u32) {
-        self.device_shards.entry(device).or_default().push(shard_index);
-        
+        self.device_shards
+            .entry(device)
+            .or_default()
+            .push(shard_index);
+
         if shard_index >= self.total_shards {
             self.total_shards = shard_index + 1;
         }
