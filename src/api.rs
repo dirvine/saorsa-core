@@ -25,6 +25,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+// ============================================================================
+// ============================================================================
+
+/// Canonical message prefix for identity website root updates
+pub const CANONICAL_IDENTITY_WEBSITE_ROOT: &[u8] = b"saorsa-identity:website_root:v1";
 // tracing not currently used in this module
 
 // Mock DHT for fallback when no global DHT client is installed
