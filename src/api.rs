@@ -115,6 +115,7 @@ pub struct IdentityPacketV1 {
     pub pk: Vec<u8>,
     pub sig: Option<Vec<u8>>, // optional when registered locally
     pub device_set_root: Key,
+    pub website_root: Option<Key>,
 }
 
 /// Member reference for group identities
@@ -205,6 +206,7 @@ pub async fn register_identity(words: [&str; 4], keypair: &MlDsaKeyPair) -> Resu
         pk: keypair.public_key.clone(),
         sig: None,
         device_set_root: compute_key("device-set", key.as_bytes()),
+        website_root: None,
     };
 
     dht_put_bytes(&key, serde_json::to_vec(&packet)?).await?;
@@ -764,7 +766,7 @@ pub async fn identity_set_website_root(id_key: Key, website_root: Key, sig: Sig)
     pkt.website_root = Some(website_root);
 
     let updated_bytes = serde_cbor::to_vec(&pkt)?;
-    dht_put_bytes(id_key, updated_bytes).await?;
+    dht_put_bytes(&id_key, updated_bytes).await?;
 
     Ok(())
 }
@@ -807,17 +809,16 @@ pub async fn group_member_remove(
 
 pub async fn group_epoch_bump(
     id_key: Key,
-    proof: Option<Vec<u8>>,
-    group_pk: Vec<u8>,
-    group_sig: Sig,
+    _proof: Option<Vec<u8>>,
+    _group_pk: Vec<u8>,
+    _group_sig: Sig,
 ) -> Result<()> {
     // For now, this is a placeholder that validates the signature
     // and potentially trigger re-keying operations
-    
+
     // Verify the group signature is valid
-    let packet = group_identity_fetch(id_key.clone()).await?;
-    
-    
+    let _packet = group_identity_fetch(id_key.clone()).await?;
+
     // For now, just return success if we can fetch the packet
     Ok(())
 }
