@@ -178,7 +178,3 @@ winapi = { version = "0.3", features = ["memoryapi"] }
 # [[bench]]
 # name = "performance_monitor"
 # harness = false
-
-# Patch for saorsa-rsps to fix unstable let expressions compilation issue
-[patch.crates-io]
-saorsa-rsps = { git = "https://github.com/dirvine/saorsa-rsps.git", rev = "d9a7f4d2c8294cb9beeb58fcfbe6747ef9251c09" }

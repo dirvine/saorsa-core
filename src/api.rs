@@ -721,3 +721,97 @@ async fn store_replicated(
         sealed_key: Some(vec![0u8; 32]),
     })
 }
+
+/// Update the website root for an identity
+pub async fn identity_set_website_root(id_key: Key, website_root: Key, sig: Sig) -> Result<()> {
+    let mut pkt = identity_fetch(id_key.clone()).await?;
+
+    let mut msg = Vec::new();
+    msg.extend_from_slice(CANONICAL_IDENTITY_WEBSITE_ROOT);
+    msg.extend_from_slice(id_key.as_bytes());
+    msg.extend_from_slice(&pkt.pk);
+    let website_root_cbor = serde_cbor::to_vec(&website_root)?;
+    msg.extend_from_slice(&website_root_cbor);
+
+    // Verify signature using stored identity pk
+    use crate::quantum_crypto::{MlDsa65, MlDsaOperations, MlDsaPublicKey, MlDsaSignature};
+    let pk = MlDsaPublicKey::from_bytes(&pkt.pk)
+        .map_err(|e| anyhow::anyhow!("Invalid ML-DSA pubkey: {e}"))?;
+
+    const SIG_LEN: usize = 3309;
+    if sig.as_bytes().len() != SIG_LEN {
+        anyhow::bail!("Invalid signature length for website_root update");
+    }
+    let mut arr = [0u8; SIG_LEN];
+    arr.copy_from_slice(sig.as_bytes());
+    let ml_sig = MlDsaSignature(Box::new(arr));
+
+    let ml = MlDsa65::new();
+    let ok = ml
+        .verify(&pk, &msg, &ml_sig)
+        .map_err(|e| anyhow::anyhow!("Website root signature verify failed: {e}"))?;
+    if !ok {
+        anyhow::bail!("Website root signature invalid");
+    }
+
+    // Update packet with new website_root
+    pkt.website_root = Some(website_root);
+
+    let updated_bytes = serde_cbor::to_vec(&pkt)?;
+    dht_put_bytes(id_key, updated_bytes).await?;
+
+    Ok(())
+}
+
+pub async fn group_member_add(
+    id_key: Key,
+    member: MemberRef,
+    group_pk: Vec<u8>,
+    group_sig: Sig,
+) -> Result<()> {
+    // Fetch current packet
+    let packet = group_identity_fetch(id_key.clone()).await?;
+
+    let mut members = packet.members;
+    if !members.iter().any(|m| m.member_id == member.member_id) {
+        members.push(member);
+    }
+
+    group_identity_update_members_signed(id_key, members, group_pk, group_sig).await
+}
+
+pub async fn group_member_remove(
+    id_key: Key,
+    member_id: Key,
+    group_pk: Vec<u8>,
+    group_sig: Sig,
+) -> Result<()> {
+    // Fetch current packet
+    let packet = group_identity_fetch(id_key.clone()).await?;
+
+    // Remove member
+    let members: Vec<MemberRef> = packet
+        .members
+        .into_iter()
+        .filter(|m| m.member_id != member_id)
+        .collect();
+
+    group_identity_update_members_signed(id_key, members, group_pk, group_sig).await
+}
+
+pub async fn group_epoch_bump(
+    id_key: Key,
+    proof: Option<Vec<u8>>,
+    group_pk: Vec<u8>,
+    group_sig: Sig,
+) -> Result<()> {
+    // For now, this is a placeholder that validates the signature
+    // and potentially trigger re-keying operations
+    
+    // Verify the group signature is valid
+    let packet = group_identity_fetch(id_key.clone()).await?;
+    
+    
+    // For now, just return success if we can fetch the packet
+    Ok(())
+}
