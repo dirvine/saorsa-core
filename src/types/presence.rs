@@ -141,9 +141,8 @@ impl Presence {
 
     /// Get the active device if set
     pub fn active_device(&self) -> Option<&Device> {
-        self.active_device.and_then(|id| {
-            self.devices.iter().find(|d| d.id == id)
-        })
+        self.active_device
+            .and_then(|id| self.devices.iter().find(|d| d.id == id))
     }
 }
 
