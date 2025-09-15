@@ -195,6 +195,7 @@ pub use address::{AddressBook, NetworkAddress};
 pub use address_book::{
     address_book, get_user_by_four_words, get_user_four_words, register_user_address,
 };
+pub use identity::FourWordAddress;
 
 // New spec-compliant API exports
 pub use auth::{
