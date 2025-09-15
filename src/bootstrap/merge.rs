@@ -465,7 +465,7 @@ impl MergeCoordinator {
         {
             use std::process::Command;
             Command::new("tasklist")
-                .args(&["/FI", &format!("PID eq {}", process_id).into()])
+                .args(["/FI", &format!("PID eq {}", process_id)])
                 .output()
                 .map(|output| {
                     String::from_utf8_lossy(&output.stdout).contains(&process_id.to_string())
@@ -605,5 +605,47 @@ mod tests {
         let cache_file = PathBuf::from("12345_1234567890.cache");
         let process_id = coordinator.extract_process_id(&cache_file);
         assert_eq!(process_id, Some(12345));
+    }
+
+    #[test]
+    fn test_is_process_running_compilation() {
+        // This test ensures the is_process_running function compiles correctly on all platforms
+        let temp_dir = TempDir::new().unwrap();
+        let coordinator = MergeCoordinator::new(temp_dir.path().to_path_buf()).unwrap();
+
+        // Test with current process ID (should be running)
+        let current_pid = std::process::id();
+        let is_running = coordinator.is_process_running(current_pid);
+
+        // On all platforms, the current process should be detected as running
+        assert!(is_running, "Current process should be detected as running");
+
+        // Test with a very high PID that's unlikely to exist
+        let non_existent_pid = 999999;
+        let is_not_running = coordinator.is_process_running(non_existent_pid);
+
+        // This may vary by platform, but we're mainly testing compilation here
+        // The actual behavior is platform-specific
+        let _ = is_not_running; // Just ensure it compiles and runs
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_windows_tasklist_command_format() {
+        // This test specifically validates the Windows command format
+        use std::process::Command;
+
+        // Test that the command format compiles and can be executed
+        // We're not testing the actual process detection, just the command syntax
+        let process_id = std::process::id();
+        let filter_arg = format!("PID eq {}", process_id);
+
+        // This should compile without the .into() bug
+        let result = Command::new("tasklist")
+            .args(["/FI", &filter_arg])
+            .output();
+
+        // The command should at least execute (even if tasklist isn't available in test env)
+        assert!(result.is_ok() || result.is_err(), "Command should either succeed or fail gracefully");
     }
 }

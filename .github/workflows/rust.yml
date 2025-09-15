@@ -16,13 +16,20 @@ concurrency:
 jobs:
   test:
     name: Test Suite
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         rust:
           - stable
           - nightly
+        exclude:
+          # Only test nightly on Ubuntu to save CI time
+          - os: windows-latest
+            rust: nightly
+          - os: macos-latest
+            rust: nightly
     continue-on-error: ${{ matrix.rust == 'nightly' }}
 
     steps:
@@ -43,7 +50,8 @@ jobs:
           target
         key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Install system dependencies
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -56,9 +64,19 @@ jobs:
           build-essential \
           protobuf-compiler
 
+    - name: Install system dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install protoc
+
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install protobuf
+
     - name: Install cargo-mutants
       run: cargo install cargo-mutants
-      if: matrix.rust == 'stable'
+      if: matrix.rust == 'stable' && matrix.os == 'ubuntu-latest'
 
     - name: Check formatting
       run: cargo fmt --all -- --check
@@ -85,7 +103,7 @@ jobs:
           --file src/adaptive/thompson_sampling.rs \
           --file src/adaptive/multi_armed_bandit.rs \
           -- -D warnings || echo "Sample mutation testing completed"
-      if: matrix.rust == 'stable'
+      if: matrix.rust == 'stable' && matrix.os == 'ubuntu-latest'
 
     - name: Fail if backup files are present
       run: |
