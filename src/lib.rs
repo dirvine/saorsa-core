@@ -102,16 +102,29 @@ pub mod storage;
 
 // Re-export main API functions
 pub use api::{
-    // Identity API
-    register_identity, get_identity, identity_fetch,
-    // Presence API
-    register_presence, get_presence, register_headless, set_active_device,
-    // Storage API
-    store_data, store_dyad, store_with_fec, get_data,
+    GroupKeyPair,
+    MemberRef,
+    get_data,
+    get_identity,
+    get_presence,
     // Group API
-    group_identity_canonical_sign_bytes, group_identity_create, group_identity_publish,
-    group_identity_fetch, group_identity_update_members_signed, GroupKeyPair, MemberRef,
+    group_identity_canonical_sign_bytes,
+    group_identity_create,
+    group_identity_fetch,
+    group_identity_publish,
+    group_identity_update_members_signed,
+    identity_fetch,
+    register_headless,
+    // Identity API
+    register_identity,
+    // Presence API
+    register_presence,
+    set_active_device,
     set_dht_client,
+    // Storage API
+    store_data,
+    store_dyad,
+    store_with_fec,
 };
 
 /// Chat system (Slack-like)
@@ -185,6 +198,9 @@ pub mod placement;
 
 /// Virtual disk for encrypted file storage
 pub mod virtual_disk;
+
+/// Entity-based system for unified identity, storage, and collaboration
+pub mod entities;
 
 /// Mock DHT for testing
 #[cfg(any(test, feature = "test-utils"))]

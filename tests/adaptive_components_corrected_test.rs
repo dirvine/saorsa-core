@@ -4,14 +4,12 @@
 use saorsa_core::adaptive::{
     ContentHash, ContentType, NodeId, NodeIdentity, Outcome, StrategyChoice,
     eviction::{CacheState, EvictionStrategy, LFUStrategy, LRUStrategy},
-    hyperbolic::HyperbolicSpace,
     learning::{ChurnPredictor, NodeEvent, NodeFeatures, QLearnCacheManager, ThompsonSampling},
     multi_armed_bandit::{MABConfig, MultiArmedBandit},
     q_learning_cache::{AccessInfo, StateVector},
     replication::ReplicationManager,
     routing::AdaptiveRouter,
     security::{BlacklistReason, SecurityConfig, SecurityError, SecurityManager},
-    som::{GridSize, SelfOrganizingMap, SomConfig},
 };
 use saorsa_core::adaptive::{storage::ReplicationConfig, trust::MockTrustProvider};
 use saorsa_core::quantum_crypto::ant_quic_integration::MlDsaPublicKey;

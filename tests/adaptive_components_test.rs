@@ -4,14 +4,12 @@
 use saorsa_core::adaptive::{
     ContentHash, NodeId,
     eviction::{CacheState, EvictionStrategy, LFUStrategy, LRUStrategy},
-    hyperbolic::HyperbolicSpace,
     learning::{ChurnPredictor, QLearnCacheManager, ThompsonSampling},
     multi_armed_bandit::{MABConfig, MultiArmedBandit},
     q_learning_cache::{AccessInfo, StateVector},
     replication::ReplicationManager,
     routing::AdaptiveRouter,
     security::{SecurityConfig, SecurityManager},
-    som::{GridSize, SelfOrganizingMap, SomConfig},
     storage::ReplicationConfig,
     trust::MockTrustProvider,
 };

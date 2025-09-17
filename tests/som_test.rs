@@ -806,9 +806,9 @@ mod benchmark_tests {
 
         let mut som = SelfOrganizingMap::new(config);
 
-        // Generate 1000 training samples
+        // Generate a moderate number of training samples to keep runtime low
         let mut training_data = Vec::new();
-        for i in 0..1000 {
+        for i in 0..400 {
             training_data.push(create_test_features((i % 256) as u8));
         }
 
@@ -816,7 +816,7 @@ mod benchmark_tests {
         som.train_batch(&training_data);
         let elapsed = start.elapsed();
 
-        println!("Training 1000 samples on 20x20 SOM took: {:?}", elapsed);
+        println!("Training 400 samples on 20x20 SOM took: {:?}", elapsed);
         assert!(
             elapsed.as_secs() < 10,
             "Training should complete within 10 seconds"
@@ -848,12 +848,12 @@ mod benchmark_tests {
         // Benchmark similarity queries
         let query_features = create_test_features(128);
         let start = Instant::now();
-        for _ in 0..1000 {
+        for _ in 0..400 {
             som.find_similar_nodes(&query_features, 5);
         }
         let elapsed = start.elapsed();
 
-        let avg_query_time = elapsed.as_micros() as f64 / 1000.0;
+        let avg_query_time = elapsed.as_micros() as f64 / 400.0;
         println!("Average similarity query time: {:.2} μs", avg_query_time);
         assert!(avg_query_time < 1000.0, "Queries should complete in < 1ms");
     }

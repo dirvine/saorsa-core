@@ -8,10 +8,14 @@
 //! - Public helpers are async and safe to call from other modules/apps.
 
 use crate::identity::four_words::FourWordAddress;
-use sha2::{Digest, Sha256};
-use crate::{error::{IdentityError, P2PError}, fwid, Result};
+use crate::{
+    Result,
+    error::{IdentityError, P2PError},
+    fwid,
+};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -57,16 +61,15 @@ impl AddressBook {
     /// Register mapping (overwrites existing).
     pub async fn register(&self, user_id: String, four_words: String) -> Result<()> {
         // Validate format (4 hyphen-separated words)
-        let parts: Vec<String> = four_words
-            .split('-')
-            .map(|s| s.to_string())
-            .collect();
-        if parts.len() != 4 || !fwid::fw_check([
-            parts[0].clone(),
-            parts[1].clone(),
-            parts[2].clone(),
-            parts[3].clone(),
-        ]) {
+        let parts: Vec<String> = four_words.split('-').map(|s| s.to_string()).collect();
+        if parts.len() != 4
+            || !fwid::fw_check([
+                parts[0].clone(),
+                parts[1].clone(),
+                parts[2].clone(),
+                parts[3].clone(),
+            ])
+        {
             return Err(P2PError::Identity(IdentityError::InvalidFourWordAddress(
                 "invalid four-word address format".into(),
             )));
@@ -88,7 +91,9 @@ impl AddressBook {
                 four_words: four_words.clone(),
             };
             let _ = client.put_object(key_user_to_words(&user_id), &entry).await;
-            let _ = client.put_object(key_words_to_user(&four_words), &entry).await;
+            let _ = client
+                .put_object(key_words_to_user(&four_words), &entry)
+                .await;
         }
         Ok(())
     }

@@ -641,11 +641,12 @@ mod tests {
         let filter_arg = format!("PID eq {}", process_id);
 
         // This should compile without the .into() bug
-        let result = Command::new("tasklist")
-            .args(["/FI", &filter_arg])
-            .output();
+        let result = Command::new("tasklist").args(["/FI", &filter_arg]).output();
 
         // The command should at least execute (even if tasklist isn't available in test env)
-        assert!(result.is_ok() || result.is_err(), "Command should either succeed or fail gracefully");
+        assert!(
+            result.is_ok() || result.is_err(),
+            "Command should either succeed or fail gracefully"
+        );
     }
 }

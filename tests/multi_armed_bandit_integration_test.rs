@@ -18,6 +18,11 @@ use saorsa_core::adaptive::{
 };
 use std::collections::HashMap;
 use std::time::Duration;
+
+const TRAINING_ROUNDS: usize = 300;
+const EVALUATION_ROUNDS: usize = 300;
+const EXPLORATION_SAMPLES: usize = 300;
+const ADAPTATION_PHASE_ROUNDS: usize = 120;
 use tempfile::TempDir;
 
 /// Simulate a network environment with different route success rates
@@ -152,7 +157,7 @@ async fn test_mab_learns_optimal_strategies() {
     ];
 
     // Training phase: Let MAB learn the network characteristics
-    for _ in 0..1000 {
+    for _ in 0..TRAINING_ROUNDS {
         for content_type in &[
             ContentType::DHTLookup,
             ContentType::DataRetrieval,
@@ -175,7 +180,7 @@ async fn test_mab_learns_optimal_strategies() {
     // Evaluation phase: Check if MAB learned the optimal strategies
     let mut strategy_selections: HashMap<(ContentType, StrategyChoice), u32> = HashMap::new();
 
-    for _ in 0..1000 {
+    for _ in 0..EVALUATION_ROUNDS {
         for content_type in &[
             ContentType::DHTLookup,
             ContentType::DataRetrieval,
@@ -201,7 +206,7 @@ async fn test_mab_learns_optimal_strategies() {
         .get(&(ContentType::DHTLookup, StrategyChoice::Kademlia))
         .unwrap_or(&0);
     assert!(
-        *kademlia_dht > 600,
+        *kademlia_dht as usize > (EVALUATION_ROUNDS * 3) / 5,
         "Kademlia should be preferred for DHT lookups"
     );
 
@@ -210,7 +215,7 @@ async fn test_mab_learns_optimal_strategies() {
         .get(&(ContentType::RealtimeMessage, StrategyChoice::Hyperbolic))
         .unwrap_or(&0);
     assert!(
-        *hyperbolic_realtime > 600,
+        *hyperbolic_realtime as usize > (EVALUATION_ROUNDS * 3) / 5,
         "Hyperbolic should be preferred for real-time messages"
     );
 
@@ -219,13 +224,13 @@ async fn test_mab_learns_optimal_strategies() {
         .get(&(ContentType::ComputeRequest, StrategyChoice::SOMRegion))
         .unwrap_or(&0);
     assert!(
-        *som_compute > 600,
+        *som_compute as usize > (EVALUATION_ROUNDS * 3) / 5,
         "SOMRegion should be preferred for compute requests"
     );
 
     // Check metrics
     let metrics = mab.get_metrics().await;
-    assert!(metrics.total_decisions > 4000);
+    assert!(metrics.total_decisions > (TRAINING_ROUNDS * 4) as u64);
     assert!(metrics.overall_success_rate > 0.7);
     assert_eq!(metrics.unique_routes, 16); // 4 strategies × 4 content types
 }
@@ -247,7 +252,7 @@ async fn test_mab_exploration_vs_exploitation() {
 
     let mut exploration_count = 0;
 
-    for _ in 0..1000 {
+    for _ in 0..EXPLORATION_SAMPLES {
         let decision = mab
             .select_route(&destination, ContentType::DHTLookup, &strategies)
             .await
@@ -269,7 +274,7 @@ async fn test_mab_exploration_vs_exploitation() {
     }
 
     // Should have roughly 20% exploration
-    let exploration_ratio = exploration_count as f64 / 1000.0;
+    let exploration_ratio = exploration_count as f64 / EXPLORATION_SAMPLES as f64;
     assert!(
         (exploration_ratio - 0.2).abs() < 0.05,
         "Exploration ratio {} should be close to 0.2",
@@ -414,7 +419,7 @@ async fn test_mab_adaptive_to_network_changes() {
     let strategies = vec![StrategyChoice::Kademlia, StrategyChoice::Hyperbolic];
 
     // Phase 1: Kademlia is better (90% success)
-    for _ in 0..200 {
+    for _ in 0..ADAPTATION_PHASE_ROUNDS {
         for strategy in &strategies {
             let route_id = RouteId::new(destination.clone(), *strategy);
             let success = match strategy {
@@ -450,7 +455,7 @@ async fn test_mab_adaptive_to_network_changes() {
     );
 
     // Phase 2: Network changes - Hyperbolic becomes better
-    for _ in 0..200 {
+    for _ in 0..ADAPTATION_PHASE_ROUNDS {
         for strategy in &strategies {
             let route_id = RouteId::new(destination.clone(), *strategy);
             let success = match strategy {

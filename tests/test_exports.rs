@@ -1,5 +1,7 @@
 // Test that the address_book exports are accessible
-use saorsa_core::{get_user_four_words, get_user_by_four_words, FourWordAddress, register_user_address};
+use saorsa_core::{
+    FourWordAddress, get_user_by_four_words, get_user_four_words, register_user_address,
+};
 
 #[tokio::test]
 async fn test_exports_are_accessible() {

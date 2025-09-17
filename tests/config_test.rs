@@ -14,12 +14,18 @@
 
 use saorsa_core::config::Config;
 use saorsa_core::network::NodeConfig;
+use serial_test::serial;
 use std::env;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
 #[test]
+#[serial]
 fn test_config_defaults() {
+    #[allow(unsafe_code)]
+    unsafe {
+        env::remove_var("SAORSA_LISTEN_ADDRESS");
+    }
     let config = Config::default();
 
     // Network defaults
@@ -47,7 +53,12 @@ fn test_development_config() {
 }
 
 #[test]
+#[serial]
 fn test_production_config() {
+    #[allow(unsafe_code)]
+    unsafe {
+        env::remove_var("SAORSA_LISTEN_ADDRESS");
+    }
     let config = Config::production();
 
     assert_eq!(config.network.listen_address, "0.0.0.0:9000");
@@ -83,13 +94,17 @@ encryption_enabled = false
 }
 
 #[test]
+#[serial]
 fn test_env_overrides() {
     // Set environment variables
     #[allow(unsafe_code)]
     unsafe {
         env::set_var("SAORSA_LISTEN_ADDRESS", "10.0.0.1:7000");
         env::set_var("SAORSA_RATE_LIMIT", "2000");
-        env::set_var("SAORSA_BOOTSTRAP_NODES", "boot1:9000,boot2:9000,boot3:9000");
+        env::set_var(
+            "SAORSA_BOOTSTRAP_NODES",
+            "127.0.0.1:9000,127.0.0.1:9001,127.0.0.1:9002",
+        );
     }
 
     let config = Config::load().unwrap();
@@ -146,7 +161,7 @@ fn test_bootstrap_address_parsing() {
     let mut config = Config::default();
     config.network.bootstrap_nodes = vec![
         "192.168.1.1:9000".to_string(),
-        "example.com:9001".to_string(),
+        "10.0.0.2:9001".to_string(),
         "/ip4/10.0.0.1/tcp/9002".to_string(),
     ];
 

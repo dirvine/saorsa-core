@@ -35,7 +35,7 @@ async fn test_security_manager_validate_join() -> anyhow::Result<()> {
     let sm = SecurityManager::new(SecurityConfig::default(), &identity);
 
     let desc = NodeDescriptor {
-        id: identity.to_user_id(),
+        id: saorsa_core::peer_record::UserId::from_public_key(identity.public_key()),
         public_key: identity.public_key().clone(),
         addresses: vec!["127.0.0.1:0".to_string()],
         hyperbolic: None,

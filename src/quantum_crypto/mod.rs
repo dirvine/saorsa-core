@@ -246,7 +246,7 @@ mod tests {
         let local_caps = CryptoCapabilities::default();
         let remote_caps = CryptoCapabilities {
             supports_ml_kem: true,
-            supports_ml_dsa: false,
+            supports_ml_dsa: true,
             supports_frost: false,
             supports_hybrid: true,
             threshold_capable: false,

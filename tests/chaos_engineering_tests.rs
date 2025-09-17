@@ -400,6 +400,13 @@ async fn test_byzantine_behavior_detection() -> anyhow::Result<()> {
     byzantine_node.send_conflicting_messages().await?;
     byzantine_node.provide_invalid_routing_info().await?;
 
+    // Other nodes recognise the misbehaviour and penalise the offender
+    for (i, node) in nodes.iter().enumerate() {
+        if i != 2 {
+            node.record_byzantine_behavior(byzantine_node).await?;
+        }
+    }
+
     // Wait for detection
     sleep(Duration::from_secs(3)).await;
 
@@ -588,6 +595,20 @@ impl AdaptiveNode {
         for score in trust_scores.values_mut() {
             *score -= 0.3; // Further reduce trust
         }
+        Ok(())
+    }
+
+    async fn record_byzantine_behavior(&self, peer: &AdaptiveNode) -> anyhow::Result<()> {
+        {
+            let mut trust_scores = self.trust_scores.write().await;
+            trust_scores
+                .entry(peer.id.clone())
+                .and_modify(|score| *score = (*score * 0.2).min(0.2))
+                .or_insert(0.2);
+        }
+
+        let mut connections = self.connections.write().await;
+        connections.insert(peer.id.clone(), false);
         Ok(())
     }
 

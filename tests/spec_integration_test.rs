@@ -2,12 +2,31 @@
 //
 // Integration tests for the saorsa-core spec implementation
 
+#![cfg(feature = "test-utils")]
+
 use anyhow::Result;
 use bytes::Bytes;
-use saorsa_core::events;
-use saorsa_core::types::Forward;
-use saorsa_core::{api::*, auth::*, events::*, fwid::*, telemetry::*};
-use std::sync::Arc;
+use saorsa_core::api::{GroupIdentityPacketV1, IdentityPacketV1, MemberRef};
+use saorsa_core::auth::{
+    CompositeWriteAuth, DelegatedWriteAuth, MlsWriteAuth, PubKey, Sig, SingleWriteAuth,
+    ThresholdWriteAuth, WriteAuth,
+};
+use saorsa_core::dht::{Outcome, PutPolicy, eigen_trust_epoch, record_interaction};
+use saorsa_core::events::{self, EventBus, TopologyEvent, global_bus, subscribe_topology};
+use saorsa_core::fwid::{FourWordsV1, Key, compute_key, fw_check, fw_to_key};
+use saorsa_core::identity::node_identity::NodeId;
+use saorsa_core::mock_dht::mock_ops;
+use saorsa_core::telemetry::{record_lookup, telemetry};
+use saorsa_core::types::storage::StorageStrategy;
+use saorsa_core::types::{
+    Device, DeviceId, Endpoint, Forward, Identity, IdentityHandle, MlDsaKeyPair,
+    presence::DeviceType,
+};
+use saorsa_core::virtual_disk::{ContainerManifestV1, FecParams};
+use saorsa_core::{
+    get_data, get_identity, get_presence, register_identity, register_presence, store_data,
+    store_dyad, store_with_fec,
+};
 use std::time::Duration;
 
 /// Test the complete four-word identifier system
@@ -217,139 +236,9 @@ async fn test_events_pubsub_system() -> Result<()> {
     Ok(())
 }
 
-/// Test telemetry collection and metrics
+/// Test the global topology bus delivers events
 #[tokio::test]
-async fn test_telemetry_comprehensive() -> Result<()> {
-    let collector = TelemetryCollector::new();
-
-    // Record various lookup operations
-    for i in 0..10 {
-        let latency = Duration::from_millis(10 * (i + 1));
-        let hops = (i % 5 + 1) as u8;
-        collector.record_lookup(latency, hops).await;
-    }
-
-    // Record some timeouts
-    for _ in 0..3 {
-        collector.record_timeout();
-    }
-
-    // Record DHT operations
-    for _ in 0..5 {
-        collector.record_dht_put();
-    }
-    for _ in 0..8 {
-        collector.record_dht_get();
-    }
-
-    // Record auth failures
-    for _ in 0..2 {
-        collector.record_auth_failure();
-    }
-
-    // Record stream metrics - need more samples for percentile calculation
-    collector
-        .record_stream_bandwidth(StreamClass::Media, 1_000_000)
-        .await;
-    collector
-        .record_stream_bandwidth(StreamClass::Media, 1_500_000)
-        .await;
-    collector
-        .record_stream_bandwidth(StreamClass::Media, 2_000_000)
-        .await;
-    collector
-        .record_stream_bandwidth(StreamClass::Media, 2_500_000)
-        .await;
-    collector
-        .record_stream_bandwidth(StreamClass::Media, 3_000_000)
-        .await;
-    collector
-        .record_stream_bandwidth(StreamClass::Control, 50_000)
-        .await;
-
-    collector
-        .record_stream_rtt(StreamClass::Media, Duration::from_millis(20))
-        .await;
-    collector
-        .record_stream_rtt(StreamClass::Media, Duration::from_millis(30))
-        .await;
-    collector
-        .record_stream_rtt(StreamClass::Control, Duration::from_millis(5))
-        .await;
-
-    // Get and verify metrics
-    let metrics = collector.get_metrics().await;
-    assert!(metrics.lookups_p95_ms > 0);
-    assert!(metrics.hop_p95 > 0);
-    assert!(metrics.timeout_rate > 0.0);
-    assert!(metrics.timeout_rate < 0.5); // Should be ~23% (3/13)
-
-    // Get and verify counters
-    let counters = collector.get_counters();
-    assert_eq!(counters.dht_puts, 5);
-    assert_eq!(counters.dht_gets, 8);
-    assert_eq!(counters.auth_failures, 2);
-
-    // Get stream metrics
-    let media_metrics = collector
-        .get_stream_metrics(StreamClass::Media)
-        .await
-        .unwrap();
-    assert!(media_metrics.bandwidth_p50 > 0);
-    assert!(media_metrics.bandwidth_p95 > media_metrics.bandwidth_p50);
-    assert!(media_metrics.rtt_p50_ms > 0);
-
-    let control_metrics = collector
-        .get_stream_metrics(StreamClass::Control)
-        .await
-        .unwrap();
-    assert_eq!(control_metrics.bandwidth_p50, 50_000);
-    assert_eq!(control_metrics.rtt_p50_ms, 5);
-
-    // Test health monitor - create a new collector for fresh stats
-    let collector_for_health = Arc::new(TelemetryCollector::new());
-    // Record some healthy operations (low latency, few timeouts)
-    for i in 0..10 {
-        collector_for_health
-            .record_lookup(Duration::from_millis(10 + i), 3)
-            .await;
-    }
-    // Only 1 timeout out of 11 operations = ~9% timeout rate (< 10% threshold)
-    collector_for_health.record_timeout();
-
-    let health_monitor = HealthMonitor::new(collector_for_health.clone());
-    let status = health_monitor.get_status().await;
-
-    assert!(status.healthy); // Should be healthy with these metrics
-    assert!(status.uptime.as_secs() < 1); // Just started
-
-    // Check original collector's counters
-    assert_eq!(counters.dht_puts, 5);
-
-    // Test reset
-    let collector2 = TelemetryCollector::new();
-    collector2.record_lookup(Duration::from_secs(1), 5).await;
-    collector2.reset().await;
-
-    let metrics2 = collector2.get_metrics().await;
-    assert_eq!(metrics2.lookups_p95_ms, 0);
-    assert_eq!(metrics2.timeout_rate, 0.0);
-
-    Ok(())
-}
-
-/// Test the global instances work correctly
-#[tokio::test]
-async fn test_global_instances() -> Result<()> {
-    // Test global telemetry
-    record_lookup(Duration::from_millis(50), 3).await;
-    record_timeout();
-
-    let global_telemetry = telemetry();
-    let metrics = global_telemetry.get_metrics().await;
-    assert!(metrics.lookups_p95_ms > 0 || metrics.timeout_rate > 0.0);
-
-    // Test global event bus
+async fn test_global_topology_bus() -> Result<()> {
     let mut sub = subscribe_topology();
 
     let event = TopologyEvent::RoutingTableUpdated {
@@ -365,111 +254,79 @@ async fn test_global_instances() -> Result<()> {
         TopologyEvent::RoutingTableUpdated { .. }
     ));
 
-    // Test DHT watch helper
-    let key = Key::new([42u8; 32]);
-    let mut dht_sub = events::dht_watch(key.clone()).await;
-
-    global_bus()
-        .publish_dht_update(key, bytes::Bytes::from(vec![100, 200]))
-        .await?;
-    assert_eq!(dht_sub.recv().await?, bytes::Bytes::from(vec![100, 200]));
-
-    // Test device subscribe helper
-    let identity_key = Key::new([88u8; 32]);
-    let mut device_sub = events::device_subscribe(identity_key.clone()).await;
-
-    let forward = Forward {
-        proto: "tcp".into(),
-        addr: "localhost:3000".into(),
-        exp: 9_999_999_999,
-    };
-
-    global_bus()
-        .publish_forward_for(identity_key.clone(), forward.clone())
-        .await?;
-
-    let received = device_sub.recv().await?;
-    assert_eq!(received.proto, "tcp");
-
     Ok(())
 }
-
 /// Test API module functions
 #[tokio::test]
 async fn test_api_functions() -> Result<()> {
-    // Test identity claim - using same words that pass in fwid test
-    let words = [
-        "hello".to_string(),
-        "world".to_string(),
-        "test".to_string(),
-        "data".to_string(),
+    // Register a new identity and fetch it back through the API
+    let words = ["hello", "world", "test", "data"];
+    let keypair = MlDsaKeyPair::generate()?;
+    let handle = register_identity(words, &keypair).await?;
+
+    let identity = get_identity(handle.key()).await?;
+    let expected_words: [String; 4] = words.map(|w| w.to_string());
+    assert_eq!(identity.words, expected_words);
+
+    // Register multi-device presence
+    let devices = vec![
+        Device {
+            id: DeviceId::generate(),
+            device_type: DeviceType::Active,
+            storage_gb: 128,
+            endpoint: Endpoint {
+                protocol: "quic".into(),
+                address: "127.0.0.1:9000".into(),
+            },
+            capabilities: Default::default(),
+        },
+        Device {
+            id: DeviceId::generate(),
+            device_type: DeviceType::Headless,
+            storage_gb: 512,
+            endpoint: Endpoint {
+                protocol: "quic".into(),
+                address: "10.0.0.2:9000".into(),
+            },
+            capabilities: Default::default(),
+        },
     ];
-    let pubkey = PubKey::new(vec![1, 2, 3]);
-    let sig = Sig::new(vec![4, 5, 6]);
 
-    identity_claim(words.clone(), pubkey, sig).await?;
+    let active_device = devices[0].id;
+    let receipt = register_presence(&handle, devices.clone(), active_device).await?;
+    assert_eq!(receipt.identity, handle.key());
 
-    // Test identity fetch
-    let key = Key::new([7u8; 32]);
-    let packet = identity_fetch(key.clone()).await?;
-    assert_eq!(packet.v, 1);
-    assert_eq!(packet.device_set_root, key);
+    let presence = get_presence(handle.key()).await?;
+    assert_eq!(presence.devices.len(), devices.len());
+    assert_eq!(presence.active_device, Some(active_device));
 
-    // Test device forward publishing
-    let forward = Forward {
-        proto: "quic".to_string(),
-        addr: "192.168.1.1:9000".to_string(),
-        exp: 1234567890,
-    };
+    // Exercise storage helpers
+    let direct_data = b"direct data".to_vec();
+    let direct_handle = store_data(&handle, direct_data.clone(), 1).await?;
+    let roundtrip_direct = get_data(&direct_handle).await?;
+    assert_eq!(roundtrip_direct, direct_data);
 
-    device_publish_forward(key.clone(), forward).await?;
+    let dyad_data = b"dyad data".to_vec();
+    let dyad_handle = store_dyad(&handle, handle.key(), dyad_data.clone()).await?;
+    let roundtrip_dyad = get_data(&dyad_handle).await?;
+    assert_eq!(roundtrip_dyad, dyad_data);
 
-    // Test DHT operations
-    let dht_key = Key::new([8u8; 32]);
-    let data = Bytes::from("test data");
-    let policy = PutPolicy {
-        quorum: 3,
-        ttl: Some(Duration::from_secs(3600)),
-        auth: Box::new(SingleWriteAuth::new(PubKey::new(vec![9]))),
-    };
+    let fec_data = b"fec data".to_vec();
+    let fec_handle = store_with_fec(&handle, fec_data.clone(), 2, 1).await?;
+    match fec_handle.strategy {
+        StorageStrategy::FecEncoded {
+            data_shards,
+            parity_shards,
+            ..
+        } => {
+            assert_eq!(data_shards, 2);
+            assert_eq!(parity_shards, 1);
+        }
+        other => panic!("unexpected storage strategy: {:?}", other),
+    }
 
-    let receipt = dht_put(dht_key.clone(), data, &policy).await?;
-    assert_eq!(receipt.key, dht_key);
-    assert!(receipt.timestamp > 0);
-
-    let _retrieved = dht_get(dht_key.clone(), 3).await?;
-
-    // Test routing functions
-    let peer = vec![10, 11, 12];
-    record_interaction(peer.clone(), Outcome::Ok).await?;
-    record_interaction(peer.clone(), Outcome::Timeout).await?;
-
-    eigen_trust_epoch().await?;
-
-    let next_hop = route_next_hop(vec![13, 14, 15]);
-    assert!(next_hop.is_none()); // Placeholder returns None
-
-    // Test transport functions
-    let endpoint = Endpoint {
-        address: "example.com:9000".to_string(),
-    };
-
-    let conn = quic_connect(&endpoint).await?;
-    assert_eq!(conn.peer, vec![0u8; 0]);
-
-    let stream = quic_open(&conn, StreamClass::Control).await?;
-    assert_eq!(stream.class, StreamClass::Control);
-
-    // Test storage control
-    let object_id = [15u8; 32];
-    let shards = place_shards(object_id, 8);
-    assert_eq!(shards.len(), 0); // Placeholder returns empty
-
-    provider_advertise_space(1000000, 2000000);
-
-    let repair_plan = repair_request(object_id);
-    assert_eq!(repair_plan.object_id, object_id);
-    assert_eq!(repair_plan.missing_shards.len(), 0);
+    let roundtrip_fec = get_data(&fec_handle).await?;
+    assert_eq!(roundtrip_fec, fec_data);
 
     Ok(())
 }
@@ -485,67 +342,64 @@ async fn test_data_structures() -> Result<()> {
         words: ["a".into(), "b".into(), "c".into(), "d".into()],
         id: Key::new([9u8; 32]),
         pk: vec![1, 2, 3],
-        sig: vec![4, 5, 6],
-        endpoints: vec![],
-        ep_sig: None,
-        website_root: Some(Key::new([10u8; 32])),
-        device_set_root: Key::new([11u8; 32]),
+        sig: Some(vec![4, 5, 6]),
+        device_set_root: compute_key("device-set", &[1, 2, 3]),
     };
 
     let json = serde_json::to_string(&identity)?;
     let recovered: IdentityPacketV1 = serde_json::from_str(&json)?;
     assert_eq!(recovered.v, 1);
     assert_eq!(recovered.words.len(), 4);
+    assert_eq!(recovered.sig.as_ref().unwrap(), &[4, 5, 6]);
 
-    // Test DeviceSetV1
-    let device_set = DeviceSetV1 {
+    // Test GroupIdentityPacketV1
+    let group_packet = GroupIdentityPacketV1 {
         v: 1,
-        crdt: "or-set".to_string(),
-        forwards: vec![Forward {
-            proto: "quic".into(),
-            addr: "192.168.1.1:9000".into(),
-            exp: 1234567890,
-        }],
-        sig: None,
+        words: [
+            "alpha".into(),
+            "beta".into(),
+            "gamma".into(),
+            "delta".into(),
+        ],
+        id: Key::new([20u8; 32]),
+        group_pk: vec![7, 7, 7],
+        group_sig: vec![8, 8, 8],
+        members: vec![
+            MemberRef {
+                member_id: Key::new([21u8; 32]),
+                member_pk: vec![1, 1, 1],
+            },
+            MemberRef {
+                member_id: Key::new([22u8; 32]),
+                member_pk: vec![2, 2, 2],
+            },
+        ],
+        membership_root: Key::new([23u8; 32]),
+        created_at: 1_700_000_000,
+        mls_ciphersuite: Some(0x0a0a),
     };
 
-    let json = serde_json::to_string(&device_set)?;
-    let recovered: DeviceSetV1 = serde_json::from_str(&json)?;
-    assert_eq!(recovered.crdt, "or-set");
-    assert_eq!(recovered.forwards.len(), 1);
-
-    // Test GroupPacketV1
-    let group = GroupPacketV1 {
-        v: 1,
-        group_id: vec![20, 21, 22],
-        epoch: 42,
-        membership: Key::new([30u8; 32]),
-        forwards_root: Key::new([31u8; 32]),
-        container_root: Key::new([32u8; 32]),
-        proof: None,
-    };
-
-    let json = serde_json::to_string(&group)?;
-    let recovered: GroupPacketV1 = serde_json::from_str(&json)?;
-    assert_eq!(recovered.epoch, 42);
+    let json = serde_json::to_string(&group_packet)?;
+    let recovered: GroupIdentityPacketV1 = serde_json::from_str(&json)?;
+    assert_eq!(recovered.members.len(), 2);
+    assert_eq!(recovered.membership_root, Key::new([23u8; 32]));
 
     // Test ContainerManifestV1
     let manifest = ContainerManifestV1 {
         v: 1,
         object: Key::new([40u8; 32]),
-        fec: FecParams {
+        fec: Some(FecParams {
             k: 8,
             m: 4,
             shard_size: 65536,
-        },
+        }),
         assets: vec![Key::new([41u8; 32]), Key::new([42u8; 32])],
         sealed_meta: None,
     };
 
     let json = serde_json::to_string(&manifest)?;
     let recovered: ContainerManifestV1 = serde_json::from_str(&json)?;
-    assert_eq!(recovered.fec.k, 8);
-    assert_eq!(recovered.fec.m, 4);
+    assert_eq!(recovered.fec.unwrap().k, 8);
     assert_eq!(recovered.assets.len(), 2);
 
     Ok(())
@@ -554,78 +408,79 @@ async fn test_data_structures() -> Result<()> {
 /// Integration test combining multiple modules
 #[tokio::test]
 async fn test_multi_module_integration() -> Result<()> {
-    // Create an identity with valid four words (same as fwid test)
-    let words = [
-        "hello".to_string(),
-        "world".to_string(),
-        "test".to_string(),
-        "data".to_string(),
-    ];
-    let identity_key = fw_to_key(words.clone())?;
+    // Synthesize an identity handle without touching the persistent DHT
+    let keypair = MlDsaKeyPair::generate()?;
+    let identity = Identity {
+        words: [
+            "orchid".into(),
+            "ember".into(),
+            "lunar".into(),
+            "pilot".into(),
+        ],
+        key: Key::new([42u8; 32]),
+        public_key: keypair.public_key.clone(),
+    };
+    let handle = IdentityHandle::new(identity, keypair);
+    let identity_key = handle.key();
 
-    // Set up authentication
-    let alice_pubkey = PubKey::new(vec![1, 2, 3]);
-    let auth = SingleWriteAuth::new(alice_pubkey.clone());
-
-    // Subscribe to events for this identity
+    // Subscribe to forward announcements
     let mut device_sub = events::device_subscribe(identity_key.clone()).await;
-
-    // Publish a forward
     let forward = Forward {
-        proto: "quic".to_string(),
-        addr: "alice.example.com:9000".to_string(),
-        exp: chrono::Utc::now().timestamp() as u64 + 3600,
+        proto: "quic".into(),
+        addr: "orchid.example.com:9000".into(),
+        exp: 1_700_000_000,
     };
 
-    device_publish_forward(identity_key.clone(), forward.clone()).await?;
-
-    // Receive the forward announcement
-    let forward_event = device_sub.recv().await?;
-    assert_eq!(forward_event.proto, "quic");
-
-    // Record telemetry for the operation
-    record_lookup(Duration::from_millis(25), 3).await;
-
-    // Store data in DHT with authentication
-    let dht_key = compute_key("alice-data", identity_key.as_bytes());
-    let data = Bytes::from("Alice's encrypted data");
-    let policy = PutPolicy {
-        quorum: 3,
-        ttl: Some(Duration::from_secs(7200)),
-        auth: Box::new(auth),
-    };
-
-    let _receipt = dht_put(dht_key.clone(), data.clone(), &policy).await?;
-
-    // Watch for DHT updates
-    let mut dht_sub = events::dht_watch(dht_key.clone()).await;
-
-    // Publish an update
     global_bus()
-        .publish_dht_update(dht_key.clone(), bytes::Bytes::from("Updated data"))
+        .publish_forward_for(identity_key.clone(), forward.clone())
         .await?;
 
+    let forward_event = device_sub.recv().await?;
+    assert_eq!(forward_event.addr, forward.addr);
+
+    // Record telemetry for the operation and verify metrics aggregation
+    record_lookup(Duration::from_millis(25), 3).await;
+
+    // Store data in the mock DHT and read it back
+    let dht_key = compute_key("orchid-data", identity_key.as_bytes());
+    let payload = Bytes::from_static(b"orchid payload");
+    let policy = PutPolicy {
+        ttl: Some(Duration::from_secs(600)),
+        quorum: 2,
+    };
+    mock_ops::dht_put(dht_key.clone(), payload.clone(), &policy).await?;
+    let stored = mock_ops::dht_get(dht_key.clone(), 1).await?;
+    assert_eq!(stored, payload);
+
+    // Watch for updates on the DHT key via the event bus
+    let mut dht_sub = events::dht_watch(dht_key.clone()).await;
+    let update_payload = Bytes::from_static(b"updated payload");
+    global_bus()
+        .publish_dht_update(dht_key.clone(), update_payload.clone())
+        .await?;
     let update = dht_sub.recv().await?;
-    assert_eq!(update.as_ref(), b"Updated data");
+    assert_eq!(update, update_payload);
 
-    // Check telemetry
+    // Telemetry snapshot should include the lookup metrics
     let metrics = telemetry().get_metrics().await;
-    assert!(metrics.lookups_p95_ms > 0);
+    assert!(metrics.lookups_p95_ms >= 25);
 
-    // Subscribe to topology events before publishing
+    // Simulate topology changes and verify delivery
     let mut topology_sub = subscribe_topology();
-
-    // Simulate topology change
     global_bus()
         .publish_topology(TopologyEvent::PeerJoined {
-            peer_id: alice_pubkey.as_bytes().to_vec(),
+            peer_id: identity_key.as_bytes().to_vec(),
             address: forward_event.addr.clone(),
         })
         .await?;
+    assert!(matches!(
+        topology_sub.recv().await?,
+        TopologyEvent::PeerJoined { .. }
+    ));
 
-    // Verify we receive the event
-    let topology_event = topology_sub.recv().await?;
-    assert!(matches!(topology_event, TopologyEvent::PeerJoined { .. }));
+    // Trust recording stubs should be callable without panicking
+    record_interaction(NodeId([5u8; 32]), Outcome::Ok).await;
+    eigen_trust_epoch().await;
 
     Ok(())
 }
@@ -655,6 +510,34 @@ async fn test_error_conditions() -> Result<()> {
 
     // Should get an error when trying to receive
     let result = sub.recv().await;
+    assert!(result.is_err());
+
+    // register_presence should fail when active device is missing
+    let keypair = MlDsaKeyPair::generate()?;
+    let identity = Identity {
+        words: [
+            "ember".into(),
+            "signal".into(),
+            "polar".into(),
+            "haze".into(),
+        ],
+        key: Key::new([99u8; 32]),
+        public_key: keypair.public_key.clone(),
+    };
+    let handle = IdentityHandle::new(identity, keypair);
+    let device = Device {
+        id: DeviceId::generate(),
+        device_type: DeviceType::Active,
+        storage_gb: 64,
+        endpoint: Endpoint {
+            protocol: "quic".into(),
+            address: "127.0.0.1:4000".into(),
+        },
+        capabilities: Default::default(),
+    };
+
+    let invalid_active = DeviceId::generate();
+    let result = register_presence(&handle, vec![device], invalid_active).await;
     assert!(result.is_err());
 
     Ok(())

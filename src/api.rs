@@ -8,17 +8,17 @@
 // For commercial licensing, contact: saorsalabs@gmail.com
 
 //! Clean API implementation for saorsa-core
-//! 
+//!
 //! This module provides the simplified public API for:
 //! - Identity registration and management
 //! - Presence and device management
 //! - Storage with saorsa-seal and saorsa-fec
 
 use crate::auth::Sig;
-use crate::fwid::{compute_key, fw_check, fw_to_key, Key};
+use crate::fwid::{Key, compute_key, fw_check, fw_to_key};
 use crate::types::{
-    Device, DeviceId, Endpoint, Identity, IdentityHandle, MlDsaKeyPair, Presence,
-    PresenceReceipt, StorageHandle, StorageStrategy,
+    Device, DeviceId, Endpoint, Identity, IdentityHandle, MlDsaKeyPair, Presence, PresenceReceipt,
+    StorageHandle, StorageStrategy,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -38,12 +38,12 @@ impl MockDht {
             storage: HashMap::new(),
         }
     }
-    
+
     async fn put(&mut self, key: Key, value: Vec<u8>) -> Result<()> {
         self.storage.insert(key, value);
         Ok(())
     }
-    
+
     async fn get(&self, key: &Key) -> Result<Vec<u8>> {
         self.storage
             .get(key)
@@ -53,9 +53,8 @@ impl MockDht {
 }
 
 // Global DHT instance for testing
-static DHT: once_cell::sync::Lazy<Arc<RwLock<MockDht>>> = once_cell::sync::Lazy::new(|| {
-    Arc::new(RwLock::new(MockDht::new()))
-});
+static DHT: once_cell::sync::Lazy<Arc<RwLock<MockDht>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(MockDht::new())));
 
 // Optional global DHT client (real engine). If not set, we fall back to MockDht.
 static GLOBAL_DHT_CLIENT: once_cell::sync::OnceCell<Arc<crate::dht::client::DhtClient>> =
@@ -155,17 +154,14 @@ impl std::fmt::Debug for GroupKeyPair {
 // ============================================================================
 
 /// Register a new identity on the network
-/// 
+///
 /// # Arguments
 /// * `words` - Four-word identifier (must be valid dictionary words)
 /// * `keypair` - ML-DSA keypair for signing
-/// 
+///
 /// # Returns
 /// * `IdentityHandle` - Handle for identity operations
-pub async fn register_identity(
-    words: [&str; 4],
-    keypair: &MlDsaKeyPair,
-) -> Result<IdentityHandle> {
+pub async fn register_identity(words: [&str; 4], keypair: &MlDsaKeyPair) -> Result<IdentityHandle> {
     // Convert to owned strings
     let words_owned: [String; 4] = [
         words[0].to_string(),
@@ -173,22 +169,22 @@ pub async fn register_identity(
         words[2].to_string(),
         words[3].to_string(),
     ];
-    
+
     // Validate words
     if !fw_check(words_owned.clone()) {
         anyhow::bail!("Invalid word in identity");
     }
-    
+
     // Generate key from words
     let key = fw_to_key(words_owned.clone())?;
-    
+
     // Check if already registered
     let dht = DHT.read().await;
     if dht.get(&key).await.is_ok() {
         anyhow::bail!("Identity already registered");
     }
     drop(dht);
-    
+
     // Create identity (typed) and store packet for compatibility
     let identity = Identity {
         words: words_owned.clone(),
@@ -211,10 +207,10 @@ pub async fn register_identity(
 }
 
 /// Get an identity by its key
-/// 
+///
 /// # Arguments
 /// * `key` - Identity key (derived from four-word address)
-/// 
+///
 /// # Returns
 /// * `Identity` - The identity information
 pub async fn get_identity(key: Key) -> Result<Identity> {
@@ -245,12 +241,12 @@ pub async fn identity_fetch(key: Key) -> Result<IdentityPacketV1> {
 // ============================================================================
 
 /// Register presence on the network
-/// 
+///
 /// # Arguments
 /// * `handle` - Identity handle
 /// * `devices` - List of devices for this identity
 /// * `active_device` - Currently active device ID
-/// 
+///
 /// # Returns
 /// * `PresenceReceipt` - Receipt of presence registration
 pub async fn register_presence(
@@ -262,7 +258,7 @@ pub async fn register_presence(
     if !devices.iter().any(|d| d.id == active_device) {
         anyhow::bail!("Active device not in device list");
     }
-    
+
     // Create presence packet
     let presence = Presence {
         identity: handle.key(),
@@ -273,34 +269,35 @@ pub async fn register_presence(
             .as_secs(),
         signature: vec![], // Will be filled
     };
-    
+
     // Sign presence
     let presence_bytes = serde_json::to_vec(&presence)?;
     let signature = handle.sign(&presence_bytes)?;
-    
+
     let mut signed_presence = presence;
     signed_presence.signature = signature;
-    
+
     // Store in DHT with presence key
     let presence_key = derive_presence_key(handle.key());
     let mut dht = DHT.write().await;
-    dht.put(presence_key, serde_json::to_vec(&signed_presence)?).await?;
-    
+    dht.put(presence_key, serde_json::to_vec(&signed_presence)?)
+        .await?;
+
     // Create receipt
     let receipt = PresenceReceipt {
         identity: handle.key(),
         timestamp: signed_presence.timestamp,
         storing_nodes: vec![Key::from([0u8; 32])], // Mock node
     };
-    
+
     Ok(receipt)
 }
 
 /// Get presence information for an identity
-/// 
+///
 /// # Arguments
 /// * `identity_key` - Key of the identity
-/// 
+///
 /// # Returns
 /// * `Presence` - Current presence information
 pub async fn get_presence(identity_key: Key) -> Result<Presence> {
@@ -312,12 +309,12 @@ pub async fn get_presence(identity_key: Key) -> Result<Presence> {
 }
 
 /// Register a headless storage node
-/// 
+///
 /// # Arguments
 /// * `handle` - Identity handle
 /// * `storage_gb` - Storage capacity in GB
 /// * `endpoint` - Network endpoint
-/// 
+///
 /// # Returns
 /// * `DeviceId` - ID of the registered headless node
 pub async fn register_headless(
@@ -327,7 +324,7 @@ pub async fn register_headless(
 ) -> Result<DeviceId> {
     // Get current presence
     let mut presence = get_presence(handle.key()).await?;
-    
+
     // Create headless device
     let device = Device {
         id: DeviceId::generate(),
@@ -342,34 +339,31 @@ pub async fn register_headless(
             ..Default::default()
         },
     };
-    
+
     let device_id = device.id;
     presence.devices.push(device);
-    
+
     // Update presence
     let active = presence.active_device.unwrap_or(device_id);
     register_presence(handle, presence.devices, active).await?;
-    
+
     Ok(device_id)
 }
 
 /// Set the active device for an identity
-/// 
+///
 /// # Arguments
 /// * `handle` - Identity handle
 /// * `device_id` - Device to make active
-pub async fn set_active_device(
-    handle: &IdentityHandle,
-    device_id: DeviceId,
-) -> Result<()> {
+pub async fn set_active_device(handle: &IdentityHandle, device_id: DeviceId) -> Result<()> {
     // Get current presence
     let presence = get_presence(handle.key()).await?;
-    
+
     // Validate device exists
     if !presence.devices.iter().any(|d| d.id == device_id) {
         anyhow::bail!("Device not found in presence");
     }
-    
+
     // Update with new active device
     register_presence(handle, presence.devices, device_id).await?;
     Ok(())
@@ -380,12 +374,12 @@ pub async fn set_active_device(
 // ============================================================================
 
 /// Store data on the network
-/// 
+///
 /// # Arguments
 /// * `handle` - Identity handle
 /// * `data` - Data to store
 /// * `group_size` - Size of the group (affects storage strategy)
-/// 
+///
 /// # Returns
 /// * `StorageHandle` - Handle to retrieve the data
 pub async fn store_data(
@@ -395,25 +389,27 @@ pub async fn store_data(
 ) -> Result<StorageHandle> {
     // Select strategy based on group size
     let strategy = StorageStrategy::from_group_size(group_size);
-    
+
     match strategy {
         StorageStrategy::Direct => store_direct(handle, data).await,
         StorageStrategy::FullReplication { replicas } => {
             store_replicated(handle, data, replicas).await
         }
-        StorageStrategy::FecEncoded { data_shards, parity_shards, .. } => {
-            store_with_fec(handle, data, data_shards, parity_shards).await
-        }
+        StorageStrategy::FecEncoded {
+            data_shards,
+            parity_shards,
+            ..
+        } => store_with_fec(handle, data, data_shards, parity_shards).await,
     }
 }
 
 /// Store data for a dyad (2-person group)
-/// 
+///
 /// # Arguments
 /// * `handle1` - First identity handle
 /// * `handle2_key` - Key of second identity
 /// * `data` - Data to store
-/// 
+///
 /// # Returns
 /// * `StorageHandle` - Handle to retrieve the data
 pub async fn store_dyad(
@@ -426,13 +422,13 @@ pub async fn store_dyad(
 }
 
 /// Store data with custom FEC parameters
-/// 
+///
 /// # Arguments
 /// * `handle` - Identity handle
 /// * `data` - Data to store
 /// * `data_shards` - Number of data shards (k)
 /// * `parity_shards` - Number of parity shards (m)
-/// 
+///
 /// # Returns
 /// * `StorageHandle` - Handle to retrieve the data
 pub async fn store_with_fec(
@@ -443,16 +439,16 @@ pub async fn store_with_fec(
 ) -> Result<StorageHandle> {
     // Generate storage ID
     let storage_id = Key::from(*blake3::hash(&data).as_bytes());
-    
+
     // TODO: Actual FEC encoding with saorsa-fec
     // For now, just store the data directly
-    
+
     // Create shard map (mock)
     let mut shard_map = crate::types::storage::ShardMap::new();
-    
+
     // Get presence to find devices
     let presence = get_presence(handle.key()).await?;
-    
+
     // Prefer headless nodes for storage
     let mut devices = presence.devices.clone();
     devices.sort_by_key(|d| match d.device_type {
@@ -460,17 +456,17 @@ pub async fn store_with_fec(
         crate::types::presence::DeviceType::Active => 1,
         crate::types::presence::DeviceType::Mobile => 2,
     });
-    
+
     // Assign shards to devices
     let total_shards = data_shards + parity_shards;
     for (i, device) in devices.iter().take(total_shards).enumerate() {
         shard_map.assign_shard(device.id, i as u32);
     }
-    
+
     // Store data in DHT
     let mut dht = DHT.write().await;
     dht.put(storage_id.clone(), data.clone()).await?;
-    
+
     // Create storage handle
     let handle = StorageHandle {
         id: storage_id,
@@ -483,21 +479,21 @@ pub async fn store_with_fec(
         shard_map,
         sealed_key: Some(vec![0u8; 32]), // Mock sealed key
     };
-    
+
     Ok(handle)
 }
 
 /// Retrieve data from the network
-/// 
+///
 /// # Arguments
 /// * `handle` - Storage handle
-/// 
+///
 /// # Returns
 /// * `Vec<u8>` - The retrieved data
 pub async fn get_data(handle: &StorageHandle) -> Result<Vec<u8>> {
     // TODO: Handle different strategies (FEC decoding, unsealing, etc.)
     // For now, just retrieve from DHT
-    
+
     let dht = DHT.read().await;
     let data = dht.get(&handle.id).await.context("Data not found")?;
     Ok(data)
@@ -518,18 +514,18 @@ fn derive_presence_key(identity_key: Key) -> Key {
 /// Store data directly (no redundancy)
 async fn store_direct(handle: &IdentityHandle, data: Vec<u8>) -> Result<StorageHandle> {
     let storage_id = Key::from(*blake3::hash(&data).as_bytes());
-    
+
     // Store in DHT
     let mut dht = DHT.write().await;
     dht.put(storage_id.clone(), data.clone()).await?;
-    
+
     // Get single device
     let presence = get_presence(handle.key()).await?;
     let device = presence.devices.first().context("No devices available")?;
-    
+
     let mut shard_map = crate::types::storage::ShardMap::new();
     shard_map.assign_shard(device.id, 0);
-    
+
     Ok(StorageHandle {
         id: storage_id,
         size: data.len() as u64,
@@ -659,8 +655,8 @@ pub async fn group_identity_update_members_signed(
     let mut sig_arr = [0u8; SIG_LEN];
     sig_arr.copy_from_slice(sig_bytes);
     let sig = MlDsaSignature(Box::new(sig_arr));
-    let pk = MlDsaPublicKey::from_bytes(&group_pk)
-        .map_err(|_| anyhow::anyhow!("invalid group_pk"))?;
+    let pk =
+        MlDsaPublicKey::from_bytes(&group_pk).map_err(|_| anyhow::anyhow!("invalid group_pk"))?;
     let ml = MlDsa65::new();
     let msg = group_identity_canonical_sign_bytes(&id_key, &new_root);
     let ok = ml
@@ -704,19 +700,19 @@ async fn store_replicated(
     replicas: usize,
 ) -> Result<StorageHandle> {
     let storage_id = Key::from(*blake3::hash(&data).as_bytes());
-    
+
     // Store in DHT
     let mut dht = DHT.write().await;
     dht.put(storage_id.clone(), data.clone()).await?;
-    
+
     // Get devices for replicas
     let presence = get_presence(handle.key()).await?;
     let mut shard_map = crate::types::storage::ShardMap::new();
-    
+
     for (i, device) in presence.devices.iter().take(replicas).enumerate() {
         shard_map.assign_shard(device.id, i as u32);
     }
-    
+
     Ok(StorageHandle {
         id: storage_id,
         size: data.len() as u64,
@@ -724,4 +720,228 @@ async fn store_replicated(
         shard_map,
         sealed_key: Some(vec![0u8; 32]),
     })
+}
+
+// =============================================================================
+// ENTITY API
+// =============================================================================
+
+use crate::entities::{
+    create_entity as internal_create_entity, Entity, EntityHandle, EntityId, EntityInfo,
+    EntityType, FourWordAddress, EntitySettings,
+    ENTITY_REGISTRY,
+};
+
+/// Create a new entity (Individual, Group, Channel, Project, Organization)
+///
+/// # Arguments
+/// * `entity_type` - Type of entity to create
+/// * `name` - Human-readable name for the entity
+/// * `four_words` - Four-word address for the entity
+/// * `description` - Optional description
+/// * `settings` - Optional custom settings
+///
+/// # Returns
+/// * `EntityHandle` - Handle to the created entity
+///
+/// # Example
+/// ```
+/// let handle = create_entity(
+///     EntityType::Individual,
+///     "Alice",
+///     ["eagle", "forest", "river", "mountain"],
+///     Some("Alice's personal entity"),
+///     None,
+/// ).await?;
+/// ```
+pub async fn create_entity(
+    entity_type: EntityType,
+    name: &str,
+    four_words: [&str; 4],
+    description: Option<String>,
+    settings: Option<EntitySettings>,
+) -> Result<EntityHandle> {
+    // Convert four words to owned strings
+    let words = [
+        four_words[0].to_string(),
+        four_words[1].to_string(),
+        four_words[2].to_string(),
+        four_words[3].to_string(),
+    ];
+
+    // Validate four-word address
+    if !fw_check(words.clone()) {
+        anyhow::bail!("Invalid four-word address");
+    }
+
+    // Create entity
+    let mut entity = internal_create_entity(entity_type, name.to_string(), words).await?;
+
+    // Apply optional settings
+    if let Some(desc) = description {
+        entity.core.metadata.description = Some(desc);
+    }
+    if let Some(custom_settings) = settings {
+        entity.core.metadata.settings = custom_settings;
+    }
+
+    // Register entity
+    ENTITY_REGISTRY.register(entity).await
+}
+
+/// Get an entity by its ID
+///
+/// # Arguments
+/// * `id` - Entity ID
+///
+/// # Returns
+/// * `Option<Arc<Entity>>` - The entity if found
+pub async fn get_entity(id: &EntityId) -> Option<Arc<Entity>> {
+    ENTITY_REGISTRY.get(id).await
+}
+
+/// Get an entity by its four-word address
+///
+/// # Arguments
+/// * `four_words` - Four-word address array
+///
+/// # Returns
+/// * `Option<Arc<Entity>>` - The entity if found
+pub async fn get_entity_by_address(four_words: [&str; 4]) -> Option<Arc<Entity>> {
+    let words = [
+        four_words[0].to_string(),
+        four_words[1].to_string(),
+        four_words[2].to_string(),
+        four_words[3].to_string(),
+    ];
+
+    match FourWordAddress::from_words(words) {
+        Ok(address) => ENTITY_REGISTRY.get_by_address(&address).await,
+        Err(_) => None,
+    }
+}
+
+/// List all entities in the registry
+///
+/// # Returns
+/// * `Vec<EntityInfo>` - List of entity information
+pub async fn list_entities() -> Vec<EntityInfo> {
+    ENTITY_REGISTRY.list().await
+}
+
+/// Write data to an entity's virtual disk
+///
+/// # Arguments
+/// * `entity_handle` - Handle to the entity
+/// * `path` - Path within the virtual disk
+/// * `content` - Data to write
+/// * `is_public` - Whether to write to public or private disk
+///
+/// # Returns
+/// * `Result<()>` - Success or error
+pub async fn entity_disk_write(
+    entity_handle: &EntityHandle,
+    path: &str,
+    content: Vec<u8>,
+    is_public: bool,
+) -> Result<()> {
+    use crate::virtual_disk::{disk_write, FileMetadata};
+
+    let disk = if is_public {
+        entity_handle.public_disk()
+    } else {
+        entity_handle.private_disk()
+    };
+
+    let metadata = FileMetadata {
+        mime_type: Some("application/octet-stream".to_string()),
+        attributes: HashMap::new(),
+        permissions: 0o644,
+    };
+
+    disk_write(disk, path, &content, metadata).await?;
+    Ok(())
+}
+
+/// Read data from an entity's virtual disk
+///
+/// # Arguments
+/// * `entity_handle` - Handle to the entity
+/// * `path` - Path within the virtual disk
+/// * `is_public` - Whether to read from public or private disk
+///
+/// # Returns
+/// * `Result<Vec<u8>>` - The file content
+pub async fn entity_disk_read(
+    entity_handle: &EntityHandle,
+    path: &str,
+    is_public: bool,
+) -> Result<Vec<u8>> {
+    use crate::virtual_disk::disk_read;
+
+    let disk = if is_public {
+        entity_handle.public_disk()
+    } else {
+        entity_handle.private_disk()
+    };
+
+    disk_read(disk, path).await
+}
+
+/// List files in an entity's virtual disk
+///
+/// # Arguments
+/// * `entity_handle` - Handle to the entity
+/// * `path` - Directory path to list
+/// * `recursive` - Whether to list recursively
+/// * `is_public` - Whether to list public or private disk
+///
+/// # Returns
+/// * `Result<Vec<FileEntry>>` - List of files
+pub async fn entity_disk_list(
+    entity_handle: &EntityHandle,
+    path: &str,
+    recursive: bool,
+    is_public: bool,
+) -> Result<Vec<crate::virtual_disk::FileEntry>> {
+    use crate::virtual_disk::disk_list;
+
+    let disk = if is_public {
+        entity_handle.public_disk()
+    } else {
+        entity_handle.private_disk()
+    };
+
+    disk_list(disk, path, recursive).await
+}
+
+/// Enable or disable website publishing for an entity
+///
+/// # Arguments
+/// * `entity_handle` - Handle to the entity
+/// * `enabled` - Whether to enable website publishing
+///
+/// # Returns
+/// * `Result<()>` - Success or error
+pub async fn entity_set_website(
+    _entity_handle: &EntityHandle,
+    _enabled: bool,
+) -> Result<()> {
+    // TODO: This would update the entity's settings in the registry
+    // Need to implement a proper update mechanism that modifies
+    // the entity in the registry and persists changes to DHT
+
+    // For now, just return Ok as a placeholder
+    Ok(())
+}
+
+/// Get the website URL for an entity (if enabled)
+///
+/// # Arguments
+/// * `entity_handle` - Handle to the entity
+///
+/// # Returns
+/// * `Option<String>` - The website URL if enabled
+pub fn entity_website_url(entity_handle: &EntityHandle) -> Option<String> {
+    entity_handle.website_url()
 }

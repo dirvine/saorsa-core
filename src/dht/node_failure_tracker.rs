@@ -18,8 +18,8 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::{Duration, SystemTime};
+use tokio::sync::RwLock;
 
 use crate::dht::replication_grace_period::*;
 use crate::peer_record::UserId as NodeId;
@@ -55,10 +55,14 @@ pub trait NodeFailureTracker: Send + Sync {
 #[async_trait]
 pub trait DhtClient: Send + Sync {
     /// Get the last known endpoint for a node
-    async fn get_last_endpoint(&self, node_id: &NodeId) -> Result<Option<String>, ReplicationError>;
+    async fn get_last_endpoint(&self, node_id: &NodeId)
+    -> Result<Option<String>, ReplicationError>;
 
     /// Get endpoint registration info for a node
-    async fn get_endpoint_registration(&self, node_id: &NodeId) -> Result<Option<EndpointRegistration>, ReplicationError>;
+    async fn get_endpoint_registration(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<EndpointRegistration>, ReplicationError>;
 }
 
 /// Production implementation of NodeFailureTracker
@@ -107,7 +111,10 @@ impl NodeFailureTracker for DefaultNodeFailureTracker {
         let grace_period_expires = now + config.grace_period_duration;
 
         // Try to get last known endpoint
-        let last_seen_endpoint = self.dht_client.get_last_endpoint(&node_id).await
+        let last_seen_endpoint = self
+            .dht_client
+            .get_last_endpoint(&node_id)
+            .await
             .unwrap_or(None);
 
         let failure_info = FailedNodeInfo {
@@ -155,7 +162,7 @@ impl NodeFailureTracker for DefaultNodeFailureTracker {
                         && registration.timestamp <= now
                         && now < failure_info.grace_period_expires
                 }
-                _ => false
+                _ => false,
             }
         } else {
             false
@@ -171,7 +178,8 @@ impl NodeFailureTracker for DefaultNodeFailureTracker {
         let max_retention = Duration::from_secs(3600);
         failures.retain(|_, info| {
             now.duration_since(info.failed_at)
-                .unwrap_or(Duration::from_secs(0)) < max_retention
+                .unwrap_or(Duration::from_secs(0))
+                < max_retention
         });
 
         initial_count - failures.len()
@@ -206,12 +214,20 @@ mod tests {
             }
         }
 
-        async fn register_endpoint(&self, node_id: NodeId, endpoint: String, timestamp: SystemTime) {
+        async fn register_endpoint(
+            &self,
+            node_id: NodeId,
+            endpoint: String,
+            timestamp: SystemTime,
+        ) {
             let registration = EndpointRegistration {
                 endpoint,
                 timestamp,
             };
-            self.endpoint_registrations.write().await.insert(node_id, registration);
+            self.endpoint_registrations
+                .write()
+                .await
+                .insert(node_id, registration);
         }
 
         async fn set_last_endpoint(&self, node_id: NodeId, endpoint: String) {
@@ -221,12 +237,23 @@ mod tests {
 
     #[async_trait]
     impl DhtClient for MockDhtClient {
-        async fn get_last_endpoint(&self, node_id: &NodeId) -> Result<Option<String>, ReplicationError> {
+        async fn get_last_endpoint(
+            &self,
+            node_id: &NodeId,
+        ) -> Result<Option<String>, ReplicationError> {
             Ok(self.last_endpoints.read().await.get(node_id).cloned())
         }
 
-        async fn get_endpoint_registration(&self, node_id: &NodeId) -> Result<Option<EndpointRegistration>, ReplicationError> {
-            Ok(self.endpoint_registrations.read().await.get(node_id).cloned())
+        async fn get_endpoint_registration(
+            &self,
+            node_id: &NodeId,
+        ) -> Result<Option<EndpointRegistration>, ReplicationError> {
+            Ok(self
+                .endpoint_registrations
+                .read()
+                .await
+                .get(node_id)
+                .cloned())
         }
     }
 
@@ -244,11 +271,9 @@ mod tests {
         let node_id = create_test_node_id(1);
 
         // Record a failure
-        let result = tracker.record_node_failure(
-            node_id.clone(),
-            NodeFailureReason::NetworkTimeout,
-            &config
-        ).await;
+        let result = tracker
+            .record_node_failure(node_id.clone(), NodeFailureReason::NetworkTimeout, &config)
+            .await;
 
         assert!(result.is_ok());
 
@@ -268,11 +293,10 @@ mod tests {
         let node_id = create_test_node_id(2);
 
         // Record failure
-        tracker.record_node_failure(
-            node_id.clone(),
-            NodeFailureReason::NetworkTimeout,
-            &config
-        ).await.unwrap();
+        tracker
+            .record_node_failure(node_id.clone(), NodeFailureReason::NetworkTimeout, &config)
+            .await
+            .unwrap();
 
         // Immediately after failure, should NOT start replication
         assert!(!tracker.should_start_replication(&node_id).await);
@@ -289,11 +313,9 @@ mod tests {
         let node_id = create_test_node_id(3);
 
         // Should fail with invalid config
-        let result = tracker.record_node_failure(
-            node_id,
-            NodeFailureReason::NetworkTimeout,
-            &invalid_config
-        ).await;
+        let result = tracker
+            .record_node_failure(node_id, NodeFailureReason::NetworkTimeout, &invalid_config)
+            .await;
 
         assert!(result.is_err());
     }
@@ -308,11 +330,10 @@ mod tests {
         // Add some failures
         for i in 0..3 {
             let node_id = create_test_node_id(i);
-            tracker.record_node_failure(
-                node_id,
-                NodeFailureReason::NetworkTimeout,
-                &config
-            ).await.unwrap();
+            tracker
+                .record_node_failure(node_id, NodeFailureReason::NetworkTimeout, &config)
+                .await
+                .unwrap();
         }
 
         // Initially should have 3 failures
@@ -337,18 +358,20 @@ mod tests {
         ];
 
         for node_id in &node_ids {
-            tracker.record_node_failure(
-                node_id.clone(),
-                NodeFailureReason::NetworkTimeout,
-                &config
-            ).await.unwrap();
+            tracker
+                .record_node_failure(node_id.clone(), NodeFailureReason::NetworkTimeout, &config)
+                .await
+                .unwrap();
         }
 
         let failed_nodes = tracker.get_all_failed_nodes().await;
         assert_eq!(failed_nodes.len(), 3);
 
         // Verify all node IDs are present
-        let returned_ids: Vec<_> = failed_nodes.iter().map(|info| info.node_id.clone()).collect();
+        let returned_ids: Vec<_> = failed_nodes
+            .iter()
+            .map(|info| info.node_id.clone())
+            .collect();
         for node_id in &node_ids {
             assert!(returned_ids.contains(node_id));
         }

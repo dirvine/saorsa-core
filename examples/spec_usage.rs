@@ -15,9 +15,11 @@
 
 //! Minimal example aligned with current saorsa-core API.
 use anyhow::Result;
+use saorsa_core::fwid::{Word, fw_check, fw_to_key};
+use saorsa_core::types::{
+    Device, DeviceId, Endpoint, MlDsaKeyPair, presence::DeviceType as DevType,
+};
 use saorsa_core::{get_data, identity_fetch, register_identity, register_presence, store_data};
-use saorsa_core::fwid::{fw_check, fw_to_key, compute_key, Key, Word};
-use saorsa_core::types::{presence::DeviceType as DevType, Device, DeviceId, Endpoint, MlDsaKeyPair};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -47,9 +49,12 @@ async fn quick_start_identity_presence_storage() -> Result<()> {
     // Presence (single device)
     let devices = vec![Device {
         id: DeviceId::generate(),
-        device_type: DevType::Desktop,
+        device_type: DevType::Active,
         storage_gb: 128,
-        endpoint: Endpoint { protocol: "quic".into(), address: "127.0.0.1:9000".into() },
+        endpoint: Endpoint {
+            protocol: "quic".into(),
+            address: "127.0.0.1:9000".into(),
+        },
         capabilities: Default::default(),
     }];
     let _ = register_presence(&handle, devices.clone(), devices[0].id).await?;

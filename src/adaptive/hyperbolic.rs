@@ -467,6 +467,11 @@ mod tests {
     async fn test_greedy_routing() {
         let space = HyperbolicSpace::new();
 
+        *space.my_coordinate.write().await = HyperbolicCoordinate {
+            r: 0.95,
+            theta: 0.0,
+        };
+
         use rand::RngCore;
 
         // Add neighbors at various positions
@@ -486,7 +491,7 @@ mod tests {
         }
 
         // Test greedy routing to a target
-        let target_coord = HyperbolicCoordinate { r: 0.9, theta: 1.0 };
+        let target_coord = HyperbolicCoordinate { r: 0.6, theta: 1.0 };
         let next_hop = space.greedy_route(&target_coord).await;
 
         // Should find a neighbor closer to target

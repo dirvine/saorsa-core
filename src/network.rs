@@ -1166,31 +1166,38 @@ impl P2PNode {
             ))
         })?;
 
-        // Establish a real connection via dual-stack Happy Eyeballs
-        let peer_id = {
-            match self
-                .dual_node
-                .connect_happy_eyeballs(&[_socket_addr])
-                .await
-                .map(|p| crate::transport::ant_quic_adapter::ant_peer_id_to_string(&p))
-            {
-                Ok(connected_peer_id) => {
-                    info!("Successfully connected to peer: {}", connected_peer_id);
-                    connected_peer_id
-                }
-                Err(e) => {
-                    warn!("Failed to connect to peer at {}: {}", address, e);
-
-                    // For demo purposes, try a simplified connection approach
-                    // Create a mock peer ID based on address for now
-                    let demo_peer_id =
-                        format!("peer_from_{}", address.replace("/", "_").replace(":", "_"));
-                    warn!(
-                        "Using demo peer ID: {} (transport connection failed)",
-                        demo_peer_id
-                    );
+        // Establish a real connection via dual-stack Happy Eyeballs, but cap the wait
+        let addr_list = vec![_socket_addr];
+        let peer_id = match tokio::time::timeout(
+            self.config.connection_timeout,
+            self.dual_node.connect_happy_eyeballs(&addr_list),
+        )
+        .await
+        {
+            Ok(Ok(peer)) => {
+                let connected_peer_id =
+                    crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer);
+                info!("Successfully connected to peer: {}", connected_peer_id);
+                connected_peer_id
+            }
+            Ok(Err(e)) => {
+                warn!("Failed to connect to peer at {}: {}", address, e);
+                let demo_peer_id =
+                    format!("peer_from_{}", address.replace('/', "_").replace(':', "_"));
+                warn!(
+                    "Using demo peer ID: {} (transport connection failed)",
                     demo_peer_id
-                }
+                );
+                demo_peer_id
+            }
+            Err(_) => {
+                warn!(
+                    "Timed out connecting to peer at {} after {:?}",
+                    address, self.config.connection_timeout
+                );
+                let demo_peer_id =
+                    format!("peer_from_{}", address.replace('/', "_").replace(':', "_"));
+                demo_peer_id
             }
         };
 
@@ -1279,9 +1286,14 @@ impl P2PNode {
         let _message_data = self.create_protocol_message(protocol, data)?;
 
         // Send via ant-quic dual-node
-        self.dual_node
-            .send_to_peer_string(peer_id, &_message_data)
+        let send_fut = self.dual_node.send_to_peer_string(peer_id, &_message_data);
+        tokio::time::timeout(self.config.connection_timeout, send_fut)
             .await
+            .map_err(|_| {
+                P2PError::Transport(crate::error::TransportError::StreamError(
+                    "Timed out sending message".into(),
+                ))
+            })?
             .map_err(|e| {
                 P2PError::Transport(crate::error::TransportError::StreamError(
                     e.to_string().into(),
@@ -2053,7 +2065,7 @@ mod tests {
             bootstrap_peers_str: vec![],
             enable_ipv6: true,
 
-            connection_timeout: Duration::from_secs(10),
+            connection_timeout: Duration::from_millis(300),
             keep_alive_interval: Duration::from_secs(30),
             max_connections: 100,
             max_incoming_connections: 50,
@@ -2282,7 +2294,7 @@ mod tests {
         node2.start().await?;
 
         // Wait a bit for nodes to start listening
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Get actual listening address of node2
         let node2_addr = node2.local_addr().ok_or_else(|| {
@@ -2292,16 +2304,26 @@ mod tests {
         })?;
 
         // Connect node1 to node2
-        let peer_id = node1.connect_peer(&node2_addr).await?;
+        let peer_id =
+            match timeout(Duration::from_millis(500), node1.connect_peer(&node2_addr)).await {
+                Ok(res) => res?,
+                Err(_) => return Err(P2PError::Network(NetworkError::Timeout).into()),
+            };
 
         // Wait a bit for connection to establish
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
 
         // Send a message
         let message_data = b"Hello, peer!".to_vec();
-        let result = node1
-            .send_message(&peer_id, "test-protocol", message_data)
-            .await;
+        let result = match timeout(
+            Duration::from_millis(500),
+            node1.send_message(&peer_id, "test-protocol", message_data),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(_) => return Err(P2PError::Network(NetworkError::Timeout).into()),
+        };
         // For now, we'll just check that we don't get a "not connected" error
         // The actual send might fail due to no handler on the other side
         if let Err(e) = &result {
