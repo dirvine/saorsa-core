@@ -11,7 +11,12 @@ use std::net::Ipv4Addr;
 fn valid_four_words(seed: u16) -> [String; 4] {
     use four_word_networking::FourWordEncoder;
     let encoder = FourWordEncoder::new();
-    let ip = Ipv4Addr::new(10, (seed >> 8) as u8, (seed & 0xFF) as u8, (seed % 200) as u8);
+    let ip = Ipv4Addr::new(
+        10,
+        (seed >> 8) as u8,
+        (seed & 0xFF) as u8,
+        (seed % 200) as u8,
+    );
     let port = 12000 + seed as u16;
     let encoding = encoder.encode_ipv4(ip, port).expect("encoder works");
     let w = encoding.words();

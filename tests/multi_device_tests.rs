@@ -35,7 +35,6 @@ fn valid_four_words(seed: u16) -> [String; 4] {
 }
 
 fn words_refs(words: &[String; 4]) -> [&str; 4] {
-
     [
         words[0].as_str(),
         words[1].as_str(),
