@@ -23,14 +23,6 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         rust:
           - stable
-          - nightly
-        exclude:
-          # Only test nightly on Ubuntu to save CI time
-          - os: windows-latest
-            rust: nightly
-          - os: macos-latest
-            rust: nightly
-    continue-on-error: ${{ matrix.rust == 'nightly' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -206,7 +198,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@nightly
+    - uses: dtolnay/rust-toolchain@stable
     - name: Install system dependencies
       run: |
         sudo apt-get update
