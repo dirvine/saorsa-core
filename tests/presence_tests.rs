@@ -8,11 +8,27 @@ use saorsa_core::types::{
 use saorsa_core::{
     get_presence, register_headless, register_identity, register_presence, set_active_device,
 };
+use std::net::Ipv4Addr;
+
+fn valid_four_words(seed: u16) -> [String; 4] {
+    use four_word_networking::FourWordEncoder;
+    let encoder = FourWordEncoder::new();
+    let ip = Ipv4Addr::new(10, (seed >> 8) as u8, (seed & 0xFF) as u8, (seed % 200) as u8);
+    let port = 15000 + seed as u16;
+    let encoding = encoder.encode_ipv4(ip, port).expect("encoder works");
+    let w = encoding.words();
+    [w[0].clone(), w[1].clone(), w[2].clone(), w[3].clone()]
+}
+
+fn words_refs(w: &[String; 4]) -> [&str; 4] {
+    [w[0].as_str(), w[1].as_str(), w[2].as_str(), w[3].as_str()]
+}
 
 #[tokio::test]
 async fn test_single_device_presence() -> Result<()> {
     // Test registering presence with single device
-    let words = ["welfare", "absurd", "kingdom", "ridge"];
+    let w = valid_four_words(10);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -38,7 +54,8 @@ async fn test_single_device_presence() -> Result<()> {
 #[tokio::test]
 async fn test_multi_device_presence() -> Result<()> {
     // Test registering presence with multiple devices
-    let words = ["regime", "abstract", "aaron", "ancient"];
+    let w = valid_four_words(20);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -147,7 +164,8 @@ async fn test_headless_node_registration() -> Result<()> {
 #[tokio::test]
 async fn test_active_device_switching() -> Result<()> {
     // Test switching active device
-    let words = ["welfare", "absurd", "kinshasa", "ridge"];
+    let w = valid_four_words(30);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -191,7 +209,8 @@ async fn test_active_device_switching() -> Result<()> {
 #[tokio::test]
 async fn test_device_capabilities() -> Result<()> {
     // Test device capability tracking
-    let words = ["huge", "yours", "zurich", "picture"];
+    let w = valid_four_words(40);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -263,7 +282,8 @@ async fn test_device_capabilities() -> Result<()> {
 #[tokio::test]
 async fn test_presence_signature_verification() -> Result<()> {
     // Test that presence packets are properly signed
-    let words = ["thrive", "scott", "liechtenstein", "ridge"];
+    let w = valid_four_words(50);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -294,7 +314,8 @@ async fn test_presence_signature_verification() -> Result<()> {
 #[tokio::test]
 async fn test_presence_update() -> Result<()> {
     // Test updating presence (adding/removing devices)
-    let words = ["addition", "almaty", "kite", "almaty"];
+    let w = valid_four_words(60);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -342,7 +363,8 @@ async fn test_presence_update() -> Result<()> {
 #[tokio::test]
 async fn test_presence_timestamp() -> Result<()> {
     // Test that presence includes proper timestamps
-    let words = ["bless", "abstract", "assess", "abstract"];
+    let w = valid_four_words(70);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 

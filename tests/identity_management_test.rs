@@ -8,6 +8,7 @@
 //! - Cross-system identity consistency
 
 use anyhow::Result;
+use blake3::Hasher;
 use rand::{RngCore, thread_rng};
 use saorsa_core::identity::{
     encryption::{decrypt_with_device_password, encrypt_with_device_password},
@@ -19,9 +20,15 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 /// Helper to create deterministic test identity
-fn create_test_identity(_seed: u64) -> NodeIdentity {
-    // Generate a new identity with minimal proof of work for testing
-    NodeIdentity::generate().expect("generate should succeed in tests")
+fn create_test_identity(seed: u64) -> NodeIdentity {
+    // Derive deterministic seed material from the provided seed value
+    let mut hasher = Hasher::new();
+    hasher.update(&seed.to_le_bytes());
+    let digest = hasher.finalize();
+    let mut seed_bytes = [0u8; 32];
+    seed_bytes.copy_from_slice(digest.as_bytes());
+
+    NodeIdentity::from_seed(&seed_bytes).expect("deterministic identity generation should succeed")
 }
 
 /// Helper to create random test data
@@ -560,9 +567,12 @@ async fn test_identity_performance() -> Result<()> {
     println!("  Decryption (1KB): {:.1} operations/sec", decrypt_rate);
 
     // Performance assertions (these should be reasonable for production use)
+    let min_generation_rate = if cfg!(debug_assertions) { 20.0 } else { 50.0 };
     assert!(
-        generation_rate > 50.0,
-        "Identity generation should be >50/sec"
+        generation_rate > min_generation_rate,
+        "Identity generation should exceed {:.1}/sec (observed {:.1}/sec)",
+        min_generation_rate,
+        generation_rate
     );
     assert!(addr_rate > 1000.0, "Address generation should be >1000/sec");
     assert!(signing_rate > 500.0, "Signing should be >500/sec");

@@ -89,8 +89,13 @@ jobs:
     - name: Build
       run: cargo build --verbose --all-features
 
-    - name: Run tests
-      run: cargo test --verbose --all-features
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+
+    - name: Run tests (nextest with timeouts)
+      run: cargo nextest run --all-features --profile default --no-fail-fast
 
     - name: Run doctests
       run: cargo test --doc --all-features || echo "Doctests have known issues with outdated examples - continuing"

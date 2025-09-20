@@ -39,8 +39,8 @@ pub use types::*;
 // pub use collaborative::CollaborativeSpace;
 // pub use website::WebsiteEngine;
 
-use crate::fwid::{Key, fw_to_key};
-use crate::virtual_disk::{DiskHandle, DiskType, DiskConfig, disk_create};
+use crate::fwid::fw_to_key;
+use crate::virtual_disk::{DiskConfig, DiskType, disk_create};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -50,6 +50,12 @@ use tokio::sync::RwLock;
 pub struct EntityRegistry {
     entities: Arc<RwLock<HashMap<EntityId, Arc<Entity>>>>,
     by_address: Arc<RwLock<HashMap<FourWordAddress, EntityId>>>,
+}
+
+impl Default for EntityRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EntityRegistry {
@@ -127,7 +133,8 @@ pub async fn create_entity(
             encrypted: true,
             ..Default::default()
         },
-    ).await?;
+    )
+    .await?;
 
     let public_disk = disk_create(
         entity_key.clone(),
@@ -136,7 +143,8 @@ pub async fn create_entity(
             encrypted: false, // Public website content
             ..Default::default()
         },
-    ).await?;
+    )
+    .await?;
 
     let core = EntityCore {
         id: entity_id,
@@ -154,14 +162,11 @@ pub async fn create_entity(
         },
     };
 
-    Ok(Entity {
-        core,
-        entity_type,
-    })
+    Ok(Entity { core, entity_type })
 }
 
-/// Global entity registry instance
 lazy_static::lazy_static! {
+    /// Global entity registry instance
     pub static ref ENTITY_REGISTRY: EntityRegistry = EntityRegistry::new();
 }
 
@@ -169,13 +174,19 @@ lazy_static::lazy_static! {
 mod tests {
     use super::*;
     use crate::entities::types::{EntityMetadata, EntitySettings};
+    use crate::fwid::Key;
 
     #[tokio::test]
     async fn test_entity_creation() {
         // For testing, we bypass validation since we don't know the exact dictionary
         // In production, these would need to be valid four-word-networking words
         let address = FourWordAddress {
-            words: ["eagle".to_string(), "forest".to_string(), "river".to_string(), "mountain".to_string()]
+            words: [
+                "eagle".to_string(),
+                "forest".to_string(),
+                "river".to_string(),
+                "mountain".to_string(),
+            ],
         };
         let entity_id = EntityId::from_address(&address);
 
@@ -189,7 +200,9 @@ mod tests {
                 encrypted: true,
                 ..Default::default()
             },
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let public_disk = disk_create(
             entity_key,
@@ -198,7 +211,9 @@ mod tests {
                 encrypted: false,
                 ..Default::default()
             },
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let core = EntityCore {
             id: entity_id,
@@ -231,22 +246,24 @@ mod tests {
 
         // Create test entity directly
         let address = FourWordAddress {
-            words: ["swift".to_string(), "ocean".to_string(), "cloud".to_string(), "thunder".to_string()]
+            words: [
+                "swift".to_string(),
+                "ocean".to_string(),
+                "cloud".to_string(),
+                "thunder".to_string(),
+            ],
         };
         let entity_id = EntityId::from_address(&address);
         let entity_key = Key::new([2u8; 32]); // Mock key for testing
 
-        let private_disk = disk_create(
-            entity_key.clone(),
-            DiskType::Private,
-            DiskConfig::default(),
-        ).await.unwrap();
+        let private_disk =
+            disk_create(entity_key.clone(), DiskType::Private, DiskConfig::default())
+                .await
+                .unwrap();
 
-        let public_disk = disk_create(
-            entity_key,
-            DiskType::Public,
-            DiskConfig::default(),
-        ).await.unwrap();
+        let public_disk = disk_create(entity_key, DiskType::Public, DiskConfig::default())
+            .await
+            .unwrap();
 
         let entity = Entity {
             core: EntityCore {

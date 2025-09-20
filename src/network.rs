@@ -1182,8 +1182,8 @@ impl P2PNode {
             }
             Ok(Err(e)) => {
                 warn!("Failed to connect to peer at {}: {}", address, e);
-                let demo_peer_id =
-                    format!("peer_from_{}", address.replace('/', "_").replace(':', "_"));
+                let sanitized_address = address.replace(['/', ':'], "_");
+                let demo_peer_id = format!("peer_from_{}", sanitized_address);
                 warn!(
                     "Using demo peer ID: {} (transport connection failed)",
                     demo_peer_id
@@ -1195,8 +1195,8 @@ impl P2PNode {
                     "Timed out connecting to peer at {} after {:?}",
                     address, self.config.connection_timeout
                 );
-                let demo_peer_id =
-                    format!("peer_from_{}", address.replace('/', "_").replace(':', "_"));
+                let sanitized_address = address.replace(['/', ':'], "_");
+                let demo_peer_id = format!("peer_from_{}", sanitized_address);
                 demo_peer_id
             }
         };

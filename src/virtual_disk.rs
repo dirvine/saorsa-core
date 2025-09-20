@@ -31,6 +31,7 @@ pub struct FecParams {
 }
 
 /// Store a container manifest in the DHT
+#[allow(dead_code)]
 async fn container_manifest_put(
     manifest: &ContainerManifestV1,
     _fec: &FecParams,
@@ -55,6 +56,7 @@ async fn container_manifest_put(
 }
 
 /// Fetch a container manifest from the DHT
+#[allow(dead_code)]
 async fn container_manifest_fetch(_key: &[u8]) -> Result<ContainerManifestV1> {
     // In production, this would fetch from actual DHT
     // For now, return a default manifest

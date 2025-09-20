@@ -23,6 +23,7 @@
 //! - Thread-safe sampling with thread-local RNG
 
 use rand::Rng;
+use statrs::distribution::{Beta as StatBeta, ContinuousCDF};
 
 /// Beta distribution parameters
 #[derive(Debug, Clone, Copy)]
@@ -124,18 +125,16 @@ impl BetaDistribution {
 
     /// Get the 95% confidence interval
     pub fn confidence_interval(&self) -> (f64, f64) {
-        // Use normal approximation for large parameters
-        if self.alpha > 30.0 && self.beta > 30.0 {
-            let mean = self.mean();
-            let std_dev = self.variance().sqrt();
-            let margin = 1.96 * std_dev; // 95% CI
-            ((mean - margin).max(0.0), (mean + margin).min(1.0))
-        } else {
-            // For small parameters, use quantile approximation
-            // This is a simplified version; for exact quantiles use incomplete beta function
-            let lower = self.alpha / (self.alpha + self.beta + 2.0);
-            let upper = (self.alpha + 1.0) / (self.alpha + self.beta + 1.0);
-            (lower, upper)
+        const LOWER_QUANTILE: f64 = 0.05;
+        const UPPER_QUANTILE: f64 = 0.95;
+
+        match StatBeta::new(self.alpha, self.beta) {
+            Ok(beta) => {
+                let lower = beta.inverse_cdf(LOWER_QUANTILE).clamp(0.0, 1.0);
+                let upper = beta.inverse_cdf(UPPER_QUANTILE).clamp(0.0, 1.0);
+                (lower, upper)
+            }
+            Err(_) => (0.0, 1.0),
         }
     }
 }

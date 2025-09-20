@@ -7,8 +7,7 @@
 
 use anyhow::Result;
 use saorsa_core::api::{
-    create_entity, entity_disk_write, entity_disk_read, entity_disk_list,
-    entity_website_url,
+    create_entity, entity_disk_list, entity_disk_read, entity_disk_write, entity_website_url,
 };
 use saorsa_core::entities::EntityType;
 
@@ -21,8 +20,10 @@ async fn main() -> Result<()> {
     let four_words = ["test", "demo", "entity", "example"];
 
     println!("Creating an Individual entity for Alice...");
-    println!("Four-word address: {}-{}-{}-{}",
-        four_words[0], four_words[1], four_words[2], four_words[3]);
+    println!(
+        "Four-word address: {}-{}-{}-{}",
+        four_words[0], four_words[1], four_words[2], four_words[3]
+    );
 
     // Create an individual entity
     // In production, the communitas app would validate the four-word address
@@ -32,7 +33,9 @@ async fn main() -> Result<()> {
         four_words,
         Some("Alice's personal entity for secure communication".to_string()),
         None, // Use default settings
-    ).await {
+    )
+    .await
+    {
         Ok(handle) => {
             println!("✓ Entity created successfully!");
             println!("  Entity ID: {:?}", handle.id);
@@ -45,7 +48,8 @@ async fn main() -> Result<()> {
 
             // Write to public disk (for website)
             println!("\nWriting to Alice's public virtual disk (website)...");
-            let public_content = b"# Welcome to Alice's Website\n\nThis is published via four-word address.";
+            let public_content =
+                b"# Welcome to Alice's Website\n\nThis is published via four-word address.";
             entity_disk_write(&handle, "/index.md", public_content.to_vec(), true).await?;
             println!("✓ Written to public disk: /index.md");
 

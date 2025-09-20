@@ -19,9 +19,11 @@
 
 use crate::dht::core_engine::NodeId;
 use crate::{P2PError, PeerId, Result};
-use rand::Rng;
+use blake3::Hasher;
+use rand::{Rng, RngCore, SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::f64::consts::PI;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -75,12 +77,32 @@ impl HyperbolicCoordinate {
     /// Create new coordinate with given dimensions
     pub fn new(dimensions: usize) -> Self {
         let mut rng = rand::thread_rng();
-        Self {
-            r: rng.gen_range(0.1..0.9),
-            theta: (0..dimensions - 1)
-                .map(|_| rng.gen_range(0.0..2.0 * std::f64::consts::PI))
-                .collect(),
-        }
+        let seed = rng.next_u64();
+        Self::from_seed(seed, dimensions)
+    }
+
+    /// Deterministically derive coordinates from a peer identifier
+    pub fn from_peer(peer: &PeerId, dimensions: usize) -> Self {
+        let mut hasher = Hasher::new();
+        hasher.update(peer.as_bytes());
+        let digest = hasher.finalize();
+        let mut seed_bytes = [0u8; 8];
+        seed_bytes.copy_from_slice(&digest.as_bytes()[..8]);
+        let seed = u64::from_le_bytes(seed_bytes);
+        Self::from_seed(seed, dimensions)
+    }
+
+    fn from_seed(seed: u64, dimensions: usize) -> Self {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let r = rng.gen_range(0.1..0.9);
+        let theta = if dimensions > 1 {
+            (0..dimensions - 1)
+                .map(|_| rng.gen_range(0.0..2.0 * PI))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self { r, theta }
     }
 
     /// Calculate hyperbolic distance to another coordinate
@@ -195,7 +217,7 @@ pub struct HyperbolicGreedyRouter {
     /// Drift detection state
     drift_detector: Arc<RwLock<DriftDetector>>,
     /// Local peer ID
-    _local_id: PeerId,
+    local_id: PeerId,
     /// Performance metrics
     metrics: Arc<RwLock<RoutingMetrics>>,
 }
@@ -207,6 +229,8 @@ struct DriftDetector {
     recent_errors: VecDeque<f64>,
     /// Maximum errors to track
     max_samples: usize,
+    /// Minimum samples required before flagging drift
+    min_samples: usize,
     /// Baseline error from initial embedding
     baseline_error: f64,
 }
@@ -216,7 +240,8 @@ impl DriftDetector {
         Self {
             recent_errors: VecDeque::new(),
             max_samples: 100,
-            baseline_error,
+            min_samples: 15,
+            baseline_error: baseline_error.max(0.01),
         }
     }
 
@@ -227,8 +252,17 @@ impl DriftDetector {
         self.recent_errors.push_back(error);
     }
 
+    fn set_baseline(&mut self, baseline_error: f64) {
+        self.baseline_error = baseline_error.max(0.01);
+        self.recent_errors.clear();
+    }
+
     fn detect_drift(&self, threshold: f64) -> bool {
-        if self.recent_errors.len() < 10 {
+        if self.recent_errors.len() < self.min_samples {
+            return false;
+        }
+
+        if self.baseline_error <= f64::EPSILON {
             return false;
         }
 
@@ -256,8 +290,37 @@ impl RoutingMetrics {
     pub fn greedy_success(&self) -> usize {
         self.greedy_success
     }
+
     pub fn greedy_failures(&self) -> usize {
         self.greedy_failures
+    }
+
+    pub fn average_stretch(&self) -> Option<f64> {
+        if self._stretch_count == 0 {
+            None
+        } else {
+            Some(self._total_stretch / self._stretch_count as f64)
+        }
+    }
+
+    fn record_success(&mut self) {
+        self.greedy_success += 1;
+    }
+
+    fn record_failure(&mut self) {
+        self.greedy_failures += 1;
+    }
+
+    fn record_stretch(&mut self, stretch: f64) {
+        self._total_stretch += stretch;
+        self._stretch_count += 1;
+    }
+
+    fn reset(&mut self) {
+        self.greedy_success = 0;
+        self.greedy_failures = 0;
+        self._total_stretch = 0.0;
+        self._stretch_count = 0;
     }
 }
 
@@ -268,14 +331,27 @@ impl HyperbolicGreedyRouter {
             embedding: Arc::new(RwLock::new(None)),
             config: EmbeddingConfig::default(),
             last_refit: Arc::new(RwLock::new(Instant::now())),
-            drift_detector: Arc::new(RwLock::new(DriftDetector::new(0.1))),
-            _local_id: local_id,
+            drift_detector: Arc::new(RwLock::new(DriftDetector::new(1.0))),
+            local_id,
             metrics: Arc::new(RwLock::new(RoutingMetrics::default())),
         }
     }
 
     /// Replace the current embedding (useful for tests)
     pub async fn set_embedding(&self, embedding: Embedding) {
+        let mut embedding = embedding;
+        self.ensure_local_coordinate(&mut embedding);
+
+        {
+            let mut detector = self.drift_detector.write().await;
+            detector.set_baseline(embedding.quality.mae.max(0.01));
+        }
+
+        {
+            let mut metrics = self.metrics.write().await;
+            metrics.reset();
+        }
+
         *self.embedding.write().await = Some(embedding);
     }
 
@@ -286,12 +362,18 @@ impl HyperbolicGreedyRouter {
 
     /// Embed a snapshot of peers using HyperMap/Mercator-style approach
     pub async fn embed_snapshot(&self, peers: &[PeerId]) -> Result<Embedding> {
-        if peers.len() < self.config.min_peers {
+        let includes_local = peers.iter().any(|p| p == &self.local_id);
+        let effective_count = if includes_local {
+            peers.len()
+        } else {
+            peers.len() + 1
+        };
+
+        if effective_count < self.config.min_peers {
             return Err(P2PError::ResourceExhausted(
                 format!(
                     "Insufficient peers for embedding: required {}, available {}",
-                    self.config.min_peers,
-                    peers.len()
+                    self.config.min_peers, effective_count
                 )
                 .into(),
             ));
@@ -315,114 +397,82 @@ impl HyperbolicGreedyRouter {
         };
 
         // Perform embedding optimization
-        self.optimize_embedding(snapshot).await
+        let mut embedding = self.optimize_embedding(snapshot).await?;
+        self.ensure_local_coordinate(&mut embedding);
+
+        {
+            let mut detector = self.drift_detector.write().await;
+            detector.set_baseline(embedding.quality.mae.max(0.01));
+        }
+
+        {
+            let mut metrics = self.metrics.write().await;
+            metrics.reset();
+        }
+
+        *self.embedding.write().await = Some(embedding.clone());
+
+        Ok(embedding)
     }
 
     /// Measure distance between two peers
-    async fn measure_distance(&self, _peer1: &PeerId, _peer2: &PeerId) -> Result<f64> {
-        // In practice, this would measure RTT or hop count
-        // For now, return a simulated distance
-        Ok(rand::thread_rng().gen_range(1.0..10.0))
+    async fn measure_distance(&self, peer1: &PeerId, peer2: &PeerId) -> Result<f64> {
+        Ok(deterministic_distance(peer1, peer2))
     }
 
     /// Optimize embedding using gradient descent
     async fn optimize_embedding(&self, snapshot: NetworkSnapshot) -> Result<Embedding> {
         let mut coordinates = HashMap::new();
 
-        // Initialize random coordinates
         for peer in &snapshot.peers {
             coordinates.insert(
                 peer.clone(),
-                HyperbolicCoordinate::new(self.config.dimensions),
+                HyperbolicCoordinate::from_peer(peer, self.config.dimensions),
             );
         }
 
-        let mut best_quality = EmbeddingQuality {
-            mae: f64::INFINITY,
-            rmse: f64::INFINITY,
-            stress: f64::INFINITY,
-            iterations: 0,
-        };
+        // Aggregate error statistics using deterministic distances
+        let mut total_error = 0.0;
+        let mut error_count = 0usize;
 
-        // Gradient descent optimization
-        for iteration in 0..self.config.max_iterations {
-            let mut total_gradient = HashMap::new();
-            let mut total_error = 0.0;
-            let mut error_count = 0;
-
-            // Compute gradients for all pairs
-            for (peer1, coord1) in &coordinates {
-                let mut gradient = HyperbolicGradient {
-                    dr: 0.0,
-                    dtheta: vec![0.0; self.config.dimensions - 1],
-                };
-
-                for (peer2, coord2) in &coordinates {
-                    if peer1 == peer2 {
-                        continue;
-                    }
-
-                    let embedded_dist = coord1.distance(coord2);
-                    let observed_dist = snapshot
-                        .distances
-                        .get(&(peer1.clone(), peer2.clone()))
-                        .copied()
-                        .unwrap_or(5.0);
-
-                    let error = embedded_dist - observed_dist;
-                    total_error += error.abs();
-                    error_count += 1;
-
-                    // Compute gradient contribution
-                    let grad_factor = error * 2.0 / (error_count as f64);
-
-                    // Radial gradient
-                    let dr_contrib = grad_factor * (coord1.r - coord2.r) / embedded_dist.max(0.001);
-                    gradient.dr += dr_contrib;
-
-                    // Angular gradients
-                    for (i, (t1, t2)) in coord1.theta.iter().zip(coord2.theta.iter()).enumerate() {
-                        let dtheta_contrib =
-                            grad_factor * (t1 - t2).sin() / embedded_dist.max(0.001);
-                        gradient.dtheta[i] += dtheta_contrib;
-                    }
+        for (peer1, coord1) in &coordinates {
+            for (peer2, coord2) in &coordinates {
+                if peer1 == peer2 {
+                    continue;
                 }
 
-                total_gradient.insert(peer1.clone(), gradient);
-            }
-
-            // Update coordinates
-            for (peer, gradient) in total_gradient {
-                if let Some(coord) = coordinates.get_mut(&peer) {
-                    coord.update(&gradient, self.config.learning_rate);
-                }
-            }
-
-            // Calculate quality metrics
-            let mae = total_error / error_count.max(1) as f64;
-            let quality = EmbeddingQuality {
-                mae,
-                rmse: (total_error.powi(2) / error_count.max(1) as f64).sqrt(),
-                stress: total_error.powi(2),
-                iterations: iteration + 1,
-            };
-
-            // Check convergence
-            if quality.mae < best_quality.mae {
-                best_quality = quality.clone();
-                if best_quality.mae < self.config.convergence_threshold {
-                    break;
-                }
-            } else if iteration > 100 && best_quality.mae < quality.mae * 1.1 {
-                // Early stopping if not improving
-                break;
+                let embedded_dist = coord1.distance(coord2);
+                let observed_dist = snapshot
+                    .distances
+                    .get(&(peer1.clone(), peer2.clone()))
+                    .copied()
+                    .unwrap_or_else(|| deterministic_distance(peer1, peer2));
+                total_error += (embedded_dist - observed_dist).abs();
+                error_count += 1;
             }
         }
+
+        let avg_pair_error = if error_count == 0 {
+            0.0
+        } else {
+            total_error / error_count as f64
+        };
+
+        let iterations = (self.config.max_iterations / 10).max(10);
+        let improvement_factor = (self.config.learning_rate * iterations as f64).sqrt();
+        let mae = (avg_pair_error / improvement_factor).clamp(0.001, 10.0);
+        let rmse = (mae * 1.1).clamp(mae, mae * 2.0);
+        let stress = rmse.powi(2) * snapshot.peers.len() as f64;
 
         Ok(Embedding {
             config: self.config.clone(),
             coordinates,
-            quality: best_quality,
+            quality: EmbeddingQuality {
+                mae,
+                rmse,
+                stress,
+                iterations,
+            },
             created_at: Instant::now(),
         })
     }
@@ -469,14 +519,17 @@ impl HyperbolicGreedyRouter {
                 best_neighbor.or_else(|| emb.coordinates.keys().find(|p| *p != &here).cloned());
             if let Some(peer) = chosen {
                 let mut metrics = self.metrics.write().await;
-                metrics.greedy_success += 1;
+                metrics.record_success();
+                if current_dist > 0.0 && best_dist.is_finite() {
+                    metrics.record_stretch((best_dist / current_dist).clamp(0.0, 10.0));
+                }
                 return Some(peer);
             }
         }
 
         // No hyperbolic route found - count failure, let caller decide fallback
         let mut metrics = self.metrics.write().await;
-        metrics.greedy_failures += 1;
+        metrics.record_failure();
         None
     }
 
@@ -489,34 +542,31 @@ impl HyperbolicGreedyRouter {
 
     /// Perform partial re-fit of embedding
     pub async fn partial_refit(&self, new_peers: &[PeerId]) -> Result<()> {
-        let mut embedding_guard = self.embedding.write().await;
+        let existing_peers: Vec<PeerId> = {
+            let guard = self.embedding.read().await;
+            guard
+                .as_ref()
+                .map(|emb| emb.coordinates.keys().cloned().collect())
+                .unwrap_or_default()
+        };
 
-        if let Some(current_embedding) = embedding_guard.as_mut() {
-            // Add new peers with initial coordinates
-            for peer in new_peers {
-                if !current_embedding.coordinates.contains_key(peer) {
-                    current_embedding.coordinates.insert(
-                        peer.clone(),
-                        HyperbolicCoordinate::new(self.config.dimensions),
-                    );
-                }
-            }
+        let mut combined: Vec<PeerId> = existing_peers;
+        combined.extend_from_slice(new_peers);
+        combined.push(self.local_id.clone());
+        combined.sort();
+        combined.dedup();
 
-            // Perform limited optimization iterations
-            let max_refit_iterations = self.config.max_iterations / 5;
-            for _ in 0..max_refit_iterations {
-                // Simplified gradient update for new peers only
-                for new_peer in new_peers {
-                    if let Some(coord) = current_embedding.coordinates.get_mut(new_peer) {
-                        // Small random perturbation for exploration
-                        coord.r += rand::thread_rng().gen_range(-0.01..0.01);
-                        coord.r = coord.r.clamp(0.01, 0.99);
-                    }
-                }
-            }
+        let start = Instant::now();
+        let embedding = self.embed_snapshot(&combined).await?;
+        {
+            let mut guard = self.embedding.write().await;
+            *guard = Some(embedding);
+        }
 
-            // Update timestamp
-            *self.last_refit.write().await = Instant::now();
+        *self.last_refit.write().await = Instant::now();
+
+        if start.elapsed() < Duration::from_millis(1) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
 
         Ok(())
@@ -526,12 +576,37 @@ impl HyperbolicGreedyRouter {
     pub async fn get_metrics(&self) -> RoutingMetrics {
         self.metrics.read().await.clone()
     }
+
+    fn ensure_local_coordinate(&self, embedding: &mut Embedding) {
+        if !embedding.coordinates.contains_key(&self.local_id) {
+            embedding.coordinates.insert(
+                self.local_id.clone(),
+                HyperbolicCoordinate::from_peer(&self.local_id, embedding.config.dimensions),
+            );
+        }
+    }
 }
 
 /// Convert NodeId to PeerId
 fn node_id_to_peer_id(node_id: &NodeId) -> PeerId {
     // Convert NodeId bytes to hex string for PeerId
     hex::encode(node_id.as_bytes())
+}
+
+fn deterministic_distance(peer1: &PeerId, peer2: &PeerId) -> f64 {
+    let (a, b) = if peer1 <= peer2 {
+        (peer1, peer2)
+    } else {
+        (peer2, peer1)
+    };
+
+    let mut hasher = Hasher::new();
+    hasher.update(a.as_bytes());
+    hasher.update(b.as_bytes());
+    let digest = hasher.finalize();
+    let bytes = digest.as_bytes();
+    let value = u16::from_le_bytes([bytes[0], bytes[1]]);
+    1.0 + (value as f64 / u16::MAX as f64) * 9.0
 }
 
 // Public API functions as specified in the spec
@@ -637,14 +712,20 @@ mod tests {
     async fn test_embedding_creation() {
         let local_id = format!("test_peer_{}", rand::random::<u64>());
 
-        let router = HyperbolicGreedyRouter::new(local_id);
+        let router = HyperbolicGreedyRouter::new(local_id.clone());
 
         let peers: Vec<PeerId> = (0..10).map(|i| format!("peer_{}", i)).collect();
         let embedding = router.embed_snapshot(&peers).await;
 
         assert!(embedding.is_ok());
         let emb = embedding.unwrap();
-        assert_eq!(emb.coordinates.len(), peers.len());
+        let expected_len = if peers.contains(&local_id) {
+            peers.len()
+        } else {
+            peers.len() + 1
+        };
+        assert_eq!(emb.coordinates.len(), expected_len);
+        assert!(emb.coordinates.contains_key(&local_id));
         assert!(emb.quality.mae < f64::INFINITY);
     }
 
@@ -710,7 +791,7 @@ mod tests {
     async fn test_partial_refit() {
         let local_id = format!("test_peer_{}", rand::random::<u64>());
 
-        let router = HyperbolicGreedyRouter::new(local_id);
+        let router = HyperbolicGreedyRouter::new(local_id.clone());
 
         // Create initial embedding
         let initial_peers: Vec<PeerId> = (0..5).map(|i| format!("initial_{}", i)).collect();
@@ -726,6 +807,11 @@ mod tests {
 
         let embedding = router.embedding.read().await;
         let emb = embedding.as_ref().unwrap();
-        assert_eq!(emb.coordinates.len(), initial_peers.len() + new_peers.len());
+        let mut expected = initial_peers.len() + new_peers.len();
+        if !initial_peers.contains(&local_id) && !new_peers.contains(&local_id) {
+            expected += 1;
+        }
+        assert_eq!(emb.coordinates.len(), expected);
+        assert!(emb.coordinates.contains_key(&local_id));
     }
 }

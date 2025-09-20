@@ -1,0 +1,63 @@
+name: CI Quick (Linux + nextest)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  quick-linux:
+    name: Quick Suite (Ubuntu, stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Format (check)
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (strict)
+        run: cargo clippy --all-features -- -D clippy::panic -D clippy::unwrap_used -D clippy::expect_used
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Tests (unit + integration)
+        run: cargo nextest run --all-features --profile default --no-fail-fast
+
+      - name: Identity subset (explicit)
+        run: cargo nextest run --all-features --profile default -E 'test(binary("identity_management_test") or binary("identity_tests"))'
+
+      - name: Multi-device subset (explicit)
+        run: cargo nextest run --all-features --profile default -E 'test(binary("multi_device_tests"))'
+

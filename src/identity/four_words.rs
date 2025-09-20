@@ -32,15 +32,27 @@ impl FourWordAddress {
     }
 
     pub fn parse_str(s: &str) -> Result<Self> {
-        // Accept hyphen or space separated four words
-        let canonical = s.replace('-', " ");
-        // Basic validation: Four words required
-        let parts: Vec<&str> = canonical.split_whitespace().collect();
-        if parts.len() != 4 {
+        let parts: Vec<&str> = if s.contains('-') {
+            s.split('-').collect()
+        } else {
+            s.split_whitespace().collect()
+        };
+
+        if parts.len() != 4 || parts.iter().any(|segment| segment.is_empty()) {
             return Err(P2PError::Identity(IdentityError::InvalidFourWordAddress(
                 format!("Expected 4 words, got {}", parts.len()).into(),
             )));
         }
+
+        if parts
+            .iter()
+            .any(|segment| !segment.chars().all(|c| c.is_ascii_lowercase()))
+        {
+            return Err(P2PError::Identity(IdentityError::InvalidFourWordAddress(
+                "Words must contain only lowercase ASCII letters".into(),
+            )));
+        }
+
         Ok(Self(parts.join("-")))
     }
 

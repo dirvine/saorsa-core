@@ -3,10 +3,11 @@
 // Entity type definitions for the unified entity system
 
 use crate::fwid::{Key, fw_to_key};
-use crate::virtual_disk::DiskHandle;
 use crate::identity::enhanced::Permission;
+use crate::virtual_disk::DiskHandle;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::sync::Arc;
 use std::time::SystemTime;
 use uuid::Uuid;
@@ -68,7 +69,7 @@ impl FourWordAddress {
 
     /// Convert to URL format
     pub fn to_url(&self) -> String {
-        format!("https://{}.saorsa", self.words.join("-"))
+        format!("https://{}.saorsa", self.hyphenated())
     }
 
     /// Convert to DHT key for resolution
@@ -77,8 +78,14 @@ impl FourWordAddress {
     }
 
     /// Format as hyphenated string
-    pub fn to_string(&self) -> String {
+    pub fn hyphenated(&self) -> String {
         self.words.join("-")
+    }
+}
+
+impl fmt::Display for FourWordAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.hyphenated())
     }
 }
 

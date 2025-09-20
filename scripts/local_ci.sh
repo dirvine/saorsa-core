@@ -230,8 +230,12 @@ main() {
     # Store current directory
     PROJECT_ROOT=$(pwd)
     
-    # 1. Format Check
-    run_step "Format Check" "cargo fmt --all -- --check" true
+    # 1. Format (apply or check)
+    if [[ "${AUTO_FMT:-0}" == "1" ]]; then
+        run_step "Format (apply)" "cargo fmt --all" false
+    else
+        run_step "Format Check" "cargo fmt --all -- --check" true
+    fi
     
     # 2. Clippy Linting (Strict)
     run_step "Clippy (Strict)" "cargo clippy --all-features -- -D clippy::panic -D clippy::unwrap_used -D clippy::expect_used -W clippy::pedantic" false
@@ -242,13 +246,10 @@ main() {
     # 4. Build Release
     run_step "Build (Release)" "cargo build --release --all-features" true
     
-    # 5. Run Tests
-    run_step "Unit Tests" "cargo test --lib --all-features" false
+    # 5. Tests (nextest if present, else chunked fallback)
+    run_step "Tests (timeouts enforced)" "scripts/ci_nextest.sh" false
     
-    # 6. Run Integration Tests
-    run_step "Integration Tests" "cargo test --tests --all-features" false
-    
-    # 7. Run Doc Tests
+    # 6. Run Doc Tests
     run_step "Doc Tests" "cargo test --doc --all-features" true
     
     # 8. Check for compilation warnings

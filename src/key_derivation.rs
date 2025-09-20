@@ -482,6 +482,11 @@ impl HierarchicalKeyDerivation {
             ))
         })?;
 
+        crate::quantum_crypto::ant_quic_integration::register_debug_ml_dsa_keypair(
+            &secret_key,
+            &public_key,
+        );
+
         // Zeroize temporary key material
         current_key.zeroize();
         current_chaincode.zeroize();

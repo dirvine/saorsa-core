@@ -171,8 +171,9 @@ impl EigenTrustEngine {
         // Use 2 seconds to allow proper convergence in tests
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            self.compute_global_trust_internal()
-        ).await;
+            self.compute_global_trust_internal(),
+        )
+        .await;
 
         match result {
             Ok(trust_map) => trust_map,
@@ -219,15 +220,22 @@ impl EigenTrustEngine {
 
         // Build normalized adjacency list
         for ((from, to), data) in local_trust.iter() {
-            if let Some(sum) = outgoing_sums.get(from) {
-                if *sum > 0.0 && data.value > 0.0 {
-                    let normalized_value = data.value / sum;
-                    incoming_edges
-                        .entry(to.clone())
-                        .or_insert_with(Vec::new)
-                        .push((from.clone(), normalized_value));
-                }
+            if data.value <= 0.0 {
+                continue;
             }
+
+            let Some(sum) = outgoing_sums.get(from) else {
+                continue;
+            };
+            if *sum <= 0.0 {
+                continue;
+            }
+
+            let normalized_value = data.value / sum;
+            incoming_edges
+                .entry(to.clone())
+                .or_default()
+                .push((from.clone(), normalized_value));
         }
 
         // Initialize trust vector uniformly
@@ -380,7 +388,6 @@ impl EigenTrustEngine {
             + 0.1 * compute_factor
     }
 
-
     /// Add a pre-trusted node
     pub async fn add_pre_trusted(&self, node_id: NodeId) {
         let mut pre_trusted = self.pre_trusted_nodes.write().await;
@@ -409,10 +416,10 @@ impl TrustProvider for EigenTrustEngine {
         // Use cached value for synchronous access
         // The cache is updated by background task
         if let Ok(cache) = self.trust_cache.try_read() {
-            cache.get(node).copied().unwrap_or(0.0)  // Return 0.0 for unknown/removed nodes
+            cache.get(node).copied().unwrap_or(0.0) // Return 0.0 for unknown/removed nodes
         } else {
             // If we can't get the lock, return default trust
-            0.0  // Return 0.0 for unknown/removed nodes
+            0.0 // Return 0.0 for unknown/removed nodes
         }
     }
 
@@ -567,7 +574,7 @@ impl TrustProvider for MockTrustProvider {
             .blocking_read()
             .get(node)
             .copied()
-            .unwrap_or(0.0)  // Return 0.0 for unknown/removed nodes
+            .unwrap_or(0.0) // Return 0.0 for unknown/removed nodes
     }
 
     fn update_trust(&self, _from: &NodeId, to: &NodeId, success: bool) {
@@ -657,8 +664,10 @@ mod tests {
         // This is verified through the global trust computation
         let global_trust = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            engine.compute_global_trust()
-        ).await.unwrap_or_else(|_| HashMap::new());
+            engine.compute_global_trust(),
+        )
+        .await
+        .unwrap_or_else(|_| HashMap::new());
 
         let trust2 = global_trust.get(&node2).copied().unwrap_or(0.0);
         let trust3 = global_trust.get(&node3).copied().unwrap_or(0.0);

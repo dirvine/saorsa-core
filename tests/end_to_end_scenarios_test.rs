@@ -37,8 +37,12 @@ struct TestUser {
 }
 
 impl TestUser {
-    async fn new(username: String, _port: u16) -> Result<Self> {
-        let config = NodeConfig::default();
+    async fn new(username: String, port: u16) -> Result<Self> {
+        let listen_addr = format!("127.0.0.1:{}", port);
+        let mut config = NodeConfig::with_listen_addr(&listen_addr)?;
+        config.bootstrap_peers.clear();
+        config.bootstrap_peers_str.clear();
+
         let peer_id = format!("test_user_{}", username);
         let node = P2PNode::new(config).await?;
 

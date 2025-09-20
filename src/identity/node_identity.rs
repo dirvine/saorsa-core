@@ -138,6 +138,11 @@ impl NodeIdentity {
 
         let node_id = NodeId::from_public_key(&public_key);
 
+        crate::quantum_crypto::ant_quic_integration::register_debug_ml_dsa_keypair(
+            &secret_key,
+            &public_key,
+        );
+
         Ok(Self {
             secret_key,
             public_key,
@@ -184,6 +189,11 @@ impl NodeIdentity {
                 })?;
 
         let node_id = NodeId::from_public_key(&public_key);
+
+        crate::quantum_crypto::ant_quic_integration::register_debug_ml_dsa_keypair(
+            &secret_key,
+            &public_key,
+        );
 
         Ok(Self {
             secret_key,
@@ -331,6 +341,12 @@ impl NodeIdentity {
         })?;
 
         let node_id = NodeId::from_public_key(&public_key);
+
+        crate::quantum_crypto::ant_quic_integration::register_debug_ml_dsa_keypair(
+            &secret_key,
+            &public_key,
+        );
+
         Ok(Self {
             secret_key,
             public_key,

@@ -6,11 +6,27 @@ use saorsa_core::types::{Device, DeviceId, DeviceType, Endpoint, MlDsaKeyPair, S
 use saorsa_core::{
     get_data, register_identity, register_presence, store_data, store_dyad, store_with_fec,
 };
+use std::net::Ipv4Addr;
+
+fn valid_four_words(seed: u16) -> [String; 4] {
+    use four_word_networking::FourWordEncoder;
+    let encoder = FourWordEncoder::new();
+    let ip = Ipv4Addr::new(10, (seed >> 8) as u8, (seed & 0xFF) as u8, (seed % 200) as u8);
+    let port = 12000 + seed as u16;
+    let encoding = encoder.encode_ipv4(ip, port).expect("encoder works");
+    let w = encoding.words();
+    [w[0].clone(), w[1].clone(), w[2].clone(), w[3].clone()]
+}
+
+fn words_refs(w: &[String; 4]) -> [&str; 4] {
+    [w[0].as_str(), w[1].as_str(), w[2].as_str(), w[3].as_str()]
+}
 
 #[tokio::test]
 async fn test_store_and_retrieve_single_user() -> Result<()> {
     // Test basic store/retrieve for single user (no FEC)
-    let words = ["welfare", "absurd", "king", "ridge"];
+    let w = valid_four_words(1);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -45,8 +61,10 @@ async fn test_store_and_retrieve_single_user() -> Result<()> {
 #[tokio::test]
 async fn test_store_dyad_optimization() -> Result<()> {
     // Test optimized storage for 2-person groups (no FEC, just replication)
-    let words1 = ["huge", "yours", "zurich", "picture"];
-    let words2 = ["thrive", "scott", "liechtenstein", "ridge"];
+    let w1 = valid_four_words(2);
+    let w2 = valid_four_words(3);
+    let words1 = words_refs(&w1);
+    let words2 = words_refs(&w2);
     let keypair1 = MlDsaKeyPair::generate()?;
     let keypair2 = MlDsaKeyPair::generate()?;
 
@@ -101,7 +119,8 @@ async fn test_store_dyad_optimization() -> Result<()> {
 #[tokio::test]
 async fn test_store_with_fec_small_group() -> Result<()> {
     // Test FEC storage for small group (3-5 members)
-    let words = ["regime", "abstract", "a", "ancient"];
+    let w = valid_four_words(4);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -156,7 +175,8 @@ async fn test_store_with_fec_small_group() -> Result<()> {
 #[tokio::test]
 async fn test_store_with_custom_fec_params() -> Result<()> {
     // Test custom FEC parameters
-    let words = ["component", "abuja", "a", "kenneth"];
+    let w = valid_four_words(5);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -208,7 +228,8 @@ async fn test_store_with_custom_fec_params() -> Result<()> {
 #[tokio::test]
 async fn test_fec_recovery_with_missing_shards() -> Result<()> {
     // Test that data can be recovered even with missing shards
-    let words = ["court", "absurd", "a", "picture"];
+    let w = valid_four_words(6);
+    let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 

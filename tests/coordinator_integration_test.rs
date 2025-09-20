@@ -117,9 +117,9 @@ async fn test_message_routing() {
         timestamp: 0,
     };
 
-    // Route message (should fail without network)
+    // Route message (should succeed with local handler even without full network)
     let result = coordinator.route_message(message).await;
-    assert!(result.is_err());
+    assert!(result.is_ok());
 }
 
 #[tokio::test]

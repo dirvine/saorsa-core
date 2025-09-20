@@ -214,6 +214,7 @@ mod tests {
             }
         }
 
+        #[allow(dead_code)]
         async fn register_endpoint(
             &self,
             node_id: NodeId,
@@ -230,6 +231,7 @@ mod tests {
                 .insert(node_id, registration);
         }
 
+        #[allow(dead_code)]
         async fn set_last_endpoint(&self, node_id: NodeId, endpoint: String) {
             self.last_endpoints.write().await.insert(node_id, endpoint);
         }

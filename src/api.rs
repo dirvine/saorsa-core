@@ -727,9 +727,8 @@ async fn store_replicated(
 // =============================================================================
 
 use crate::entities::{
-    create_entity as internal_create_entity, Entity, EntityHandle, EntityId, EntityInfo,
-    EntityType, FourWordAddress, EntitySettings,
-    ENTITY_REGISTRY,
+    ENTITY_REGISTRY, Entity, EntityHandle, EntityId, EntityInfo, EntitySettings, EntityType,
+    FourWordAddress, create_entity as internal_create_entity,
 };
 
 /// Create a new entity (Individual, Group, Channel, Project, Organization)
@@ -845,7 +844,7 @@ pub async fn entity_disk_write(
     content: Vec<u8>,
     is_public: bool,
 ) -> Result<()> {
-    use crate::virtual_disk::{disk_write, FileMetadata};
+    use crate::virtual_disk::{FileMetadata, disk_write};
 
     let disk = if is_public {
         entity_handle.public_disk()
@@ -923,10 +922,7 @@ pub async fn entity_disk_list(
 ///
 /// # Returns
 /// * `Result<()>` - Success or error
-pub async fn entity_set_website(
-    _entity_handle: &EntityHandle,
-    _enabled: bool,
-) -> Result<()> {
+pub async fn entity_set_website(_entity_handle: &EntityHandle, _enabled: bool) -> Result<()> {
     // TODO: This would update the entity's settings in the registry
     // Need to implement a proper update mechanism that modifies
     // the entity in the registry and persists changes to DHT

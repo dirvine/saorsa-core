@@ -2,8 +2,8 @@
 
 #[cfg(test)]
 mod tests {
-    use saorsa_core::adaptive::trust::*;
     use saorsa_core::adaptive::NodeId;
+    use saorsa_core::adaptive::trust::*;
     use std::collections::HashSet;
 
     #[tokio::test]
@@ -22,8 +22,9 @@ mod tests {
         // Compute global trust with timeout
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            engine.compute_global_trust()
-        ).await;
+            engine.compute_global_trust(),
+        )
+        .await;
 
         match result {
             Ok(trust_map) => {

@@ -104,7 +104,8 @@ impl NetworkAddress {
     /// Decode four-word format to NetworkAddress using four-word-networking
     pub fn from_four_words(words: &str) -> Result<Self> {
         let enc = FourWordAdaptiveEncoder::new()?;
-        let decoded = enc.decode(words)?; // returns a normalized address string
+        let normalized = words.replace('-', " ");
+        let decoded = enc.decode(&normalized)?; // returns a normalized address string
         let socket_addr: SocketAddr = decoded.parse()?; // must include port
         Ok(Self::new(socket_addr))
     }

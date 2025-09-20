@@ -736,10 +736,8 @@ mod benchmark_tests {
 
             // Benchmark computation with timeout
             let start = Instant::now();
-            let _ = tokio::time::timeout(
-                Duration::from_secs(10),
-                engine.compute_global_trust()
-            ).await;
+            let _ =
+                tokio::time::timeout(Duration::from_secs(10), engine.compute_global_trust()).await;
             let duration = start.elapsed();
 
             let ms = duration.as_secs_f64() * 1000.0;

@@ -165,10 +165,12 @@ pub struct MABMetrics {
 impl MultiArmedBandit {
     /// Create a new Multi-Armed Bandit instance
     pub async fn new(config: MABConfig) -> Result<Self> {
+        let initial_persist = Instant::now() - config.persist_interval;
+
         let mut mab = Self {
             config,
             statistics: Arc::new(RwLock::new(HashMap::new())),
-            last_persist: Arc::new(RwLock::new(Instant::now())),
+            last_persist: Arc::new(RwLock::new(initial_persist)),
             metrics: Arc::new(RwLock::new(MABMetrics::default())),
         };
 
@@ -338,6 +340,10 @@ impl MultiArmedBandit {
             let statistics_clone = statistics.clone();
             let metrics_clone = metrics.clone();
             let path_clone = path.clone();
+            let stats_arc = Arc::clone(&self.statistics);
+            let metrics_arc = Arc::clone(&self.metrics);
+            let path_deferred = path.clone();
+            let interval = self.config.persist_interval;
 
             // Persist asynchronously
             tokio::spawn(async move {
@@ -346,6 +352,18 @@ impl MultiArmedBandit {
                         .await
                 {
                     tracing::error!("Failed to persist MAB statistics: {}", e);
+                }
+            });
+
+            // Schedule a deferred persistence to capture subsequent updates
+            tokio::spawn(async move {
+                tokio::time::sleep(interval).await;
+                let statistics = stats_arc.read().await.clone();
+                let metrics = metrics_arc.read().await.clone();
+                if let Err(e) =
+                    Self::persist_statistics_static(&path_deferred, &statistics, &metrics).await
+                {
+                    tracing::error!("Failed to persist deferred MAB statistics: {}", e);
                 }
             });
 
@@ -503,7 +521,7 @@ impl MultiArmedBandit {
         let max_age_secs = self.config.max_stats_age.as_secs();
         let cleaned_stats: HashMap<_, _> = statistics
             .into_iter()
-            .filter(|(_, stats)| now - stats.last_updated < max_age_secs)
+            .filter(|(_, stats)| now.saturating_sub(stats.last_updated) < max_age_secs)
             .collect();
 
         *self.statistics.write().await = cleaned_stats;

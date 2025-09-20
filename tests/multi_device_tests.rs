@@ -9,6 +9,40 @@ use saorsa_core::{
     get_data, get_presence, register_headless, register_identity, register_presence, store_data,
     store_with_fec,
 };
+use std::net::Ipv4Addr;
+
+fn valid_four_words(seed: u16) -> [String; 4] {
+    use four_word_networking::FourWordEncoder;
+
+    let encoder = FourWordEncoder::new();
+    let ip = Ipv4Addr::new(
+        10,
+        (seed >> 8) as u8,
+        (seed & 0xFF) as u8,
+        (seed % 200) as u8,
+    );
+    let port = 10000 + seed as u16;
+    let encoding = encoder
+        .encode_ipv4(ip, port)
+        .expect("IPv4 encoding should succeed for deterministic seed");
+    let words = encoding.words();
+    [
+        words[0].clone(),
+        words[1].clone(),
+        words[2].clone(),
+        words[3].clone(),
+    ]
+}
+
+fn words_refs(words: &[String; 4]) -> [&str; 4] {
+
+    [
+        words[0].as_str(),
+        words[1].as_str(),
+        words[2].as_str(),
+        words[3].as_str(),
+    ]
+}
 
 #[tokio::test]
 async fn test_multi_user_multi_device_storage() -> Result<()> {
@@ -18,12 +52,13 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
 
     // Create 4 users with varying device configurations
     for i in 0..4 {
-        let words = match i {
-            0 => ["alpha", "bravo", "charlie", "delta"],
-            1 => ["echo", "foxtrot", "golf", "hotel"],
-            2 => ["india", "juliet", "kilo", "lima"],
-            _ => ["mike", "november", "oscar", "papa"],
-        };
+        let words_owned = valid_four_words(i as u16);
+        let words: [&str; 4] = [
+            words_owned[0].as_str(),
+            words_owned[1].as_str(),
+            words_owned[2].as_str(),
+            words_owned[3].as_str(),
+        ];
 
         let keypair = MlDsaKeyPair::generate()?;
         let handle = register_identity(words, &keypair).await?;
@@ -132,7 +167,8 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
 #[tokio::test]
 async fn test_headless_node_preference() -> Result<()> {
     // Test that headless nodes are preferred for storage
-    let words = ["quebec", "romeo", "sierra", "tango"];
+    let words_owned = valid_four_words(100);
+    let words = words_refs(&words_owned);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -222,7 +258,8 @@ async fn test_headless_node_preference() -> Result<()> {
 #[tokio::test]
 async fn test_device_failure_recovery() -> Result<()> {
     // Test recovery when devices go offline
-    let words = ["uniform", "victor", "whiskey", "xray"];
+    let words_owned = valid_four_words(200);
+    let words = words_refs(&words_owned);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -275,7 +312,8 @@ async fn test_device_failure_recovery() -> Result<()> {
 #[tokio::test]
 async fn test_dynamic_device_addition() -> Result<()> {
     // Test adding devices dynamically and redistributing shards
-    let words = ["yankee", "zulu", "alpha", "bravo"];
+    let words_owned = valid_four_words(300);
+    let words = words_refs(&words_owned);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -343,9 +381,13 @@ async fn test_dynamic_device_addition() -> Result<()> {
 #[tokio::test]
 async fn test_cross_user_collaboration() -> Result<()> {
     // Test multiple users collaborating on shared data
-    let words1 = ["charlie", "delta", "echo", "foxtrot"];
-    let words2 = ["golf", "hotel", "india", "juliet"];
-    let words3 = ["kilo", "lima", "mike", "november"];
+    let words1_owned = valid_four_words(400);
+    let words2_owned = valid_four_words(401);
+    let words3_owned = valid_four_words(402);
+
+    let words1 = words_refs(&words1_owned);
+    let words2 = words_refs(&words2_owned);
+    let words3 = words_refs(&words3_owned);
 
     let keypair1 = MlDsaKeyPair::generate()?;
     let keypair2 = MlDsaKeyPair::generate()?;
@@ -414,7 +456,8 @@ async fn test_cross_user_collaboration() -> Result<()> {
 #[tokio::test]
 async fn test_mobile_device_handling() -> Result<()> {
     // Test special handling for mobile devices
-    let words = ["oscar", "papa", "quebec", "romeo"];
+    let words_owned = valid_four_words(500);
+    let words = words_refs(&words_owned);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -531,7 +574,8 @@ async fn test_mobile_device_handling() -> Result<()> {
 #[tokio::test]
 async fn test_storage_farm_scenario() -> Result<()> {
     // Test user with storage farm (many headless nodes)
-    let words = ["sierra", "tango", "uniform", "victor"];
+    let words_owned = valid_four_words(510);
+    let words = words_refs(&words_owned);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -599,7 +643,8 @@ async fn test_storage_farm_scenario() -> Result<()> {
 #[tokio::test]
 async fn test_device_capability_based_selection() -> Result<()> {
     // Test that device capabilities influence shard placement
-    let words = ["whiskey", "xray", "yankee", "zulu"];
+    let words_owned = valid_four_words(520);
+    let words = words_refs(&words_owned);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
@@ -696,7 +741,8 @@ async fn test_device_capability_based_selection() -> Result<()> {
 #[tokio::test]
 async fn test_geographic_distribution() -> Result<()> {
     // Test geographic distribution of shards
-    let words = ["alpha", "charlie", "echo", "golf"];
+    let words_owned = valid_four_words(530);
+    let words = words_refs(&words_owned);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 

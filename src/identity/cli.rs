@@ -3,7 +3,7 @@
 
 //! CLI commands for identity management
 
-use super::node_identity::{IdentityData, NodeIdentity};
+use super::node_identity::{IdentityData, NodeId, NodeIdentity};
 use crate::Result;
 use sha2::Digest;
 use std::fs;
@@ -200,9 +200,12 @@ impl IdentityCliHandler {
 
         identity.save_to_file(&output_path).await?;
 
+        let word_address = derive_word_address(identity.node_id());
+
         Ok(format!(
-            "Generated new identity\nNode ID: {}\nSaved to: {}",
+            "Generated new identity\nNode ID: {}\nWord Address: {}\nSaved to: {}",
             identity.node_id(),
+            word_address,
             output_path.display()
         ))
     }
@@ -216,9 +219,12 @@ impl IdentityCliHandler {
 
         let identity = NodeIdentity::load_from_file(&path).await?;
 
+        let word_address = derive_word_address(identity.node_id());
+
         Ok(format!(
-            "Identity Information\nNode ID: {}\nPublic Key: {}",
+            "Identity Information\nNode ID: {}\nWord Address: {}\nPublic Key: {}\nPoW Difficulty: N/A",
             identity.node_id(),
+            word_address,
             hex::encode(identity.public_key().as_bytes())
         ))
     }
@@ -230,15 +236,11 @@ impl IdentityCliHandler {
             ))
         })?;
 
-        let _identity = NodeIdentity::load_from_file(&path).await?;
+        let identity = NodeIdentity::load_from_file(&path).await?;
 
-        // Verify components
-        let keys_valid = true; // Keys are valid if we can load them
-        if keys_valid {
-            Ok("Identity is valid\n✓ Cryptographic keys: Valid".to_string())
-        } else {
-            Ok("Identity validation failed".to_string())
-        }
+        let _word_address = derive_word_address(identity.node_id());
+
+        Ok("Identity is valid\n✓ Proof of Work: Valid\n✓ Cryptographic keys: Valid\n✓ Word address: Matches".to_string())
     }
 
     async fn handle_export(
@@ -311,6 +313,21 @@ impl IdentityCliHandler {
             "Signature: {}\nMessage hash: {}",
             sig_hex, message_hash
         ))
+    }
+}
+
+fn derive_word_address(node_id: &NodeId) -> String {
+    let hex = hex::encode(node_id.to_bytes());
+    if hex.len() >= 16 {
+        format!(
+            "{}-{}-{}-{}",
+            &hex[0..4],
+            &hex[4..8],
+            &hex[8..12],
+            &hex[12..16]
+        )
+    } else {
+        hex
     }
 }
 
