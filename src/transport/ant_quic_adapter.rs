@@ -170,6 +170,29 @@ impl P2PNetworkNode {
         self.local_addr
     }
 
+    /// Get the actual bound listening address from the QUIC endpoint
+    pub async fn actual_listening_address(&self) -> Result<SocketAddr> {
+        // Try to get the actual bound address from the ant-quic node
+        // This should resolve the port 0 to the actual bound port
+        match self.node.get_nat_endpoint() {
+            Ok(nat_endpoint) => {
+                if let Some(quinn_endpoint) = nat_endpoint.get_quinn_endpoint() {
+                    // The quinn endpoint should have the actual bound address
+                    if let Ok(local_addr) = quinn_endpoint.local_addr() {
+                        return Ok(local_addr);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get NAT endpoint: {}", e);
+            }
+        }
+
+        // Fallback to the configured address if we can't get the actual one
+        tracing::warn!("Could not get actual listening address, falling back to configured address");
+        Ok(self.local_addr)
+    }
+
     /// Get our peer ID
     pub fn our_peer_id(&self) -> PeerId {
         self.node.peer_id()
@@ -361,15 +384,19 @@ impl DualStackNetworkNode {
     }
 
     /// Return all local listening addresses available (v6 then v4 if present)
-    pub fn local_addrs(&self) -> Vec<SocketAddr> {
+    pub async fn local_addrs(&self) -> Result<Vec<SocketAddr>> {
         let mut out = Vec::new();
+
         if let Some(v6) = &self.v6 {
-            out.push(v6.local_address());
+            let actual_addr = v6.actual_listening_address().await?;
+            out.push(actual_addr);
         }
         if let Some(v4) = &self.v4 {
-            out.push(v4.local_address());
+            let actual_addr = v4.actual_listening_address().await?;
+            out.push(actual_addr);
         }
-        out
+
+        Ok(out)
     }
 
     /// Accept the next incoming connection from either IPv6 or IPv4 node.

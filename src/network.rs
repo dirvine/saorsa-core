@@ -687,6 +687,9 @@ impl P2PNode {
         };
         info!("Created P2P node with peer ID: {}", node.peer_id);
 
+        // Start the network listeners to populate listen addresses
+        node.start_network_listeners().await?;
+
         Ok(node)
     }
 
@@ -816,7 +819,10 @@ impl P2PNode {
     async fn start_network_listeners(&self) -> Result<()> {
         info!("Starting dual-stack listeners (ant-quic)...");
         // Update our listen_addrs from the dual node bindings
-        let addrs = self.dual_node.local_addrs();
+        let addrs = self.dual_node.local_addrs().await
+            .map_err(|e| P2PError::Transport(crate::error::TransportError::SetupFailed(
+                format!("Failed to get local addresses: {}", e).into()
+            )))?;
         {
             let mut la = self.listen_addrs.write().await;
             *la = addrs.clone();
