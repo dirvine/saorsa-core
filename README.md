@@ -31,7 +31,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-saorsa-core = "0.3.4"
+saorsa-core = "0.3.25"
 ```
 
 ### Basic DHT Node
@@ -166,7 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - **Byzantine Fault Tolerance**: Configurable f-out-of-3f+1 security model
 - **Geographic Diversity**: Ensures shards are distributed across regions
 - **Continuous Monitoring**: Audit system with automatic repair
-- **DHT Record Types**: Efficient ≤512B records with proof-of-work
+- **DHT Record Types**: Efficient ≤512B records with cryptographic validation
 - **Hysteresis Control**: Prevents repair storms with smart cooldown
 
 ## Configuration
@@ -189,14 +189,13 @@ let config = NetworkConfig {
 
 ## Feature Flags
 
-- `default` - DHT, ant-quic (four-word addresses always enabled)
-- `dht` - DHT functionality
-- `ant-quic` - QUIC transport
-- `quantum-resistant` - Post-quantum cryptography (ML-DSA, ML-KEM)
-- `threshold` - Threshold cryptography
-- `cli` - CLI utilities
-- `metrics` - Prometheus metrics
-- `commercial` - Commercial license features
+- `default` - Metrics and Prometheus integration
+- `metrics` - Prometheus metrics and monitoring
+- `mocks` - Test/dummy helpers for development (off by default)
+- `h2_greedy` - Hyperbolic greedy routing helpers in API
+- `test-utils` - Test utilities including mock DHT for integration tests
+
+Note: DHT, ant-quic QUIC transport, and post-quantum cryptography are always enabled. Four-word networking is a core feature.
 
 ## Performance
 
