@@ -386,8 +386,14 @@ pub use placement::{
 // Network address types
 /// Peer identifier used throughout Saorsa
 ///
-/// Currently implemented as a String for simplicity, but can be enhanced
-/// with cryptographic verification in future versions.
+/// Currently implemented as a String for simplicity, but should be enhanced
+/// with cryptographic verification and validation in future versions.
+/// 
+/// TODO: Replace with a proper newtype that includes validation:
+/// - Non-empty string validation
+/// - Character set validation (alphanumeric + - _)
+/// - Length limits (max 256 characters)
+/// - Optional cryptographic verification
 pub type PeerId = String;
 
 /// Network address used for peer-to-peer communication
