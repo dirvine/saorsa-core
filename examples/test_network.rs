@@ -12,14 +12,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 use anyhow::{Context, Result};
-use saorsa_core::types::{MlDsaKeyPair, IdentityHandle};
-use saorsa_core::{register_identity, store_data};
 use saorsa_core::network::{NodeConfig, P2PNode};
+use saorsa_core::types::{IdentityHandle, MlDsaKeyPair};
+use saorsa_core::{register_identity, store_data};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio::time::interval;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Test network node configuration
 struct TestNode {
@@ -36,35 +36,46 @@ impl TestNode {
     async fn new(id: usize, port: u16, words: Vec<&'static str>) -> Result<Self> {
         // Use a specific port for testing instead of 0
         let actual_port = if port == 0 { 9000 + id as u16 } else { port };
-        let listen_addr = format!("127.0.0.1:{}", actual_port).parse()
+        let listen_addr = format!("127.0.0.1:{}", actual_port)
+            .parse()
             .context("Failed to parse listen address")?;
 
         let mut config = NodeConfig::default();
         config.listen_addr = listen_addr;
         // Use valid addresses for testing - let the system assign actual addresses
         config.listen_addrs = vec![
-            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)), 0), // localhost with port 0 for system assignment
+            std::net::SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+                0,
+            ), // localhost with port 0 for system assignment
         ];
 
-        info!("🔧 Node {} configured to listen on port {} ({})", id, actual_port, if port == 0 { "system-assigned" } else { "specified" });
+        info!(
+            "🔧 Node {} configured to listen on port {} ({})",
+            id,
+            actual_port,
+            if port == 0 {
+                "system-assigned"
+            } else {
+                "specified"
+            }
+        );
 
-        let node = Arc::new(P2PNode::new(config).await
-            .context("Failed to create P2P node")?);
+        let node = Arc::new(
+            P2PNode::new(config)
+                .await
+                .context("Failed to create P2P node")?,
+        );
 
         // Get actual listen addresses after node creation
         let actual_addrs = node.listen_addrs().await;
         info!("📡 Node {} actual listen addresses: {:?}", id, actual_addrs);
 
-        let keypair = MlDsaKeyPair::generate()
-            .context("Failed to generate keypair")?;
+        let keypair = MlDsaKeyPair::generate().context("Failed to generate keypair")?;
 
-        let words_array: [&str; 4] = [
-            words[0],
-            words[1],
-            words[2],
-            words[3],
-        ];
-        let handle = register_identity(words_array, &keypair).await
+        let words_array: [&str; 4] = [words[0], words[1], words[2], words[3]];
+        let handle = register_identity(words_array, &keypair)
+            .await
             .context("Failed to register identity")?;
 
         info!("✅ Node {} registered with words: {:?}", id, words);
@@ -81,12 +92,19 @@ impl TestNode {
     }
 
     async fn connect_to_bootstrap(&self, bootstrap_addrs: &[String]) -> Result<()> {
-        info!("🔗 Node {} attempting to connect to {} bootstrap addresses", self.id, bootstrap_addrs.len());
+        info!(
+            "🔗 Node {} attempting to connect to {} bootstrap addresses",
+            self.id,
+            bootstrap_addrs.len()
+        );
         for addr in bootstrap_addrs {
             info!("🔗 Node {} trying address: {}", self.id, addr);
             match self.node.connect_peer(addr).await {
                 Ok(peer_id) => {
-                    info!("✅ Node {} successfully connected to bootstrap: {}", self.id, peer_id);
+                    info!(
+                        "✅ Node {} successfully connected to bootstrap: {}",
+                        self.id, peer_id
+                    );
                 }
                 Err(e) => {
                     warn!("❌ Node {} failed to connect to {}: {}", self.id, addr, e);
@@ -98,14 +116,16 @@ impl TestNode {
 
     async fn send_message(&self, target_node: &TestNode, message: &str) -> Result<()> {
         let data = message.as_bytes().to_vec();
-        let handle = self.handle.as_ref()
-            .context("Node not registered")?;
+        let handle = self.handle.as_ref().context("Node not registered")?;
 
-        let _storage_handle = store_data(handle, data, 1).await
+        let _storage_handle = store_data(handle, data, 1)
+            .await
             .context("Failed to store message")?;
 
-        info!("📤 Node {} sent message to Node {}: '{}'",
-              self.id, target_node.id, message);
+        info!(
+            "📤 Node {} sent message to Node {}: '{}'",
+            self.id, target_node.id, message
+        );
 
         Ok(())
     }
@@ -156,13 +176,14 @@ impl TestNetwork {
             let port = 0u16; // Let system assign free port
             let words = match i {
                 0 => vec!["welfare", "absurd", "king", "ridge"],
-                1 => vec!["welfare", "absurd", "king", "peak"],  // Different last word
-                2 => vec!["welfare", "absurd", "king", "flow"],  // Different last word
+                1 => vec!["welfare", "absurd", "king", "peak"], // Different last word
+                2 => vec!["welfare", "absurd", "king", "flow"], // Different last word
                 3 => vec!["welfare", "absurd", "king", "depth"], // Different last word
                 _ => vec!["global", "fast", "eagle", "soar"],
             };
 
-            let node = TestNode::new(i, port, words).await
+            let node = TestNode::new(i, port, words)
+                .await
                 .context(format!("Failed to create node {}", i))?;
 
             nodes.push(node);
@@ -172,20 +193,24 @@ impl TestNetwork {
         }
 
         // Get bootstrap addresses from first node
-        let bootstrap_addrs = nodes[0].get_listen_addrs().await
+        let bootstrap_addrs = nodes[0]
+            .get_listen_addrs()
+            .await
             .context("Failed to get bootstrap addresses")?;
 
         info!("🔗 Bootstrap addresses: {:?}", bootstrap_addrs);
 
         // Convert to string format for connect_peer
-        let bootstrap_addr_strings: Vec<String> = bootstrap_addrs.iter()
+        let bootstrap_addr_strings: Vec<String> = bootstrap_addrs
+            .iter()
             .map(|addr| addr.to_string())
             .collect();
         info!("🔗 Bootstrap address strings: {:?}", bootstrap_addr_strings);
 
         // Connect all nodes to bootstrap
         for node in &nodes[1..] {
-            node.connect_to_bootstrap(&bootstrap_addrs).await
+            node.connect_to_bootstrap(&bootstrap_addrs)
+                .await
                 .context(format!("Failed to connect node {}", node.id))?;
         }
 
@@ -207,7 +232,10 @@ impl TestNetwork {
     }
 
     async fn run_message_test(&mut self, message_count: usize) -> Result<()> {
-        info!("📨 Starting message transmission test ({} messages)", message_count);
+        info!(
+            "📨 Starting message transmission test ({} messages)",
+            message_count
+        );
 
         for i in 0..message_count {
             let sender_idx = i % self.nodes.len();
@@ -216,10 +244,16 @@ impl TestNetwork {
             let sender = &self.nodes[sender_idx];
             let receiver = &self.nodes[receiver_idx];
 
-            let message = format!("Test message {} from Node {} to Node {}",
-                                i + 1, sender.id, receiver.id);
+            let message = format!(
+                "Test message {} from Node {} to Node {}",
+                i + 1,
+                sender.id,
+                receiver.id
+            );
 
-            sender.send_message(receiver, &message).await
+            sender
+                .send_message(receiver, &message)
+                .await
                 .context(format!("Failed to send message {}", i + 1))?;
 
             self.messages_sent += 1;
@@ -244,10 +278,13 @@ impl TestNetwork {
 
             let elapsed = self.start_time.elapsed();
             let messages_per_sec = self.messages_sent as f64 / elapsed.as_secs_f64();
-            let bandwidth_kbps = (self.bytes_transferred as f64 * 8.0) / (elapsed.as_millis() as f64);
+            let bandwidth_kbps =
+                (self.bytes_transferred as f64 * 8.0) / (elapsed.as_millis() as f64);
 
-            info!("📊 Bandwidth: {:.2} Kbps | Messages/sec: {:.2} | Total Messages: {}",
-                  bandwidth_kbps, messages_per_sec, self.messages_sent);
+            info!(
+                "📊 Bandwidth: {:.2} Kbps | Messages/sec: {:.2} | Total Messages: {}",
+                bandwidth_kbps, messages_per_sec, self.messages_sent
+            );
         }
 
         info!("✅ Bandwidth test completed");
@@ -260,11 +297,18 @@ impl TestNetwork {
         info!("📈 === FINAL TEST RESULTS ===");
         info!("⏱️  Total runtime: {:.2}s", elapsed.as_secs_f64());
         info!("📦 Total messages sent: {}", self.messages_sent);
-        info!("💾 Total bytes transferred: {} KB", self.bytes_transferred / 1024);
-        info!("⚡ Average bandwidth: {:.2} Kbps",
-              (self.bytes_transferred as f64 * 8.0) / (elapsed.as_millis() as f64));
-        info!("📨 Messages per second: {:.2}",
-              self.messages_sent as f64 / elapsed.as_secs_f64());
+        info!(
+            "💾 Total bytes transferred: {} KB",
+            self.bytes_transferred / 1024
+        );
+        info!(
+            "⚡ Average bandwidth: {:.2} Kbps",
+            (self.bytes_transferred as f64 * 8.0) / (elapsed.as_millis() as f64)
+        );
+        info!(
+            "📨 Messages per second: {:.2}",
+            self.messages_sent as f64 / elapsed.as_secs_f64()
+        );
 
         // Check message delivery
         for node in &self.nodes {
@@ -319,7 +363,8 @@ async fn main() -> Result<()> {
     println!("• Multi-device functionality");
     println!();
 
-    let mut network = TestNetwork::new(4).await
+    let mut network = TestNetwork::new(4)
+        .await
         .context("Failed to create test network")?;
 
     if let Err(e) = network.run_full_test().await {

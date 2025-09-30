@@ -189,7 +189,9 @@ impl P2PNetworkNode {
         }
 
         // Fallback to the configured address if we can't get the actual one
-        tracing::warn!("Could not get actual listening address, falling back to configured address");
+        tracing::warn!(
+            "Could not get actual listening address, falling back to configured address"
+        );
         Ok(self.local_addr)
     }
 

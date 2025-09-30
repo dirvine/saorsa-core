@@ -388,7 +388,7 @@ pub use placement::{
 ///
 /// Currently implemented as a String for simplicity, but should be enhanced
 /// with cryptographic verification and validation in future versions.
-/// 
+///
 /// TODO: Replace with a proper newtype that includes validation:
 /// - Non-empty string validation
 /// - Character set validation (alphanumeric + - _)

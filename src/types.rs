@@ -38,7 +38,7 @@ pub use storage::{
 };
 
 /// Example strong typing implementations (future replacements for string-based IDs)
-/// 
+///
 /// This demonstrates how `pub type PeerId = String` should eventually
 /// be replaced with validated newtypes for better type safety.
 pub mod validated_ids {
@@ -59,7 +59,10 @@ pub mod validated_ids {
                 return Err(ValidationError::TooLong(id.len()));
             }
             // Basic validation - could be enhanced with cryptographic checks
-            if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            if !id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
                 return Err(ValidationError::InvalidCharacters);
             }
             Ok(Self(id))

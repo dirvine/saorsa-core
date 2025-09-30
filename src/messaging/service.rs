@@ -271,6 +271,37 @@ impl MessagingService {
         self.store.get_message(message_id).await
     }
 
+    /// Get messages for a channel with pagination
+    ///
+    /// # Arguments
+    /// * `channel_id` - The channel to retrieve messages from
+    /// * `limit` - Maximum number of messages to return
+    /// * `before` - Optional timestamp to get messages before (for pagination)
+    ///
+    /// # Returns
+    /// Vector of messages ordered by creation time (newest first)
+    pub async fn get_channel_messages(
+        &self,
+        channel_id: ChannelId,
+        limit: usize,
+        before: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<RichMessage>> {
+        self.store
+            .get_channel_messages(channel_id, limit, before)
+            .await
+    }
+
+    /// Get all messages in a thread
+    ///
+    /// # Arguments
+    /// * `thread_id` - The thread to retrieve messages from
+    ///
+    /// # Returns
+    /// Vector of all messages in the thread
+    pub async fn get_thread_messages(&self, thread_id: ThreadId) -> Result<Vec<RichMessage>> {
+        self.store.get_thread_messages(thread_id).await
+    }
+
     /// Mark a user as online
     pub async fn mark_user_online(&self, user: FourWordAddress) -> Result<()> {
         let mut online = self.online_users.write().await;

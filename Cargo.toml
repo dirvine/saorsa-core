@@ -1,6 +1,6 @@
 [package]
 name = "saorsa-core"
-version = "0.3.25"
+version = "0.3.26"
 edition = "2024"
 authors = ["Saorsa Labs Limited <saorsalabs@gmail.com>"]
 license = "AGPL-3.0"
