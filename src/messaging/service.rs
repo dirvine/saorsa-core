@@ -67,8 +67,82 @@ pub struct SendOptions {
 }
 
 impl MessagingService {
-    /// Create a new messaging service
+    /// Create a new messaging service with default configuration
+    ///
+    /// Uses OS-assigned port (port 0) by default to avoid port conflicts.
+    /// This is the recommended way to create a MessagingService for most use cases.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use saorsa_core::messaging::{MessagingService, DhtClient};
+    /// # use saorsa_core::identity::FourWordAddress;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let dht = DhtClient::new()?;
+    /// let address = FourWordAddress("test-user-one-alpha".to_string());
+    /// let service = MessagingService::new(address, dht).await?;
+    ///
+    /// // Get actual bound port
+    /// let addrs = service.listen_addrs().await;
+    /// println!("Listening on: {:?}", addrs);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn new(identity: FourWordAddress, dht_client: DhtClient) -> Result<Self> {
+        // Use default NetworkConfig (OS-assigned port, IPv4-only)
+        Self::new_with_config(identity, dht_client, super::NetworkConfig::default()).await
+    }
+
+    /// Create a new messaging service with custom network configuration
+    ///
+    /// This allows fine-grained control over port binding, IP mode, and retry behavior.
+    ///
+    /// # Arguments
+    /// * `identity` - Four-word address for this node
+    /// * `dht_client` - DHT client for distributed operations
+    /// * `config` - Network configuration (port, IP mode, retry behavior)
+    ///
+    /// # Example with OS-Assigned Port
+    /// ```no_run
+    /// # use saorsa_core::messaging::{MessagingService, DhtClient, NetworkConfig};
+    /// # use saorsa_core::identity::FourWordAddress;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let dht = DhtClient::new()?;
+    /// let address = FourWordAddress("test-user-one-alpha".to_string());
+    ///
+    /// // Use default config (OS-assigned port)
+    /// let config = NetworkConfig::default();
+    /// let service = MessagingService::new_with_config(address, dht, config).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Example with Explicit Port
+    /// ```no_run
+    /// # use saorsa_core::messaging::{MessagingService, DhtClient, NetworkConfig, PortConfig, IpMode, RetryBehavior};
+    /// # use saorsa_core::identity::FourWordAddress;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let dht = DhtClient::new()?;
+    /// let address = FourWordAddress("test-user-two-alpha".to_string());
+    ///
+    /// // Use explicit port
+    /// let config = NetworkConfig {
+    ///     port: PortConfig::Explicit(12345),
+    ///     ip_mode: IpMode::IPv4Only,
+    ///     retry_behavior: RetryBehavior::FailFast,
+    /// };
+    /// let service = MessagingService::new_with_config(address, dht, config).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Note
+    /// Currently, only `PortConfig::OsAssigned` and `PortConfig::Explicit` are fully supported.
+    /// Full configuration support (port ranges, dual-stack separate ports) requires ant-quic 0.10.0.
+    pub async fn new_with_config(
+        identity: FourWordAddress,
+        dht_client: DhtClient,
+        config: super::NetworkConfig,
+    ) -> Result<Self> {
         // Initialize components
         let store = MessageStore::new(dht_client.clone(), None).await?;
 
@@ -78,9 +152,113 @@ impl MessagingService {
 
         #[cfg(not(test))]
         let network = {
-            // Use a real P2P node with defaults for production wiring
-            let config = crate::network::NodeConfig::new()?;
-            let node = crate::network::P2PNode::new(config).await?;
+            // Convert NetworkConfig to NodeConfig
+            let mut node_config = crate::network::NodeConfig::new()?;
+
+            // Apply port configuration
+            match &config.port {
+                super::PortConfig::OsAssigned => {
+                    // Use port 0 for OS-assigned
+                    let bind_addr = std::net::SocketAddr::new(
+                        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                        0, // Port 0 = OS-assigned
+                    );
+                    node_config.listen_addr = bind_addr;
+                    node_config.listen_addrs = vec![bind_addr];
+                }
+                super::PortConfig::Explicit(port) => {
+                    // Use explicit port
+                    let bind_addr = match &config.ip_mode {
+                        super::IpMode::IPv6Only => std::net::SocketAddr::new(
+                            std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                            *port,
+                        ),
+                        _ => std::net::SocketAddr::new(
+                            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                            *port,
+                        ),
+                    };
+                    node_config.listen_addr = bind_addr;
+                    node_config.listen_addrs = vec![bind_addr];
+                }
+                super::PortConfig::Range(start, _end) => {
+                    // For now, use the start of the range
+                    // Full range support requires ant-quic 0.10.0
+                    warn!(
+                        "Port range configuration not fully supported yet, using port {}",
+                        start
+                    );
+                    let bind_addr = std::net::SocketAddr::new(
+                        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                        *start,
+                    );
+                    node_config.listen_addr = bind_addr;
+                    node_config.listen_addrs = vec![bind_addr];
+                }
+            }
+
+            // Apply IP mode configuration
+            match &config.ip_mode {
+                super::IpMode::IPv4Only => {
+                    node_config.enable_ipv6 = false;
+                }
+                super::IpMode::IPv6Only => {
+                    node_config.enable_ipv6 = true;
+                    // Only include IPv6 address
+                    let port = node_config.listen_addr.port();
+                    node_config.listen_addrs = vec![std::net::SocketAddr::new(
+                        std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                        port,
+                    )];
+                }
+                super::IpMode::DualStack => {
+                    node_config.enable_ipv6 = true;
+                    // Add both IPv4 and IPv6
+                    let port = node_config.listen_addr.port();
+                    node_config.listen_addrs = vec![
+                        std::net::SocketAddr::new(
+                            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                            port,
+                        ),
+                        std::net::SocketAddr::new(
+                            std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                            port,
+                        ),
+                    ];
+                }
+                super::IpMode::DualStackSeparate { ipv4_port, ipv6_port } => {
+                    // Separate ports for IPv4 and IPv6
+                    node_config.enable_ipv6 = true;
+
+                    let ipv4_port_num = match ipv4_port {
+                        super::PortConfig::OsAssigned => 0,
+                        super::PortConfig::Explicit(p) => *p,
+                        super::PortConfig::Range(start, _) => *start,
+                    };
+
+                    let ipv6_port_num = match ipv6_port {
+                        super::PortConfig::OsAssigned => 0,
+                        super::PortConfig::Explicit(p) => *p,
+                        super::PortConfig::Range(start, _) => *start,
+                    };
+
+                    node_config.listen_addrs = vec![
+                        std::net::SocketAddr::new(
+                            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                            ipv4_port_num,
+                        ),
+                        std::net::SocketAddr::new(
+                            std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                            ipv6_port_num,
+                        ),
+                    ];
+
+                    // Set primary listen_addr to IPv4
+                    node_config.listen_addr = node_config.listen_addrs[0];
+                }
+            }
+
+            let node = crate::network::P2PNode::new(node_config).await?;
             Arc::new(node)
         };
         let transport = Arc::new(MessageTransport::new(network, dht_client.clone()).await?);
