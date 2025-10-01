@@ -330,14 +330,41 @@ impl MessagingService {
             // Get or establish encryption key
             let encryption_key = match self.key_exchange.get_session_key(recipient).await {
                 Ok(key) => key,
-                Err(e) => {
-                    // Attempt to initiate PQC key exchange; if unavailable, error out
-                    let _ = self.key_exchange.initiate_exchange(recipient.clone()).await;
-                    return Err(anyhow::anyhow!(
-                        "No session key established for {}: {}",
-                        recipient,
-                        e
-                    ));
+                Err(_) => {
+                    // Initiate PQC key exchange
+                    info!("No session key for {}, initiating key exchange", recipient);
+                    let kex_msg = self.key_exchange.initiate_exchange(recipient.clone()).await?;
+
+                    // Send the key exchange message
+                    self.transport
+                        .send_key_exchange_message(recipient, kex_msg)
+                        .await?;
+
+                    // Wait for session establishment with timeout
+                    let wait_result = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(5),
+                        self.wait_for_session_key(recipient)
+                    ).await;
+
+                    match wait_result {
+                        Ok(Ok(key)) => {
+                            info!("Key exchange completed for {}", recipient);
+                            key
+                        }
+                        Ok(Err(e)) => {
+                            return Err(anyhow::anyhow!(
+                                "Key exchange failed for {}: {}",
+                                recipient,
+                                e
+                            ));
+                        }
+                        Err(_) => {
+                            return Err(anyhow::anyhow!(
+                                "Key exchange timeout for {}",
+                                recipient
+                            ));
+                        }
+                    }
                 }
             };
 
@@ -414,6 +441,7 @@ impl MessagingService {
         let key_exchange = self.key_exchange.clone();
         let store = self.store.clone();
 
+        // Spawn message receiver task
         tokio::spawn(async move {
             let mut receiver = transport.receive_messages().await;
 
@@ -437,6 +465,46 @@ impl MessagingService {
                         message: received.message,
                         received_at: received.received_at,
                     });
+                }
+            }
+        });
+
+        // Spawn key exchange handler task
+        let transport_kex = self.transport.clone();
+        let key_exchange_kex = self.key_exchange.clone();
+        tokio::spawn(async move {
+            let mut kex_receiver = transport_kex.subscribe_key_exchange();
+
+            while let Ok(kex_msg) = kex_receiver.recv().await {
+                use super::key_exchange::KeyExchangeType;
+
+                match kex_msg.message_type {
+                    KeyExchangeType::Initiation => {
+                        // Received key exchange initiation - respond
+                        info!("Received key exchange initiation from {}", kex_msg.sender);
+                        match key_exchange_kex.respond_to_exchange(kex_msg).await {
+                            Ok(response) => {
+                                // Send response back
+                                let recipient = response.recipient.clone();
+                                if let Err(e) = transport_kex
+                                    .send_key_exchange_message(&recipient, response)
+                                    .await
+                                {
+                                    warn!("Failed to send key exchange response to {}: {}", recipient, e);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to respond to key exchange: {}", e);
+                            }
+                        }
+                    }
+                    KeyExchangeType::Response => {
+                        // Received key exchange response - complete
+                        info!("Received key exchange response from {}", kex_msg.sender);
+                        if let Err(e) = key_exchange_kex.complete_exchange(kex_msg).await {
+                            warn!("Failed to complete key exchange: {}", e);
+                        }
+                    }
                 }
             }
         });
@@ -678,6 +746,26 @@ impl MessagingService {
             .parse()
             .map_err(|e| anyhow::anyhow!("Invalid peer ID: {}", e))?;
         self.transport.disconnect_peer(&peer_id_parsed).await
+    }
+
+    /// Wait for a session key to be established with a peer
+    ///
+    /// Polls the key exchange system for up to the specified duration.
+    /// This is called after initiating key exchange to wait for the response.
+    async fn wait_for_session_key(&self, peer: &FourWordAddress) -> Result<Vec<u8>> {
+        // Poll with exponential backoff
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+        let max_attempts = 50; // 5 seconds total (100ms * 50)
+
+        for _ in 0..max_attempts {
+            interval.tick().await;
+
+            if let Ok(key) = self.key_exchange.get_session_key(peer).await {
+                return Ok(key);
+            }
+        }
+
+        Err(anyhow::anyhow!("Session key not established within timeout"))
     }
 
     // Test helpers

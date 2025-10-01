@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2025-10-02
+
+### Fixed
+- **PQC Key Exchange Now Functional** 🔐
+  - Fixed critical bug where `KeyExchange.initiate_exchange()` created but never transmitted messages
+  - Added dedicated `"key_exchange"` P2P protocol topic
+  - Implemented `send_key_exchange_message()` in MessageTransport
+  - Added bidirectional key exchange response handling
+  - Integrated automatic session establishment with 5-second timeout
+  - Added session key polling with exponential backoff
+
+### Added
+- `MessageTransport::send_key_exchange_message()` - Send key exchange over P2P network
+- `MessageTransport::subscribe_key_exchange()` - Subscribe to incoming key exchange messages
+- `MessagingService::wait_for_session_key()` - Wait for session establishment with timeout
+- Automatic key exchange responder in `subscribe_messages()` task
+- Comprehensive integration tests in `tests/key_exchange_integration_test.rs`
+- Detailed implementation documentation in `KEY_EXCHANGE_IMPLEMENTATION.md`
+
+### Changed
+- Enhanced `MessagingService::send_message()` to automatically initiate key exchange
+- Updated message receiving loop to handle both encrypted messages and key exchange protocol
+- Improved error messages for key exchange failures (timeout, no peer key, etc.)
+
+### Technical Details
+- ML-KEM-768 encapsulation/decapsulation over P2P QUIC transport
+- HKDF-SHA256 session key derivation
+- ChaCha20-Poly1305 symmetric encryption with established keys
+- 24-hour session key TTL with automatic caching
+
+### Documentation
+- Complete message flow diagrams
+- Security considerations and future enhancements
+- Performance characteristics and overhead analysis
+
 ## [0.5.0] - 2025-10-01
 
 ### Added

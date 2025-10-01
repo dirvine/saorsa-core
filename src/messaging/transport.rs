@@ -3,6 +3,7 @@
 
 use super::DhtClient;
 use super::types::*;
+use super::key_exchange::KeyExchangeMessage;
 use crate::identity::FourWordAddress;
 use crate::network::P2PNode;
 use anyhow::Result;
@@ -30,12 +31,15 @@ pub struct MessageTransport {
     metrics: Arc<RwLock<NetworkMetrics>>,
     /// Event broadcaster
     event_tx: broadcast::Sender<TransportEvent>,
+    /// Key exchange message broadcaster
+    key_exchange_tx: broadcast::Sender<KeyExchangeMessage>,
 }
 
 impl MessageTransport {
     /// Create new message transport
     pub async fn new(network: Arc<P2PNode>, dht_client: DhtClient) -> Result<Self> {
         let (event_tx, _) = broadcast::channel(1000);
+        let (key_exchange_tx, _) = broadcast::channel(100);
 
         Ok(Self {
             network,
@@ -45,6 +49,7 @@ impl MessageTransport {
             confirmations: Arc::new(RwLock::new(HashMap::new())),
             metrics: Arc::new(RwLock::new(NetworkMetrics::default())),
             event_tx,
+            key_exchange_tx,
         })
     }
 
@@ -106,9 +111,10 @@ impl MessageTransport {
 
         // Subscribe to network events and forward "messaging" topic messages
         let mut events = self.network.subscribe_events();
+        let kex_tx = self.key_exchange_tx.clone();
+
         tokio::spawn(async move {
             while let Ok(event) = events.recv().await {
-                #[allow(clippy::collapsible_if)]
                 if let crate::network::P2PEvent::Message {
                     topic,
                     source,
@@ -130,6 +136,17 @@ impl MessageTransport {
                             message: encrypted_msg,
                             received_at: Utc::now(),
                         });
+                    } else if topic == "key_exchange" {
+                        // Handle key exchange messages
+                        match bincode::deserialize::<KeyExchangeMessage>(&data) {
+                            Ok(kex_msg) => {
+                                debug!("Received key exchange message from {}", source);
+                                let _ = kex_tx.send(kex_msg);
+                            }
+                            Err(e) => {
+                                warn!("Failed to deserialize key exchange message: {}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -335,6 +352,62 @@ impl MessageTransport {
     /// Get network metrics
     pub async fn get_metrics(&self) -> NetworkMetrics {
         self.metrics.read().await.clone()
+    }
+
+    // ===== Key Exchange Methods =====
+
+    /// Send a key exchange message to a peer
+    pub async fn send_key_exchange_message(
+        &self,
+        recipient: &FourWordAddress,
+        message: KeyExchangeMessage,
+    ) -> Result<()> {
+        debug!("Sending key exchange message to {}", recipient);
+
+        // Serialize the key exchange message
+        let data = bincode::serialize(&message)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize key exchange message: {}", e))?;
+
+        // Resolve peer address through DHT
+        let peer_info = self.resolve_peer_address(recipient).await?;
+
+        // Try to send via each known address
+        let mut last_error: Option<anyhow::Error> = None;
+        for addr in &peer_info.addresses {
+            match self.network.connect_peer(addr).await {
+                Ok(peer_id) => {
+                    // Send via the key_exchange topic
+                    match self
+                        .network
+                        .send_message(&peer_id, "key_exchange", data.clone())
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                "Key exchange message sent to {} (peer {})",
+                                recipient, peer_id
+                            );
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            warn!("Failed sending key exchange to {} via {}: {}", recipient, addr, e);
+                            last_error = Some(anyhow::Error::from(e));
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed connecting to {} at {}: {}", recipient, addr, e);
+                    last_error = Some(anyhow::Error::from(e));
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Failed to send key exchange message")))
+    }
+
+    /// Subscribe to incoming key exchange messages
+    pub fn subscribe_key_exchange(&self) -> broadcast::Receiver<KeyExchangeMessage> {
+        self.key_exchange_tx.subscribe()
     }
 
     // ===== P2P Networking Methods =====
@@ -612,6 +685,7 @@ impl Clone for MessageTransport {
             confirmations: self.confirmations.clone(),
             metrics: self.metrics.clone(),
             event_tx: self.event_tx.clone(),
+            key_exchange_tx: self.key_exchange_tx.clone(),
         }
     }
 }
