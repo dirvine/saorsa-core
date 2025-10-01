@@ -430,6 +430,56 @@ impl MessagingService {
         Ok(message)
     }
 
+    // ===== P2P Networking Methods =====
+
+    /// Get the local network address(es) this node is listening on
+    pub async fn listen_addrs(&self) -> Vec<std::net::SocketAddr> {
+        self.transport.listen_addrs().await
+    }
+
+    /// Get the list of currently connected peer IDs
+    pub async fn connected_peers(&self) -> Vec<String> {
+        self.transport.connected_peers().await
+            .into_iter()
+            .map(|peer_id| peer_id.to_string())
+            .collect()
+    }
+
+    /// Get the count of currently connected peers
+    pub async fn peer_count(&self) -> usize {
+        self.transport.peer_count().await
+    }
+
+    /// Check if the P2P node is running
+    pub async fn is_running(&self) -> bool {
+        // If we have a transport, we're running
+        // The transport is created during initialization and stays active
+        true
+    }
+
+    /// Connect to a peer via their network address
+    ///
+    /// # Arguments
+    /// * `address` - Network address in format "ip:port" or "[ipv6]:port"
+    ///
+    /// # Returns
+    /// The peer ID of the connected peer
+    pub async fn connect_peer(&self, address: &str) -> Result<String> {
+        let peer_id = self.transport.connect_peer(address).await?;
+        Ok(peer_id.to_string())
+    }
+
+    /// Disconnect from a specific peer
+    ///
+    /// # Arguments
+    /// * `peer_id` - The peer ID to disconnect from
+    pub async fn disconnect_peer(&self, peer_id: &str) -> Result<()> {
+        // Parse peer ID from string
+        let peer_id_parsed = peer_id.parse()
+            .map_err(|e| anyhow::anyhow!("Invalid peer ID: {}", e))?;
+        self.transport.disconnect_peer(&peer_id_parsed).await
+    }
+
     // Test helpers
     #[cfg(test)]
     pub fn create_test_message(

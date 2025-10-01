@@ -8,6 +8,7 @@ pub mod key_exchange;
 pub mod media;
 #[cfg(any(test, feature = "mocks"))]
 pub mod mocks;
+pub mod network_config;
 pub mod quic_media_streams;
 pub mod reactions;
 pub mod search;
@@ -34,6 +35,9 @@ pub use database::MessageStore;
 pub use encryption::SecureMessaging;
 pub use key_exchange::{KeyExchange, KeyExchangeMessage};
 pub use media::MediaProcessor;
+pub use network_config::{
+    IpMode, NetworkConfig, NetworkConfigError, PortConfig, RetryBehavior,
+};
 pub use quic_media_streams::{QosParameters, QuicMediaStreamManager, StreamStats};
 pub use reactions::ReactionManager;
 pub use search::MessageSearch;

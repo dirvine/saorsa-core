@@ -336,6 +336,44 @@ impl MessageTransport {
     pub async fn get_metrics(&self) -> NetworkMetrics {
         self.metrics.read().await.clone()
     }
+
+    // ===== P2P Networking Methods =====
+
+    /// Get the local network address(es) this node is listening on
+    pub async fn listen_addrs(&self) -> Vec<std::net::SocketAddr> {
+        self.network.listen_addrs().await
+    }
+
+    /// Get the list of currently connected peer IDs
+    pub async fn connected_peers(&self) -> Vec<crate::PeerId> {
+        self.network.connected_peers().await
+    }
+
+    /// Get the count of currently connected peers
+    pub async fn peer_count(&self) -> usize {
+        self.network.peer_count().await
+    }
+
+    /// Connect to a peer via their network address
+    ///
+    /// # Arguments
+    /// * `address` - Network address in format "ip:port" or "[ipv6]:port"
+    ///
+    /// # Returns
+    /// The peer ID of the connected peer
+    pub async fn connect_peer(&self, address: &str) -> Result<crate::PeerId> {
+        self.network.connect_peer(address).await
+            .map_err(|e| anyhow::anyhow!("Failed to connect to peer: {}", e))
+    }
+
+    /// Disconnect from a specific peer
+    ///
+    /// # Arguments
+    /// * `peer_id` - The peer ID to disconnect from
+    pub async fn disconnect_peer(&self, peer_id: &crate::PeerId) -> Result<()> {
+        self.network.disconnect_peer(peer_id).await
+            .map_err(|e| anyhow::anyhow!("Failed to disconnect from peer: {}", e))
+    }
 }
 
 /// Connection pool for managing peer connections
