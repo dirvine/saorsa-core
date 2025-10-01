@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-10-01
+
+### Added
+- **P2P NAT Traversal Support** 🎉
+  - Added `NatTraversalMode` enum with `ClientOnly` and `P2PNode` variants
+  - Integrated ant-quic 0.10.0's NAT traversal capabilities
+  - `P2PNetworkNode::from_network_config()` for NAT-aware network creation
+  - Full P2P messaging support between MessagingService instances
+  - NAT configuration logging in MessagingService
+  - Comprehensive P2P integration tests (6 new tests)
+
+### Changed
+- **Breaking Change**: Updated to ant-quic 0.10.0
+  - New endpoint role system (Client, Server, Bootstrap)
+  - Improved NAT traversal with symmetric ServerSupport
+  - Bootstrap role for P2P nodes without external infrastructure
+- Added `nat_traversal: Option<NatTraversalMode>` field to `NetworkConfig`
+- Default NetworkConfig now includes P2P NAT traversal (concurrency limit: 10)
+- Updated `P2PNetworkNode` to use `EndpointRole::Bootstrap` for compatibility
+
+### Dependencies
+- Updated `ant-quic` from 0.9.0 to 0.10.0
+
+### Documentation
+- Updated CHANGELOG with v0.5.0 release notes
+- Added NAT traversal configuration examples
+- Documented endpoint role behavior
+
+### Testing
+- All 666 unit tests passing
+- 6 new P2P NAT integration tests passing
+- Zero compilation errors, zero warnings
+
 ## [0.4.0] - 2025-10-01
 
 ### Added

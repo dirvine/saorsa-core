@@ -143,6 +143,22 @@ impl MessagingService {
         dht_client: DhtClient,
         config: super::NetworkConfig,
     ) -> Result<Self> {
+        // Log NAT traversal configuration
+        match &config.nat_traversal {
+            Some(super::NatTraversalMode::P2PNode { concurrency_limit }) => {
+                info!(
+                    "Initializing MessagingService with P2P NAT traversal (concurrency limit: {})",
+                    concurrency_limit
+                );
+            }
+            Some(super::NatTraversalMode::ClientOnly) => {
+                info!("Initializing MessagingService with client-only NAT traversal");
+            }
+            None => {
+                warn!("Initializing MessagingService with NAT traversal disabled");
+            }
+        }
+
         // Initialize components
         let store = MessageStore::new(dht_client.clone(), None).await?;
 
@@ -226,7 +242,10 @@ impl MessagingService {
                         ),
                     ];
                 }
-                super::IpMode::DualStackSeparate { ipv4_port, ipv6_port } => {
+                super::IpMode::DualStackSeparate {
+                    ipv4_port,
+                    ipv6_port,
+                } => {
                     // Separate ports for IPv4 and IPv6
                     node_config.enable_ipv6 = true;
 
@@ -617,7 +636,9 @@ impl MessagingService {
 
     /// Get the list of currently connected peer IDs
     pub async fn connected_peers(&self) -> Vec<String> {
-        self.transport.connected_peers().await
+        self.transport
+            .connected_peers()
+            .await
             .into_iter()
             .map(|peer_id| peer_id.to_string())
             .collect()
@@ -653,7 +674,8 @@ impl MessagingService {
     /// * `peer_id` - The peer ID to disconnect from
     pub async fn disconnect_peer(&self, peer_id: &str) -> Result<()> {
         // Parse peer ID from string
-        let peer_id_parsed = peer_id.parse()
+        let peer_id_parsed = peer_id
+            .parse()
             .map_err(|e| anyhow::anyhow!("Invalid peer ID: {}", e))?;
         self.transport.disconnect_peer(&peer_id_parsed).await
     }

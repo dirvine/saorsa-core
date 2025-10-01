@@ -6,8 +6,12 @@
 // - Port range selection with fallback
 // - IPv4/IPv6 mode configuration
 // - Multiple instances on the same machine
+// - P2P NAT traversal configuration
 
 use serde::{Deserialize, Serialize};
+
+// Import ant-quic NAT traversal types
+use ant_quic::nat_traversal_api::{EndpointRole, NatTraversalConfig as AntNatConfig};
 
 /// Configuration for network port binding
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +24,9 @@ pub struct NetworkConfig {
 
     /// Retry behavior on port conflicts
     pub retry_behavior: RetryBehavior,
+
+    /// NAT traversal configuration (None disables NAT traversal)
+    pub nat_traversal: Option<NatTraversalMode>,
 }
 
 /// Port configuration options
@@ -99,6 +106,22 @@ pub enum RetryBehavior {
     TryNext,
 }
 
+/// NAT traversal mode for this node
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NatTraversalMode {
+    /// Act as client only (no incoming path validations)
+    ClientOnly,
+
+    /// Act as P2P node (both send and receive path validations)
+    ///
+    /// Concurrency limit controls max simultaneous path validation attempts.
+    /// Must be 1-100. Recommended: 5-10 for typical nodes, 20-50 for high-traffic.
+    P2PNode {
+        /// Maximum concurrent path validation attempts
+        concurrency_limit: u32,
+    },
+}
+
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
@@ -108,6 +131,10 @@ impl Default for NetworkConfig {
             ip_mode: IpMode::IPv4Only,
             // Fail fast by default for predictable behavior
             retry_behavior: RetryBehavior::FailFast,
+            // Enable P2P NAT traversal with recommended concurrency limit
+            nat_traversal: Some(NatTraversalMode::P2PNode {
+                concurrency_limit: 10,
+            }),
         }
     }
 }
@@ -148,6 +175,49 @@ impl NetworkConfig {
             ..Default::default()
         }
     }
+
+    /// Create configuration with P2P NAT traversal
+    pub fn p2p_node(concurrency_limit: u32) -> Self {
+        Self {
+            nat_traversal: Some(NatTraversalMode::P2PNode { concurrency_limit }),
+            ..Default::default()
+        }
+    }
+
+    /// Create configuration with client-only NAT traversal
+    pub fn client_only() -> Self {
+        Self {
+            nat_traversal: Some(NatTraversalMode::ClientOnly),
+            ..Default::default()
+        }
+    }
+
+    /// Create configuration with NAT traversal disabled
+    pub fn no_nat_traversal() -> Self {
+        Self {
+            nat_traversal: None,
+            ..Default::default()
+        }
+    }
+
+    /// Convert to ant-quic NAT configuration
+    pub fn to_ant_config(&self) -> Option<AntNatConfig> {
+        self.nat_traversal.as_ref().map(|mode| {
+            let role = match mode {
+                NatTraversalMode::ClientOnly => EndpointRole::Client,
+                NatTraversalMode::P2PNode {
+                    concurrency_limit: _,
+                } => EndpointRole::Server {
+                    can_coordinate: true,
+                },
+            };
+
+            AntNatConfig {
+                role,
+                ..Default::default()
+            }
+        })
+    }
 }
 
 /// Error types for network configuration
@@ -173,6 +243,9 @@ pub enum NetworkConfigError {
 
     #[error("Cannot bind to port {0}: Permission denied. Use port 1024 or higher.")]
     PermissionDenied(u16),
+
+    #[error("Invalid NAT traversal concurrency limit: {0}. Must be between 1 and 100.")]
+    InvalidConcurrencyLimit(u32),
 }
 
 #[cfg(test)]
@@ -204,5 +277,63 @@ mod tests {
     fn test_with_dual_stack() {
         let config = NetworkConfig::with_dual_stack();
         assert!(matches!(config.ip_mode, IpMode::DualStack));
+    }
+
+    #[test]
+    fn test_default_has_p2p_nat() {
+        let config = NetworkConfig::default();
+        assert!(matches!(
+            config.nat_traversal,
+            Some(NatTraversalMode::P2PNode {
+                concurrency_limit: 10
+            })
+        ));
+    }
+
+    #[test]
+    fn test_p2p_node() {
+        let config = NetworkConfig::p2p_node(20);
+        assert!(matches!(
+            config.nat_traversal,
+            Some(NatTraversalMode::P2PNode {
+                concurrency_limit: 20
+            })
+        ));
+    }
+
+    #[test]
+    fn test_client_only() {
+        let config = NetworkConfig::client_only();
+        assert!(matches!(
+            config.nat_traversal,
+            Some(NatTraversalMode::ClientOnly)
+        ));
+    }
+
+    #[test]
+    fn test_no_nat_traversal() {
+        let config = NetworkConfig::no_nat_traversal();
+        assert!(config.nat_traversal.is_none());
+    }
+
+    #[test]
+    fn test_to_ant_config_p2p() {
+        let config = NetworkConfig::p2p_node(15);
+        let ant_config = config.to_ant_config();
+        assert!(ant_config.is_some());
+    }
+
+    #[test]
+    fn test_to_ant_config_client() {
+        let config = NetworkConfig::client_only();
+        let ant_config = config.to_ant_config();
+        assert!(ant_config.is_some());
+    }
+
+    #[test]
+    fn test_to_ant_config_none() {
+        let config = NetworkConfig::no_nat_traversal();
+        let ant_config = config.to_ant_config();
+        assert!(ant_config.is_none());
     }
 }

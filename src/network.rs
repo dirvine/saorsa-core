@@ -2314,7 +2314,7 @@ mod tests {
         let peer_id =
             match timeout(Duration::from_millis(500), node1.connect_peer(&node2_addr)).await {
                 Ok(res) => res?,
-                Err(_) => return Err(P2PError::Network(NetworkError::Timeout).into()),
+                Err(_) => return Err(P2PError::Network(NetworkError::Timeout)),
             };
 
         // Wait a bit for connection to establish

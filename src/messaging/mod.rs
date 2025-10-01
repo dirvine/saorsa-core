@@ -36,7 +36,7 @@ pub use encryption::SecureMessaging;
 pub use key_exchange::{KeyExchange, KeyExchangeMessage};
 pub use media::MediaProcessor;
 pub use network_config::{
-    IpMode, NetworkConfig, NetworkConfigError, PortConfig, RetryBehavior,
+    IpMode, NatTraversalMode, NetworkConfig, NetworkConfigError, PortConfig, RetryBehavior,
 };
 pub use quic_media_streams::{QosParameters, QuicMediaStreamManager, StreamStats};
 pub use reactions::ReactionManager;

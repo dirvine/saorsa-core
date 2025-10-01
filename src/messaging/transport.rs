@@ -362,7 +362,9 @@ impl MessageTransport {
     /// # Returns
     /// The peer ID of the connected peer
     pub async fn connect_peer(&self, address: &str) -> Result<crate::PeerId> {
-        self.network.connect_peer(address).await
+        self.network
+            .connect_peer(address)
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to connect to peer: {}", e))
     }
 
@@ -371,7 +373,9 @@ impl MessageTransport {
     /// # Arguments
     /// * `peer_id` - The peer ID to disconnect from
     pub async fn disconnect_peer(&self, peer_id: &crate::PeerId) -> Result<()> {
-        self.network.disconnect_peer(peer_id).await
+        self.network
+            .disconnect_peer(peer_id)
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to disconnect from peer: {}", e))
     }
 }

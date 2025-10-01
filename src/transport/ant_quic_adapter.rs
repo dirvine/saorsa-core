@@ -63,10 +63,10 @@ impl P2PNetworkNode {
     /// Create a new P2P network node
     pub async fn new(bind_addr: SocketAddr) -> Result<Self> {
         let config = QuicNodeConfig {
-            role: EndpointRole::Bootstrap, // Use Bootstrap role to avoid requiring bootstrap nodes in tests
-            bootstrap_nodes: vec![],       // Bootstrap nodes not needed for Bootstrap role
-            enable_coordinator: false,     // We don't need a coordinator
-            max_connections: 100,          // Reasonable default
+            role: EndpointRole::Bootstrap, // Use Bootstrap role for P2P nodes without external bootstrap infrastructure
+            bootstrap_nodes: vec![],
+            enable_coordinator: false,
+            max_connections: 100,
             connection_timeout: Duration::from_secs(30),
             stats_interval: Duration::from_secs(60),
             auth_config: AuthConfig::default(), // Use ant-quic's default auth (includes PQC)
@@ -96,6 +96,49 @@ impl P2PNetworkNode {
             local_addr: bind_addr,
             peers: Arc::new(RwLock::new(Vec::new())),
         })
+    }
+
+    /// Create a new P2P network node from NetworkConfig
+    pub async fn from_network_config(
+        bind_addr: SocketAddr,
+        net_config: &crate::messaging::NetworkConfig,
+    ) -> Result<Self> {
+        // Convert NAT traversal mode to EndpointRole
+        // For P2P nodes without external bootstrap infrastructure, use Bootstrap role
+        // which allows accepting connections without requiring external bootstrap nodes
+        let role = match &net_config.nat_traversal {
+            Some(crate::messaging::NatTraversalMode::ClientOnly) => {
+                // Client-only mode still needs Bootstrap role to accept connections
+                EndpointRole::Bootstrap
+            }
+            Some(crate::messaging::NatTraversalMode::P2PNode { .. }) => {
+                // P2P node uses Bootstrap role to enable full P2P communication
+                EndpointRole::Bootstrap
+            }
+            None => {
+                // Default to Bootstrap role for compatibility
+                EndpointRole::Bootstrap
+            }
+        };
+
+        let config = QuicNodeConfig {
+            role,
+            bootstrap_nodes: vec![],
+            enable_coordinator: false,
+            max_connections: 100,
+            connection_timeout: Duration::from_secs(30),
+            stats_interval: Duration::from_secs(60),
+            auth_config: AuthConfig::default(),
+            bind_addr: Some(bind_addr),
+        };
+
+        tracing::info!(
+            "Creating P2P network node with role {:?} at {}",
+            config.role,
+            bind_addr
+        );
+
+        Self::new_with_config(bind_addr, config).await
     }
 
     /// Connect to a peer

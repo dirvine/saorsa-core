@@ -13,6 +13,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-s
 
 ## Features
 
+- **P2P NAT Traversal**: True peer-to-peer messaging with automatic NAT traversal (ant-quic 0.10.0+)
 - **DHT (Distributed Hash Table)**: Advanced DHT implementation with RSPS (Root-Scoped Provider Summaries)
 - **Placement System**: Intelligent shard placement with EigenTrust integration and Byzantine fault tolerance
 - **QUIC Transport**: High-performance networking with ant-quic
@@ -31,7 +32,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-saorsa-core = "0.3.25"
+saorsa-core = "0.5.0"
 ```
 
 ### Basic DHT Node
@@ -63,9 +64,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### P2P NAT Traversal
+
+saorsa-core v0.5.0+ includes full P2P NAT traversal support, enabling direct peer-to-peer connections:
+
+```rust
+use saorsa_core::messaging::{MessagingService, NetworkConfig, DhtClient};
+use saorsa_core::identity::FourWordAddress;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create two messaging service instances with P2P NAT traversal (default)
+    let config = NetworkConfig::default();  // Includes P2P NAT traversal
+
+    let service1 = MessagingService::new_with_config(
+        FourWordAddress("peer-one-alpha".to_string()),
+        DhtClient::new()?,
+        config.clone(),
+    ).await?;
+
+    let service2 = MessagingService::new_with_config(
+        FourWordAddress("peer-two-beta".to_string()),
+        DhtClient::new()?,
+        config,
+    ).await?;
+
+    // Connect peers directly
+    let addr2 = service2.listen_addrs().await[0];
+    service1.connect_peer(&addr2).await?;
+
+    // Send P2P message
+    service1.send_direct_message(&addr2, b"Hello P2P!").await?;
+
+    Ok(())
+}
+```
+
+**NAT Traversal Modes:**
+- **P2P Node** (default): Both send and receive path validations for symmetric P2P connections
+- **Client Only**: Outgoing connections only, minimal resource usage
+- **Disabled**: No NAT traversal for private networks
+
+**Configuration Examples:**
+```rust
+// Default P2P mode with concurrency limit of 10
+let config = NetworkConfig::default();
+
+// High-traffic P2P node
+let config = NetworkConfig::p2p_node(50);
+
+// Lightweight client
+let config = NetworkConfig::client_only();
+
+// Private network (no NAT traversal)
+let config = NetworkConfig::no_nat_traversal();
+```
+
 ### Four-Word Endpoints
 
-- Endpoints are encoded/decoded using the `four-word-networking` crate’s adaptive API.
+- Endpoints are encoded/decoded using the `four-word-networking` crate's adaptive API.
 - IPv4 → 4 words; IPv6 → word count is crate‑defined; decoding requires a port (no implicit defaults).
 - Four‑words are reserved strictly for network endpoints; user identities in messaging are separate handles.
 
@@ -73,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Core Components
 
-1. **Network Layer**: QUIC-based P2P networking with NAT traversal
+1. **Network Layer**: QUIC-based P2P networking with automatic NAT traversal (ant-quic 0.10.0+)
 2. **DHT**: Kademlia-based DHT with RSPS optimization
 3. **Placement System**: Intelligent shard placement with weighted selection algorithms
 4. **Identity**: Post‑quantum cryptographic identities with ML‑DSA‑65 signatures (no PoW; no embedded four‑word address)
@@ -581,7 +638,7 @@ For commercial licensing, contact: saorsalabs@gmail.com
 - `tracing` - Logging
 
 ### Networking
-- `ant-quic` - QUIC transport
+- `ant-quic` (0.10.0+) - QUIC transport with P2P NAT traversal
 - `four-word-networking` - Human-readable addresses
 - `rustls` - TLS support
 

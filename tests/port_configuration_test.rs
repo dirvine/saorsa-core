@@ -2,9 +2,9 @@
 //! Tests the new NetworkConfig integration with ant-quic 0.9.0
 
 use anyhow::Result;
-use saorsa_core::messaging::{IpMode, MessagingService, NetworkConfig, PortConfig, RetryBehavior};
-use saorsa_core::messaging::DhtClient;
 use saorsa_core::identity::FourWordAddress;
+use saorsa_core::messaging::DhtClient;
+use saorsa_core::messaging::{IpMode, MessagingService, NetworkConfig, PortConfig, RetryBehavior};
 
 #[tokio::test]
 async fn test_os_assigned_port() -> Result<()> {
@@ -46,7 +46,10 @@ async fn test_multiple_instances_different_ports() -> Result<()> {
     let port2 = service2.listen_addrs().await[0].port();
 
     // Should have different ports
-    assert_ne!(port1, port2, "Multiple instances should get different ports");
+    assert_ne!(
+        port1, port2,
+        "Multiple instances should get different ports"
+    );
 
     Ok(())
 }
@@ -62,6 +65,7 @@ async fn test_explicit_port_configuration() -> Result<()> {
         port: PortConfig::Explicit(12345),
         ip_mode: IpMode::IPv4Only,
         retry_behavior: RetryBehavior::FailFast,
+        nat_traversal: None,
     };
 
     let service = MessagingService::new_with_config(address, dht_client, config).await?;
@@ -84,13 +88,17 @@ async fn test_port_range_configuration() -> Result<()> {
         port: PortConfig::Range(20000, 20010),
         ip_mode: IpMode::IPv4Only,
         retry_behavior: RetryBehavior::TryNext,
+        nat_traversal: None,
     };
 
     let service = MessagingService::new_with_config(address, dht_client, config).await?;
 
     // Verify port is in range
     let port = service.listen_addrs().await[0].port();
-    assert!(port >= 20000 && port <= 20010, "Port should be in specified range");
+    assert!(
+        port >= 20000 && port <= 20010,
+        "Port should be in specified range"
+    );
 
     Ok(())
 }
@@ -105,6 +113,7 @@ async fn test_ipv4_only_mode() -> Result<()> {
         port: PortConfig::OsAssigned,
         ip_mode: IpMode::IPv4Only,
         retry_behavior: RetryBehavior::FailFast,
+        nat_traversal: None,
     };
 
     let service = MessagingService::new_with_config(address, dht_client, config).await?;
@@ -131,6 +140,7 @@ async fn test_port_conflict_handling() -> Result<()> {
         port: PortConfig::Explicit(port),
         ip_mode: IpMode::IPv4Only,
         retry_behavior: RetryBehavior::FailFast,
+        nat_traversal: None,
     };
 
     // First instance should succeed
@@ -138,7 +148,10 @@ async fn test_port_conflict_handling() -> Result<()> {
 
     // Second instance should fail with FailFast
     let result = MessagingService::new_with_config(addr2, dht2, config).await;
-    assert!(result.is_err(), "Second instance should fail on port conflict");
+    assert!(
+        result.is_err(),
+        "Second instance should fail on port conflict"
+    );
 
     Ok(())
 }
@@ -157,12 +170,14 @@ async fn test_port_conflict_fallback() -> Result<()> {
         port: PortConfig::Explicit(port),
         ip_mode: IpMode::IPv4Only,
         retry_behavior: RetryBehavior::FailFast,
+        nat_traversal: None,
     };
 
     let config2 = NetworkConfig {
         port: PortConfig::Explicit(port),
         ip_mode: IpMode::IPv4Only,
         retry_behavior: RetryBehavior::FallbackToOsAssigned,
+        nat_traversal: None,
     };
 
     // First instance uses explicit port
@@ -174,7 +189,10 @@ async fn test_port_conflict_fallback() -> Result<()> {
     let port2 = service2.listen_addrs().await[0].port();
 
     assert_eq!(port1, port, "First instance should use explicit port");
-    assert_ne!(port2, port, "Second instance should fall back to different port");
+    assert_ne!(
+        port2, port,
+        "Second instance should fall back to different port"
+    );
 
     Ok(())
 }
