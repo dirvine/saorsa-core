@@ -1201,6 +1201,37 @@ impl P2PNode {
             .collect()
     }
 
+    /// Remove a peer from the peers map
+    ///
+    /// This method removes a peer from the internal peers map. It should be used
+    /// when a connection is no longer valid (e.g., after detecting that the underlying
+    /// ant-quic connection has closed).
+    ///
+    /// # Arguments
+    /// * `peer_id` - The ID of the peer to remove
+    ///
+    /// # Returns
+    /// `true` if the peer was found and removed, `false` if the peer was not in the map
+    pub async fn remove_peer(&self, peer_id: &PeerId) -> bool {
+        self.peers.write().await.remove(peer_id).is_some()
+    }
+
+    /// Check if a peer is connected
+    ///
+    /// This method checks if the peer ID exists in the peers map. Note that this
+    /// only verifies the peer is registered - it does not guarantee the underlying
+    /// ant-quic connection is still active. For connection validation, use `send_message`
+    /// which will fail if the connection is closed.
+    ///
+    /// # Arguments
+    /// * `peer_id` - The ID of the peer to check
+    ///
+    /// # Returns
+    /// `true` if the peer exists in the peers map, `false` otherwise
+    pub async fn is_peer_connected(&self, peer_id: &PeerId) -> bool {
+        self.peers.read().await.contains_key(peer_id)
+    }
+
     /// Connect to a peer
     pub async fn connect_peer(&self, address: &str) -> Result<PeerId> {
         info!("Connecting to peer at: {}", address);
@@ -2783,6 +2814,85 @@ mod tests {
         // Verify addresses match
         assert_eq!(peer1_conn.unwrap().1, peer1_addrs);
         assert_eq!(peer2_conn.unwrap().1, peer2_addrs);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_peer_success() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        // Add a peer
+        let peer_id = "peer_to_remove".to_string();
+        let peer_info = PeerInfo {
+            peer_id: peer_id.clone(),
+            addresses: vec!["192.168.1.100:9000".to_string()],
+            connected_at: Instant::now(),
+            last_seen: Instant::now(),
+            status: ConnectionStatus::Connected,
+            protocols: vec!["test-protocol".to_string()],
+            heartbeat_count: 0,
+        };
+
+        node.peers.write().await.insert(peer_id.clone(), peer_info);
+
+        // Verify peer exists
+        assert!(node.is_peer_connected(&peer_id).await);
+
+        // Remove the peer
+        let removed = node.remove_peer(&peer_id).await;
+        assert!(removed);
+
+        // Verify peer no longer exists
+        assert!(!node.is_peer_connected(&peer_id).await);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_peer_nonexistent() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        // Try to remove a peer that doesn't exist
+        let removed = node.remove_peer(&"nonexistent_peer".to_string()).await;
+        assert!(!removed);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_is_peer_connected() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        let peer_id = "test_peer".to_string();
+
+        // Initially not connected
+        assert!(!node.is_peer_connected(&peer_id).await);
+
+        // Add peer
+        let peer_info = PeerInfo {
+            peer_id: peer_id.clone(),
+            addresses: vec!["192.168.1.100:9000".to_string()],
+            connected_at: Instant::now(),
+            last_seen: Instant::now(),
+            status: ConnectionStatus::Connected,
+            protocols: vec!["test-protocol".to_string()],
+            heartbeat_count: 0,
+        };
+
+        node.peers.write().await.insert(peer_id.clone(), peer_info);
+
+        // Now connected
+        assert!(node.is_peer_connected(&peer_id).await);
+
+        // Remove peer
+        node.remove_peer(&peer_id).await;
+
+        // No longer connected
+        assert!(!node.is_peer_connected(&peer_id).await);
 
         Ok(())
     }

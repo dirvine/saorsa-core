@@ -231,7 +231,20 @@ impl MessageTransport {
         });
     }
 
-    /// Try direct delivery to a peer
+    /// Check if an error indicates a connection was closed
+    fn is_connection_error(error: &anyhow::Error) -> bool {
+        // Convert the error to a string for pattern matching
+        let error_str = format!("{}", error).to_lowercase();
+
+        // Check for common connection closure patterns
+        error_str.contains("closed")
+            || error_str.contains("connection")
+            || error_str.contains("send_to_peer failed")
+            || error_str.contains("not found")
+            || error_str.contains("peer not found")
+    }
+
+    /// Try direct delivery to a peer with automatic reconnection
     async fn try_direct_delivery(
         &self,
         recipient: &FourWordAddress,
@@ -271,20 +284,75 @@ impl MessageTransport {
                 };
 
             // Send message using the connection (either reused or new)
-            if let Err(e) = self
+            let send_result = self
                 .network
                 .send_message(&peer_id, "messaging", data.clone())
-                .await
-            {
-                warn!("Failed sending to {} via {}: {}", recipient, addr, e);
-                continue; // Try next address
-            }
+                .await;
 
-            debug!(
-                "Message {} delivered to {} (peer {})",
-                message.id, recipient, peer_id
-            );
-            return Ok(DeliveryStatus::Delivered(Utc::now()));
+            match send_result {
+                Ok(_) => {
+                    debug!(
+                        "Message {} delivered to {} (peer {})",
+                        message.id, recipient, peer_id
+                    );
+                    return Ok(DeliveryStatus::Delivered(Utc::now()));
+                }
+                Err(e) => {
+                    // Convert error to anyhow::Error and check if it's a connection error
+                    let anyhow_err: anyhow::Error = e.into();
+
+                    // Check if this is a connection error
+                    if Self::is_connection_error(&anyhow_err) {
+                        // Connection closed - remove stale peer and attempt reconnection
+                        warn!(
+                            "Connection to {} (peer {}) closed, attempting reconnect: {}",
+                            recipient, peer_id, anyhow_err
+                        );
+
+                        // Remove stale peer from P2PNode
+                        self.network.remove_peer(&peer_id).await;
+
+                        // Attempt to reconnect
+                        match self.network.connect_peer(addr).await {
+                            Ok(new_peer_id) => {
+                                debug!(
+                                    "Reconnected to {} at {} (new peer {})",
+                                    recipient, addr, new_peer_id
+                                );
+
+                                // Retry send with new connection
+                                if self
+                                    .network
+                                    .send_message(&new_peer_id, "messaging", data.clone())
+                                    .await
+                                    .is_ok()
+                                {
+                                    debug!(
+                                        "Message {} delivered after reconnect to {} (peer {})",
+                                        message.id, recipient, new_peer_id
+                                    );
+                                    return Ok(DeliveryStatus::Delivered(Utc::now()));
+                                } else {
+                                    warn!(
+                                        "Failed to send after reconnect to {} at {}",
+                                        recipient, addr
+                                    );
+                                }
+                            }
+                            Err(reconnect_err) => {
+                                warn!(
+                                    "Failed to reconnect to {} at {}: {}",
+                                    recipient, addr, reconnect_err
+                                );
+                            }
+                        }
+                    } else {
+                        warn!("Failed sending to {} via {}: {}", recipient, addr, anyhow_err);
+                    }
+
+                    continue; // Try next address
+                }
+            }
         }
 
         Err(anyhow::anyhow!(
