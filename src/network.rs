@@ -1155,6 +1155,52 @@ impl P2PNode {
         self.peers.read().await.get(peer_id).cloned()
     }
 
+    /// Get the peer ID for a given socket address, if connected
+    ///
+    /// This method searches through all connected peers to find one that has
+    /// the specified address in its address list.
+    ///
+    /// # Arguments
+    /// * `addr` - The socket address to search for (e.g., "192.168.1.100:9000")
+    ///
+    /// # Returns
+    /// * `Some(PeerId)` - The peer ID if a matching connected peer is found
+    /// * `None` - If no peer with this address is currently connected
+    pub async fn get_peer_id_by_address(&self, addr: &str) -> Option<PeerId> {
+        // Parse the address to a SocketAddr for comparison
+        let socket_addr: std::net::SocketAddr = addr.parse().ok()?;
+
+        let peers = self.peers.read().await;
+
+        // Search through all connected peers
+        for (peer_id, peer_info) in peers.iter() {
+            // Check if this peer has a matching address
+            for peer_addr in &peer_info.addresses {
+                if let Ok(peer_socket) = peer_addr.parse::<std::net::SocketAddr>()
+                    && peer_socket == socket_addr
+                {
+                    return Some(peer_id.clone());
+                }
+            }
+        }
+
+        None
+    }
+
+    /// List all active connections with their peer IDs and addresses
+    ///
+    /// # Returns
+    /// A vector of tuples containing (PeerId, Vec<String>) where the Vec<String>
+    /// contains all known addresses for that peer.
+    pub async fn list_active_connections(&self) -> Vec<(PeerId, Vec<String>)> {
+        let peers = self.peers.read().await;
+
+        peers
+            .iter()
+            .map(|(peer_id, peer_info)| (peer_id.clone(), peer_info.addresses.clone()))
+            .collect()
+    }
+
     /// Connect to a peer
     pub async fn connect_peer(&self, address: &str) -> Result<PeerId> {
         info!("Connecting to peer at: {}", address);
@@ -2329,7 +2375,7 @@ mod tests {
         .await
         {
             Ok(res) => res,
-            Err(_) => return Err(P2PError::Network(NetworkError::Timeout).into()),
+            Err(_) => return Err(P2PError::Network(NetworkError::Timeout)),
         };
         // For now, we'll just check that we don't get a "not connected" error
         // The actual send might fail due to no handler on the other side
@@ -2557,6 +2603,186 @@ mod tests {
         assert_eq!(config.peer_id, deserialized.peer_id);
         assert_eq!(config.listen_addrs, deserialized.listen_addrs);
         assert_eq!(config.enable_ipv6, deserialized.enable_ipv6);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_peer_id_by_address_found() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        // Manually insert a peer for testing
+        let test_peer_id = "peer_test_123".to_string();
+        let test_address = "192.168.1.100:9000".to_string();
+
+        let peer_info = PeerInfo {
+            peer_id: test_peer_id.clone(),
+            addresses: vec![test_address.clone()],
+            connected_at: Instant::now(),
+            last_seen: Instant::now(),
+            status: ConnectionStatus::Connected,
+            protocols: vec!["test-protocol".to_string()],
+            heartbeat_count: 0,
+        };
+
+        node.peers
+            .write()
+            .await
+            .insert(test_peer_id.clone(), peer_info);
+
+        // Test: Find peer by address
+        let found_peer_id = node.get_peer_id_by_address(&test_address).await;
+        assert_eq!(found_peer_id, Some(test_peer_id));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_peer_id_by_address_not_found() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        // Test: Try to find a peer that doesn't exist
+        let result = node.get_peer_id_by_address("192.168.1.200:9000").await;
+        assert_eq!(result, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_peer_id_by_address_invalid_format() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        // Test: Invalid address format should return None
+        let result = node.get_peer_id_by_address("invalid-address").await;
+        assert_eq!(result, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_peer_id_by_address_multiple_peers() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        // Add multiple peers with different addresses
+        let peer1_id = "peer_1".to_string();
+        let peer1_addr = "192.168.1.101:9001".to_string();
+
+        let peer2_id = "peer_2".to_string();
+        let peer2_addr = "192.168.1.102:9002".to_string();
+
+        let peer1_info = PeerInfo {
+            peer_id: peer1_id.clone(),
+            addresses: vec![peer1_addr.clone()],
+            connected_at: Instant::now(),
+            last_seen: Instant::now(),
+            status: ConnectionStatus::Connected,
+            protocols: vec!["test-protocol".to_string()],
+            heartbeat_count: 0,
+        };
+
+        let peer2_info = PeerInfo {
+            peer_id: peer2_id.clone(),
+            addresses: vec![peer2_addr.clone()],
+            connected_at: Instant::now(),
+            last_seen: Instant::now(),
+            status: ConnectionStatus::Connected,
+            protocols: vec!["test-protocol".to_string()],
+            heartbeat_count: 0,
+        };
+
+        node.peers
+            .write()
+            .await
+            .insert(peer1_id.clone(), peer1_info);
+        node.peers
+            .write()
+            .await
+            .insert(peer2_id.clone(), peer2_info);
+
+        // Test: Find each peer by their unique address
+        let found_peer1 = node.get_peer_id_by_address(&peer1_addr).await;
+        let found_peer2 = node.get_peer_id_by_address(&peer2_addr).await;
+
+        assert_eq!(found_peer1, Some(peer1_id));
+        assert_eq!(found_peer2, Some(peer2_id));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_list_active_connections_empty() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        // Test: No connections initially
+        let connections = node.list_active_connections().await;
+        assert!(connections.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_list_active_connections_with_peers() -> Result<()> {
+        let config = create_test_node_config();
+        let node = P2PNode::new(config).await?;
+
+        // Add multiple peers
+        let peer1_id = "peer_1".to_string();
+        let peer1_addrs = vec![
+            "192.168.1.101:9001".to_string(),
+            "192.168.1.101:9002".to_string(),
+        ];
+
+        let peer2_id = "peer_2".to_string();
+        let peer2_addrs = vec!["192.168.1.102:9003".to_string()];
+
+        let peer1_info = PeerInfo {
+            peer_id: peer1_id.clone(),
+            addresses: peer1_addrs.clone(),
+            connected_at: Instant::now(),
+            last_seen: Instant::now(),
+            status: ConnectionStatus::Connected,
+            protocols: vec!["test-protocol".to_string()],
+            heartbeat_count: 0,
+        };
+
+        let peer2_info = PeerInfo {
+            peer_id: peer2_id.clone(),
+            addresses: peer2_addrs.clone(),
+            connected_at: Instant::now(),
+            last_seen: Instant::now(),
+            status: ConnectionStatus::Connected,
+            protocols: vec!["test-protocol".to_string()],
+            heartbeat_count: 0,
+        };
+
+        node.peers
+            .write()
+            .await
+            .insert(peer1_id.clone(), peer1_info);
+        node.peers
+            .write()
+            .await
+            .insert(peer2_id.clone(), peer2_info);
+
+        // Test: List all active connections
+        let connections = node.list_active_connections().await;
+        assert_eq!(connections.len(), 2);
+
+        // Verify peer1 and peer2 are in the list
+        let peer1_conn = connections.iter().find(|(id, _)| id == &peer1_id);
+        let peer2_conn = connections.iter().find(|(id, _)| id == &peer2_id);
+
+        assert!(peer1_conn.is_some());
+        assert!(peer2_conn.is_some());
+
+        // Verify addresses match
+        assert_eq!(peer1_conn.unwrap().1, peer1_addrs);
+        assert_eq!(peer2_conn.unwrap().1, peer2_addrs);
 
         Ok(())
     }

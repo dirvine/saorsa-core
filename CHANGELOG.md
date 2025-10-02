@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2025-10-02
+
+### Added
+- **Connection Reuse for P2P Messaging** 🔄
+  - Added `P2PNode::get_peer_id_by_address()` method for connection lookup
+  - Added `P2PNode::list_active_connections()` method for connection enumeration
+  - 6 comprehensive unit tests for connection lookup functionality
+
+### Changed
+- **Optimized MessageTransport Delivery** 📡
+  - Refactored `MessageTransport::try_direct_delivery()` to check for existing P2P connections before creating new ones
+  - Eliminated redundant connection establishment when peer is already connected
+  - Simplified delivery logic by removing duplicate code paths
+  - Improved logging to distinguish between "reusing existing connection" vs "establishing new connection"
+  - Removed unused `ConnectionPool::get_connection()` method (dead code cleanup)
+
+### Performance
+- Reduced connection overhead by reusing active P2P connections
+- Eliminated unnecessary Happy Eyeballs dual-stack connection attempts for already-connected peers
+- Faster message delivery for repeated communications with the same peer
+
+### Technical Details
+- Zero breaking changes - purely internal optimization
+- MessageTransport already used shared `Arc<P2PNode>` - no architectural changes needed
+- Connection lookup uses socket address comparison for accurate matching
+- All 666 unit tests passing with zero failures
+
+### Implementation
+- Modified `src/network.rs`: Added connection lookup methods to P2PNode
+- Modified `src/messaging/transport.rs`: Updated try_direct_delivery() to check existing connections
+- Added comprehensive test coverage for new functionality
+
 ## [0.5.2] - 2025-10-02
 
 ### Added

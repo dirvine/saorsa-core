@@ -6,9 +6,7 @@
 
 use anyhow::Result;
 use saorsa_core::identity::FourWordAddress;
-use saorsa_core::messaging::{
-    DhtClient, MessagingService, MessageContent, ChannelId, SendOptions,
-};
+use saorsa_core::messaging::{ChannelId, DhtClient, MessageContent, MessagingService, SendOptions};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing_subscriber;
@@ -114,7 +112,10 @@ async fn test_session_key_caching() -> Result<()> {
         )
         .await;
 
-    assert!(result1.is_ok(), "First message should trigger key exchange and succeed");
+    assert!(
+        result1.is_ok(),
+        "First message should trigger key exchange and succeed"
+    );
 
     // Send second message immediately (should reuse session key)
     let result2 = alice_service
@@ -126,7 +127,10 @@ async fn test_session_key_caching() -> Result<()> {
         )
         .await;
 
-    assert!(result2.is_ok(), "Second message should reuse cached session key");
+    assert!(
+        result2.is_ok(),
+        "Second message should reuse cached session key"
+    );
 
     Ok(())
 }

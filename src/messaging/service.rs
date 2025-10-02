@@ -333,7 +333,10 @@ impl MessagingService {
                 Err(_) => {
                     // Initiate PQC key exchange
                     info!("No session key for {}, initiating key exchange", recipient);
-                    let kex_msg = self.key_exchange.initiate_exchange(recipient.clone()).await?;
+                    let kex_msg = self
+                        .key_exchange
+                        .initiate_exchange(recipient.clone())
+                        .await?;
 
                     // Send the key exchange message
                     self.transport
@@ -343,8 +346,9 @@ impl MessagingService {
                     // Wait for session establishment with timeout
                     let wait_result = tokio::time::timeout(
                         tokio::time::Duration::from_secs(5),
-                        self.wait_for_session_key(recipient)
-                    ).await;
+                        self.wait_for_session_key(recipient),
+                    )
+                    .await;
 
                     match wait_result {
                         Ok(Ok(key)) => {
@@ -359,10 +363,7 @@ impl MessagingService {
                             ));
                         }
                         Err(_) => {
-                            return Err(anyhow::anyhow!(
-                                "Key exchange timeout for {}",
-                                recipient
-                            ));
+                            return Err(anyhow::anyhow!("Key exchange timeout for {}", recipient));
                         }
                     }
                 }
@@ -490,7 +491,10 @@ impl MessagingService {
                                     .send_key_exchange_message(&recipient, response)
                                     .await
                                 {
-                                    warn!("Failed to send key exchange response to {}: {}", recipient, e);
+                                    warn!(
+                                        "Failed to send key exchange response to {}: {}",
+                                        recipient, e
+                                    );
                                 }
                             }
                             Err(e) => {
@@ -765,7 +769,9 @@ impl MessagingService {
             }
         }
 
-        Err(anyhow::anyhow!("Session key not established within timeout"))
+        Err(anyhow::anyhow!(
+            "Session key not established within timeout"
+        ))
     }
 
     // Test helpers

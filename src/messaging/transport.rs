@@ -2,8 +2,8 @@
 // Integrates with the existing P2P network infrastructure
 
 use super::DhtClient;
-use super::types::*;
 use super::key_exchange::KeyExchangeMessage;
+use super::types::*;
 use crate::identity::FourWordAddress;
 use crate::network::P2PNode;
 use anyhow::Result;
@@ -237,65 +237,60 @@ impl MessageTransport {
         recipient: &FourWordAddress,
         message: &EncryptedMessage,
     ) -> Result<DeliveryStatus> {
-        // Check if peer is online
-        let pool = self.connections.read().await;
-
         // Serialize payload
         let data = serde_json::to_vec(message)?;
 
-        // Try existing pool connection first (best-effort info-only cache)
-        if let Some(_connection) = pool.get_connection(recipient) {
-            // We route via the network node to ensure real delivery
-            // Resolve and connect using DHT-discovered endpoints
-            let peer_info = self.resolve_peer_address(recipient).await?;
-            for addr in &peer_info.addresses {
-                if let Ok(peer_id) = self.network.connect_peer(addr).await {
-                    // Use a stable protocol label for routing
-                    if let Err(e) = self
-                        .network
-                        .send_message(&peer_id, "messaging", data.clone())
-                        .await
-                    {
-                        warn!("Failed sending to {} via {}: {}", recipient, addr, e);
-                        continue;
-                    }
-                    debug!(
-                        "Message {} delivered to {} (peer {})",
-                        message.id, recipient, peer_id
-                    );
-                    return Ok(DeliveryStatus::Delivered(Utc::now()));
-                }
-            }
-            // Fall through to queue if all endpoints failed
-            return Err(anyhow::anyhow!("All endpoints failed for {recipient}"));
-        }
-
-        // No cached connection: resolve and send via network
+        // Resolve peer addresses from DHT
         let peer_info = self.resolve_peer_address(recipient).await?;
+
+        // Try each address, checking for existing connections first
         for addr in &peer_info.addresses {
-            match self.network.connect_peer(addr).await {
-                Ok(peer_id) => {
-                    if let Err(e) = self
-                        .network
-                        .send_message(&peer_id, "messaging", data.clone())
-                        .await
-                    {
-                        warn!("Failed sending to {} via {}: {}", recipient, addr, e);
-                        continue;
-                    }
+            // Check if we already have an active connection to this address
+            let peer_id =
+                if let Some(existing_peer_id) = self.network.get_peer_id_by_address(addr).await {
                     debug!(
-                        "Message {} delivered to {} (peer {})",
-                        message.id, recipient, peer_id
+                        "Reusing existing connection to {} at {} (peer {})",
+                        recipient, addr, existing_peer_id
                     );
-                    return Ok(DeliveryStatus::Delivered(Utc::now()));
-                }
-                Err(e) => {
-                    debug!("Cannot connect to {} at {}: {}", recipient, addr, e);
-                }
+                    existing_peer_id
+                } else {
+                    // No existing connection, establish a new one
+                    match self.network.connect_peer(addr).await {
+                        Ok(peer_id) => {
+                            debug!(
+                                "Established new connection to {} at {} (peer {})",
+                                recipient, addr, peer_id
+                            );
+                            peer_id
+                        }
+                        Err(e) => {
+                            debug!("Cannot connect to {} at {}: {}", recipient, addr, e);
+                            continue; // Try next address
+                        }
+                    }
+                };
+
+            // Send message using the connection (either reused or new)
+            if let Err(e) = self
+                .network
+                .send_message(&peer_id, "messaging", data.clone())
+                .await
+            {
+                warn!("Failed sending to {} via {}: {}", recipient, addr, e);
+                continue; // Try next address
             }
+
+            debug!(
+                "Message {} delivered to {} (peer {})",
+                message.id, recipient, peer_id
+            );
+            return Ok(DeliveryStatus::Delivered(Utc::now()));
         }
 
-        Err(anyhow::anyhow!("Delivery failed: no reachable endpoints"))
+        Err(anyhow::anyhow!(
+            "Delivery failed: no reachable endpoints for {}",
+            recipient
+        ))
     }
 
     /// Queue message for later delivery
@@ -390,7 +385,10 @@ impl MessageTransport {
                             return Ok(());
                         }
                         Err(e) => {
-                            warn!("Failed sending key exchange to {} via {}: {}", recipient, addr, e);
+                            warn!(
+                                "Failed sending key exchange to {} via {}: {}",
+                                recipient, addr, e
+                            );
                             last_error = Some(anyhow::Error::from(e));
                         }
                     }
@@ -485,10 +483,6 @@ impl ConnectionPool {
 
         self.connections.insert(peer, connection);
         Ok(())
-    }
-
-    fn get_connection(&self, peer: &FourWordAddress) -> Option<&PeerConnection> {
-        self.connections.get(peer)
     }
 
     fn evict_lru(&mut self) {
