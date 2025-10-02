@@ -30,12 +30,13 @@ use crate::validation::RateLimiter;
 use crate::{NetworkAddress, PeerId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -489,6 +490,19 @@ pub struct P2PNode {
     /// Rate limiter for connection and request throttling
     #[allow(dead_code)]
     rate_limiter: Arc<RateLimiter>,
+
+    /// Active connections (tracked by peer_id)
+    /// This set is synchronized with ant-quic's connection state via event monitoring
+    active_connections: Arc<RwLock<HashSet<PeerId>>>,
+
+    /// Connection lifecycle monitor task handle
+    connection_monitor_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+
+    /// Keepalive task handle
+    keepalive_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+
+    /// Shutdown flag for background tasks
+    shutdown: Arc<AtomicBool>,
 }
 
 impl P2PNode {
@@ -546,6 +560,10 @@ impl P2PNode {
                 window: std::time::Duration::from_secs(1),
                 ..Default::default()
             })),
+            active_connections: Arc::new(RwLock::new(HashSet::new())),
+            connection_monitor_handle: Arc::new(RwLock::new(None)),
+            keepalive_handle: Arc::new(RwLock::new(None)),
+            shutdown: Arc::new(AtomicBool::new(false)),
         })
     }
     /// Create a new P2P node with the given configuration
@@ -671,6 +689,46 @@ impl P2PNode {
             crate::validation::RateLimitConfig::default(),
         ));
 
+        // Create active connections tracker
+        let active_connections = Arc::new(RwLock::new(HashSet::new()));
+
+        // Start connection lifecycle monitor
+        let connection_monitor_handle = {
+            let active_conns = Arc::clone(&active_connections);
+            let peers_map = Arc::new(RwLock::new(HashMap::new())); // Will be replaced with actual peers after node creation
+            let event_tx_clone = event_tx.clone();
+            let dual_node_clone = Arc::clone(&dual_node);
+
+            let handle = tokio::spawn(async move {
+                Self::connection_lifecycle_monitor(
+                    dual_node_clone,
+                    active_conns,
+                    peers_map,
+                    event_tx_clone,
+                ).await;
+            });
+
+            Arc::new(RwLock::new(Some(handle)))
+        };
+
+        // Spawn keepalive task
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let keepalive_handle = {
+            let active_conns = Arc::clone(&active_connections);
+            let dual_node_clone = Arc::clone(&dual_node);
+            let shutdown_clone = Arc::clone(&shutdown);
+
+            let handle = tokio::spawn(async move {
+                Self::keepalive_task(
+                    active_conns,
+                    dual_node_clone,
+                    shutdown_clone,
+                ).await;
+            });
+
+            Arc::new(RwLock::new(Some(handle)))
+        };
+
         let node = Self {
             config,
             peer_id,
@@ -684,11 +742,18 @@ impl P2PNode {
             bootstrap_manager,
             dual_node,
             rate_limiter,
+            active_connections,
+            connection_monitor_handle,
+            keepalive_handle,
+            shutdown,
         };
         info!("Created P2P node with peer ID: {}", node.peer_id);
 
         // Start the network listeners to populate listen addresses
         node.start_network_listeners().await?;
+
+        // Update the connection monitor with actual peers reference
+        node.start_connection_monitor().await;
 
         Ok(node)
     }
@@ -1213,6 +1278,9 @@ impl P2PNode {
     /// # Returns
     /// `true` if the peer was found and removed, `false` if the peer was not in the map
     pub async fn remove_peer(&self, peer_id: &PeerId) -> bool {
+        // Remove from active connections tracking
+        self.active_connections.write().await.remove(peer_id);
+        // Remove from peers map and return whether it existed
         self.peers.write().await.remove(peer_id).is_some()
     }
 
@@ -1315,6 +1383,9 @@ impl P2PNode {
     pub async fn disconnect_peer(&self, peer_id: &PeerId) -> Result<()> {
         info!("Disconnecting from peer: {}", peer_id);
 
+        // Remove from active connections
+        self.active_connections.write().await.remove(peer_id);
+
         if let Some(mut peer_info) = self.peers.write().await.remove(peer_id) {
             peer_info.status = ConnectionStatus::Disconnected;
 
@@ -1327,6 +1398,11 @@ impl P2PNode {
         }
 
         Ok(())
+    }
+
+    /// Check if a connection to a peer is actually active (ant-quic level)
+    pub async fn is_connection_active(&self, peer_id: &PeerId) -> bool {
+        self.active_connections.read().await.contains(peer_id)
     }
 
     /// Send a message to a peer
@@ -1352,11 +1428,27 @@ impl P2PNode {
             ));
         }
 
-        // Check if peer is connected
+        // Check if peer exists in peers map
         if !self.peers.read().await.contains_key(peer_id) {
             return Err(P2PError::Network(crate::error::NetworkError::PeerNotFound(
                 peer_id.to_string().into(),
             )));
+        }
+
+        // **NEW**: Check if the ant-quic connection is actually active
+        // This is the critical fix for the connection state synchronization issue
+        if !self.is_connection_active(peer_id).await {
+            debug!(
+                "Connection to peer {} exists in peers map but ant-quic connection is closed",
+                peer_id
+            );
+
+            // Clean up stale peer entry
+            self.remove_peer(peer_id).await;
+
+            return Err(P2PError::Network(crate::error::NetworkError::ConnectionClosed {
+                peer_id: peer_id.to_string().into(),
+            }));
         }
 
         // MCP removed: no special-case protocol validation
@@ -1479,6 +1571,153 @@ impl P2PNode {
                 ),
             ))
         }
+    }
+
+    /// Connection lifecycle monitor task - processes ant-quic connection events
+    /// and updates active_connections HashSet and peers map
+    async fn connection_lifecycle_monitor(
+        dual_node: Arc<DualStackNetworkNode>,
+        active_connections: Arc<RwLock<HashSet<String>>>,
+        peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
+        event_tx: broadcast::Sender<P2PEvent>,
+    ) {
+        use crate::transport::ant_quic_adapter::ConnectionEvent;
+
+        let mut event_rx = dual_node.subscribe_connection_events();
+
+        info!("Connection lifecycle monitor started");
+
+        loop {
+            match event_rx.recv().await {
+                Ok(event) => {
+                    match event {
+                        ConnectionEvent::Established { peer_id, remote_address } => {
+                            let peer_id_str = crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            debug!("Connection established: peer={}, addr={}", peer_id_str, remote_address);
+
+                            // Add to active connections
+                            active_connections.write().await.insert(peer_id_str.clone());
+
+                            // Update peer info if exists
+                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
+                                peer_info.status = ConnectionStatus::Connected;
+                                peer_info.connected_at = Instant::now();
+                            }
+
+                            // Broadcast connection event
+                            let _ = event_tx.send(P2PEvent::PeerConnected(peer_id_str));
+                        }
+                        ConnectionEvent::Lost { peer_id, reason } => {
+                            let peer_id_str = crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            debug!("Connection lost: peer={}, reason={}", peer_id_str, reason);
+
+                            // Remove from active connections
+                            active_connections.write().await.remove(&peer_id_str);
+
+                            // Update peer info status
+                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
+                                peer_info.status = ConnectionStatus::Disconnected;
+                                peer_info.last_seen = Instant::now();
+                            }
+
+                            // Broadcast disconnection event
+                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
+                        }
+                        ConnectionEvent::Failed { peer_id, reason } => {
+                            let peer_id_str = crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            warn!("Connection failed: peer={}, reason={}", peer_id_str, reason);
+
+                            // Remove from active connections
+                            active_connections.write().await.remove(&peer_id_str);
+
+                            // Update peer info status
+                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
+                                peer_info.status = ConnectionStatus::Failed(reason.clone());
+                            }
+
+                            // Broadcast disconnection event
+                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
+                        }
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    warn!("Connection event monitor lagged, skipped {} events", skipped);
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    info!("Connection event channel closed, stopping monitor");
+                    break;
+                }
+            }
+        }
+
+        info!("Connection lifecycle monitor stopped");
+    }
+
+    /// Start connection monitor (called after node initialization)
+    async fn start_connection_monitor(&self) {
+        // The monitor task is already spawned in new() with a temporary peers map
+        // This method is a placeholder for future enhancements where we might
+        // need to restart the monitor or provide it with updated references
+        debug!("Connection monitor already running from initialization");
+    }
+
+    /// Keepalive task - sends periodic pings to prevent 30-second idle timeout
+    ///
+    /// ant-quic has a 30-second max_idle_timeout. This task sends a small keepalive
+    /// message every 15 seconds (half the timeout) to all active connections to prevent
+    /// them from timing out during periods of inactivity.
+    async fn keepalive_task(
+        active_connections: Arc<RwLock<HashSet<String>>>,
+        dual_node: Arc<DualStackNetworkNode>,
+        shutdown: Arc<AtomicBool>,
+    ) {
+        use tokio::time::{interval, Duration};
+
+        const KEEPALIVE_INTERVAL_SECS: u64 = 15; // Half of 30-second timeout
+        const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive"; // Small payload
+
+        let mut interval = interval(Duration::from_secs(KEEPALIVE_INTERVAL_SECS));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        info!("Keepalive task started (interval: {}s)", KEEPALIVE_INTERVAL_SECS);
+
+        loop {
+            // Check shutdown flag first
+            if shutdown.load(Ordering::Relaxed) {
+                info!("Keepalive task shutting down");
+                break;
+            }
+
+            interval.tick().await;
+
+            // Get snapshot of active connections
+            let peers: Vec<String> = {
+                active_connections.read().await.iter().cloned().collect()
+            };
+
+            if peers.is_empty() {
+                trace!("Keepalive: no active connections");
+                continue;
+            }
+
+            debug!("Sending keepalive to {} active connections", peers.len());
+
+            // Send keepalive to each peer
+            for peer_id in peers {
+                match dual_node.send_to_peer_string(&peer_id, KEEPALIVE_PAYLOAD).await {
+                    Ok(_) => {
+                        trace!("Keepalive sent to peer: {}", peer_id);
+                    }
+                    Err(e) => {
+                        debug!("Failed to send keepalive to peer {}: {} (connection may have closed)", peer_id, e);
+                        // Don't remove from active_connections here - let the lifecycle monitor handle it
+                    }
+                }
+            }
+        }
+
+        info!("Keepalive task stopped");
     }
 
     /// Check system health

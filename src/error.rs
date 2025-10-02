@@ -201,8 +201,8 @@ pub enum NetworkError {
         reason: Cow<'static, str>,
     },
 
-    #[error("Connection closed unexpectedly")]
-    ConnectionClosed,
+    #[error("Connection closed unexpectedly for peer: {peer_id}")]
+    ConnectionClosed { peer_id: Cow<'static, str> },
 
     #[error("Invalid network address: {0}")]
     InvalidAddress(Cow<'static, str>),

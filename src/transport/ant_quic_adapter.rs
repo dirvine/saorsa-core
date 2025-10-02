@@ -37,14 +37,32 @@ use crate::telemetry::StreamClass;
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tokio::time::sleep;
 
 // Import ant-quic types
 use ant_quic::auth::AuthConfig;
-use ant_quic::nat_traversal_api::{EndpointRole, PeerId};
+use ant_quic::nat_traversal_api::{EndpointRole, NatTraversalEvent, PeerId};
 use ant_quic::{QuicNodeConfig, QuicP2PNode};
+
+/// Connection lifecycle events from ant-quic
+#[derive(Debug, Clone)]
+pub enum ConnectionEvent {
+    /// Connection successfully established
+    Established {
+        peer_id: PeerId,
+        remote_address: SocketAddr,
+    },
+    /// Connection lost/closed
+    Lost { peer_id: PeerId, reason: String },
+    /// Connection attempt failed
+    Failed {
+        peer_id: PeerId,
+        reason: String,
+    },
+}
 
 /// Native ant-quic network node
 ///
@@ -57,6 +75,12 @@ pub struct P2PNetworkNode {
     pub local_addr: SocketAddr,
     /// Peer registry for tracking connected peers
     pub peers: Arc<RwLock<Vec<(PeerId, SocketAddr)>>>,
+    /// Connection event broadcaster
+    event_tx: broadcast::Sender<ConnectionEvent>,
+    /// Shutdown signal for event polling task
+    shutdown: Arc<AtomicBool>,
+    /// Event polling task handle
+    poll_task_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl P2PNetworkNode {
@@ -91,10 +115,28 @@ impl P2PNetworkNode {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create ant-quic node: {}", e))?;
 
+        let node = Arc::new(node);
+        let (event_tx, _) = broadcast::channel(1000); // Buffer for 1000 connection events
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        // Start event polling task
+        let poll_task_handle = {
+            let node_clone = Arc::clone(&node);
+            let event_tx_clone = event_tx.clone();
+            let shutdown_clone = Arc::clone(&shutdown);
+
+            Some(tokio::spawn(async move {
+                Self::event_polling_task(node_clone, event_tx_clone, shutdown_clone).await;
+            }))
+        };
+
         Ok(Self {
-            node: Arc::new(node),
+            node,
             local_addr: bind_addr,
             peers: Arc::new(RwLock::new(Vec::new())),
+            event_tx,
+            shutdown,
+            poll_task_handle,
         })
     }
 
@@ -303,6 +345,99 @@ impl P2PNetworkNode {
     /// Send a message (compatibility method for network.rs)
     pub async fn send_message(&self, peer_id: &str, data: Vec<u8>) -> Result<()> {
         self.send_to_peer_string(peer_id, &data).await
+    }
+
+    /// Subscribe to connection lifecycle events
+    ///
+    /// Returns a broadcast receiver that will receive ConnectionEvent notifications
+    /// whenever connections are established, lost, or fail.
+    pub fn subscribe_connection_events(&self) -> broadcast::Receiver<ConnectionEvent> {
+        self.event_tx.subscribe()
+    }
+
+    /// Event polling task that monitors ant-quic for connection lifecycle events
+    ///
+    /// This task polls the NAT traversal endpoint periodically and converts
+    /// ant-quic events into ConnectionEvent notifications for subscribers.
+    async fn event_polling_task(
+        node: Arc<QuicP2PNode>,
+        event_tx: broadcast::Sender<ConnectionEvent>,
+        shutdown: Arc<AtomicBool>,
+    ) {
+        use std::time::Instant;
+
+        tracing::info!("Starting connection event polling task");
+
+        let poll_interval = Duration::from_millis(100); // Poll 10 times per second
+        let mut interval = tokio::time::interval(poll_interval);
+
+        while !shutdown.load(Ordering::Relaxed) {
+            interval.tick().await;
+
+            // Get NAT traversal endpoint for polling
+            let nat_endpoint = match node.get_nat_endpoint() {
+                Ok(endpoint) => endpoint,
+                Err(e) => {
+                    tracing::warn!("Failed to get NAT endpoint: {}", e);
+                    continue;
+                }
+            };
+
+            // Poll for events
+            match nat_endpoint.poll(Instant::now()) {
+                Ok(events) => {
+                    for event in events {
+                        // Convert ant-quic events to our ConnectionEvent type
+                        let conn_event = match event {
+                            NatTraversalEvent::ConnectionEstablished {
+                                peer_id,
+                                remote_address,
+                            } => Some(ConnectionEvent::Established {
+                                peer_id,
+                                remote_address,
+                            }),
+                            NatTraversalEvent::ConnectionLost { peer_id, reason } => {
+                                Some(ConnectionEvent::Lost { peer_id, reason })
+                            }
+                            NatTraversalEvent::TraversalFailed {
+                                peer_id, error, ..
+                            } => Some(ConnectionEvent::Failed {
+                                peer_id,
+                                reason: format!("{:?}", error),
+                            }),
+                            _ => None, // Ignore other event types for now
+                        };
+
+                        if let Some(event) = conn_event {
+                            // Broadcast the event
+                            // If all receivers have been dropped, the send will fail but that's OK
+                            let _ = event_tx.send(event);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Error polling NAT traversal events: {}", e);
+                }
+            }
+        }
+
+        tracing::info!("Connection event polling task stopped");
+    }
+
+    /// Shutdown the event polling task
+    ///
+    /// This should be called when the node is being destroyed to ensure
+    /// clean shutdown of background tasks.
+    pub async fn shutdown(&mut self) {
+        tracing::info!("Shutting down P2PNetworkNode");
+
+        // Signal shutdown
+        self.shutdown.store(true, Ordering::Relaxed);
+
+        // Wait for polling task to complete
+        if let Some(handle) = self.poll_task_handle.take() {
+            let _ = handle.await;
+        }
     }
 }
 
@@ -528,6 +663,42 @@ impl DualStackNetworkNode {
             (None, Some(v4)) => v4.receive_from_any_peer().await,
             (None, None) => Err(anyhow::anyhow!("no listening nodes available")),
         }
+    }
+
+    /// Subscribe to connection lifecycle events from both IPv4 and IPv6 nodes
+    ///
+    /// Returns a broadcast receiver that receives merged ConnectionEvent notifications
+    /// from both dual-stack nodes (if available).
+    ///
+    /// Note: This creates a new channel that merges events from both stacks. For better
+    /// performance in single-threaded scenarios, consider subscribing directly to individual
+    /// nodes if you only use one stack.
+    pub fn subscribe_connection_events(&self) -> broadcast::Receiver<ConnectionEvent> {
+        let (tx, rx) = broadcast::channel(1000);
+
+        // Subscribe to IPv6 events
+        if let Some(v6) = &self.v6 {
+            let mut v6_rx = v6.subscribe_connection_events();
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                while let Ok(event) = v6_rx.recv().await {
+                    let _ = tx_clone.send(event);
+                }
+            });
+        }
+
+        // Subscribe to IPv4 events
+        if let Some(v4) = &self.v4 {
+            let mut v4_rx = v4.subscribe_connection_events();
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                while let Ok(event) = v4_rx.recv().await {
+                    let _ = tx_clone.send(event);
+                }
+            });
+        }
+
+        rx
     }
 }
 
