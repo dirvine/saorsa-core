@@ -505,6 +505,37 @@ pub struct P2PNode {
     shutdown: Arc<AtomicBool>,
 }
 
+/// Normalize wildcard bind addresses to localhost loopback addresses
+///
+/// ant-quic correctly rejects "unspecified" addresses (0.0.0.0 and [::]) for remote connections
+/// because you cannot connect TO an unspecified address - these are only valid for BINDING.
+///
+/// This function converts wildcard addresses to appropriate loopback addresses for local connections:
+/// - IPv6 [::]:port → ::1:port (IPv6 loopback)
+/// - IPv4 0.0.0.0:port → 127.0.0.1:port (IPv4 loopback)
+/// - All other addresses pass through unchanged
+///
+/// # Arguments
+/// * `addr` - The SocketAddr to normalize
+///
+/// # Returns
+/// * Normalized SocketAddr suitable for remote connections
+fn normalize_wildcard_to_loopback(addr: std::net::SocketAddr) -> std::net::SocketAddr {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    if addr.ip().is_unspecified() {
+        // Convert unspecified addresses to loopback
+        let loopback_ip = match addr {
+            std::net::SocketAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST), // ::1
+            std::net::SocketAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),  // 127.0.0.1
+        };
+        std::net::SocketAddr::new(loopback_ip, addr.port())
+    } else {
+        // Not a wildcard address, pass through unchanged
+        addr
+    }
+}
+
 impl P2PNode {
     /// Minimal constructor for tests that avoids real networking
     pub fn new_for_tests() -> Result<Self> {
@@ -1312,14 +1343,24 @@ impl P2PNode {
         };
 
         // Parse the address to SocketAddr format
-        let _socket_addr: std::net::SocketAddr = address.parse().map_err(|e| {
+        let socket_addr: std::net::SocketAddr = address.parse().map_err(|e| {
             P2PError::Network(crate::error::NetworkError::InvalidAddress(
                 format!("{}: {}", address, e).into(),
             ))
         })?;
 
+        // Normalize wildcard addresses to loopback for local connections
+        // This converts [::]:port → ::1:port and 0.0.0.0:port → 127.0.0.1:port
+        let normalized_addr = normalize_wildcard_to_loopback(socket_addr);
+        if normalized_addr != socket_addr {
+            info!(
+                "Normalized wildcard address {} to loopback {}",
+                socket_addr, normalized_addr
+            );
+        }
+
         // Establish a real connection via dual-stack Happy Eyeballs, but cap the wait
-        let addr_list = vec![_socket_addr];
+        let addr_list = vec![normalized_addr];
         let peer_id = match tokio::time::timeout(
             self.config.connection_timeout,
             self.dual_node.connect_happy_eyeballs(&addr_list),
@@ -3134,5 +3175,48 @@ mod tests {
         assert!(!node.is_peer_connected(&peer_id).await);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_normalize_ipv6_wildcard() {
+        use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+
+        let wildcard = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 8080);
+        let normalized = normalize_wildcard_to_loopback(wildcard);
+
+        assert_eq!(normalized.ip(), IpAddr::V6(Ipv6Addr::LOCALHOST));
+        assert_eq!(normalized.port(), 8080);
+    }
+
+    #[test]
+    fn test_normalize_ipv4_wildcard() {
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+        let wildcard = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9000);
+        let normalized = normalize_wildcard_to_loopback(wildcard);
+
+        assert_eq!(normalized.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(normalized.port(), 9000);
+    }
+
+    #[test]
+    fn test_normalize_specific_address_unchanged() {
+        let specific: std::net::SocketAddr = "192.168.1.100:3000".parse().unwrap();
+        let normalized = normalize_wildcard_to_loopback(specific);
+
+        assert_eq!(normalized, specific);
+    }
+
+    #[test]
+    fn test_normalize_loopback_unchanged() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+        let loopback_v6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5000);
+        let normalized_v6 = normalize_wildcard_to_loopback(loopback_v6);
+        assert_eq!(normalized_v6, loopback_v6);
+
+        let loopback_v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5000);
+        let normalized_v4 = normalize_wildcard_to_loopback(loopback_v4);
+        assert_eq!(normalized_v4, loopback_v4);
     }
 }

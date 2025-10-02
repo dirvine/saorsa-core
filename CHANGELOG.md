@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2025-10-02
+
+### Fixed
+- **Wildcard Address Normalization for Local Connections** 🌐
+  - ant-quic correctly rejects wildcard addresses (`0.0.0.0`, `[::]`) as invalid remote addresses
+  - Added `normalize_wildcard_to_loopback()` to convert wildcard bind addresses to loopback addresses
+  - IPv6 `[::]:port` → `::1:port` (IPv6 loopback)
+  - IPv4 `0.0.0.0:port` → `127.0.0.1:port` (IPv4 loopback)
+  - Resolves "invalid remote address" errors when connecting to nodes bound to wildcard addresses
+
+### Added
+- **Address Normalization Infrastructure** 🛠️
+  - `normalize_wildcard_to_loopback()` - Transparently converts wildcard to loopback addresses
+  - Comprehensive unit tests for IPv4 and IPv6 address normalization
+  - Logging of address normalization for debugging
+
+### Changed
+- **P2PNode Connection Logic** 📡
+  - `connect_peer()` now normalizes addresses before passing to ant-quic
+  - Supports both IPv4 and IPv6 loopback connections
+  - Non-wildcard addresses pass through unchanged
+
+### Technical Details
+- Fixes confusion between BIND addresses (for listening) and CONNECT addresses (for connecting)
+- Wildcard addresses (`0.0.0.0`, `[::]`) are only valid for binding, not connecting
+- Maintains zero breaking changes - purely internal improvement
+- All unit tests passing including new address normalization tests
+
+### Implementation
+- Modified `src/network.rs`: Added `normalize_wildcard_to_loopback()` function (lines 508-537)
+- Modified `src/network.rs`: Integrated normalization in `connect_peer()` (lines 1352-1360)
+- Added unit tests in `src/network.rs` (lines 3180-3221)
+
 ## [0.5.6] - 2025-10-02
 
 ### Fixed
