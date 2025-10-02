@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2025-10-02
+
+### Added
+- **Public API Export** 🔓
+  - Exported `PeerInfo` type from public API
+  - Exported `ConnectionStatus` enum (dependency of PeerInfo)
+  - Makes `P2PNode::peer_info()` method actually usable by library consumers
+
+### Changed
+- Updated public exports in `src/lib.rs` to include network peer types
+- Enhanced API usability for network monitoring and debugging
+
+### Technical Details
+- Zero breaking changes - purely additive API enhancement
+- Enables users to inspect peer connection state, addresses, and protocols
+- `PeerInfo` contains: peer_id, addresses, connection timestamps, status, protocols, heartbeat_count
+- `ConnectionStatus` enum: Connecting, Connected, Disconnecting, Disconnected, Failed(String)
+
 ## [0.5.1] - 2025-10-02
 
 ### Fixed

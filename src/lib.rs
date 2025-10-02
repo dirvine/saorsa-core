@@ -242,7 +242,7 @@ pub use monotonic_counter::{
     BatchUpdateRequest, BatchUpdateResult, CounterStats, MonotonicCounterSystem, PeerCounter,
     SequenceValidationResult,
 };
-pub use network::{NodeBuilder, NodeConfig, P2PEvent, P2PNode};
+pub use network::{ConnectionStatus, NodeBuilder, NodeConfig, P2PEvent, P2PNode, PeerInfo};
 pub use telemetry::{Metrics, StreamClass, record_lookup, record_timeout, telemetry};
 // Back-compat exports for tests
 pub use config::Config;
