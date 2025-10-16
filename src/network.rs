@@ -496,12 +496,15 @@ pub struct P2PNode {
     active_connections: Arc<RwLock<HashSet<PeerId>>>,
 
     /// Connection lifecycle monitor task handle
+    #[allow(dead_code)]
     connection_monitor_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
     /// Keepalive task handle
+    #[allow(dead_code)]
     keepalive_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
     /// Shutdown flag for background tasks
+    #[allow(dead_code)]
     shutdown: Arc<AtomicBool>,
 }
 

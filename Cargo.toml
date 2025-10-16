@@ -114,7 +114,7 @@ deadpool-sqlite = "0.12.1"
 rusqlite = { version = "0.37", features = ["chrono", "serde_json", "uuid", "bundled"] }
 
 # WebRTC implementation - using saorsa-webrtc with pluggable signaling
-saorsa-webrtc = "0.1.1"
+saorsa-webrtc = "0.1.2"
 
 # CLI dependencies (needed for identity CLI types used in tests)
 clap = { version = "4.4", features = ["derive"] }

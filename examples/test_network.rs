@@ -24,9 +24,12 @@ use tracing::{error, info, warn};
 /// Test network node configuration
 struct TestNode {
     id: usize,
+    #[allow(dead_code)]
     port: u16,
+    #[allow(dead_code)]
     words: Vec<&'static str>,
     node: Arc<P2PNode>,
+    #[allow(dead_code)]
     keypair: MlDsaKeyPair,
     handle: Option<IdentityHandle>,
     messages_received: Arc<Mutex<Vec<String>>>,
@@ -135,6 +138,7 @@ impl TestNode {
         Ok(messages.clone())
     }
 
+    #[allow(dead_code)]
     async fn add_message(&self, message: String) {
         let mut messages = self.messages_received.lock().await;
         messages.push(message.clone());
