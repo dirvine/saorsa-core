@@ -19,8 +19,6 @@ pub mod transport;
 pub mod types;
 pub mod user_handle;
 pub mod user_resolver;
-pub mod webrtc;
-pub mod webrtc_quic_bridge;
 
 use user_handle::UserHandle;
 // Removed unused imports
@@ -46,8 +44,13 @@ pub use sync::RealtimeSync;
 pub use threads::ThreadManager;
 pub use transport::{DeliveryReceipt, DeliveryStatus, MessageTransport, ReceivedMessage};
 pub use types::*;
-pub use webrtc::{CallEvent, CallManager, WebRtcEvent, WebRtcService};
-pub use webrtc_quic_bridge::{RtpPacket, StreamConfig, StreamType, WebRtcQuicBridge};
+
+// Re-export WebRTC types from saorsa-webrtc crate
+pub use saorsa_webrtc::{
+    CallEvent, CallId, CallManager, CallState, MediaConstraints, MediaEvent, MediaStreamManager,
+    PeerIdentity, SignalingHandler, SignalingTransport, WebRtcEvent, WebRtcService,
+    WebRtcQuicBridge,
+};
 
 // Import the real DHT client
 pub use crate::dht::client::DhtClient;

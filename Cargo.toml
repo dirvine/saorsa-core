@@ -1,6 +1,6 @@
 [package]
 name = "saorsa-core"
-version = "0.5.7"
+version = "0.6.0"
 edition = "2024"
 authors = ["Saorsa Labs Limited <saorsalabs@gmail.com>"]
 license = "AGPL-3.0"
@@ -113,19 +113,8 @@ num_cpus = "1.16"
 deadpool-sqlite = "0.12.1"
 rusqlite = { version = "0.37", features = ["chrono", "serde_json", "uuid", "bundled"] }
 
-
-
-# WebRTC dependencies for voice/video calling - updated for security
-webrtc = "0.13"
-webrtc-ice = "0.13"
-webrtc-media = "0.10"
-webrtc-sctp = "0.12"
-webrtc-srtp = "0.15"
-webrtc-dtls = "0.12"
-webrtc-data = "0.11"
-interceptor = "0.14"
-rtcp = "0.13"
-rtp = "0.13"
+# WebRTC implementation - using saorsa-webrtc with pluggable signaling
+saorsa-webrtc = "0.1.0"
 
 # CLI dependencies (needed for identity CLI types used in tests)
 clap = { version = "4.4", features = ["derive"] }

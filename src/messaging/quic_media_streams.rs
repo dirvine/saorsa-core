@@ -4,7 +4,7 @@
 // This module provides sophisticated stream management for the WebRTC-QUIC bridge,
 // including QoS parameters, bandwidth control, and priority-based queuing.
 
-use crate::messaging::webrtc_quic_bridge::{RtpPacket, StreamType};
+use saorsa_webrtc::{RtpPacket, StreamType};
 use ant_quic::nat_traversal_api::PeerId;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
