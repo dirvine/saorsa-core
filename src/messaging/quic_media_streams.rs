@@ -638,9 +638,9 @@ mod tests {
         let peer_id = PeerId([0u8; 32]);
 
         // Create packets with different priorities
-        let audio_packet = RtpPacket::new(96, 1, 1000, 1, vec![1], StreamType::Audio);
-        let video_packet = RtpPacket::new(97, 2, 2000, 2, vec![2], StreamType::Video);
-        let data_packet = RtpPacket::new(98, 3, 3000, 3, vec![3], StreamType::Data);
+        let audio_packet = RtpPacket::new(96, 1, 1000, 1, vec![1], StreamType::Audio).unwrap();
+        let video_packet = RtpPacket::new(97, 2, 2000, 2, vec![2], StreamType::Video).unwrap();
+        let data_packet = RtpPacket::new(98, 3, 3000, 3, vec![3], StreamType::Data).unwrap();
 
         // Add packets
         assert!(queue.enqueue(video_packet, peer_id));
@@ -712,7 +712,7 @@ mod tests {
         let peer_id = PeerId([2u8; 32]);
 
         // Test packet enqueuing
-        let packet = RtpPacket::new(96, 1, 1000, 1, vec![1; 100], StreamType::Audio);
+        let packet = RtpPacket::new(96, 1, 1000, 1, vec![1; 100], StreamType::Audio).unwrap();
         let queued = manager.enqueue_packet(packet, peer_id).await.unwrap();
         assert!(queued);
 
