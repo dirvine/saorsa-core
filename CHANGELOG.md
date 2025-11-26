@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2024-11-26
+
+### Added
+- **Dual-Stack Security System** 🛡️
+  - **IPv4 DHT Node Identity** (`src/dht/ipv4_identity.rs`)
+    - IPv4-based node identity with ML-DSA-65 cryptographic binding
+    - Security parity with existing IPv6 identity system
+    - IP diversity enforcement integration
+    - 22 comprehensive unit tests
+
+  - **IPv6 DHT Node Identity** (`src/dht/ipv6_identity.rs`)
+    - IPv6-based node identity with ML-DSA-65 cryptographic binding
+    - Full integration with IP diversity enforcer
+    - 20 comprehensive unit tests
+
+  - **BGP-based GeoIP Provider** (`src/bgp_geo_provider.rs`)
+    - Open-source GeoIP using BGP routing data (no proprietary licensing)
+    - 30+ known hosting provider ASNs (AWS, Azure, GCP, DigitalOcean, etc.)
+    - 15+ known VPN provider ASNs (NordVPN infrastructure, Mullvad, etc.)
+    - 50+ ASN-to-country mappings from RIR delegations
+    - IPv4 prefix-to-ASN lookup with longest-prefix matching
+    - Implements `GeoProvider` trait for unified interface
+    - 11 comprehensive unit tests
+
+  - **Cross-Network Replication** (`src/dht/cross_network_replication.rs`)
+    - IPv4/IPv6 dual-stack redundancy for network partition resilience
+    - Minimum replicas per IP family (default: 2)
+    - Target replicas per IP family (default: 4)
+    - Dual-stack node preference for better fault tolerance
+    - Trust-weighted replica selection
+    - Network diversity statistics tracking
+    - 10 comprehensive unit tests
+
+  - **Node Age Verification** (`src/dht/node_age_verifier.rs`)
+    - Anti-Sybil protection through age-based trust
+    - Age categories: New (<1hr), Young (1-24hr), Established (1-7d), Veteran (>7d)
+    - Trust multipliers: New (0.2), Young (0.5), Established (1.0), Veteran (1.2)
+    - Operation restrictions based on node age
+    - New nodes cannot participate in replication (must wait 1 hour)
+    - Critical operations require established status (24 hours)
+    - 11 comprehensive unit tests
+
+  - **Comprehensive Integration Tests** (`tests/dual_stack_security_integration_test.rs`)
+    - 27 integration tests covering all security components
+    - Tests for Sybil resistance, network partition resilience
+    - Full security pipeline testing for node joins
+    - Geographic diversity and ASN verification tests
+
+### Security Features Summary
+- **Sybil Attack Prevention**: Node age verification limits new node privileges
+- **Network Partition Resilience**: Cross-network replication ensures data availability
+- **Geographic Diversity**: BGP-based GeoIP identifies hosting/VPN providers
+- **Cryptographic Identity Binding**: ML-DSA-65 signatures bind node IDs to IP addresses
+- **IP Diversity Enforcement**: Prevents subnet concentration attacks
+
+### Technical Details
+- All components pass `cargo clippy -- -D warnings` with zero warnings
+- 74 new unit tests + 27 integration tests = 101 new tests total
+- Fully compatible with existing codebase (no breaking changes)
+- Open-source GeoIP data suitable for AGPL-3.0 licensing
+
 ## [0.5.7] - 2025-10-02
 
 ### Fixed

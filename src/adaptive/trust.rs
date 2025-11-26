@@ -476,6 +476,36 @@ impl TrustProvider for EigenTrustEngine {
     }
 }
 
+/// Configuration for trust-based routing
+#[derive(Debug, Clone)]
+pub struct TrustRoutingConfig {
+    /// Minimum trust threshold for routing (nodes below this are excluded)
+    /// Default: 0.15 (15%) - provides Sybil resistance while allowing network growth
+    pub min_trust_threshold: f64,
+    /// Maximum intermediate hops in a path
+    /// Default: 3
+    pub max_intermediate_hops: usize,
+}
+
+impl Default for TrustRoutingConfig {
+    fn default() -> Self {
+        Self {
+            min_trust_threshold: 0.15, // Raised from 0.01 for better Sybil protection
+            max_intermediate_hops: 3,
+        }
+    }
+}
+
+impl TrustRoutingConfig {
+    /// Create config with custom minimum trust threshold
+    pub fn with_min_trust(min_trust_threshold: f64) -> Self {
+        Self {
+            min_trust_threshold,
+            ..Default::default()
+        }
+    }
+}
+
 /// Trust-based routing strategy
 pub struct TrustBasedRoutingStrategy {
     /// Reference to the trust engine
@@ -484,18 +514,32 @@ pub struct TrustBasedRoutingStrategy {
     /// Local node ID
     local_id: NodeId,
 
-    /// Minimum trust threshold for routing
-    min_trust_threshold: f64,
+    /// Routing configuration
+    config: TrustRoutingConfig,
 }
 
 impl TrustBasedRoutingStrategy {
-    /// Create a new trust-based routing strategy
+    /// Create a new trust-based routing strategy with default config
     pub fn new(trust_engine: Arc<EigenTrustEngine>, local_id: NodeId) -> Self {
+        Self::with_config(trust_engine, local_id, TrustRoutingConfig::default())
+    }
+
+    /// Create a new trust-based routing strategy with custom config
+    pub fn with_config(
+        trust_engine: Arc<EigenTrustEngine>,
+        local_id: NodeId,
+        config: TrustRoutingConfig,
+    ) -> Self {
         Self {
             trust_engine,
             local_id,
-            min_trust_threshold: 0.01, // Lower threshold to allow more paths
+            config,
         }
+    }
+
+    /// Get the current minimum trust threshold
+    pub fn min_trust_threshold(&self) -> f64 {
+        self.config.min_trust_threshold
     }
 }
 
@@ -509,7 +553,7 @@ impl RoutingStrategy for TrustBasedRoutingStrategy {
         let mut trusted_nodes: Vec<(NodeId, f64)> = trust_scores
             .into_iter()
             .filter(|(id, trust)| {
-                id != &self.local_id && id != target && *trust >= self.min_trust_threshold
+                id != &self.local_id && id != target && *trust >= self.config.min_trust_threshold
             })
             .collect();
 
@@ -519,7 +563,7 @@ impl RoutingStrategy for TrustBasedRoutingStrategy {
         // Create path through highest trust nodes
         let path: Vec<NodeId> = trusted_nodes
             .into_iter()
-            .take(3) // Max 3 intermediate hops
+            .take(self.config.max_intermediate_hops)
             .map(|(id, _)| id)
             .chain(std::iter::once(target.clone()))
             .collect();

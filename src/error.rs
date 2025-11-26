@@ -503,6 +503,9 @@ pub enum BootstrapError {
 
     #[error("Invalid data: {0}")]
     InvalidData(Cow<'static, str>),
+
+    #[error("Rate limited: {0}")]
+    RateLimited(Cow<'static, str>),
 }
 
 /// Result type alias for P2P operations

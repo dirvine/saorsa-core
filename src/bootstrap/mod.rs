@@ -122,7 +122,10 @@ impl WordEncoder {
 }
 
 use crate::error::BootstrapError;
+use crate::rate_limit::{JoinRateLimiter, JoinRateLimiterConfig};
+use crate::security::{IPDiversityConfig, IPDiversityEnforcer};
 use crate::{P2PError, PeerId, Result};
+use std::net::{IpAddr, Ipv6Addr};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -142,6 +145,10 @@ pub struct BootstrapManager {
     cache: BootstrapCache,
     merge_coordinator: MergeCoordinator,
     word_encoder: WordEncoder,
+    /// Join rate limiter for Sybil attack protection
+    join_limiter: JoinRateLimiter,
+    /// IP diversity enforcer for geographic and ASN diversity
+    diversity_enforcer: IPDiversityEnforcer,
 }
 
 impl BootstrapManager {
@@ -153,11 +160,15 @@ impl BootstrapManager {
         let cache = BootstrapCache::new(cache_dir.clone(), config).await?;
         let merge_coordinator = MergeCoordinator::new(cache_dir)?;
         let word_encoder = WordEncoder::new();
+        let join_limiter = JoinRateLimiter::new(JoinRateLimiterConfig::default());
+        let diversity_enforcer = IPDiversityEnforcer::new(IPDiversityConfig::default());
 
         Ok(Self {
             cache,
             merge_coordinator,
             word_encoder,
+            join_limiter,
+            diversity_enforcer,
         })
     }
 
@@ -168,11 +179,60 @@ impl BootstrapManager {
         let cache = BootstrapCache::new(cache_dir.clone(), config).await?;
         let merge_coordinator = MergeCoordinator::new(cache_dir)?;
         let word_encoder = WordEncoder::new();
+        let join_limiter = JoinRateLimiter::new(JoinRateLimiterConfig::default());
+        let diversity_enforcer = IPDiversityEnforcer::new(IPDiversityConfig::default());
 
         Ok(Self {
             cache,
             merge_coordinator,
             word_encoder,
+            join_limiter,
+            diversity_enforcer,
+        })
+    }
+
+    /// Create a new bootstrap manager with custom configuration and rate limiting
+    pub async fn with_rate_limiting(
+        config: CacheConfig,
+        rate_limit_config: JoinRateLimiterConfig,
+    ) -> Result<Self> {
+        let cache_dir = config.cache_dir.clone();
+
+        let cache = BootstrapCache::new(cache_dir.clone(), config).await?;
+        let merge_coordinator = MergeCoordinator::new(cache_dir)?;
+        let word_encoder = WordEncoder::new();
+        let join_limiter = JoinRateLimiter::new(rate_limit_config);
+        let diversity_enforcer = IPDiversityEnforcer::new(IPDiversityConfig::default());
+
+        Ok(Self {
+            cache,
+            merge_coordinator,
+            word_encoder,
+            join_limiter,
+            diversity_enforcer,
+        })
+    }
+
+    /// Create a new bootstrap manager with full custom configuration
+    pub async fn with_full_config(
+        config: CacheConfig,
+        rate_limit_config: JoinRateLimiterConfig,
+        diversity_config: IPDiversityConfig,
+    ) -> Result<Self> {
+        let cache_dir = config.cache_dir.clone();
+
+        let cache = BootstrapCache::new(cache_dir.clone(), config).await?;
+        let merge_coordinator = MergeCoordinator::new(cache_dir)?;
+        let word_encoder = WordEncoder::new();
+        let join_limiter = JoinRateLimiter::new(rate_limit_config);
+        let diversity_enforcer = IPDiversityEnforcer::new(diversity_config);
+
+        Ok(Self {
+            cache,
+            merge_coordinator,
+            word_encoder,
+            join_limiter,
+            diversity_enforcer,
         })
     }
 
@@ -182,7 +242,79 @@ impl BootstrapManager {
     }
 
     /// Add a discovered peer to the cache
+    ///
+    /// This method enforces both rate limiting and IP diversity checks to prevent
+    /// Sybil attacks:
+    ///
+    /// 1. **Rate limiting**: Per-subnet (IPv6 /64, /48 and IPv4 /24) and global limits
+    /// 2. **IP diversity**: Ensures geographic and ASN diversity across the network
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The contact has no addresses
+    /// - Join rate limit is exceeded for the IP subnet
+    /// - IP diversity limits are exceeded
+    /// - The cache operation fails
     pub async fn add_contact(&mut self, contact: ContactEntry) -> Result<()> {
+        // Extract IP address from contact for rate limiting
+        let ip = contact
+            .addresses
+            .first()
+            .map(|addr| addr.ip())
+            .ok_or_else(|| {
+                P2PError::Bootstrap(BootstrapError::InvalidData(
+                    "Contact has no addresses".to_string().into(),
+                ))
+            })?;
+
+        // Check join rate limit (Sybil protection - temporal)
+        self.join_limiter.check_join_allowed(&ip).map_err(|e| {
+            tracing::warn!("Join rate limit exceeded for {}: {}", ip, e);
+            P2PError::Bootstrap(BootstrapError::RateLimited(e.to_string().into()))
+        })?;
+
+        // Convert IP to IPv6 for diversity analysis
+        // IPv4 addresses are mapped to IPv6 (::ffff:a.b.c.d)
+        let ipv6 = ip_to_ipv6(&ip);
+
+        // Analyze IP for diversity enforcement
+        let ip_analysis = self.diversity_enforcer.analyze_ip(ipv6).map_err(|e| {
+            tracing::warn!("IP analysis failed for {}: {}", ip, e);
+            P2PError::Bootstrap(BootstrapError::InvalidData(
+                format!("IP analysis failed: {e}").into(),
+            ))
+        })?;
+
+        // Check IP diversity limits (Sybil protection - geographic/ASN)
+        if !self.diversity_enforcer.can_accept_node(&ip_analysis) {
+            tracing::warn!("IP diversity limit exceeded for {}", ip);
+            return Err(P2PError::Bootstrap(BootstrapError::RateLimited(
+                "IP diversity limits exceeded (too many nodes from same subnet/ASN)".to_string().into(),
+            )));
+        }
+
+        // Add to diversity tracking
+        if let Err(e) = self.diversity_enforcer.add_node(&ip_analysis) {
+            tracing::warn!("Failed to track IP diversity for {}: {}", ip, e);
+            // Don't fail the add - diversity tracking is best-effort
+        }
+
+        self.cache.add_contact(contact).await
+    }
+
+    /// Add a contact bypassing rate limiting and diversity checks (for internal/trusted sources)
+    ///
+    /// Use this method only for contacts from trusted sources like:
+    /// - Well-known bootstrap nodes
+    /// - Pre-configured seed nodes
+    /// - Admin-approved contacts
+    ///
+    /// # Safety
+    ///
+    /// This method does not enforce rate limiting or diversity checks.
+    /// Only use for trusted sources.
+    pub async fn add_contact_trusted(&mut self, contact: ContactEntry) -> Result<()> {
         self.cache.add_contact(contact).await
     }
 
@@ -337,6 +469,17 @@ pub struct CacheStats {
     pub avg_iroh_setup_time_ms: f64,
     /// Most successful QUIC connection type
     pub preferred_iroh_connection_type: Option<String>,
+}
+
+/// Convert an IP address to IPv6
+///
+/// IPv4 addresses are converted to IPv6-mapped format (::ffff:a.b.c.d)
+/// IPv6 addresses are returned as-is
+fn ip_to_ipv6(ip: &IpAddr) -> Ipv6Addr {
+    match ip {
+        IpAddr::V4(ipv4) => ipv4.to_ipv6_mapped(),
+        IpAddr::V6(ipv6) => *ipv6,
+    }
 }
 
 /// Get the home cache directory

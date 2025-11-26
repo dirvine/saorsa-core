@@ -25,7 +25,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use std::sync::Arc;
@@ -222,6 +222,138 @@ impl IPv6NodeID {
         let mut subnet = [0u8; 16];
         subnet[..4].copy_from_slice(&octets[..4]); // Keep first 32 bits, zero the rest
         Ipv6Addr::from(subnet)
+    }
+}
+
+/// IPv4-based node identity that binds node ID to actual network location
+/// Mirrors IPv6NodeID for security parity on IPv4 networks
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IPv4NodeID {
+    /// Derived node ID (SHA256 of ipv4_addr + public_key + salt + timestamp)
+    pub node_id: Vec<u8>,
+    /// IPv4 address this node ID is bound to
+    pub ipv4_addr: Ipv4Addr,
+    /// ML-DSA public key for signatures
+    pub public_key: Vec<u8>,
+    /// Signature proving ownership of the IPv4 address and keys
+    pub signature: Vec<u8>,
+    /// Timestamp when this ID was generated (seconds since epoch)
+    pub timestamp_secs: u64,
+    /// Salt used in node ID generation (for freshness)
+    pub salt: Vec<u8>,
+}
+
+impl IPv4NodeID {
+    /// Generate a new IPv4-based node ID
+    pub fn generate(
+        ipv4_addr: Ipv4Addr,
+        secret: &MlDsaSecretKey,
+        public: &MlDsaPublicKey,
+    ) -> Result<Self> {
+        let mut rng = rand::thread_rng();
+        let mut salt = vec![0u8; 16];
+        rand::RngCore::fill_bytes(&mut rng, &mut salt);
+
+        let timestamp = SystemTime::now();
+        let timestamp_secs = timestamp.duration_since(UNIX_EPOCH)?.as_secs();
+        let public_key = public.as_bytes().to_vec();
+
+        // Generate node ID: SHA256(ipv4_address || public_key || salt || timestamp)
+        let mut hasher = Sha256::new();
+        hasher.update(ipv4_addr.octets());
+        hasher.update(&public_key);
+        hasher.update(&salt);
+        hasher.update(timestamp_secs.to_le_bytes());
+        let node_id = hasher.finalize().to_vec();
+
+        // Create signature proving ownership
+        let mut message_to_sign = Vec::new();
+        message_to_sign.extend_from_slice(&ipv4_addr.octets());
+        message_to_sign.extend_from_slice(&public_key);
+        message_to_sign.extend_from_slice(&salt);
+        message_to_sign.extend_from_slice(&timestamp_secs.to_le_bytes());
+
+        let sig = ml_dsa_sign(secret, &message_to_sign)
+            .map_err(|e| anyhow!("ML-DSA sign failed: {:?}", e))?;
+        let signature = sig.0.to_vec();
+
+        Ok(IPv4NodeID {
+            node_id,
+            ipv4_addr,
+            public_key,
+            signature,
+            timestamp_secs,
+            salt,
+        })
+    }
+
+    /// Verify that this node ID is valid and properly signed
+    pub fn verify(&self) -> Result<bool> {
+        // Reconstruct the node ID
+        let mut hasher = Sha256::new();
+        hasher.update(self.ipv4_addr.octets());
+        hasher.update(&self.public_key);
+        hasher.update(&self.salt);
+        hasher.update(self.timestamp_secs.to_le_bytes());
+        let expected_node_id = hasher.finalize();
+
+        // Verify node ID matches
+        if expected_node_id.as_slice() != self.node_id {
+            return Ok(false);
+        }
+
+        let public_key = MlDsaPublicKey::from_bytes(&self.public_key)
+            .map_err(|e| anyhow!("Invalid ML-DSA public key: {:?}", e))?;
+
+        // Convert Vec<u8> to fixed-size array for MlDsaSignature
+        if self.signature.len() != 3309 {
+            return Ok(false); // Invalid signature length
+        }
+        let mut sig_bytes = [0u8; 3309];
+        sig_bytes.copy_from_slice(&self.signature);
+        let signature = MlDsaSignature(Box::new(sig_bytes));
+
+        let mut message_to_verify = Vec::new();
+        message_to_verify.extend_from_slice(&self.ipv4_addr.octets());
+        message_to_verify.extend_from_slice(&self.public_key);
+        message_to_verify.extend_from_slice(&self.salt);
+        message_to_verify.extend_from_slice(&self.timestamp_secs.to_le_bytes());
+
+        let ok = ml_dsa_verify(&public_key, &message_to_verify, &signature)
+            .map_err(|e| anyhow!("ML-DSA verify error: {:?}", e))?;
+        Ok(ok)
+    }
+
+    /// Extract /24 subnet from IPv4 address (Class C / most ISP allocations)
+    pub fn extract_subnet_24(&self) -> Ipv4Addr {
+        let octets = self.ipv4_addr.octets();
+        Ipv4Addr::new(octets[0], octets[1], octets[2], 0)
+    }
+
+    /// Extract /16 subnet from IPv4 address (Class B / large ISP allocations)
+    pub fn extract_subnet_16(&self) -> Ipv4Addr {
+        let octets = self.ipv4_addr.octets();
+        Ipv4Addr::new(octets[0], octets[1], 0, 0)
+    }
+
+    /// Extract /8 subnet from IPv4 address (Class A / regional allocations)
+    pub fn extract_subnet_8(&self) -> Ipv4Addr {
+        let octets = self.ipv4_addr.octets();
+        Ipv4Addr::new(octets[0], 0, 0, 0)
+    }
+
+    /// Get the age of this node ID in seconds
+    pub fn age_secs(&self) -> u64 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        now.saturating_sub(self.timestamp_secs)
+    }
+
+    /// Check if the node ID has expired (older than max_age)
+    pub fn is_expired(&self, max_age: Duration) -> bool {
+        self.age_secs() > max_age.as_secs()
     }
 }
 
@@ -728,6 +860,135 @@ mod tests {
 
         Ok(())
     }
+
+    // =========== IPv4 Node ID Tests ===========
+
+    fn create_test_ipv4() -> Ipv4Addr {
+        Ipv4Addr::new(192, 168, 1, 100)
+    }
+
+    #[test]
+    fn test_ipv4_node_id_generation() -> Result<()> {
+        let (public_key, secret_key) = create_test_keypair();
+        let ipv4_addr = create_test_ipv4();
+
+        let node_id = IPv4NodeID::generate(ipv4_addr, &secret_key, &public_key)?;
+
+        assert_eq!(node_id.ipv4_addr, ipv4_addr);
+        assert_eq!(node_id.public_key.len(), 1952); // ML-DSA-65 public key size
+        assert_eq!(node_id.signature.len(), 3309); // ML-DSA-65 signature size
+        assert_eq!(node_id.node_id.len(), 32); // SHA256 output
+        assert_eq!(node_id.salt.len(), 16);
+        assert!(node_id.timestamp_secs > 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_ipv4_node_id_verification() -> Result<()> {
+        let (public_key, secret_key) = create_test_keypair();
+        let ipv4_addr = create_test_ipv4();
+
+        let node_id = IPv4NodeID::generate(ipv4_addr, &secret_key, &public_key)?;
+        let is_valid = node_id.verify()?;
+
+        assert!(is_valid);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_ipv4_node_id_verification_fails_with_wrong_data() -> Result<()> {
+        let (public_key, secret_key) = create_test_keypair();
+        let ipv4_addr = create_test_ipv4();
+
+        let mut node_id = IPv4NodeID::generate(ipv4_addr, &secret_key, &public_key)?;
+
+        // Tamper with the node ID
+        node_id.node_id[0] ^= 0xFF;
+        let is_valid = node_id.verify()?;
+        assert!(!is_valid);
+
+        // Test with wrong signature length
+        let mut node_id2 = IPv4NodeID::generate(ipv4_addr, &secret_key, &public_key)?;
+        node_id2.signature = vec![0u8; 32]; // Wrong length (should be 3309 for ML-DSA)
+        let is_valid2 = node_id2.verify()?;
+        assert!(!is_valid2);
+
+        // Test with wrong public key length
+        let mut node_id3 = IPv4NodeID::generate(ipv4_addr, &secret_key, &public_key)?;
+        node_id3.public_key = vec![0u8; 16]; // Wrong length (should be 1952 for ML-DSA-65)
+        let is_valid3 = node_id3.verify()?;
+        assert!(!is_valid3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_ipv4_subnet_extraction() -> Result<()> {
+        let (public_key, secret_key) = create_test_keypair();
+        let ipv4_addr = Ipv4Addr::new(192, 168, 42, 100);
+
+        let node_id = IPv4NodeID::generate(ipv4_addr, &secret_key, &public_key)?;
+
+        // Test /24 subnet extraction
+        let subnet_24 = node_id.extract_subnet_24();
+        let expected_24 = Ipv4Addr::new(192, 168, 42, 0);
+        assert_eq!(subnet_24, expected_24);
+
+        // Test /16 subnet extraction
+        let subnet_16 = node_id.extract_subnet_16();
+        let expected_16 = Ipv4Addr::new(192, 168, 0, 0);
+        assert_eq!(subnet_16, expected_16);
+
+        // Test /8 subnet extraction
+        let subnet_8 = node_id.extract_subnet_8();
+        let expected_8 = Ipv4Addr::new(192, 0, 0, 0);
+        assert_eq!(subnet_8, expected_8);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_ipv4_node_id_age() -> Result<()> {
+        let (public_key, secret_key) = create_test_keypair();
+        let ipv4_addr = create_test_ipv4();
+
+        let node_id = IPv4NodeID::generate(ipv4_addr, &secret_key, &public_key)?;
+
+        // Age should be very small (just created)
+        assert!(node_id.age_secs() < 5);
+
+        // Not expired with a 1 hour max age
+        assert!(!node_id.is_expired(Duration::from_secs(3600)));
+
+        // A freshly created node with 0 age is NOT expired (0 > 0 is false)
+        // This is correct behavior - a 0-second-old node is not older than 0 seconds
+        assert!(!node_id.is_expired(Duration::from_secs(0)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_ipv4_different_addresses_different_node_ids() -> Result<()> {
+        let (public_key, secret_key) = create_test_keypair();
+        let addr1 = Ipv4Addr::new(192, 168, 1, 1);
+        let addr2 = Ipv4Addr::new(192, 168, 1, 2);
+
+        let node_id1 = IPv4NodeID::generate(addr1, &secret_key, &public_key)?;
+        let node_id2 = IPv4NodeID::generate(addr2, &secret_key, &public_key)?;
+
+        // Different addresses should produce different node IDs
+        assert_ne!(node_id1.node_id, node_id2.node_id);
+
+        // Both should verify successfully
+        assert!(node_id1.verify()?);
+        assert!(node_id2.verify()?);
+
+        Ok(())
+    }
+
+    // =========== End IPv4 Tests ===========
 
     #[test]
     fn test_ip_diversity_config_default() {

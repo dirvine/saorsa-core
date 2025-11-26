@@ -101,7 +101,7 @@ pub use storage::{ChunkManager, ContentStore, ReplicationConfig, StorageConfig};
 pub use transport::{ConnectionInfo, Transport, TransportManager, TransportProtocol};
 pub use trust::{
     EigenTrustEngine, MockTrustProvider, NodeStatistics, NodeStatisticsUpdate,
-    TrustBasedRoutingStrategy,
+    TrustBasedRoutingStrategy, TrustRoutingConfig,
 };
 
 /// Result type for adaptive network operations

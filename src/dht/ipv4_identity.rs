@@ -11,30 +11,32 @@
 // distributed under these licenses is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
-//! IPv6-based DHT Node Identity System
+//! IPv4-based DHT Node Identity System
 //!
-//! This module provides IPv6-based node identity for the DHT, integrating network-level
+//! This module provides IPv4-based node identity for the DHT, integrating network-level
 //! security with application-level S/Kademlia protections. It ensures that DHT node IDs
-//! are cryptographically bound to actual IPv6 addresses, preventing various attack vectors.
+//! are cryptographically bound to actual IPv4 addresses, preventing various attack vectors.
+//!
+//! This mirrors the IPv6 identity system to ensure security parity across both address families.
 
 use crate::dht::{DHTNode, Key};
 use crate::error::SecurityError;
-use crate::security::{IPDiversityConfig, IPDiversityEnforcer, IPv6NodeID};
+use crate::security::{IPDiversityConfig, IPDiversityEnforcer, IPv4NodeID};
 use crate::{P2PError, PeerId, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, SystemTime};
 use tracing::{debug, info, warn};
 
-/// IPv6-based DHT node identity that binds node ID to network location
+/// IPv4-based DHT node identity that binds node ID to network location
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IPv6DHTNode {
+pub struct IPv4DHTNode {
     /// Base DHT node information
     pub base_node: DHTNode,
-    /// IPv6-based node identity
-    pub ipv6_identity: IPv6NodeID,
-    /// IP diversity analysis
+    /// IPv4-based node identity
+    pub ipv4_identity: IPv4NodeID,
+    /// IP diversity analysis (stored as IPv6 for unified handling)
     pub ip_analysis: crate::security::IPAnalysis,
     /// Security validation timestamp
     pub validated_at: SystemTime,
@@ -42,18 +44,18 @@ pub struct IPv6DHTNode {
     pub is_verified: bool,
 }
 
-/// Configuration for IPv6-DHT integration
+/// Configuration for IPv4-DHT integration
 #[derive(Debug, Clone)]
-pub struct IPv6DHTConfig {
-    /// IPv6 diversity enforcement settings
+pub struct IPv4DHTConfig {
+    /// IP diversity enforcement settings
     pub diversity_config: IPDiversityConfig,
-    /// Enable IPv6 identity verification for all operations
-    pub enable_ipv6_verification: bool,
+    /// Enable IPv4 identity verification for all operations
+    pub enable_ipv4_verification: bool,
     /// Enable IP diversity enforcement
     pub enable_ip_diversity: bool,
-    /// Minimum node reputation for IPv6 operations
-    pub min_ipv6_reputation: f64,
-    /// IPv6 identity refresh interval
+    /// Minimum node reputation for IPv4 operations
+    pub min_ipv4_reputation: f64,
+    /// IPv4 identity refresh interval
     pub identity_refresh_interval: Duration,
     /// Maximum age for cached IP analysis
     pub ip_analysis_cache_ttl: Duration,
@@ -63,28 +65,28 @@ pub struct IPv6DHTConfig {
     pub security_ban_duration: Duration,
 }
 
-/// IPv6-based DHT identity manager
+/// IPv4-based DHT identity manager
 #[derive(Debug)]
-pub struct IPv6DHTIdentityManager {
+pub struct IPv4DHTIdentityManager {
     /// Configuration
-    pub config: IPv6DHTConfig,
+    pub config: IPv4DHTConfig,
     /// IP diversity enforcer
     pub ip_enforcer: IPDiversityEnforcer,
-    /// Verified IPv6 nodes
-    verified_nodes: HashMap<PeerId, IPv6DHTNode>,
+    /// Verified IPv4 nodes
+    verified_nodes: HashMap<PeerId, IPv4DHTNode>,
     /// Node identity cache
-    identity_cache: HashMap<PeerId, (IPv6NodeID, SystemTime)>,
-    /// IP analysis cache
-    ip_analysis_cache: HashMap<Ipv6Addr, (crate::security::IPAnalysis, SystemTime)>,
+    identity_cache: HashMap<PeerId, (IPv4NodeID, SystemTime)>,
+    /// IP analysis cache (keyed by IPv4 address)
+    ip_analysis_cache: HashMap<Ipv4Addr, (crate::security::IPAnalysis, SystemTime)>,
     /// Banned nodes for security violations
     banned_nodes: HashMap<PeerId, SystemTime>,
-    /// Local IPv6 identity
-    local_identity: Option<IPv6NodeID>,
+    /// Local IPv4 identity
+    local_identity: Option<IPv4NodeID>,
 }
 
-/// IPv6 identity verification result
+/// IPv4 identity verification result
 #[derive(Debug, Clone)]
-pub struct IPv6VerificationResult {
+pub struct IPv4VerificationResult {
     /// Verification success
     pub is_valid: bool,
     /// Verification confidence (0.0-1.0)
@@ -97,24 +99,24 @@ pub struct IPv6VerificationResult {
     pub identity_age_secs: u64,
 }
 
-/// Security event for IPv6-DHT integration
+/// Security event for IPv4-DHT integration
 #[derive(Debug, Clone)]
-pub enum IPv6SecurityEvent {
-    /// Node joined with valid IPv6 identity
+pub enum IPv4SecurityEvent {
+    /// Node joined with valid IPv4 identity
     NodeJoined {
         /// ID of the peer that joined
         peer_id: PeerId,
-        /// IPv6 address of the peer
-        ipv6_addr: Ipv6Addr,
+        /// IPv4 address of the peer
+        ipv4_addr: Ipv4Addr,
         /// Confidence level of identity verification (0.0-1.0)
         verification_confidence: f64,
     },
-    /// Node failed IPv6 verification
+    /// Node failed IPv4 verification
     VerificationFailed {
         /// ID of the peer that failed verification
         peer_id: PeerId,
-        /// IPv6 address that failed verification
-        ipv6_addr: Ipv6Addr,
+        /// IPv4 address that failed verification
+        ipv4_addr: Ipv4Addr,
         /// Reason for verification failure
         reason: String,
     },
@@ -122,8 +124,8 @@ pub enum IPv6SecurityEvent {
     DiversityViolation {
         /// ID of the peer causing violation
         peer_id: PeerId,
-        /// IPv6 address involved in violation
-        ipv6_addr: Ipv6Addr,
+        /// IPv4 address involved in violation
+        ipv4_addr: Ipv4Addr,
         /// Type of subnet causing the violation
         subnet_type: String,
     },
@@ -131,8 +133,8 @@ pub enum IPv6SecurityEvent {
     NodeBanned {
         /// ID of the banned peer
         peer_id: PeerId,
-        /// IPv6 address of the banned peer
-        ipv6_addr: Ipv6Addr,
+        /// IPv4 address of the banned peer
+        ipv4_addr: Ipv4Addr,
         /// Reason for banning
         reason: String,
         /// Duration of the ban
@@ -142,20 +144,20 @@ pub enum IPv6SecurityEvent {
     SuspiciousActivity {
         /// ID of the suspicious peer
         peer_id: PeerId,
-        /// IPv6 address of the suspicious peer
-        ipv6_addr: Ipv6Addr,
+        /// IPv4 address of the suspicious peer
+        ipv4_addr: Ipv4Addr,
         /// Type of suspicious activity detected
         activity_type: String,
     },
 }
 
-impl Default for IPv6DHTConfig {
+impl Default for IPv4DHTConfig {
     fn default() -> Self {
         Self {
             diversity_config: IPDiversityConfig::default(),
-            enable_ipv6_verification: true,
+            enable_ipv4_verification: true,
             enable_ip_diversity: true,
-            min_ipv6_reputation: 0.3,
+            min_ipv4_reputation: 0.3,
             identity_refresh_interval: Duration::from_secs(3600), // 1 hour
             ip_analysis_cache_ttl: Duration::from_secs(1800),     // 30 minutes
             enable_node_banning: true,
@@ -164,9 +166,14 @@ impl Default for IPv6DHTConfig {
     }
 }
 
-impl IPv6DHTIdentityManager {
-    /// Create a new IPv6 DHT identity manager
-    pub fn new(config: IPv6DHTConfig) -> Self {
+/// Convert IPv4 address to IPv6-mapped format for unified diversity analysis
+fn ipv4_to_ipv6_mapped(ipv4: Ipv4Addr) -> Ipv6Addr {
+    ipv4.to_ipv6_mapped()
+}
+
+impl IPv4DHTIdentityManager {
+    /// Create a new IPv4 DHT identity manager
+    pub fn new(config: IPv4DHTConfig) -> Self {
         let ip_enforcer = IPDiversityEnforcer::new(config.diversity_config.clone());
 
         Self {
@@ -180,18 +187,18 @@ impl IPv6DHTIdentityManager {
         }
     }
 
-    /// Set the local IPv6 identity
-    pub fn set_local_identity(&mut self, identity: IPv6NodeID) -> Result<()> {
+    /// Set the local IPv4 identity
+    pub fn set_local_identity(&mut self, identity: IPv4NodeID) -> Result<()> {
         // Verify the local identity
         match identity.verify() {
             Ok(true) => {
                 self.local_identity = Some(identity);
-                info!("Local IPv6 identity set and verified");
+                info!("Local IPv4 identity set and verified");
                 Ok(())
             }
             Ok(false) => Err(P2PError::Security(
                 SecurityError::SignatureVerificationFailed(
-                    "Failed to verify IPv6 identity signature"
+                    "Failed to verify IPv4 identity signature"
                         .to_string()
                         .into(),
                 ),
@@ -202,31 +209,31 @@ impl IPv6DHTIdentityManager {
         }
     }
 
-    /// Generate DHT key from IPv6 node identity
-    pub fn generate_dht_key(ipv6_identity: &IPv6NodeID) -> Key {
-        // Use the node_id from IPv6 identity as the DHT key
-        // This ensures the DHT key is cryptographically bound to the IPv6 address
-        ipv6_identity
+    /// Generate DHT key from IPv4 node identity
+    pub fn generate_dht_key(ipv4_identity: &IPv4NodeID) -> Key {
+        // Use the node_id from IPv4 identity as the DHT key
+        // This ensures the DHT key is cryptographically bound to the IPv4 address
+        ipv4_identity
             .node_id
             .as_slice()
             .try_into()
             .unwrap_or([0u8; 32])
     }
 
-    /// Convert a regular DHT node to IPv6-enhanced node
+    /// Convert a regular DHT node to IPv4-enhanced node
     pub async fn enhance_dht_node(
         &mut self,
         node: DHTNode,
-        ipv6_identity: IPv6NodeID,
-    ) -> Result<IPv6DHTNode> {
-        // Verify IPv6 identity
-        let verification_result = self.verify_ipv6_identity(&ipv6_identity).await?;
+        ipv4_identity: IPv4NodeID,
+    ) -> Result<IPv4DHTNode> {
+        // Verify IPv4 identity
+        let verification_result = self.verify_ipv4_identity(&ipv4_identity).await?;
 
         if !verification_result.is_valid {
             return Err(P2PError::Security(
                 crate::error::SecurityError::AuthorizationFailed(
                     format!(
-                        "IPv6 identity verification failed: {}",
+                        "IPv4 identity verification failed: {}",
                         verification_result.error_message.unwrap_or_default()
                     )
                     .into(),
@@ -235,7 +242,7 @@ impl IPv6DHTIdentityManager {
         }
 
         // Analyze IP for diversity enforcement
-        let ip_analysis = self.analyze_node_ip(ipv6_identity.ipv6_addr).await?;
+        let ip_analysis = self.analyze_node_ip(ipv4_identity.ipv4_addr).await?;
 
         // Check IP diversity constraints
         if self.config.enable_ip_diversity && !self.ip_enforcer.can_accept_node(&ip_analysis) {
@@ -255,39 +262,39 @@ impl IPv6DHTIdentityManager {
             })?;
         }
 
-        let enhanced_node = IPv6DHTNode {
+        let enhanced_node = IPv4DHTNode {
             base_node: node,
-            ipv6_identity,
+            ipv4_identity,
             ip_analysis,
             validated_at: SystemTime::now(),
             is_verified: verification_result.is_valid,
         };
 
-        // Cache the verified node
+        // Cache the verified node (use id.to_string() as the key)
         self.verified_nodes.insert(
             enhanced_node.base_node.id.to_string(),
             enhanced_node.clone(),
         );
 
         info!(
-            "Enhanced DHT node with IPv6 identity: {}",
+            "Enhanced DHT node with IPv4 identity: {}",
             enhanced_node.base_node.id
         );
         Ok(enhanced_node)
     }
 
-    /// Verify IPv6 node identity
-    pub async fn verify_ipv6_identity(
+    /// Verify IPv4 node identity
+    pub async fn verify_ipv4_identity(
         &mut self,
-        identity: &IPv6NodeID,
-    ) -> Result<IPv6VerificationResult> {
+        identity: &IPv4NodeID,
+    ) -> Result<IPv4VerificationResult> {
         // Check cache first
         if let Some((cached_identity, cached_at)) =
-            self.identity_cache.get(&identity.ipv6_addr.to_string())
+            self.identity_cache.get(&identity.ipv4_addr.to_string())
             && cached_at.elapsed().unwrap_or(Duration::MAX) < self.config.identity_refresh_interval
             && cached_identity.node_id == identity.node_id
         {
-            return Ok(IPv6VerificationResult {
+            return Ok(IPv4VerificationResult {
                 is_valid: true,
                 confidence: 0.9, // High confidence for cached valid identity
                 error_message: None,
@@ -300,8 +307,8 @@ impl IPv6DHTIdentityManager {
         let signature_valid = match identity.verify() {
             Ok(valid) => valid,
             Err(e) => {
-                warn!("IPv6 identity signature verification failed: {}", e);
-                return Ok(IPv6VerificationResult {
+                warn!("IPv4 identity signature verification failed: {}", e);
+                return Ok(IPv4VerificationResult {
                     is_valid: false,
                     confidence: 0.0,
                     error_message: Some(format!("Signature verification failed: {e}")),
@@ -312,7 +319,7 @@ impl IPv6DHTIdentityManager {
         };
 
         if !signature_valid {
-            return Ok(IPv6VerificationResult {
+            return Ok(IPv4VerificationResult {
                 is_valid: false,
                 confidence: 0.0,
                 error_message: Some("Invalid cryptographic signature".to_string()),
@@ -321,17 +328,12 @@ impl IPv6DHTIdentityManager {
             });
         }
 
-        // Check identity freshness
-        let identity_age = identity.timestamp_secs;
-        let now_secs = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let age_secs = now_secs.saturating_sub(identity_age);
+        // Check identity freshness using the age_secs() method
+        let age_secs = identity.age_secs();
 
         // Reject identities older than 24 hours
         if age_secs > 86400 {
-            return Ok(IPv6VerificationResult {
+            return Ok(IPv4VerificationResult {
                 is_valid: false,
                 confidence: 0.0,
                 error_message: Some("Identity too old".to_string()),
@@ -341,7 +343,7 @@ impl IPv6DHTIdentityManager {
         }
 
         // Analyze IP for diversity
-        let ip_analysis = self.analyze_node_ip(identity.ipv6_addr).await?;
+        let ip_analysis = self.analyze_node_ip(identity.ipv4_addr).await?;
         let ip_diversity_ok =
             !self.config.enable_ip_diversity || self.ip_enforcer.can_accept_node(&ip_analysis);
 
@@ -368,14 +370,14 @@ impl IPv6DHTIdentityManager {
 
         // Cache the identity
         self.identity_cache.insert(
-            identity.ipv6_addr.to_string(),
+            identity.ipv4_addr.to_string(),
             (identity.clone(), SystemTime::now()),
         );
 
-        Ok(IPv6VerificationResult {
+        Ok(IPv4VerificationResult {
             is_valid: signature_valid
                 && ip_diversity_ok
-                && confidence >= self.config.min_ipv6_reputation,
+                && confidence >= self.config.min_ipv4_reputation,
             confidence,
             error_message: None,
             ip_diversity_ok,
@@ -384,44 +386,48 @@ impl IPv6DHTIdentityManager {
     }
 
     /// Analyze node IP for diversity enforcement
+    /// Converts IPv4 to IPv6-mapped format for unified diversity analysis
     async fn analyze_node_ip(
         &mut self,
-        ipv6_addr: Ipv6Addr,
+        ipv4_addr: Ipv4Addr,
     ) -> Result<crate::security::IPAnalysis> {
         // Check cache first
-        if let Some((cached_analysis, cached_at)) = self.ip_analysis_cache.get(&ipv6_addr)
+        if let Some((cached_analysis, cached_at)) = self.ip_analysis_cache.get(&ipv4_addr)
             && cached_at.elapsed().unwrap_or(Duration::MAX) < self.config.ip_analysis_cache_ttl
         {
             return Ok(cached_analysis.clone());
         }
 
-        // Perform IP analysis
+        // Convert IPv4 to IPv6-mapped for unified analysis
+        let ipv6_mapped = ipv4_to_ipv6_mapped(ipv4_addr);
+
+        // Perform IP analysis using the IPv6-mapped address
         let analysis = self
             .ip_enforcer
-            .analyze_ip(ipv6_addr)
+            .analyze_ip(ipv6_mapped)
             .map_err(|_e| P2PError::Security(crate::error::SecurityError::AuthenticationFailed))?;
 
         // Cache the analysis
         self.ip_analysis_cache
-            .insert(ipv6_addr, (analysis.clone(), SystemTime::now()));
+            .insert(ipv4_addr, (analysis.clone(), SystemTime::now()));
 
         Ok(analysis)
     }
 
-    /// Validate node join with IPv6 security checks
+    /// Validate node join with IPv4 security checks
     pub async fn validate_node_join(
         &mut self,
         node: &DHTNode,
-        ipv6_identity: &IPv6NodeID,
-    ) -> Result<IPv6SecurityEvent> {
+        ipv4_identity: &IPv4NodeID,
+    ) -> Result<IPv4SecurityEvent> {
         let node_peer_id = node.id.to_string();
 
         // Check if node is banned
         if let Some(ban_time) = self.banned_nodes.get(&node_peer_id) {
             if ban_time.elapsed().unwrap_or(Duration::MAX) < self.config.security_ban_duration {
-                return Ok(IPv6SecurityEvent::NodeBanned {
+                return Ok(IPv4SecurityEvent::NodeBanned {
                     peer_id: node_peer_id,
-                    ipv6_addr: ipv6_identity.ipv6_addr,
+                    ipv4_addr: ipv4_identity.ipv4_addr,
                     reason: "Node still banned".to_string(),
                     ban_duration: self.config.security_ban_duration,
                 });
@@ -431,13 +437,13 @@ impl IPv6DHTIdentityManager {
             }
         }
 
-        // Verify IPv6 identity
-        let verification_result = self.verify_ipv6_identity(ipv6_identity).await?;
+        // Verify IPv4 identity
+        let verification_result = self.verify_ipv4_identity(ipv4_identity).await?;
 
         if !verification_result.is_valid {
-            let event = IPv6SecurityEvent::VerificationFailed {
+            let event = IPv4SecurityEvent::VerificationFailed {
                 peer_id: node_peer_id.clone(),
-                ipv6_addr: ipv6_identity.ipv6_addr,
+                ipv4_addr: ipv4_identity.ipv4_addr,
                 reason: verification_result
                     .error_message
                     .unwrap_or("Unknown".to_string()),
@@ -453,35 +459,35 @@ impl IPv6DHTIdentityManager {
         }
 
         // Check IP diversity
-        let ip_analysis = self.analyze_node_ip(ipv6_identity.ipv6_addr).await?;
+        let ip_analysis = self.analyze_node_ip(ipv4_identity.ipv4_addr).await?;
 
         if self.config.enable_ip_diversity && !self.ip_enforcer.can_accept_node(&ip_analysis) {
-            return Ok(IPv6SecurityEvent::DiversityViolation {
+            return Ok(IPv4SecurityEvent::DiversityViolation {
                 peer_id: node_peer_id,
-                ipv6_addr: ipv6_identity.ipv6_addr,
-                subnet_type: "IPv6 subnet".to_string(),
+                ipv4_addr: ipv4_identity.ipv4_addr,
+                subnet_type: "IPv4 subnet".to_string(),
             });
         }
 
         // Node join is valid
-        Ok(IPv6SecurityEvent::NodeJoined {
+        Ok(IPv4SecurityEvent::NodeJoined {
             peer_id: node_peer_id,
-            ipv6_addr: ipv6_identity.ipv6_addr,
+            ipv4_addr: ipv4_identity.ipv4_addr,
             verification_confidence: verification_result.confidence,
         })
     }
 
-    /// Get verified IPv6 node by peer ID
-    pub fn get_verified_node(&self, peer_id: &PeerId) -> Option<&IPv6DHTNode> {
+    /// Get verified IPv4 node by peer ID
+    pub fn get_verified_node(&self, peer_id: &PeerId) -> Option<&IPv4DHTNode> {
         self.verified_nodes.get(peer_id)
     }
 
-    /// Remove node from IPv6 tracking
+    /// Remove node from IPv4 tracking
     pub fn remove_node(&mut self, peer_id: &PeerId) {
-        if let Some(ipv6_node) = self.verified_nodes.remove(peer_id) {
+        if let Some(ipv4_node) = self.verified_nodes.remove(peer_id) {
             // Remove from IP diversity tracking
-            self.ip_enforcer.remove_node(&ipv6_node.ip_analysis);
-            debug!("Removed IPv6 node from tracking: {}", peer_id);
+            self.ip_enforcer.remove_node(&ipv4_node.ip_analysis);
+            debug!("Removed IPv4 node from tracking: {}", peer_id);
         }
     }
 
@@ -500,15 +506,13 @@ impl IPv6DHTIdentityManager {
         warn!("Banned node {} for: {}", peer_id, reason);
     }
 
-    /// Get IPv6 diversity statistics
-    pub fn get_ipv6_diversity_stats(&self) -> crate::security::DiversityStats {
+    /// Get IPv4 diversity statistics
+    pub fn get_ipv4_diversity_stats(&self) -> crate::security::DiversityStats {
         self.ip_enforcer.get_diversity_stats()
     }
 
     /// Cleanup expired entries
     pub fn cleanup_expired(&mut self) {
-        let _now = SystemTime::now();
-
         // Remove expired identity cache entries
         self.identity_cache.retain(|_, (_, cached_at)| {
             cached_at.elapsed().unwrap_or(Duration::MAX) < self.config.identity_refresh_interval
@@ -530,50 +534,50 @@ impl IPv6DHTIdentityManager {
         });
     }
 
-    /// Get local IPv6 identity
-    pub fn get_local_identity(&self) -> Option<&IPv6NodeID> {
+    /// Get local IPv4 identity
+    pub fn get_local_identity(&self) -> Option<&IPv4NodeID> {
         self.local_identity.as_ref()
     }
 
-    /// Update node reputation based on IPv6 behavior
-    pub fn update_ipv6_reputation(&mut self, peer_id: &PeerId, positive_behavior: bool) {
-        if let Some(ipv6_node) = self.verified_nodes.get_mut(peer_id) {
+    /// Update node reputation based on IPv4 behavior
+    pub fn update_ipv4_reputation(&mut self, peer_id: &PeerId, positive_behavior: bool) {
+        if let Some(ipv4_node) = self.verified_nodes.get_mut(peer_id) {
             // Update reputation score based on behavior
             if positive_behavior {
-                ipv6_node.ip_analysis.reputation_score =
-                    (ipv6_node.ip_analysis.reputation_score + 0.1).min(1.0);
+                ipv4_node.ip_analysis.reputation_score =
+                    (ipv4_node.ip_analysis.reputation_score + 0.1).min(1.0);
             } else {
-                ipv6_node.ip_analysis.reputation_score =
-                    (ipv6_node.ip_analysis.reputation_score - 0.2).max(0.0);
+                ipv4_node.ip_analysis.reputation_score =
+                    (ipv4_node.ip_analysis.reputation_score - 0.2).max(0.0);
 
                 // Ban node if reputation drops too low
-                if ipv6_node.ip_analysis.reputation_score < 0.1 && self.config.enable_node_banning {
-                    self.ban_node(peer_id, "Low IPv6 reputation");
+                if ipv4_node.ip_analysis.reputation_score < 0.1 && self.config.enable_node_banning {
+                    self.ban_node(peer_id, "Low IPv4 reputation");
                 }
             }
         }
     }
 }
 
-impl IPv6DHTNode {
-    /// Create a new IPv6 DHT node
+impl IPv4DHTNode {
+    /// Create a new IPv4 DHT node
     pub fn new(
         base_node: DHTNode,
-        ipv6_identity: IPv6NodeID,
+        ipv4_identity: IPv4NodeID,
         ip_analysis: crate::security::IPAnalysis,
     ) -> Self {
         Self {
             base_node,
-            ipv6_identity,
+            ipv4_identity,
             ip_analysis,
             validated_at: SystemTime::now(),
             is_verified: false,
         }
     }
 
-    /// Get the DHT key derived from IPv6 identity
+    /// Get the DHT key derived from IPv4 identity
     pub fn get_dht_key(&self) -> Key {
-        IPv6DHTIdentityManager::generate_dht_key(&self.ipv6_identity)
+        IPv4DHTIdentityManager::generate_dht_key(&self.ipv4_identity)
     }
 
     /// Check if identity needs refresh
@@ -581,12 +585,12 @@ impl IPv6DHTNode {
         self.validated_at.elapsed().unwrap_or(Duration::MAX) > refresh_interval
     }
 
-    /// Get IPv6 subnet information
-    pub fn get_subnet_info(&self) -> (Ipv6Addr, Ipv6Addr, Ipv6Addr) {
+    /// Get IPv4 subnet information
+    pub fn get_subnet_info(&self) -> (Ipv4Addr, Ipv4Addr, Ipv4Addr) {
         (
-            self.ipv6_identity.extract_subnet_64(),
-            self.ipv6_identity.extract_subnet_48(),
-            self.ipv6_identity.extract_subnet_32(),
+            self.ipv4_identity.extract_subnet_24(),
+            self.ipv4_identity.extract_subnet_16(),
+            self.ipv4_identity.extract_subnet_8(),
         )
     }
 }
@@ -594,33 +598,33 @@ impl IPv6DHTNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{IPAnalysis, IPv6NodeID};
+    use crate::dht::{DhtNodeId, NodeCapacity};
     use crate::quantum_crypto::ant_quic_integration::generate_ml_dsa_keypair;
-    use std::net::Ipv6Addr;
+    use crate::security::{IPAnalysis, IPv4NodeID};
+    use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
     use std::time::Duration;
 
     fn create_test_dht_node(peer_id: &str, id_bytes: [u8; 32]) -> DHTNode {
-        use crate::dht::{DhtNodeId, NodeCapacity};
         DHTNode {
             id: DhtNodeId::from_bytes(id_bytes),
-            address: format!("::1:8080:{}", peer_id),
+            address: format!("192.168.1.100:8080:{}", peer_id),
             last_seen: SystemTime::now(),
             capacity: NodeCapacity::default(),
         }
     }
 
-    fn create_test_ipv6_identity() -> IPv6NodeID {
+    fn create_test_ipv4_identity() -> IPv4NodeID {
         let (public, secret) = generate_ml_dsa_keypair().unwrap();
-        let ipv6_addr = Ipv6Addr::from_str("2001:db8::1").unwrap();
-        IPv6NodeID::generate(ipv6_addr, &secret, &public).unwrap()
+        let ipv4_addr = Ipv4Addr::from_str("192.168.1.100").unwrap();
+        IPv4NodeID::generate(ipv4_addr, &secret, &public).unwrap()
     }
 
     fn create_test_ip_analysis() -> IPAnalysis {
         IPAnalysis {
-            subnet_64: Ipv6Addr::from_str("2001:db8::").unwrap(),
-            subnet_48: Ipv6Addr::from_str("2001:db8::").unwrap(),
-            subnet_32: Ipv6Addr::from_str("2001:db8::").unwrap(),
+            subnet_64: Ipv6Addr::from_str("::ffff:192.168.0.0").unwrap(),
+            subnet_48: Ipv6Addr::from_str("::ffff:192.168.0.0").unwrap(),
+            subnet_32: Ipv6Addr::from_str("::ffff:192.0.0.0").unwrap(),
             asn: Some(64512),
             country: Some("US".to_string()),
             is_hosting_provider: false,
@@ -630,11 +634,11 @@ mod tests {
     }
 
     #[test]
-    fn test_ipv6_dht_config_default() {
-        let config = IPv6DHTConfig::default();
-        assert!(config.enable_ipv6_verification);
+    fn test_ipv4_dht_config_default() {
+        let config = IPv4DHTConfig::default();
+        assert!(config.enable_ipv4_verification);
         assert!(config.enable_ip_diversity);
-        assert_eq!(config.min_ipv6_reputation, 0.3);
+        assert_eq!(config.min_ipv4_reputation, 0.3);
         assert_eq!(config.identity_refresh_interval, Duration::from_secs(3600));
         assert_eq!(config.ip_analysis_cache_ttl, Duration::from_secs(1800));
         assert!(config.enable_node_banning);
@@ -642,9 +646,9 @@ mod tests {
     }
 
     #[test]
-    fn test_ipv6_dht_identity_manager_creation() {
-        let config = IPv6DHTConfig::default();
-        let manager = IPv6DHTIdentityManager::new(config);
+    fn test_ipv4_dht_identity_manager_creation() {
+        let config = IPv4DHTConfig::default();
+        let manager = IPv4DHTIdentityManager::new(config);
 
         assert!(manager.verified_nodes.is_empty());
         assert!(manager.identity_cache.is_empty());
@@ -654,18 +658,18 @@ mod tests {
     }
 
     #[test]
-    fn test_ipv6_dht_identity_manager_set_local_identity() -> Result<()> {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+    fn test_ipv4_dht_identity_manager_set_local_identity() -> Result<()> {
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
         let result = manager.set_local_identity(identity.clone());
 
         assert!(result.is_ok());
         assert!(manager.local_identity.is_some());
         assert_eq!(
-            manager.local_identity.unwrap().ipv6_addr,
-            identity.ipv6_addr
+            manager.local_identity.unwrap().ipv4_addr,
+            identity.ipv4_addr
         );
 
         Ok(())
@@ -673,11 +677,11 @@ mod tests {
 
     #[test]
     fn test_generate_dht_key() {
-        let identity = create_test_ipv6_identity();
-        let dht_key = IPv6DHTIdentityManager::generate_dht_key(&identity);
+        let identity = create_test_ipv4_identity();
+        let dht_key = IPv4DHTIdentityManager::generate_dht_key(&identity);
 
         // Should generate consistent key from identity
-        let dht_key2 = IPv6DHTIdentityManager::generate_dht_key(&identity);
+        let dht_key2 = IPv4DHTIdentityManager::generate_dht_key(&identity);
         assert_eq!(dht_key, dht_key2);
 
         // Key should be derived from node_id
@@ -687,11 +691,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_enhance_dht_node() -> Result<()> {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
         let base_node = create_test_dht_node("test_peer", [1u8; 32]);
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
 
         let result = manager
             .enhance_dht_node(base_node.clone(), identity.clone())
@@ -700,7 +704,7 @@ mod tests {
         match result {
             Ok(enhanced_node) => {
                 assert_eq!(enhanced_node.base_node.id, base_node.id);
-                assert_eq!(enhanced_node.ipv6_identity.ipv6_addr, identity.ipv6_addr);
+                assert_eq!(enhanced_node.ipv4_identity.ipv4_addr, identity.ipv4_addr);
                 assert!(enhanced_node.is_verified);
             }
             Err(_) => {
@@ -713,12 +717,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_verify_ipv6_identity() -> Result<()> {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+    async fn test_verify_ipv4_identity() -> Result<()> {
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
-        let identity = create_test_ipv6_identity();
-        let result = manager.verify_ipv6_identity(&identity).await?;
+        let identity = create_test_ipv4_identity();
+        let result = manager.verify_ipv4_identity(&identity).await?;
 
         // Should be valid with good confidence
         assert!(result.is_valid);
@@ -729,17 +733,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_verify_ipv6_identity_caching() -> Result<()> {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+    async fn test_verify_ipv4_identity_caching() -> Result<()> {
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
 
         // First verification
-        let result1 = manager.verify_ipv6_identity(&identity).await?;
+        let result1 = manager.verify_ipv4_identity(&identity).await?;
 
         // Second verification should use cache
-        let result2 = manager.verify_ipv6_identity(&identity).await?;
+        let result2 = manager.verify_ipv4_identity(&identity).await?;
 
         assert_eq!(result1.is_valid, result2.is_valid);
 
@@ -748,28 +752,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_node_join() -> Result<()> {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
         let node = create_test_dht_node("test_peer", [1u8; 32]);
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
 
         let event = manager.validate_node_join(&node, &identity).await?;
 
         match event {
-            IPv6SecurityEvent::NodeJoined {
+            IPv4SecurityEvent::NodeJoined {
                 peer_id,
-                ipv6_addr,
+                ipv4_addr,
                 verification_confidence,
             } => {
                 assert_eq!(peer_id, node.id.to_string());
-                assert_eq!(ipv6_addr, identity.ipv6_addr);
+                assert_eq!(ipv4_addr, identity.ipv4_addr);
                 assert!(verification_confidence > 0.0);
             }
-            IPv6SecurityEvent::VerificationFailed { .. } => {
+            IPv4SecurityEvent::VerificationFailed { .. } => {
                 // Verification might fail for various reasons, this is also valid
             }
-            IPv6SecurityEvent::DiversityViolation { .. } => {
+            IPv4SecurityEvent::DiversityViolation { .. } => {
                 // IP diversity constraints might prevent joining
             }
             _ => panic!("Unexpected security event type"),
@@ -780,8 +784,8 @@ mod tests {
 
     #[test]
     fn test_node_banning() {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
         let peer_id = "test_peer".to_string();
 
@@ -800,8 +804,8 @@ mod tests {
 
     #[test]
     fn test_get_verified_node() {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
         let peer_id = "test_peer".to_string();
 
@@ -810,11 +814,11 @@ mod tests {
 
         // Add a verified node
         let base_node = create_test_dht_node(&peer_id, [1u8; 32]);
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
         let ip_analysis = create_test_ip_analysis();
-        let ipv6_node = IPv6DHTNode::new(base_node, identity, ip_analysis);
+        let ipv4_node = IPv4DHTNode::new(base_node, identity, ip_analysis);
 
-        manager.verified_nodes.insert(peer_id.clone(), ipv6_node);
+        manager.verified_nodes.insert(peer_id.clone(), ipv4_node);
 
         // Should now find the verified node
         assert!(manager.get_verified_node(&peer_id).is_some());
@@ -822,17 +826,17 @@ mod tests {
 
     #[test]
     fn test_remove_node() {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
         let peer_id = "test_peer".to_string();
         let base_node = create_test_dht_node(&peer_id, [1u8; 32]);
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
         let ip_analysis = create_test_ip_analysis();
-        let ipv6_node = IPv6DHTNode::new(base_node, identity, ip_analysis);
+        let ipv4_node = IPv4DHTNode::new(base_node, identity, ip_analysis);
 
         // Add verified node
-        manager.verified_nodes.insert(peer_id.clone(), ipv6_node);
+        manager.verified_nodes.insert(peer_id.clone(), ipv4_node);
         assert!(manager.get_verified_node(&peer_id).is_some());
 
         // Remove node
@@ -841,31 +845,31 @@ mod tests {
     }
 
     #[test]
-    fn test_update_ipv6_reputation() {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+    fn test_update_ipv4_reputation() {
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
         let peer_id = "test_peer".to_string();
         let base_node = create_test_dht_node(&peer_id, [1u8; 32]);
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
         let ip_analysis = create_test_ip_analysis();
-        let ipv6_node = IPv6DHTNode::new(base_node, identity, ip_analysis);
+        let ipv4_node = IPv4DHTNode::new(base_node, identity, ip_analysis);
 
-        manager.verified_nodes.insert(peer_id.clone(), ipv6_node);
+        manager.verified_nodes.insert(peer_id.clone(), ipv4_node);
 
         let initial_reputation = manager.verified_nodes[&peer_id]
             .ip_analysis
             .reputation_score;
 
         // Positive behavior should increase reputation
-        manager.update_ipv6_reputation(&peer_id, true);
+        manager.update_ipv4_reputation(&peer_id, true);
         let new_reputation = manager.verified_nodes[&peer_id]
             .ip_analysis
             .reputation_score;
         assert!(new_reputation >= initial_reputation);
 
         // Negative behavior should decrease reputation
-        manager.update_ipv6_reputation(&peer_id, false);
+        manager.update_ipv4_reputation(&peer_id, false);
         let final_reputation = manager.verified_nodes[&peer_id]
             .ip_analysis
             .reputation_score;
@@ -874,26 +878,26 @@ mod tests {
 
     #[test]
     fn test_cleanup_expired() {
-        let config = IPv6DHTConfig {
+        let config = IPv4DHTConfig {
             identity_refresh_interval: Duration::from_millis(1),
             ip_analysis_cache_ttl: Duration::from_millis(1),
             security_ban_duration: Duration::from_millis(1),
             ..Default::default()
         };
-        let mut manager = IPv6DHTIdentityManager::new(config);
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
         // Add some test data
-        let ipv6_addr = Ipv6Addr::from_str("2001:db8::1").unwrap();
-        let identity = create_test_ipv6_identity();
+        let ipv4_addr = Ipv4Addr::from_str("192.168.1.100").unwrap();
+        let identity = create_test_ipv4_identity();
         let ip_analysis = create_test_ip_analysis();
         let peer_id = "test_peer".to_string();
 
         manager
             .identity_cache
-            .insert(ipv6_addr.to_string(), (identity, SystemTime::now()));
+            .insert(ipv4_addr.to_string(), (identity, SystemTime::now()));
         manager
             .ip_analysis_cache
-            .insert(ipv6_addr, (ip_analysis, SystemTime::now()));
+            .insert(ipv4_addr, (ip_analysis, SystemTime::now()));
         manager
             .banned_nodes
             .insert(peer_id.clone(), SystemTime::now());
@@ -906,15 +910,14 @@ mod tests {
 
         // Entries should be removed (or at least ready to be removed)
         // Note: Due to timing issues in tests, we just verify cleanup doesn't crash
-        // The cleanup method should work without panicking
     }
 
     #[test]
-    fn test_get_ipv6_diversity_stats() {
-        let config = IPv6DHTConfig::default();
-        let manager = IPv6DHTIdentityManager::new(config);
+    fn test_get_ipv4_diversity_stats() {
+        let config = IPv4DHTConfig::default();
+        let manager = IPv4DHTIdentityManager::new(config);
 
-        let stats = manager.get_ipv6_diversity_stats();
+        let stats = manager.get_ipv4_diversity_stats();
 
         // Should return valid diversity stats
         assert_eq!(stats.total_64_subnets, 0);
@@ -924,81 +927,81 @@ mod tests {
 
     #[test]
     fn test_get_local_identity() {
-        let config = IPv6DHTConfig::default();
-        let mut manager = IPv6DHTIdentityManager::new(config);
+        let config = IPv4DHTConfig::default();
+        let mut manager = IPv4DHTIdentityManager::new(config);
 
         // Initially no local identity
         assert!(manager.get_local_identity().is_none());
 
         // Set local identity
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
         manager.set_local_identity(identity.clone()).unwrap();
 
         // Should return the identity
         let retrieved_identity = manager.get_local_identity().unwrap();
-        assert_eq!(retrieved_identity.ipv6_addr, identity.ipv6_addr);
+        assert_eq!(retrieved_identity.ipv4_addr, identity.ipv4_addr);
     }
 
     #[test]
-    fn test_ipv6_dht_node_creation() {
+    fn test_ipv4_dht_node_creation() {
         let base_node = create_test_dht_node("test_peer", [1u8; 32]);
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
         let ip_analysis = create_test_ip_analysis();
 
-        let ipv6_node = IPv6DHTNode::new(base_node.clone(), identity.clone(), ip_analysis.clone());
+        let ipv4_node = IPv4DHTNode::new(base_node.clone(), identity.clone(), ip_analysis.clone());
 
-        assert_eq!(ipv6_node.base_node.id, base_node.id);
-        assert_eq!(ipv6_node.ipv6_identity.ipv6_addr, identity.ipv6_addr);
-        assert_eq!(ipv6_node.ip_analysis.subnet_64, ip_analysis.subnet_64);
-        assert!(!ipv6_node.is_verified); // Default is false
+        assert_eq!(ipv4_node.base_node.id, base_node.id);
+        assert_eq!(ipv4_node.ipv4_identity.ipv4_addr, identity.ipv4_addr);
+        assert_eq!(ipv4_node.ip_analysis.subnet_64, ip_analysis.subnet_64);
+        assert!(!ipv4_node.is_verified); // Default is false
     }
 
     #[test]
-    fn test_ipv6_dht_node_get_dht_key() {
+    fn test_ipv4_dht_node_get_dht_key() {
         let base_node = create_test_dht_node("test_peer", [1u8; 32]);
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
         let ip_analysis = create_test_ip_analysis();
 
-        let ipv6_node = IPv6DHTNode::new(base_node, identity.clone(), ip_analysis);
-        let dht_key = ipv6_node.get_dht_key();
+        let ipv4_node = IPv4DHTNode::new(base_node, identity.clone(), ip_analysis);
+        let dht_key = ipv4_node.get_dht_key();
 
         // Should match the key generated from identity
-        let expected_key = IPv6DHTIdentityManager::generate_dht_key(&identity);
+        let expected_key = IPv4DHTIdentityManager::generate_dht_key(&identity);
         assert_eq!(dht_key, expected_key);
     }
 
     #[test]
-    fn test_ipv6_dht_node_needs_identity_refresh() {
+    fn test_ipv4_dht_node_needs_identity_refresh() {
         let base_node = create_test_dht_node("test_peer", [1u8; 32]);
-        let identity = create_test_ipv6_identity();
+        let identity = create_test_ipv4_identity();
         let ip_analysis = create_test_ip_analysis();
 
-        let ipv6_node = IPv6DHTNode::new(base_node, identity, ip_analysis);
+        let ipv4_node = IPv4DHTNode::new(base_node, identity, ip_analysis);
 
         // Should not need refresh immediately
-        assert!(!ipv6_node.needs_identity_refresh(Duration::from_secs(3600)));
+        assert!(!ipv4_node.needs_identity_refresh(Duration::from_secs(3600)));
 
         // Wait a bit then test refresh need for very short interval
         std::thread::sleep(Duration::from_millis(2));
 
         // Should need refresh for very short interval
-        assert!(ipv6_node.needs_identity_refresh(Duration::from_millis(1)));
+        assert!(ipv4_node.needs_identity_refresh(Duration::from_millis(1)));
     }
 
     #[test]
-    fn test_ipv6_security_event_variants() {
+    fn test_ipv4_security_event_variants() {
         let peer_id = "test_peer".to_string();
-        let ipv6_addr = Ipv6Addr::from_str("2001:db8::1").unwrap();
+        let ipv4_addr = Ipv4Addr::from_str("192.168.1.100").unwrap();
 
         // Test NodeJoined event
-        let joined_event = IPv6SecurityEvent::NodeJoined {
+        let joined_event = IPv4SecurityEvent::NodeJoined {
             peer_id: peer_id.clone(),
-            ipv6_addr,
+            ipv4_addr,
             verification_confidence: 0.9,
         };
 
         match joined_event {
-            IPv6SecurityEvent::NodeJoined {
+            IPv4SecurityEvent::NodeJoined {
                 verification_confidence,
                 ..
             } => {
@@ -1008,57 +1011,57 @@ mod tests {
         }
 
         // Test VerificationFailed event
-        let failed_event = IPv6SecurityEvent::VerificationFailed {
+        let failed_event = IPv4SecurityEvent::VerificationFailed {
             peer_id: peer_id.clone(),
-            ipv6_addr,
+            ipv4_addr,
             reason: "Test failure".to_string(),
         };
 
         match failed_event {
-            IPv6SecurityEvent::VerificationFailed { reason, .. } => {
+            IPv4SecurityEvent::VerificationFailed { reason, .. } => {
                 assert_eq!(reason, "Test failure");
             }
             _ => panic!("Wrong event type"),
         }
 
         // Test DiversityViolation event
-        let violation_event = IPv6SecurityEvent::DiversityViolation {
+        let violation_event = IPv4SecurityEvent::DiversityViolation {
             peer_id: peer_id.clone(),
-            ipv6_addr,
-            subnet_type: "IPv6 subnet".to_string(),
+            ipv4_addr,
+            subnet_type: "IPv4 subnet".to_string(),
         };
 
         match violation_event {
-            IPv6SecurityEvent::DiversityViolation { subnet_type, .. } => {
-                assert_eq!(subnet_type, "IPv6 subnet");
+            IPv4SecurityEvent::DiversityViolation { subnet_type, .. } => {
+                assert_eq!(subnet_type, "IPv4 subnet");
             }
             _ => panic!("Wrong event type"),
         }
 
         // Test NodeBanned event
-        let banned_event = IPv6SecurityEvent::NodeBanned {
+        let banned_event = IPv4SecurityEvent::NodeBanned {
             peer_id: peer_id.clone(),
-            ipv6_addr,
+            ipv4_addr,
             reason: "Security violation".to_string(),
             ban_duration: Duration::from_secs(3600),
         };
 
         match banned_event {
-            IPv6SecurityEvent::NodeBanned { ban_duration, .. } => {
+            IPv4SecurityEvent::NodeBanned { ban_duration, .. } => {
                 assert_eq!(ban_duration, Duration::from_secs(3600));
             }
             _ => panic!("Wrong event type"),
         }
 
         // Test SuspiciousActivity event
-        let suspicious_event = IPv6SecurityEvent::SuspiciousActivity {
+        let suspicious_event = IPv4SecurityEvent::SuspiciousActivity {
             peer_id,
-            ipv6_addr,
+            ipv4_addr,
             activity_type: "Repeated failed attempts".to_string(),
         };
 
         match suspicious_event {
-            IPv6SecurityEvent::SuspiciousActivity { activity_type, .. } => {
+            IPv4SecurityEvent::SuspiciousActivity { activity_type, .. } => {
                 assert_eq!(activity_type, "Repeated failed attempts");
             }
             _ => panic!("Wrong event type"),
@@ -1066,8 +1069,8 @@ mod tests {
     }
 
     #[test]
-    fn test_ipv6_verification_result() {
-        let result = IPv6VerificationResult {
+    fn test_ipv4_verification_result() {
+        let result = IPv4VerificationResult {
             is_valid: true,
             confidence: 0.85,
             error_message: None,
@@ -1080,5 +1083,31 @@ mod tests {
         assert!(result.error_message.is_none());
         assert!(result.ip_diversity_ok);
         assert_eq!(result.identity_age_secs, 300);
+    }
+
+    #[test]
+    fn test_ipv4_to_ipv6_mapped() {
+        let ipv4 = Ipv4Addr::new(192, 168, 1, 100);
+        let ipv6 = ipv4_to_ipv6_mapped(ipv4);
+
+        // IPv4-mapped IPv6 format is ::ffff:a.b.c.d
+        assert!(ipv6.to_ipv4_mapped().is_some());
+        assert_eq!(ipv6.to_ipv4_mapped().unwrap(), ipv4);
+    }
+
+    #[test]
+    fn test_ipv4_dht_node_get_subnet_info() {
+        let base_node = create_test_dht_node("test_peer", [1u8; 32]);
+        let (public, secret) = generate_ml_dsa_keypair().unwrap();
+        let ipv4_addr = Ipv4Addr::new(192, 168, 42, 100);
+        let identity = IPv4NodeID::generate(ipv4_addr, &secret, &public).unwrap();
+        let ip_analysis = create_test_ip_analysis();
+
+        let ipv4_node = IPv4DHTNode::new(base_node, identity, ip_analysis);
+        let (subnet_24, subnet_16, subnet_8) = ipv4_node.get_subnet_info();
+
+        assert_eq!(subnet_24, Ipv4Addr::new(192, 168, 42, 0));
+        assert_eq!(subnet_16, Ipv4Addr::new(192, 168, 0, 0));
+        assert_eq!(subnet_8, Ipv4Addr::new(192, 0, 0, 0));
     }
 }

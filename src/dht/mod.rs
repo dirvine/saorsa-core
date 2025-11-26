@@ -139,3 +139,15 @@ pub mod replication_grace_period;
 pub mod rsps_integration;
 pub mod skademlia;
 pub mod witness;
+
+/// IPv6-based DHT identity for security parity
+pub mod ipv6_identity;
+
+/// IPv4-based DHT identity for security parity
+pub mod ipv4_identity;
+
+/// Cross-network replication for IPv4/IPv6 dual-stack redundancy
+pub mod cross_network_replication;
+
+/// Node age verification for anti-Sybil protection
+pub mod node_age_verifier;

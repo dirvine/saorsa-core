@@ -94,6 +94,9 @@ pub mod telemetry;
 /// Security and cryptography
 pub mod security;
 
+/// BGP-based GeoIP provider using open-source routing data
+pub mod bgp_geo_provider;
+
 /// User identity and privacy system
 pub mod identity;
 
@@ -261,6 +264,13 @@ pub use validation::{
     RateLimitConfig, RateLimiter, Sanitize, Validate, ValidationContext, ValidationError,
     sanitize_string, validate_dht_key, validate_dht_value, validate_file_path,
     validate_message_size, validate_network_address, validate_peer_id,
+};
+
+// Join rate limiting for Sybil protection
+pub use rate_limit::{
+    JoinRateLimitError, JoinRateLimiter, JoinRateLimiterConfig,
+    extract_ipv4_subnet_16, extract_ipv4_subnet_24, extract_ipv4_subnet_8,
+    extract_ipv6_subnet_32, extract_ipv6_subnet_48, extract_ipv6_subnet_64,
 };
 
 // Enhanced identity removed
