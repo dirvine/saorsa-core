@@ -29,8 +29,13 @@ use tracing::{debug, info};
 /// 2. If a connection closes anyway, P2PNode detects it via `is_connection_active()`
 /// 3. Stale peer entries are automatically removed
 /// 4. MessageTransport can retry with a fresh connection
+///
+/// TODO: Investigate why QUIC-level keepalive (configured at 5s interval) doesn't
+/// prevent the 30-second idle timeout. The ant-quic transport has keep_alive_interval
+/// set, but connections still timeout. This may be a timing issue with how events are
+/// polled, or the keepalive mechanism may not be working as expected.
 #[tokio::test]
-#[ignore] // Connection lifecycle issues - ant-quic connection closes before test completes
+#[ignore = "Keepalive mechanism needs investigation - QUIC keepalive not preventing 30s timeout"]
 async fn test_connection_lifecycle_with_keepalive() {
     // Initialize logging for test debugging
     let _ = tracing_subscriber::fmt()
@@ -58,12 +63,8 @@ async fn test_connection_lifecycle_with_keepalive() {
         ..Default::default()
     };
 
-    let node1 = P2PNode::new(config1)
-        .await
-        .expect("Failed to create node1");
-    let node2 = P2PNode::new(config2)
-        .await
-        .expect("Failed to create node2");
+    let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
 
     // Get their addresses
     let addrs1 = node1.listen_addrs().await;
@@ -149,7 +150,6 @@ async fn test_connection_lifecycle_with_keepalive() {
 /// send_message will check if the ant-quic connection is actually active
 /// and fail gracefully with ConnectionClosed error if not.
 #[tokio::test]
-#[ignore] // Connection lifecycle issues - ant-quic connection closes before test completes
 async fn test_send_message_validates_connection_state() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("debug")
@@ -176,12 +176,8 @@ async fn test_send_message_validates_connection_state() {
         ..Default::default()
     };
 
-    let node1 = P2PNode::new(config1)
-        .await
-        .expect("Failed to create node1");
-    let node2 = P2PNode::new(config2)
-        .await
-        .expect("Failed to create node2");
+    let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
 
     // Get addresses and connect
     let addrs2 = node2.listen_addrs().await;
@@ -235,7 +231,6 @@ async fn test_send_message_validates_connection_state() {
 /// Validates that the connection lifecycle tracking doesn't interfere with
 /// normal message exchange operations.
 #[tokio::test]
-#[ignore] // Connection lifecycle issues - ant-quic connection closes before test completes
 async fn test_multiple_message_exchanges() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("info")
@@ -262,12 +257,8 @@ async fn test_multiple_message_exchanges() {
         ..Default::default()
     };
 
-    let node1 = P2PNode::new(config1)
-        .await
-        .expect("Failed to create node1");
-    let node2 = P2PNode::new(config2)
-        .await
-        .expect("Failed to create node2");
+    let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
 
     // Connect nodes
     let addrs2 = node2.listen_addrs().await;
