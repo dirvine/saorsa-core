@@ -348,6 +348,8 @@ impl RestartManager {
         // Update targeter if we have a suggested target
         if let Some(target) = &rejection.suggested_target {
             self.identity_targeter.set_target(Some(target.clone()));
+            // Also update persistent state to ensure it survives restarts
+            self.persistent_state.write().last_target = Some(target.clone());
         }
 
         // Emit event
@@ -362,9 +364,17 @@ impl RestartManager {
         };
 
         let _ = self.event_tx.send(IdentitySystemEvent::RejectionReceived {
-            rejection,
+            rejection: rejection.clone(),
             decision: decision_str,
         });
+
+        // If decision is to proceed, trigger regeneration immediately
+        if decision.should_proceed() {
+            let reason = crate::identity::regeneration::RegenerationReason::Rejection(rejection.reason);
+            if let Err(e) = self.regenerate(reason) {
+                tracing::warn!("Automatic regeneration after rejection failed: {}", e);
+            }
+        }
 
         decision
     }

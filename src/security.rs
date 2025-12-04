@@ -119,6 +119,52 @@ impl Default for IPDiversityConfig {
     }
 }
 
+impl IPDiversityConfig {
+    /// Create a testnet configuration with relaxed diversity requirements.
+    ///
+    /// This is useful for testing environments like Digital Ocean where all nodes
+    /// share the same ASN (AS14061). The relaxed limits allow many nodes from the
+    /// same provider while still maintaining some diversity tracking.
+    ///
+    /// # Warning
+    ///
+    /// This configuration should NEVER be used in production as it significantly
+    /// weakens Sybil attack protection.
+    #[must_use]
+    pub fn testnet() -> Self {
+        Self {
+            max_nodes_per_64: 100,   // Allow many nodes per /64 subnet
+            max_nodes_per_48: 500,   // Allow many nodes per /48 allocation
+            max_nodes_per_32: 1000,  // Allow many nodes per /32 region
+            max_nodes_per_asn: 5000, // Allow many nodes from same ASN (e.g., Digital Ocean)
+            enable_geolocation_check: false, // Disable geo checks for testing
+            min_geographic_diversity: 1, // Single region is acceptable for testing
+        }
+    }
+
+    /// Create a permissive configuration that effectively disables diversity checks.
+    ///
+    /// This is useful for local development and unit testing where all nodes
+    /// run on localhost or the same machine.
+    #[must_use]
+    pub fn permissive() -> Self {
+        Self {
+            max_nodes_per_64: usize::MAX,
+            max_nodes_per_48: usize::MAX,
+            max_nodes_per_32: usize::MAX,
+            max_nodes_per_asn: usize::MAX,
+            enable_geolocation_check: false,
+            min_geographic_diversity: 0,
+        }
+    }
+
+    /// Check if this is a testnet or permissive configuration.
+    #[must_use]
+    pub fn is_relaxed(&self) -> bool {
+        self.max_nodes_per_asn > 100 || !self.enable_geolocation_check
+    }
+}
+
 impl IPv6NodeID {
     /// Generate a new IPv6-based node ID
     pub fn generate(

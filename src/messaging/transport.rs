@@ -53,6 +53,11 @@ impl MessageTransport {
         })
     }
 
+    /// Get reference to underlying P2P node
+    pub fn network(&self) -> &Arc<P2PNode> {
+        &self.network
+    }
+
     /// Send a message to recipients
     pub async fn send_message(
         &self,

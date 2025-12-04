@@ -113,6 +113,41 @@ impl Default for NodeAgeConfig {
     }
 }
 
+impl NodeAgeConfig {
+    /// Create a testnet configuration with relaxed age requirements.
+    ///
+    /// This is useful for testing environments where you want nodes to
+    /// immediately participate in all operations without waiting.
+    ///
+    /// # Warning
+    ///
+    /// This configuration should NEVER be used in production as it
+    /// disables anti-Sybil age-based protection.
+    #[must_use]
+    pub fn testnet() -> Self {
+        Self {
+            min_replication_age_secs: 0,      // No minimum age for replication
+            min_critical_ops_age_secs: 0,     // No minimum age for critical ops
+            enforce_age_requirements: false,  // Disable age enforcement entirely
+            trust_bonus_per_day: 0.0,         // No trust bonus from age
+            max_age_trust_bonus: 0.0,         // No maximum bonus
+            veteran_age_secs: 0,              // Instant veteran status
+        }
+    }
+
+    /// Create a permissive configuration for local development.
+    #[must_use]
+    pub fn permissive() -> Self {
+        Self::testnet()
+    }
+
+    /// Check if this is a testnet or permissive configuration.
+    #[must_use]
+    pub fn is_relaxed(&self) -> bool {
+        !self.enforce_age_requirements || self.min_replication_age_secs == 0
+    }
+}
+
 /// Record of a node's presence in the network
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeAgeRecord {

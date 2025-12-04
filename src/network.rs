@@ -18,8 +18,12 @@
 
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
+use crate::control::RejectionMessage;
 use crate::dht::DHT;
 use crate::error::{NetworkError, P2PError, P2pResult as Result};
+use crate::identity::rejection::RejectionReason;
+use crate::bgp_geo_provider::BgpGeoProvider;
+use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
 use crate::transport::ant_quic_adapter::DualStackNetworkNode;
@@ -506,6 +510,10 @@ pub struct P2PNode {
     /// Shutdown flag for background tasks
     #[allow(dead_code)]
     shutdown: Arc<AtomicBool>,
+
+    /// GeoIP provider for connection validation
+    #[allow(dead_code)]
+    geo_provider: Arc<BgpGeoProvider>,
 }
 
 /// Normalize wildcard bind addresses to localhost loopback addresses
@@ -598,6 +606,7 @@ impl P2PNode {
             connection_monitor_handle: Arc::new(RwLock::new(None)),
             keepalive_handle: Arc::new(RwLock::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
+            geo_provider: Arc::new(BgpGeoProvider::new()),
         })
     }
     /// Create a new P2P node with the given configuration
@@ -687,21 +696,31 @@ impl P2PNode {
         };
 
         // Initialize dual-stack ant-quic nodes
-        let (v6_opt, v4_opt) = if !config.listen_addrs.is_empty() {
-            let v6_addr = config.listen_addrs.iter().find(|a| a.is_ipv6()).cloned();
-            let v4_addr = config.listen_addrs.iter().find(|a| a.is_ipv4()).cloned();
-            (v6_addr, v4_addr)
-        } else {
-            // Defaults: always listen on IPv4; IPv6 if enabled
-            let v4_addr = Some(std::net::SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                config.listen_addr.port(),
-            ));
-            let v6_addr = if config.enable_ipv6 {
+        // Determine bind addresses
+        let (v6_opt, v4_opt) = {
+            let port = config.listen_addr.port();
+            let ip = config.listen_addr.ip();
+
+            let v4_addr = if ip.is_ipv4() {
+                Some(std::net::SocketAddr::new(ip, port))
+            } else {
+                // If config is IPv6, we still might want IPv4 on UNSPECIFIED if dual stack is desired
+                // But for now let's just stick to defaults if not specified
                 Some(std::net::SocketAddr::new(
-                    std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
-                    config.listen_addr.port(),
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                    port,
                 ))
+            };
+
+            let v6_addr = if config.enable_ipv6 {
+                if ip.is_ipv6() {
+                    Some(std::net::SocketAddr::new(ip, port))
+                } else {
+                    Some(std::net::SocketAddr::new(
+                        std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                        port,
+                    ))
+                }
             } else {
                 None
             };
@@ -726,12 +745,20 @@ impl P2PNode {
         // Create active connections tracker
         let active_connections = Arc::new(RwLock::new(HashSet::new()));
 
+        // Initialize GeoIP provider
+        let geo_provider = Arc::new(BgpGeoProvider::new());
+
+        // Create peers map
+        let peers = Arc::new(RwLock::new(HashMap::new()));
+
         // Start connection lifecycle monitor
         let connection_monitor_handle = {
             let active_conns = Arc::clone(&active_connections);
-            let peers_map = Arc::new(RwLock::new(HashMap::new())); // Will be replaced with actual peers after node creation
+            let peers_map = Arc::clone(&peers);
             let event_tx_clone = event_tx.clone();
             let dual_node_clone = Arc::clone(&dual_node);
+            let geo_provider_clone = Arc::clone(&geo_provider);
+            let peer_id_clone = peer_id.clone();
 
             let handle = tokio::spawn(async move {
                 Self::connection_lifecycle_monitor(
@@ -739,6 +766,8 @@ impl P2PNode {
                     active_conns,
                     peers_map,
                     event_tx_clone,
+                    geo_provider_clone,
+                    peer_id_clone,
                 )
                 .await;
             });
@@ -763,7 +792,7 @@ impl P2PNode {
         let node = Self {
             config,
             peer_id,
-            peers: Arc::new(RwLock::new(HashMap::new())),
+            peers,
             event_tx,
             listen_addrs: RwLock::new(Vec::new()),
             start_time: Instant::now(),
@@ -777,6 +806,7 @@ impl P2PNode {
             connection_monitor_handle,
             keepalive_handle,
             shutdown,
+            geo_provider,
         };
         info!("Created P2P node with peer ID: {}", node.peer_id);
 
@@ -928,6 +958,7 @@ impl P2PNode {
         // Spawn a background accept loop that handles incoming connections from either stack
         let event_tx = self.event_tx.clone();
         let peers = self.peers.clone();
+        let active_connections = self.active_connections.clone();
         let rate_limiter = self.rate_limiter.clone();
         let dual = self.dual_node.clone();
         tokio::spawn(async move {
@@ -941,6 +972,7 @@ impl P2PNode {
                         let _ = rate_limiter.check_ip(&remote_sock.ip());
                         let _ = event_tx.send(P2PEvent::PeerConnected(peer_id.clone()));
                         register_new_peer(&peers, &peer_id, &remote_addr).await;
+                        active_connections.write().await.insert(peer_id);
                     }
                     Err(e) => {
                         warn!("Accept failed: {}", e);
@@ -1448,8 +1480,8 @@ impl P2PNode {
         Ok(())
     }
 
-    /// Check if a connection to a peer is actually active (ant-quic level)
-    pub async fn is_connection_active(&self, peer_id: &PeerId) -> bool {
+    /// Check if a connection to a peer is active
+    pub async fn is_connection_active(&self, peer_id: &str) -> bool {
         self.active_connections.read().await.contains(peer_id)
     }
 
@@ -1630,6 +1662,8 @@ impl P2PNode {
         active_connections: Arc<RwLock<HashSet<String>>>,
         peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
         event_tx: broadcast::Sender<P2PEvent>,
+        geo_provider: Arc<BgpGeoProvider>,
+        local_peer_id: String,
     ) {
         use crate::transport::ant_quic_adapter::ConnectionEvent;
 
@@ -1652,13 +1686,96 @@ impl P2PNode {
                                 peer_id_str, remote_address
                             );
 
+                            // **GeoIP Validation**
+                            // Check if the peer's IP is allowed
+                            let ip = remote_address.ip();
+                            let is_rejected = match ip {
+                                std::net::IpAddr::V4(v4) => {
+                                    // Check if it's a hosting provider or VPN
+                                    if let Some(asn) = geo_provider.lookup_ipv4_asn(v4) {
+                                        geo_provider.is_hosting_asn(asn) || geo_provider.is_vpn_asn(asn)
+                                    } else {
+                                        false
+                                    }
+                                }
+                                std::net::IpAddr::V6(v6) => {
+                                    let info = geo_provider.lookup(v6);
+                                    info.is_hosting_provider || info.is_vpn_provider
+                                }
+                            };
+
+                            if is_rejected {
+                                info!(
+                                    "Rejecting connection from {} ({}) due to GeoIP policy (Hosting/VPN)",
+                                    peer_id_str, remote_address
+                                );
+
+                                // Create rejection message
+                                let rejection = RejectionMessage {
+                                    reason: RejectionReason::GeoIpPolicy,
+                                    message: "Connection rejected: Hosting/VPN providers not allowed"
+                                        .to_string(),
+                                    suggested_target: None, // Could suggest a different region if we knew more
+                                };
+
+                                // Serialize message
+                                if let Ok(data) = serde_json::to_vec(&rejection) {
+                                    // Create protocol message
+                                    let timestamp = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs();
+
+                                    let message = serde_json::json!({
+                                        "protocol": "control",
+                                        "data": data,
+                                        "from": local_peer_id,
+                                        "timestamp": timestamp
+                                    });
+
+                                    if let Ok(msg_bytes) = serde_json::to_vec(&message) {
+                                        // Send rejection message
+                                        // We use send_to_peer directly on dual_node to avoid the checks in P2PNode::send_message
+                                        // which might fail if we haven't fully registered the peer yet
+                                        let _ = dual_node
+                                            .send_to_peer(&peer_id, &msg_bytes)
+                                            .await;
+                                        
+                                        // Give it a moment to send before disconnecting?
+                                        // ant-quic might handle this, but a small yield is safe
+                                        tokio::task::yield_now().await;
+                                    }
+                                }
+
+                                // Disconnect (TODO: Add disconnect method to dual_node or just drop?)
+                                // For now, we just don't add it to active connections, effectively ignoring it
+                                // Ideally we should actively close the connection
+                                continue;
+                            }
+
                             // Add to active connections
                             active_connections.write().await.insert(peer_id_str.clone());
 
-                            // Update peer info if exists
-                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
+                            // Update peer info or insert new
+                            let mut peers_lock = peers.write().await;
+                            if let Some(peer_info) = peers_lock.get_mut(&peer_id_str) {
                                 peer_info.status = ConnectionStatus::Connected;
                                 peer_info.connected_at = Instant::now();
+                            } else {
+                                // New incoming peer
+                                debug!("Registering new incoming peer: {}", peer_id_str);
+                                peers_lock.insert(
+                                    peer_id_str.clone(),
+                                    PeerInfo {
+                                        peer_id: peer_id_str.clone(),
+                                        addresses: vec![remote_address.to_string()],
+                                        status: ConnectionStatus::Connected,
+                                        last_seen: Instant::now(),
+                                        connected_at: Instant::now(),
+                                        protocols: Vec::new(),
+                                        heartbeat_count: 0,
+                                    },
+                                );
                             }
 
                             // Broadcast connection event

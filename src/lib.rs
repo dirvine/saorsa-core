@@ -189,6 +189,7 @@ pub mod adaptive;
 
 /// Configuration management system
 pub mod config;
+pub mod control;
 
 /// Health check system for monitoring and metrics
 pub mod health;
@@ -274,6 +275,16 @@ pub use rate_limit::{
     JoinRateLimitError, JoinRateLimiter, JoinRateLimiterConfig, extract_ipv4_subnet_8,
     extract_ipv4_subnet_16, extract_ipv4_subnet_24, extract_ipv6_subnet_32, extract_ipv6_subnet_48,
     extract_ipv6_subnet_64,
+};
+
+// Security and anti-Sybil exports (includes testnet configurations)
+pub use security::{
+    DiversityStats, GeoInfo, GeoProvider, IPAnalysis, IPDiversityConfig, IPDiversityEnforcer,
+    IPv4NodeID, IPv6NodeID, NodeReputation, ReputationManager, StubGeoProvider,
+};
+pub use dht::node_age_verifier::{
+    AgeVerificationResult, NodeAgeCategory, NodeAgeConfig, NodeAgeRecord, NodeAgeStats,
+    NodeAgeVerifier, OperationType,
 };
 
 // Enhanced identity removed

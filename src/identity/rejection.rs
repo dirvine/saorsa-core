@@ -98,6 +98,10 @@ pub enum RejectionReason {
     /// Generic rejection for unspecified reasons.
     /// May or may not benefit from regeneration.
     Other = 0xFF,
+
+    /// Rejected due to GeoIP policy (e.g., hosting provider, VPN, or restricted region).
+    /// Regeneration won't help unless IP changes.
+    GeoIpPolicy = 0x0C,
 }
 
 impl RejectionReason {
@@ -140,6 +144,7 @@ impl RejectionReason {
                 | Self::Subnet48Limit
                 | Self::Subnet32Limit
                 | Self::AsnLimit
+                | Self::GeoIpPolicy
         )
     }
 
@@ -157,6 +162,7 @@ impl RejectionReason {
             0x08 => Self::NodeIdCollision,
             0x09 => Self::RateLimited,
             0x0B => Self::Blocklisted,
+            0x0C => Self::GeoIpPolicy,
             _ => Self::Other,
         }
     }
@@ -181,6 +187,7 @@ impl fmt::Display for RejectionReason {
             Self::NodeIdCollision => write!(f, "node ID collision"),
             Self::RateLimited => write!(f, "join rate limit exceeded"),
             Self::Blocklisted => write!(f, "node is blocklisted"),
+            Self::GeoIpPolicy => write!(f, "rejected by GeoIP policy"),
             Self::Other => write!(f, "unspecified rejection"),
         }
     }

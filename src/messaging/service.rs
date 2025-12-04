@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
 use tracing::{info, warn};
+use crate::control::ControlMessageHandler;
+use crate::identity::restart::RestartManager;
 
 /// Resolve channel members to their FourWordAddress recipients
 /// This maps channel member user_ids to their FourWordAddress representation
@@ -294,6 +296,16 @@ impl MessagingService {
             event_tx,
             online_users: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// Enable restart management for this service
+    ///
+    /// This integrates the RestartManager to handle network rejections and identity regeneration.
+    pub async fn enable_restart_management(&self, restart_manager: Arc<RestartManager>) {
+        let handler = Arc::new(ControlMessageHandler::new(restart_manager));
+        let events = self.transport.network().subscribe_events();
+        handler.start(events).await;
+        info!("Restart management enabled for MessagingService");
     }
 
     /// Send a message to recipients
