@@ -106,16 +106,55 @@ pub trait QLearningCacheExtensions {
 }
 
 impl QLearningCacheExtensions for QLearningCacheManager {
-    async fn decide_caching(&self, _hash: &ContentHash) -> CacheDecision {
-        CacheDecision::Cache
+    async fn decide_caching(&self, hash: &ContentHash) -> CacheDecision {
+        // Check if content is already cached
+        if self.is_cached(hash).await {
+            return CacheDecision::Skip;
+        }
+
+        // Get available actions for this content
+        // Use a reasonable default size estimate (1KB) for decision-making
+        let content_size = 1024u64;
+        let available_actions = match self.get_available_actions(hash, content_size).await {
+            Ok(actions) => actions,
+            Err(_) => return CacheDecision::Skip,
+        };
+
+        // Get current state
+        let state = match self.get_current_state(hash).await {
+            Ok(s) => s,
+            Err(_) => return CacheDecision::Skip,
+        };
+
+        // Use Q-learning to select action
+        match self.select_action(&state, available_actions).await {
+            Ok(action) => match action {
+                super::q_learning_cache::CacheAction::Cache(_) => CacheDecision::Cache,
+                super::q_learning_cache::CacheAction::Evict(_) => CacheDecision::Evict,
+                super::q_learning_cache::CacheAction::Replicate { .. } => CacheDecision::Cache,
+                super::q_learning_cache::CacheAction::DoNothing => CacheDecision::Skip,
+            },
+            Err(_) => CacheDecision::Skip,
+        }
     }
 
-    async fn get(&self, _hash: &ContentHash) -> Option<Vec<u8>> {
-        None // TODO: Implement cache retrieval
+    async fn get(&self, hash: &ContentHash) -> Option<Vec<u8>> {
+        // QLearnCacheManager tracks caching decisions but doesn't store actual data
+        // The actual data is stored in ContentStore
+        // This method checks if we have made a caching decision for this hash
+        if self.is_cached(hash).await {
+            // Content is tracked as cached, but we don't have the actual bytes
+            // The caller should retrieve from ContentStore
+            None
+        } else {
+            None
+        }
     }
 
     async fn save_model(&self) -> Result<()> {
-        // TODO: Implement model saving
+        // Q-learning state is maintained in-memory via the Q-table
+        // For persistence, the Q-table would need to be serialized
+        // For now, this is a no-op as the Q-table is ephemeral
         Ok(())
     }
 }
@@ -216,18 +255,25 @@ pub trait SecurityManagerExtensions {
 }
 
 impl SecurityManagerExtensions for SecurityManager {
-    async fn check_rate_limit(&self, _node_id: &NodeId) -> Result<()> {
-        // TODO: Implement rate limiting
-        Ok(())
+    async fn check_rate_limit(&self, node_id: &NodeId) -> Result<()> {
+        // Use the underlying SecurityManager's rate limiting with no IP
+        SecurityManager::check_rate_limit(self, node_id, None)
+            .await
+            .map_err(|e| P2PError::Internal(format!("Rate limit check failed: {}", e).into()))
     }
 
     async fn set_temporary_relaxation(&self, _duration: Duration) -> Result<()> {
-        // TODO: Implement relaxation
+        // Rate limit relaxation allows temporary increase in request limits
+        // This would be useful during network recovery or high-demand periods
+        // The underlying RateLimiter would need a relaxation multiplier field
+        // For now, this is a no-op placeholder
         Ok(())
     }
 
     async fn enable_strict_rate_limiting(&self) -> Result<()> {
-        // TODO: Implement strict limiting
+        // Strict rate limiting reduces limits to protect against attacks
+        // The underlying RateLimiter would need a strict mode flag
+        // For now, this is a no-op placeholder
         Ok(())
     }
 }
@@ -239,7 +285,15 @@ pub trait AdaptiveDHTExtensions {
 
 impl AdaptiveDHTExtensions for AdaptiveDHT {
     async fn bootstrap(&self) -> Result<()> {
-        // TODO: Implement DHT bootstrap
+        // DHT bootstrap connects to well-known nodes to populate the routing table.
+        // This would typically:
+        // 1. Connect to bootstrap nodes from a hardcoded list or configuration
+        // 2. Perform FIND_NODE queries to populate routing table buckets
+        // 3. Announce presence to nearby nodes
+        //
+        // The underlying DhtCoreEngine has join_network(bootstrap_nodes) which can be used.
+        // However, AdaptiveDHT would need bootstrap node configuration to implement this.
+        // For now, this is a no-op placeholder.
         Ok(())
     }
 }

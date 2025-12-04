@@ -139,6 +139,10 @@ pub mod replication_grace_period;
 pub mod rsps_integration;
 pub mod skademlia;
 pub mod witness;
+pub mod witness_client;
+pub mod witness_protocol;
+pub mod witness_selection;
+pub mod witness_signer;
 
 /// IPv6-based DHT identity for security parity
 pub mod ipv6_identity;

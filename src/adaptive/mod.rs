@@ -374,6 +374,9 @@ pub struct LearningMetrics {
 mod timestamp_tests;
 
 #[cfg(test)]
+mod coordinator_extensions_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
