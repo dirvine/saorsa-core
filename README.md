@@ -15,6 +15,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-s
 
 - **P2P NAT Traversal**: True peer-to-peer messaging with automatic NAT traversal (ant-quic 0.10.0+)
 - **DHT (Distributed Hash Table)**: Advanced DHT implementation with RSPS (Root-Scoped Provider Summaries)
+- **S/Kademlia Witness Protocol**: Byzantine fault tolerance with geographically diverse witness attestations
 - **Placement System**: Intelligent shard placement with EigenTrust integration and Byzantine fault tolerance
 - **QUIC Transport**: High-performance networking with ant-quic
 - **Four-Word Endpoints**: Human‑readable network endpoints via `four-word-networking` (IPv4 encodes to 4 words; IPv6 word count decided by the crate); decode requires an explicit port (no defaults).
@@ -131,7 +132,7 @@ let config = NetworkConfig::no_nat_traversal();
 ### Core Components
 
 1. **Network Layer**: QUIC-based P2P networking with automatic NAT traversal (ant-quic 0.10.0+)
-2. **DHT**: Kademlia-based DHT with RSPS optimization
+2. **DHT**: S/Kademlia-based DHT with RSPS optimization and witness attestations for Byzantine fault tolerance
 3. **Placement System**: Intelligent shard placement with weighted selection algorithms
 4. **Identity**: Post‑quantum cryptographic identities with ML‑DSA‑65 signatures (no PoW; no embedded four‑word address)
 5. **Storage**: Local and distributed content storage with audit and repair
@@ -288,6 +289,159 @@ Key benchmarks:
 - **QUIC Encryption**: Transport-level encryption with PQC support
 - **Pure PQC**: No classical cryptographic algorithms - quantum-resistant from the ground up
 - **Secure Memory**: Platform-specific memory protection
+
+## S/Kademlia Witness Protocol
+
+Saorsa Core implements an advanced **S/Kademlia witness system** for Byzantine fault tolerance in DHT operations. This system ensures data integrity and prevents malicious nodes from corrupting stored data through cryptographically attested operations.
+
+### Overview
+
+The witness protocol requires multiple independent nodes to cryptographically attest to DHT operations before they are considered valid. This prevents:
+
+- **Sybil Attacks**: Attackers cannot flood the network with fake identities
+- **Eclipse Attacks**: Honest nodes cannot be isolated from the network
+- **Data Corruption**: Malicious nodes cannot unilaterally modify stored data
+- **Routing Manipulation**: Path selection cannot be influenced by adversaries
+
+### Geographic Diversity (GeoIP Integration)
+
+A key innovation in our witness protocol is **geographic diversity enforcement** using GeoIP data. Witnesses are selected to be geographically distributed, providing:
+
+#### Anti-Collusion Guarantees
+```
+┌─────────────────────────────────────────────────────────┐
+│                 Geographic Witness Selection             │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│   Region A          Region B          Region C          │
+│   ┌────────┐        ┌────────┐        ┌────────┐        │
+│   │Witness1│        │Witness2│        │Witness3│        │
+│   │  EU    │        │  APAC  │        │   NA   │        │
+│   └───┬────┘        └───┬────┘        └───┬────┘        │
+│       │                 │                 │             │
+│       └────────────┬────┴─────────────────┘             │
+│                    │                                    │
+│              Attestation Quorum                         │
+│         (Geographic spread prevents                     │
+│          regional collusion)                            │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **Regional Distribution**: Witnesses must come from different geographic regions
+- **Latency Zones**: Selection considers network latency for optimal performance
+- **Jurisdiction Diversity**: Data is attested across legal jurisdictions
+- **Infrastructure Independence**: Reduces risk of correlated failures
+
+#### Selection Algorithm
+
+```rust
+use saorsa_core::dht::witness::{WitnessSelector, GeographicConfig};
+
+// Configure witness selection with geographic constraints
+let config = GeographicConfig {
+    min_regions: 3,           // Minimum distinct regions
+    max_per_region: 2,        // Maximum witnesses per region
+    prefer_low_latency: true, // Optimize for performance
+    exclude_same_asn: true,   // Avoid same network provider
+};
+
+let selector = WitnessSelector::with_geographic_config(config);
+
+// Select geographically diverse witnesses for a DHT key
+let witnesses = selector.select_witnesses(
+    &key,
+    required_count,
+    &candidate_nodes,
+).await?;
+```
+
+### Cryptographic Attestation
+
+Each witness signs attestations using **ML-DSA-65** post-quantum signatures:
+
+```rust
+use saorsa_core::dht::witness::{WitnessSigner, Attestation};
+
+// Create a witness attestation
+let attestation = Attestation {
+    operation_id: operation.id(),
+    key: key.clone(),
+    value_hash: blake3::hash(&value),
+    witness_id: my_node_id,
+    timestamp: SystemTime::now(),
+    geographic_region: my_region,
+};
+
+// Sign with ML-DSA-65 (post-quantum secure)
+let signed = signer.sign_attestation(&attestation).await?;
+```
+
+### Verification Protocol
+
+```rust
+use saorsa_core::dht::witness::WitnessVerifier;
+
+// Verify a quorum of witness attestations
+let verifier = WitnessVerifier::new(trust_provider);
+
+// Verify attestations meet quorum requirements
+let result = verifier.verify_quorum(
+    &attestations,
+    required_quorum,      // e.g., 2/3 of witnesses
+    geographic_diversity, // require regional spread
+).await?;
+
+match result {
+    QuorumResult::Valid => {
+        // Operation is valid, proceed
+    }
+    QuorumResult::InsufficientWitnesses => {
+        // Not enough attestations, retry
+    }
+    QuorumResult::GeographicViolation => {
+        // Witnesses too concentrated, reselect
+    }
+    QuorumResult::InvalidSignatures => {
+        // Cryptographic verification failed
+    }
+}
+```
+
+### Security Properties
+
+| Property | Guarantee |
+|----------|-----------|
+| **Byzantine Tolerance** | Tolerates f malicious nodes in 3f+1 system |
+| **Geographic Spread** | Minimum 3 distinct regions for attestation |
+| **Post-Quantum Security** | ML-DSA-65 signatures (NIST Level 3) |
+| **Sybil Resistance** | Geographic diversity prevents identity flooding |
+| **Forward Secrecy** | Each operation uses unique attestation context |
+| **Non-Repudiation** | Signed attestations provide audit trail |
+
+### Integration with EigenTrust
+
+Witness behavior feeds into the EigenTrust reputation system:
+
+```rust
+// Witness performance affects trust scores
+trust_provider.record_witness_behavior(
+    witness_id,
+    WitnessBehavior::ValidAttestation,
+);
+
+// Low-trust nodes are excluded from witness selection
+let eligible_witnesses = candidates
+    .iter()
+    .filter(|n| trust_provider.get_trust(&n.id) > MIN_WITNESS_TRUST)
+    .collect();
+```
+
+### Performance Considerations
+
+- **Parallel Verification**: Attestations verified concurrently
+- **Caching**: Valid attestations cached to reduce verification overhead
+- **Batching**: Multiple operations can share witness quorums
+- **Adaptive Selection**: Witness count adjusts based on data importance
 
 ## WebRTC over QUIC Integration
 
