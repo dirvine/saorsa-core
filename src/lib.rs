@@ -205,6 +205,9 @@ pub mod virtual_disk;
 /// Entity-based system for unified identity, storage, and collaboration
 pub mod entities;
 
+/// Auto-upgrade system for cross-platform binary updates
+pub mod upgrade;
+
 /// Mock DHT for testing
 #[cfg(any(test, feature = "test-utils"))]
 pub mod mock_dht;
@@ -413,3 +416,12 @@ pub type Multiaddr = NetworkAddress;
 
 /// Saorsa Core version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Upgrade system exports
+pub use upgrade::{
+    ApplierConfig, ApplyResult, BackupMetadata, DownloadProgress, Downloader, DownloaderConfig,
+    PinnedKey, Platform as UpgradePlatform, PlatformBinary, Release, ReleaseChannel,
+    RollbackManager, SignatureVerifier, StagedUpdate, StagedUpdateManager, UpdateConfig,
+    UpdateConfigBuilder, UpdateInfo, UpdateManager, UpdateManifest, UpdatePolicy, UpgradeError,
+    UpgradeEvent, create_applier,
+};

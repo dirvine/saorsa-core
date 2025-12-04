@@ -10,6 +10,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-s
 
 - Contributor guide: see [AGENTS.md](AGENTS.md)
 - Architecture overview: see [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Auto-Upgrade System**: see [docs/AUTO_UPGRADE.md](docs/AUTO_UPGRADE.md) - Cross-platform binary updates with ML-DSA-65 signatures
 
 ## Features
 
@@ -24,6 +25,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-s
 - **Media Processing**: Image and audio processing with blurhash and symphonia
 - **Geographic Routing**: Location-aware networking
 - **Identity Management**: Post-quantum ML-DSA-65 signatures (NIST Level 3). No PoW; identities hold only required keys (no embedded word address).
+- **Auto-Upgrade System**: Cross-platform binary updates with ML-DSA-65 signatures, rollback support, and configurable policies
 - **Secure Storage**: Database persistence with deadpool-sqlite + rusqlite
 - **Monitoring**: Prometheus metrics integration
 

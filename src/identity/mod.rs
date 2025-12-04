@@ -13,15 +13,32 @@
 
 //! Identity management module
 //!
-//! Provides identity creation, management, and encryption with quantum-resistant capabilities
+//! Provides identity creation, management, and encryption with quantum-resistant capabilities.
+//!
+//! # Identity Restart System
+//!
+//! The identity restart system enables nodes to detect when their identity doesn't
+//! "fit" a DHT close group and automatically regenerate with a new identity.
+//!
+//! Key components:
+//! - [`rejection`]: Network rejection reasons and information
+//! - [`fitness`]: Proactive fitness monitoring
+//! - [`regeneration`]: Regeneration trigger with loop prevention
+//! - [`targeting`]: Targeted identity generation
+//! - [`restart`]: Main orchestrator with state persistence
 
 pub mod cli;
 pub mod encryption;
 pub mod enhanced;
+pub mod fitness;
 pub mod four_words;
 pub mod manager;
 pub mod node_identity;
+pub mod regeneration;
+pub mod rejection;
+pub mod restart;
 pub mod secure_node_identity;
+pub mod targeting;
 
 #[cfg(test)]
 mod four_words_error_tests;
@@ -31,3 +48,15 @@ pub use four_words::{FourWordAddress, WordEncoder};
 pub use manager::{IdentityManager, UserIdentity};
 pub use node_identity::{IdentityData, NodeId, NodeIdentity};
 pub use secure_node_identity::SecureNodeIdentity;
+
+// Identity restart system exports
+pub use fitness::{FitnessConfig, FitnessMetrics, FitnessMonitor, FitnessVerdict};
+pub use regeneration::{
+    BlockReason, RegenerationConfig, RegenerationDecision, RegenerationReason,
+    RegenerationTrigger, RegenerationUrgency,
+};
+pub use rejection::{KeyspaceRegion, RejectionHistory, RejectionInfo, RejectionReason, TargetRegion};
+pub use restart::{
+    IdentitySystemEvent, PersistentState, RestartConfig, RestartManager, RestartManagerStatus,
+};
+pub use targeting::{IdentityTargeter, TargetingConfig, TargetingStats};

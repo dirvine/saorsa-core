@@ -28,3 +28,4 @@ criterion/
 # Local config
 .env
 .env.localpatches/
+patches/
