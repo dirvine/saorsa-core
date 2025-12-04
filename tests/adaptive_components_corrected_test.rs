@@ -389,7 +389,7 @@ async fn test_q_learning_cache_real_api() -> anyhow::Result<()> {
         ContentHash([3u8; 32]),
     ];
 
-    let test_content = vec![
+    let test_content = [
         vec![1u8; 100], // 100 bytes
         vec![2u8; 200], // 200 bytes
         vec![3u8; 150], // 150 bytes
@@ -557,7 +557,7 @@ async fn test_churn_predictor_real_api() -> anyhow::Result<()> {
 async fn test_state_vector_discretization() -> anyhow::Result<()> {
     println!("Testing State Vector discretization...");
 
-    let test_cases = vec![
+    let test_cases = [
         (0.5, 10.0, 300, 1024 * 50),   // 50% util, 10/hr freq, 5min recency, 50KB
         (0.9, 100.0, 60, 1024 * 1024), // 90% util, 100/hr freq, 1min recency, 1MB
         (0.1, 1.0, 86400, 500),        // 10% util, 1/hr freq, 1day recency, 500B

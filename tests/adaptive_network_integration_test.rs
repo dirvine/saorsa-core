@@ -560,8 +560,8 @@ async fn test_adaptive_replication() -> anyhow::Result<()> {
         "Critical data replicas (placeholder): {}",
         critical_replicas
     );
-    // critical_replicas is unsigned; the following is always true
-    assert!(critical_replicas <= usize::MAX);
+    // Verify critical replicas is at least 1
+    assert!(critical_replicas >= 1);
 
     network.stop_all().await?;
     Ok(())
@@ -604,7 +604,6 @@ async fn test_adaptive_gossip_protocol() -> anyhow::Result<()> {
 
     // Create and publish messages
     let start = Instant::now();
-    let mut message_count = 0;
 
     for (i, topic) in topics.iter().enumerate() {
         let message_data = format!("Test message {} for {}", i, topic);
@@ -625,7 +624,6 @@ async fn test_adaptive_gossip_protocol() -> anyhow::Result<()> {
 
         // Publish should work even without peers in mesh
         gossip.publish(topic, message).await?;
-        message_count += 1;
 
         println!("Published message {} to topic {}", i, topic);
     }
@@ -1039,7 +1037,6 @@ async fn test_adaptive_network_resilience() -> anyhow::Result<()> {
     let config = TestConfig {
         num_nodes: 15,
         test_duration: Duration::from_secs(30),
-        ..Default::default()
     };
 
     let network = TestNetwork::new(config.clone()).await?;

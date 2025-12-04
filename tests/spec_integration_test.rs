@@ -76,7 +76,11 @@ async fn test_auth_comprehensive() -> Result<()> {
     let single_auth = SingleWriteAuth::new(pub_key.clone());
     let sig = Sig::new(vec![10, 11, 12]);
 
-    assert!(single_auth.verify(record, &[sig.clone()]).await?);
+    assert!(
+        single_auth
+            .verify(record, std::slice::from_ref(&sig))
+            .await?
+    );
     assert_eq!(single_auth.auth_type(), "single");
 
     // Empty signatures should fail
@@ -91,12 +95,12 @@ async fn test_auth_comprehensive() -> Result<()> {
     delegated.add_key(key3.clone());
     delegated.add_key(key3.clone()); // Duplicate should not be added twice
 
-    assert!(delegated.verify(record, &[sig.clone()]).await?);
+    assert!(delegated.verify(record, std::slice::from_ref(&sig)).await?);
     assert_eq!(delegated.auth_type(), "delegated");
 
     // Test MlsWriteAuth
     let mls_auth = MlsWriteAuth::new(vec![1, 2, 3], 42);
-    assert!(mls_auth.verify(record, &[sig.clone()]).await?);
+    assert!(mls_auth.verify(record, std::slice::from_ref(&sig)).await?);
     assert_eq!(mls_auth.auth_type(), "mls");
 
     // Test ThresholdWriteAuth
@@ -114,7 +118,7 @@ async fn test_auth_comprehensive() -> Result<()> {
     assert!(threshold.verify(record, &sigs).await?);
 
     // Should fail with 1 signature (below threshold)
-    assert!(!threshold.verify(record, &[sig.clone()]).await?);
+    assert!(!threshold.verify(record, std::slice::from_ref(&sig)).await?);
 
     assert_eq!(threshold.auth_type(), "threshold");
 
@@ -127,7 +131,11 @@ async fn test_auth_comprehensive() -> Result<()> {
     let auth2: Box<dyn WriteAuth> = Box::new(SingleWriteAuth::new(pub_key.clone()));
 
     let composite_all = CompositeWriteAuth::all(vec![auth1, auth2]);
-    assert!(composite_all.verify(record, &[sig.clone()]).await?);
+    assert!(
+        composite_all
+            .verify(record, std::slice::from_ref(&sig))
+            .await?
+    );
     assert_eq!(composite_all.auth_type(), "composite_all");
 
     // Test CompositeWriteAuth (any mode)

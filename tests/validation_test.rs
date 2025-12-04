@@ -263,8 +263,8 @@ fn test_config_value_validation() {
         100
     );
     assert_eq!(
-        validate_config_value::<f64>("3.14", Some(0.0), Some(10.0)).unwrap(),
-        3.14
+        validate_config_value::<f64>("2.71", Some(0.0), Some(10.0)).unwrap(),
+        2.71
     );
 
     // Out of range
@@ -291,9 +291,11 @@ fn test_sanitization() {
 
 #[test]
 fn test_rate_limiter_cleanup() {
-    let mut config = RateLimitConfig::default();
-    config.cleanup_interval = Duration::from_millis(100);
-    config.window = Duration::from_millis(50);
+    let config = RateLimitConfig {
+        cleanup_interval: Duration::from_millis(100),
+        window: Duration::from_millis(50),
+        ..Default::default()
+    };
 
     let limiter = Arc::new(RateLimiter::new(config));
 

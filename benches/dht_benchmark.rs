@@ -158,8 +158,10 @@ fn create_test_peer_id(bytes: [u8; 32]) -> PeerId {
 /// Calculate XOR distance between two peer IDs
 fn xor_distance(a: &PeerId, b: &PeerId) -> [u8; 32] {
     let mut result = [0u8; 32];
-    for i in 0..32 {
-        result[i] = a.to_bytes()[i] ^ b.to_bytes()[i];
+    let a_bytes = a.to_bytes();
+    let b_bytes = b.to_bytes();
+    for (i, byte) in result.iter_mut().enumerate() {
+        *byte = a_bytes[i] ^ b_bytes[i];
     }
     result
 }

@@ -31,8 +31,8 @@ use crate::{NetworkAddress, PeerId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::Instant;
@@ -530,7 +530,7 @@ fn normalize_wildcard_to_loopback(addr: std::net::SocketAddr) -> std::net::Socke
         // Convert unspecified addresses to loopback
         let loopback_ip = match addr {
             std::net::SocketAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST), // ::1
-            std::net::SocketAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),  // 127.0.0.1
+            std::net::SocketAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST), // 127.0.0.1
         };
         std::net::SocketAddr::new(loopback_ip, addr.port())
     } else {
@@ -739,7 +739,8 @@ impl P2PNode {
                     active_conns,
                     peers_map,
                     event_tx_clone,
-                ).await;
+                )
+                .await;
             });
 
             Arc::new(RwLock::new(Some(handle)))
@@ -753,11 +754,7 @@ impl P2PNode {
             let shutdown_clone = Arc::clone(&shutdown);
 
             let handle = tokio::spawn(async move {
-                Self::keepalive_task(
-                    active_conns,
-                    dual_node_clone,
-                    shutdown_clone,
-                ).await;
+                Self::keepalive_task(active_conns, dual_node_clone, shutdown_clone).await;
             });
 
             Arc::new(RwLock::new(Some(handle)))
@@ -1411,6 +1408,13 @@ impl P2PNode {
         // Store peer information
         self.peers.write().await.insert(peer_id.clone(), peer_info);
 
+        // Add to active connections tracking
+        // This is critical for is_connection_active() to work correctly
+        self.active_connections
+            .write()
+            .await
+            .insert(peer_id.clone());
+
         // Record bandwidth usage if resource manager is enabled
         if let Some(ref resource_manager) = self.resource_manager {
             resource_manager.record_bandwidth(0, 0); // Placeholder for handshake data
@@ -1490,9 +1494,11 @@ impl P2PNode {
             // Clean up stale peer entry
             self.remove_peer(peer_id).await;
 
-            return Err(P2PError::Network(crate::error::NetworkError::ConnectionClosed {
-                peer_id: peer_id.to_string().into(),
-            }));
+            return Err(P2PError::Network(
+                crate::error::NetworkError::ConnectionClosed {
+                    peer_id: peer_id.to_string().into(),
+                },
+            ));
         }
 
         // MCP removed: no special-case protocol validation
@@ -1635,9 +1641,16 @@ impl P2PNode {
             match event_rx.recv().await {
                 Ok(event) => {
                     match event {
-                        ConnectionEvent::Established { peer_id, remote_address } => {
-                            let peer_id_str = crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
-                            debug!("Connection established: peer={}, addr={}", peer_id_str, remote_address);
+                        ConnectionEvent::Established {
+                            peer_id,
+                            remote_address,
+                        } => {
+                            let peer_id_str =
+                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            debug!(
+                                "Connection established: peer={}, addr={}",
+                                peer_id_str, remote_address
+                            );
 
                             // Add to active connections
                             active_connections.write().await.insert(peer_id_str.clone());
@@ -1652,7 +1665,8 @@ impl P2PNode {
                             let _ = event_tx.send(P2PEvent::PeerConnected(peer_id_str));
                         }
                         ConnectionEvent::Lost { peer_id, reason } => {
-                            let peer_id_str = crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            let peer_id_str =
+                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
                             debug!("Connection lost: peer={}, reason={}", peer_id_str, reason);
 
                             // Remove from active connections
@@ -1668,7 +1682,8 @@ impl P2PNode {
                             let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
                         }
                         ConnectionEvent::Failed { peer_id, reason } => {
-                            let peer_id_str = crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            let peer_id_str =
+                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
                             warn!("Connection failed: peer={}, reason={}", peer_id_str, reason);
 
                             // Remove from active connections
@@ -1685,7 +1700,10 @@ impl P2PNode {
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    warn!("Connection event monitor lagged, skipped {} events", skipped);
+                    warn!(
+                        "Connection event monitor lagged, skipped {} events",
+                        skipped
+                    );
                     continue;
                 }
                 Err(broadcast::error::RecvError::Closed) => {
@@ -1716,7 +1734,7 @@ impl P2PNode {
         dual_node: Arc<DualStackNetworkNode>,
         shutdown: Arc<AtomicBool>,
     ) {
-        use tokio::time::{interval, Duration};
+        use tokio::time::{Duration, interval};
 
         const KEEPALIVE_INTERVAL_SECS: u64 = 15; // Half of 30-second timeout
         const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive"; // Small payload
@@ -1724,7 +1742,10 @@ impl P2PNode {
         let mut interval = interval(Duration::from_secs(KEEPALIVE_INTERVAL_SECS));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-        info!("Keepalive task started (interval: {}s)", KEEPALIVE_INTERVAL_SECS);
+        info!(
+            "Keepalive task started (interval: {}s)",
+            KEEPALIVE_INTERVAL_SECS
+        );
 
         loop {
             // Check shutdown flag first
@@ -1736,9 +1757,7 @@ impl P2PNode {
             interval.tick().await;
 
             // Get snapshot of active connections
-            let peers: Vec<String> = {
-                active_connections.read().await.iter().cloned().collect()
-            };
+            let peers: Vec<String> = { active_connections.read().await.iter().cloned().collect() };
 
             if peers.is_empty() {
                 trace!("Keepalive: no active connections");
@@ -1749,12 +1768,18 @@ impl P2PNode {
 
             // Send keepalive to each peer
             for peer_id in peers {
-                match dual_node.send_to_peer_string(&peer_id, KEEPALIVE_PAYLOAD).await {
+                match dual_node
+                    .send_to_peer_string(&peer_id, KEEPALIVE_PAYLOAD)
+                    .await
+                {
                     Ok(_) => {
                         trace!("Keepalive sent to peer: {}", peer_id);
                     }
                     Err(e) => {
-                        debug!("Failed to send keepalive to peer {}: {} (connection may have closed)", peer_id, e);
+                        debug!(
+                            "Failed to send keepalive to peer {}: {} (connection may have closed)",
+                            peer_id, e
+                        );
                         // Don't remove from active_connections here - let the lifecycle monitor handle it
                     }
                 }

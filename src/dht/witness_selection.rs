@@ -16,10 +16,10 @@
 //! - Trust scores from EigenTrust system
 //! - Node availability and responsiveness
 
+use crate::PeerId;
 use crate::dht::geographic_routing::GeographicRegion;
 use crate::dht::{DhtKey, NodeInfo};
 use crate::error::{P2PError, P2pResult as Result};
-use crate::PeerId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::time::Instant;
@@ -52,9 +52,10 @@ impl WitnessCandidate {
     ) -> Result<Self> {
         // Validate trust score is in valid range
         if !(0.0..=1.0).contains(&trust_score) {
-            return Err(P2PError::InvalidInput(
-                format!("Trust score must be between 0.0 and 1.0, got {}", trust_score),
-            ));
+            return Err(P2PError::InvalidInput(format!(
+                "Trust score must be between 0.0 and 1.0, got {}",
+                trust_score
+            )));
         }
 
         Ok(Self {
@@ -68,7 +69,11 @@ impl WitnessCandidate {
     }
 
     /// Create from a NodeInfo and target key
-    pub fn from_node_info(node: &NodeInfo, target_key: &[u8; 32], trust_score: f64) -> Result<Self> {
+    pub fn from_node_info(
+        node: &NodeInfo,
+        target_key: &[u8; 32],
+        trust_score: f64,
+    ) -> Result<Self> {
         let node_key = DhtKey::from_bytes(*node.id.as_bytes());
         let target = DhtKey::from_bytes(*target_key);
         let distance = node_key.distance(&target);
@@ -92,7 +97,11 @@ impl WitnessCandidate {
 
         // Distance component: closer is better (0.0 to 0.3)
         // Use leading zeros as a quick distance metric
-        let leading_zeros = self.distance_to_target.iter().take_while(|&&b| b == 0).count();
+        let leading_zeros = self
+            .distance_to_target
+            .iter()
+            .take_while(|&&b| b == 0)
+            .count();
         let distance_component = (leading_zeros as f64 / 32.0) * 0.3;
 
         // Reachability component (0.0 or 0.2)
@@ -288,7 +297,10 @@ impl WitnessSelector {
         let candidates: Vec<_> = nodes
             .iter()
             .filter_map(|node| {
-                let trust = trust_scores.get(&node.id.to_string()).copied().unwrap_or(0.5);
+                let trust = trust_scores
+                    .get(&node.id.to_string())
+                    .copied()
+                    .unwrap_or(0.5);
                 WitnessCandidate::from_node_info(node, target_key, trust).ok()
             })
             .collect();
@@ -369,9 +381,12 @@ mod tests {
         let bad_candidate = create_test_candidate("bad", 255, GeographicRegion::Europe, 0.1);
         let bad_score = bad_candidate.selection_score();
 
-        assert!(good_score > bad_score, "Good candidate should have higher score");
-        assert!(good_score > 0.0 && good_score <= 1.0);
-        assert!(bad_score >= 0.0 && bad_score <= 1.0);
+        assert!(
+            good_score > bad_score,
+            "Good candidate should have higher score"
+        );
+        assert!((0.0..=1.0).contains(&good_score));
+        assert!((0.0..=1.0).contains(&bad_score));
     }
 
     #[test]
@@ -449,7 +464,9 @@ mod tests {
         ];
 
         let source = "source".to_string();
-        let selection = selector.select_witnesses(&candidates, Some(&source), None).unwrap();
+        let selection = selector
+            .select_witnesses(&candidates, Some(&source), None)
+            .unwrap();
 
         // Source should be excluded
         assert!(!selection.witnesses.iter().any(|w| w.peer_id == "source"));
@@ -466,7 +483,9 @@ mod tests {
         ];
 
         let target = "target".to_string();
-        let selection = selector.select_witnesses(&candidates, None, Some(&target)).unwrap();
+        let selection = selector
+            .select_witnesses(&candidates, None, Some(&target))
+            .unwrap();
 
         // Target should be excluded
         assert!(!selection.witnesses.iter().any(|w| w.peer_id == "target"));
@@ -525,7 +544,8 @@ mod tests {
     fn test_witness_selector_excludes_unreachable() {
         let selector = WitnessSelector::new();
 
-        let mut unreachable = create_test_candidate("unreachable", 1, GeographicRegion::Europe, 0.9);
+        let mut unreachable =
+            create_test_candidate("unreachable", 1, GeographicRegion::Europe, 0.9);
         unreachable.is_reachable = false;
 
         let candidates = vec![
@@ -537,7 +557,12 @@ mod tests {
         let selection = selector.select_witnesses(&candidates, None, None).unwrap();
 
         // Unreachable should be excluded
-        assert!(!selection.witnesses.iter().any(|w| w.peer_id == "unreachable"));
+        assert!(
+            !selection
+                .witnesses
+                .iter()
+                .any(|w| w.peer_id == "unreachable")
+        );
     }
 
     #[test]
@@ -563,9 +588,12 @@ mod tests {
         assert!(valid_selection.is_valid(&config));
 
         let invalid_selection = WitnessSelection {
-            witnesses: vec![
-                create_test_candidate("p1", 1, GeographicRegion::Europe, 0.7),
-            ],
+            witnesses: vec![create_test_candidate(
+                "p1",
+                1,
+                GeographicRegion::Europe,
+                0.7,
+            )],
             distinct_regions: 1,
             avg_trust_score: 0.7,
             meets_bft_requirements: false,

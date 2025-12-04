@@ -445,8 +445,7 @@ impl IPv6DHTIdentityManager {
 
             // Ban node for repeated verification failures
             if self.config.enable_node_banning {
-                self.banned_nodes
-                    .insert(node_peer_id, SystemTime::now());
+                self.banned_nodes.insert(node_peer_id, SystemTime::now());
             }
 
             return Ok(event);
@@ -594,8 +593,8 @@ impl IPv6DHTNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{IPAnalysis, IPv6NodeID};
     use crate::quantum_crypto::ant_quic_integration::generate_ml_dsa_keypair;
+    use crate::security::{IPAnalysis, IPv6NodeID};
     use std::net::Ipv6Addr;
     use std::str::FromStr;
     use std::time::Duration;

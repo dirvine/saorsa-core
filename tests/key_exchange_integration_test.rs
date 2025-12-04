@@ -9,7 +9,6 @@ use saorsa_core::identity::FourWordAddress;
 use saorsa_core::messaging::{ChannelId, DhtClient, MessageContent, MessagingService, SendOptions};
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing_subscriber;
 
 /// Initialize logging for tests
 fn init_logging() {

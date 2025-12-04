@@ -14,14 +14,14 @@
 //! - Collecting and aggregating witness responses
 //! - Verifying witness consensus for BFT
 
+use crate::PeerId;
+use crate::dht::DhtKey;
 use crate::dht::witness::OperationType;
 use crate::dht::witness_protocol::{
     AggregatedWitnessProof, WitnessOperationId, WitnessRequest, WitnessResponse,
 };
 use crate::dht::witness_selection::{WitnessCandidate, WitnessSelection, WitnessSelector};
-use crate::dht::DhtKey;
 use crate::error::{P2PError, P2pResult as Result};
-use crate::PeerId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -207,7 +207,9 @@ impl<T: WitnessTransport + 'static> WitnessClient<T> {
 
         // Select witnesses
         let source = self.transport.local_peer_id();
-        let selection = self.selector.select_witnesses(candidates, Some(source), None)?;
+        let selection = self
+            .selector
+            .select_witnesses(candidates, Some(source), None)?;
 
         if selection.witnesses.is_empty() {
             return Err(P2PError::InvalidInput(
@@ -264,7 +266,11 @@ impl<T: WitnessTransport + 'static> WitnessClient<T> {
         let mut handles = Vec::new();
 
         // Spawn concurrent requests (limited by max_concurrent_requests)
-        for witness in selection.witnesses.iter().take(self.config.max_concurrent_requests) {
+        for witness in selection
+            .witnesses
+            .iter()
+            .take(self.config.max_concurrent_requests)
+        {
             let transport = Arc::clone(&self.transport);
             let request = request.clone();
             let peer_id = witness.peer_id.clone();
@@ -327,8 +333,8 @@ impl<T: WitnessTransport + 'static> WitnessClient<T> {
         loop {
             attempts += 1;
 
-            let result = tokio::time::timeout(timeout, transport.send_witness_request(peer, request))
-                .await;
+            let result =
+                tokio::time::timeout(timeout, transport.send_witness_request(peer, request)).await;
 
             match result {
                 Ok(Ok(response)) => return Ok(response),
@@ -480,9 +486,12 @@ mod tests {
     async fn test_mock_transport_custom_response() {
         let transport = MockWitnessTransport::new("local".to_string());
 
-        let custom_response =
-            WitnessResponse::reject(WitnessOperationId::new(), "peer1".to_string(), "Custom reason")
-                .unwrap();
+        let custom_response = WitnessResponse::reject(
+            WitnessOperationId::new(),
+            "peer1".to_string(),
+            "Custom reason",
+        )
+        .unwrap();
 
         transport
             .set_response("peer1".to_string(), custom_response)

@@ -250,8 +250,8 @@ async fn test_peer_discovery_under_load() -> Result<()> {
     assert_eq!(stats[0].1, 9, "Hub node should have 9 connections");
 
     // Other nodes should have 1 connection each
-    for i in 1..stats.len() {
-        assert_eq!(stats[i].1, 1, "Spoke node {} should have 1 connection", i);
+    for (i, stat) in stats.iter().enumerate().skip(1) {
+        assert_eq!(stat.1, 1, "Spoke node {} should have 1 connection", i);
     }
 
     // Now test peer discovery - nodes should learn about each other

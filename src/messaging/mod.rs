@@ -48,8 +48,8 @@ pub use types::*;
 // Re-export WebRTC types from saorsa-webrtc crate
 pub use saorsa_webrtc::{
     CallEvent, CallId, CallManager, CallState, MediaConstraints, MediaEvent, MediaStreamManager,
-    PeerIdentity, SignalingHandler, SignalingTransport, WebRtcEvent, WebRtcService,
-    WebRtcQuicBridge,
+    PeerIdentity, SignalingHandler, SignalingTransport, WebRtcEvent, WebRtcQuicBridge,
+    WebRtcService,
 };
 
 // Import the real DHT client

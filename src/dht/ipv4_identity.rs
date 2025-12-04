@@ -451,8 +451,7 @@ impl IPv4DHTIdentityManager {
 
             // Ban node for repeated verification failures
             if self.config.enable_node_banning {
-                self.banned_nodes
-                    .insert(node_peer_id, SystemTime::now());
+                self.banned_nodes.insert(node_peer_id, SystemTime::now());
             }
 
             return Ok(event);

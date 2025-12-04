@@ -419,7 +419,7 @@ mod simulation_tests {
     #[tokio::test]
     async fn test_performance_vs_hop_count() {
         // Create a grid topology for predictable hop counts
-        let grid_size = 5;
+        let grid_size: i32 = 5;
         let mut grid_spaces = HashMap::new();
 
         for x in 0..grid_size {
@@ -439,8 +439,7 @@ mod simulation_tests {
                     let ny = y + dy;
 
                     if nx >= 0 && nx < grid_size && ny >= 0 && ny < grid_size {
-                        let neighbor_id =
-                            generate_test_node_id((nx * grid_size as i32 + ny) as u64);
+                        let neighbor_id = generate_test_node_id((nx * grid_size + ny) as u64);
                         let neighbor_r = 0.1
                             + 0.8 * ((nx * nx + ny * ny) as f64).sqrt()
                                 / ((grid_size * grid_size * 2) as f64).sqrt();
@@ -475,27 +474,21 @@ mod simulation_tests {
                 for y1 in 0..grid_size {
                     for x2 in 0..grid_size {
                         for y2 in 0..grid_size {
-                            let manhattan = ((x1 as i32 - x2 as i32).abs()
-                                + (y1 as i32 - y2 as i32).abs())
-                                as usize;
+                            let manhattan = ((x1 - x2).abs() + (y1 - y2).abs()) as usize;
 
-                            if manhattan == distance {
-                                if let (Some((source_id, source_space)), Some((target_id, _))) =
+                            if manhattan == distance
+                                && let (Some((source_id, source_space)), Some((target_id, _))) =
                                     (grid_spaces.get(&(x1, y1)), grid_spaces.get(&(x2, y2)))
-                                {
-                                    let strategy = HyperbolicRoutingStrategy::new(
-                                        source_id.clone(),
-                                        source_space.clone(),
-                                    );
+                            {
+                                let strategy = HyperbolicRoutingStrategy::new(
+                                    source_id.clone(),
+                                    source_space.clone(),
+                                );
 
-                                    attempts += 1;
-                                    match strategy.find_path(target_id).await {
-                                        Ok(path) => {
-                                            successes += 1;
-                                            total_hops += path.len();
-                                        }
-                                        Err(_) => {}
-                                    }
+                                attempts += 1;
+                                if let Ok(path) = strategy.find_path(target_id).await {
+                                    successes += 1;
+                                    total_hops += path.len();
                                 }
                             }
                         }

@@ -58,10 +58,11 @@ async fn test_network_config_with_invalid_addresses() {
 #[tokio::test]
 async fn test_bind_error_handling() {
     // Test that binding to an invalid address returns proper error
-    let mut config = P2PNodeConfig::default();
-
     // Try to bind to a privileged port (should fail without root)
-    config.listen_addr = "127.0.0.1:80".parse().unwrap();
+    let config = P2PNodeConfig {
+        listen_addr: "127.0.0.1:80".parse().expect("valid test address"),
+        ..Default::default()
+    };
 
     let result = P2PNode::new(config).await;
 
@@ -132,8 +133,10 @@ async fn test_default_address_fallback() {
 #[tokio::test]
 async fn test_connection_timeout_config_handling() {
     // Test that connection timeout configuration works properly
-    let mut config = P2PNodeConfig::default();
-    config.connection_timeout = Duration::from_secs(30);
+    let config = P2PNodeConfig {
+        connection_timeout: Duration::from_secs(30),
+        ..Default::default()
+    };
 
     // Should create node with custom timeout, not panic
     let result = P2PNode::new(config).await;

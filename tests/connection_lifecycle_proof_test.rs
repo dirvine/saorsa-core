@@ -35,9 +35,7 @@ async fn test_connection_lifecycle_infrastructure_exists() {
         ..Default::default()
     };
 
-    let node = P2PNode::new(config)
-        .await
-        .expect("Failed to create node");
+    let node = P2PNode::new(config).await.expect("Failed to create node");
 
     info!("Node created successfully");
 
@@ -51,18 +49,12 @@ async fn test_connection_lifecycle_infrastructure_exists() {
 
     // Test 1: is_connection_active() exists and returns false for non-existent peer
     let is_active = node.is_connection_active(&test_peer_id).await;
-    assert!(
-        !is_active,
-        "Non-existent peer should not be active"
-    );
+    assert!(!is_active, "Non-existent peer should not be active");
     info!("✓ is_connection_active() method exists and works");
 
     // Test 2: is_peer_connected() exists and returns false for non-existent peer
     let is_connected = node.is_peer_connected(&test_peer_id).await;
-    assert!(
-        !is_connected,
-        "Non-existent peer should not be connected"
-    );
+    assert!(!is_connected, "Non-existent peer should not be connected");
     info!("✓ is_peer_connected() method exists and works");
 
     // Test 3: Verify remove_peer() method exists (even if peer doesn't exist)
@@ -117,9 +109,7 @@ async fn test_keepalive_task_initialized() {
         ..Default::default()
     };
 
-    let _node = P2PNode::new(config)
-        .await
-        .expect("Failed to create node");
+    let _node = P2PNode::new(config).await.expect("Failed to create node");
 
     // The keepalive task is spawned in P2PNode::new() and runs in the background
     // It sends keepalive messages every 15 seconds to prevent the 30-second ant-quic timeout

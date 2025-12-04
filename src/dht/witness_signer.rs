@@ -15,9 +15,7 @@
 use crate::dht::witness_protocol::{WitnessAttestation, WitnessResponse};
 use crate::error::{P2PError, P2pResult as Result};
 // Import types from ant_quic_integration to ensure consistency with functions
-use crate::quantum_crypto::ant_quic_integration::{
-    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
-};
+use crate::quantum_crypto::ant_quic_integration::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
 use crate::quantum_crypto::{generate_ml_dsa_keypair, ml_dsa_sign, ml_dsa_verify};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -100,9 +98,8 @@ impl WitnessSigner {
         let bytes = attestation.to_bytes_for_signing();
 
         let keypair = self.keypair.read().await;
-        let signature = ml_dsa_sign(&keypair.secret_key, &bytes).map_err(|e| {
-            P2PError::Internal(format!("Failed to sign attestation: {}", e).into())
-        })?;
+        let signature = ml_dsa_sign(&keypair.secret_key, &bytes)
+            .map_err(|e| P2PError::Internal(format!("Failed to sign attestation: {}", e).into()))?;
 
         attestation.signature = signature.as_bytes().to_vec();
         Ok(())
@@ -251,9 +248,8 @@ impl SignedWitnessData {
         }
 
         let bytes = self.attestation.to_bytes_for_signing();
-        let public_key = MlDsaPublicKey::from_bytes(&self.signer_public_key).map_err(|e| {
-            P2PError::Internal(format!("Invalid public key: {}", e).into())
-        })?;
+        let public_key = MlDsaPublicKey::from_bytes(&self.signer_public_key)
+            .map_err(|e| P2PError::Internal(format!("Invalid public key: {}", e).into()))?;
 
         // Convert signature bytes to MlDsaSignature
         let signature = match MlDsaSignature::from_bytes(&self.attestation.signature) {
@@ -342,12 +338,9 @@ mod tests {
     #[tokio::test]
     async fn test_sign_response_rejected() {
         let signer = WitnessSigner::new().unwrap();
-        let mut response = WitnessResponse::reject(
-            WitnessOperationId::new(),
-            "witness".to_string(),
-            "reason",
-        )
-        .unwrap();
+        let mut response =
+            WitnessResponse::reject(WitnessOperationId::new(), "witness".to_string(), "reason")
+                .unwrap();
 
         let result = signer.sign_response(&mut response).await;
 
@@ -571,12 +564,9 @@ mod tests {
     #[tokio::test]
     async fn test_verify_rejected_response() {
         let signer = WitnessSigner::new().unwrap();
-        let response = WitnessResponse::reject(
-            WitnessOperationId::new(),
-            "witness".to_string(),
-            "reason",
-        )
-        .unwrap();
+        let response =
+            WitnessResponse::reject(WitnessOperationId::new(), "witness".to_string(), "reason")
+                .unwrap();
 
         // Verify rejected response (no signature needed)
         let result = signer.verify_response(&response).await;

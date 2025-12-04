@@ -290,7 +290,9 @@ impl BootstrapManager {
         if !self.diversity_enforcer.can_accept_node(&ip_analysis) {
             tracing::warn!("IP diversity limit exceeded for {}", ip);
             return Err(P2PError::Bootstrap(BootstrapError::RateLimited(
-                "IP diversity limits exceeded (too many nodes from same subnet/ASN)".to_string().into(),
+                "IP diversity limits exceeded (too many nodes from same subnet/ASN)"
+                    .to_string()
+                    .into(),
             )));
         }
 

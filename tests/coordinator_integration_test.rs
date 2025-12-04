@@ -74,12 +74,11 @@ async fn test_full_system_integration() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Retrieve from different node
-    if let Some(hash) = hash {
-        if let Ok(Ok(retrieved_data)) =
+    if let Some(hash) = hash
+        && let Ok(Ok(retrieved_data)) =
             timeout(Duration::from_secs(5), coordinator2.retrieve(&hash)).await
-        {
-            assert_eq!(retrieved_data, test_data);
-        }
+    {
+        assert_eq!(retrieved_data, test_data);
     }
 
     // Test gossip messaging
@@ -135,10 +134,10 @@ async fn test_layer_coordination() {
     let paths = coordinator.coordinate_routing(&target).await;
 
     // Should return empty paths in test environment
-    match paths {
-        Ok(path) => assert!(path.is_empty()),
-        Err(_) => {} // Expected without actual network
+    if let Ok(path) = paths {
+        assert!(path.is_empty());
     }
+    // Err is expected without actual network
 }
 
 #[tokio::test]

@@ -20,9 +20,11 @@ proptest! {
 
     #[test]
     fn prop_cache_hit_rate_is_bounded(hits in 0u64..10_000u64, misses in 0u64..10_000u64) {
-        let mut stats = CacheStatistics::default();
-        stats.hits = hits;
-        stats.misses = misses;
+        let stats = CacheStatistics {
+            hits,
+            misses,
+            ..Default::default()
+        };
         let rate = stats.hit_rate();
         prop_assert!((0.0..=1.0).contains(&rate));
         if hits == 0 && misses == 0 { prop_assert!(rate == 0.0); }

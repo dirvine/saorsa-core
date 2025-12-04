@@ -21,7 +21,7 @@ fn valid_four_words(seed: u16) -> [String; 4] {
         (seed & 0xFF) as u8,
         (seed % 200) as u8,
     );
-    let port = 10000 + seed as u16;
+    let port = 10000 + seed;
     let encoding = encoder
         .encode_ipv4(ip, port)
         .expect("IPv4 encoding should succeed for deterministic seed");
@@ -115,7 +115,7 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
                     address: format!("10.0.{}.{}:900{}", i, j + 1, j),
                 },
                 capabilities: DeviceCapabilities {
-                    storage_bytes: (500 + j * 100) as u64 * 1_000_000_000,
+                    storage_bytes: (500 + j * 100) * 1_000_000_000,
                     always_online: true,
                     supports_fec: true,
                     supports_seal: true,
@@ -143,10 +143,10 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
         .filter_map(|device_id| {
             // Find which user owns this device
             for (user_idx, handle) in handles.iter().enumerate() {
-                if let Ok(presence) = futures::executor::block_on(get_presence(handle.key())) {
-                    if presence.devices.iter().any(|d| d.id == *device_id) {
-                        return Some(user_idx);
-                    }
+                if let Ok(presence) = futures::executor::block_on(get_presence(handle.key()))
+                    && presence.devices.iter().any(|d| d.id == *device_id)
+                {
+                    return Some(user_idx);
                 }
             }
             None
@@ -491,7 +491,6 @@ async fn test_mobile_device_handling() -> Result<()> {
             always_online: false,
             supports_fec: false, // Mobile devices don't do FEC
             supports_seal: true,
-            ..Default::default()
         },
     };
 
@@ -510,7 +509,6 @@ async fn test_mobile_device_handling() -> Result<()> {
             always_online: false,
             supports_fec: false,
             supports_seal: true,
-            ..Default::default()
         },
     };
 
@@ -609,7 +607,6 @@ async fn test_storage_farm_scenario() -> Result<()> {
                 supports_seal: true,
                 bandwidth_mbps: 1000,
                 cpu_cores: 4,
-                ..Default::default()
             },
         });
     }

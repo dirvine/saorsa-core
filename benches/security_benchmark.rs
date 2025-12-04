@@ -83,8 +83,8 @@ fn ipv6_benchmarks(c: &mut Criterion) {
 /// Calculate XOR distance between two peer IDs
 fn xor_distance(a: &UserId, b: &UserId) -> [u8; 32] {
     let mut result = [0u8; 32];
-    for i in 0..32 {
-        result[i] = a.hash[i] ^ b.hash[i];
+    for (i, byte) in result.iter_mut().enumerate() {
+        *byte = a.hash[i] ^ b.hash[i];
     }
     result
 }

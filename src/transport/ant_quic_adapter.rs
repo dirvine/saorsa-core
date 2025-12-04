@@ -39,7 +39,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tokio::time::sleep;
 
 // Import ant-quic types
@@ -58,10 +58,7 @@ pub enum ConnectionEvent {
     /// Connection lost/closed
     Lost { peer_id: PeerId, reason: String },
     /// Connection attempt failed
-    Failed {
-        peer_id: PeerId,
-        reason: String,
-    },
+    Failed { peer_id: PeerId, reason: String },
 }
 
 /// Native ant-quic network node
@@ -399,12 +396,12 @@ impl P2PNetworkNode {
                             NatTraversalEvent::ConnectionLost { peer_id, reason } => {
                                 Some(ConnectionEvent::Lost { peer_id, reason })
                             }
-                            NatTraversalEvent::TraversalFailed {
-                                peer_id, error, ..
-                            } => Some(ConnectionEvent::Failed {
-                                peer_id,
-                                reason: format!("{:?}", error),
-                            }),
+                            NatTraversalEvent::TraversalFailed { peer_id, error, .. } => {
+                                Some(ConnectionEvent::Failed {
+                                    peer_id,
+                                    reason: format!("{:?}", error),
+                                })
+                            }
                             _ => None, // Ignore other event types for now
                         };
 
@@ -703,13 +700,15 @@ impl DualStackNetworkNode {
 }
 
 /// Convert from our PeerId (String) to ant_quic PeerId
+///
+/// This is the inverse of `ant_peer_id_to_string` - it decodes a hex string
+/// back to the original 32-byte peer ID.
 pub fn string_to_ant_peer_id(peer_id: &str) -> ant_quic::nat_traversal_api::PeerId {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(peer_id.as_bytes());
-    let hash = hasher.finalize();
     let mut bytes = [0u8; 32];
-    bytes.copy_from_slice(&hash[..32]);
+    if let Ok(decoded) = hex::decode(peer_id) {
+        let len = decoded.len().min(32);
+        bytes[..len].copy_from_slice(&decoded[..len]);
+    }
     ant_quic::nat_traversal_api::PeerId(bytes)
 }
 

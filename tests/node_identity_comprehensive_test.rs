@@ -138,10 +138,8 @@ mod four_word_address_tests {
                 );
                 let res = four_word_networking::FourWordEncoder::new().decode_ipv4(&encoding);
                 assert!(res.is_err(), "Expected decode error for {}", invalid);
-            } else {
-                // Not 4 parts is invalid by definition
-                assert!(true);
             }
+            // Not 4 parts is invalid by definition - no assertion needed
         }
     }
 

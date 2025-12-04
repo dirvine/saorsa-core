@@ -23,11 +23,11 @@
 //! - PeeringDB (for hosting provider identification): https://www.peeringdb.com/
 
 use crate::security::{GeoInfo, GeoProvider};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 /// BGP-based GeoIP provider using open-source routing data
 #[derive(Debug)]
@@ -152,7 +152,7 @@ impl BgpGeoProvider {
         // Major cloud providers
         hosting.insert(16509); // Amazon AWS
         hosting.insert(14618); // Amazon AWS
-        hosting.insert(8075);  // Microsoft Azure
+        hosting.insert(8075); // Microsoft Azure
         hosting.insert(15169); // Google Cloud
         hosting.insert(396982); // Google Cloud
         hosting.insert(13335); // Cloudflare
@@ -167,15 +167,15 @@ impl BgpGeoProvider {
         hosting.insert(24940); // Hetzner
         hosting.insert(51167); // Contabo
         hosting.insert(12876); // Scaleway
-        hosting.insert(9009);  // M247
+        hosting.insert(9009); // M247
         hosting.insert(60781); // LeaseWeb
         hosting.insert(202018); // Hostwinds
         hosting.insert(62567); // DigitalOcean (additional)
         hosting.insert(39572); // DataCamp
-        hosting.insert(174);   // Cogent (large transit, often used by hosting)
-        hosting.insert(3356);  // Level3/Lumen
-        hosting.insert(6939);  // Hurricane Electric
-        hosting.insert(4766);  // Korea Telecom (IDC operations)
+        hosting.insert(174); // Cogent (large transit, often used by hosting)
+        hosting.insert(3356); // Level3/Lumen
+        hosting.insert(6939); // Hurricane Electric
+        hosting.insert(4766); // Korea Telecom (IDC operations)
         hosting.insert(45102); // Alibaba Cloud
         hosting.insert(37963); // Alibaba Cloud
         hosting.insert(132203); // Tencent Cloud
@@ -189,21 +189,21 @@ impl BgpGeoProvider {
         let mut vpn = self.vpn_asns.write();
 
         // Known VPN providers
-        vpn.insert(9009);   // M247 (NordVPN, ExpressVPN infrastructure)
+        vpn.insert(9009); // M247 (NordVPN, ExpressVPN infrastructure)
         vpn.insert(212238); // Datacamp (VPN infrastructure)
-        vpn.insert(60068);  // CDN77 (VPN infrastructure)
+        vpn.insert(60068); // CDN77 (VPN infrastructure)
         vpn.insert(200651); // Flokinet (privacy focused)
-        vpn.insert(51852);  // Private Layer
-        vpn.insert(60729);  // ZeroTier (P2P VPN)
+        vpn.insert(51852); // Private Layer
+        vpn.insert(60729); // ZeroTier (P2P VPN)
         vpn.insert(395954); // Mullvad VPN
-        vpn.insert(39351);  // 31173 Services (VPN)
-        vpn.insert(44066);  // LLC First Colo
-        vpn.insert(9312);   // xTom (VPN hosting)
-        vpn.insert(34549);  // meerfarbig (VPN hosting)
+        vpn.insert(39351); // 31173 Services (VPN)
+        vpn.insert(44066); // LLC First Colo
+        vpn.insert(9312); // xTom (VPN hosting)
+        vpn.insert(34549); // meerfarbig (VPN hosting)
         vpn.insert(210277); // TrafficTransit
         vpn.insert(204957); // Green Floid
-        vpn.insert(44592);  // SkyLink (VPN services)
-        vpn.insert(34927);  // iFog (privacy)
+        vpn.insert(44592); // SkyLink (VPN services)
+        vpn.insert(34927); // iFog (privacy)
         vpn.insert(197540); // Netcup (popular VPN hosting)
     }
 
@@ -265,12 +265,15 @@ impl BgpGeoProvider {
         ];
 
         for (asn, org, country, rir) in asns {
-            info.insert(asn, AsnInfo {
+            info.insert(
                 asn,
-                org_name: org.to_string(),
-                country: country.to_string(),
-                rir: rir.to_string(),
-            });
+                AsnInfo {
+                    asn,
+                    org_name: org.to_string(),
+                    country: country.to_string(),
+                    rir: rir.to_string(),
+                },
+            );
         }
     }
 
@@ -354,7 +357,10 @@ impl BgpGeoProvider {
 
     /// Get country for an ASN
     pub fn get_asn_country(&self, asn: u32) -> Option<String> {
-        self.asn_info.read().get(&asn).map(|info| info.country.clone())
+        self.asn_info
+            .read()
+            .get(&asn)
+            .map(|info| info.country.clone())
     }
 
     /// Check if ASN is a known hosting provider
@@ -386,12 +392,15 @@ impl BgpGeoProvider {
 
     /// Add ASN info
     pub fn add_asn_info(&self, asn: u32, org_name: &str, country: &str, rir: &str) {
-        self.asn_info.write().insert(asn, AsnInfo {
+        self.asn_info.write().insert(
             asn,
-            org_name: org_name.to_string(),
-            country: country.to_string(),
-            rir: rir.to_string(),
-        });
+            AsnInfo {
+                asn,
+                org_name: org_name.to_string(),
+                country: country.to_string(),
+                rir: rir.to_string(),
+            },
+        );
     }
 
     /// Get statistics about loaded data
@@ -589,9 +598,15 @@ mod tests {
         let stats = provider.stats();
 
         // Should have reasonable amounts of data loaded
-        assert!(stats.hosting_asn_count >= 20, "Expected at least 20 hosting ASNs");
+        assert!(
+            stats.hosting_asn_count >= 20,
+            "Expected at least 20 hosting ASNs"
+        );
         assert!(stats.vpn_asn_count >= 10, "Expected at least 10 VPN ASNs");
-        assert!(stats.asn_info_count >= 40, "Expected at least 40 ASN info entries");
+        assert!(
+            stats.asn_info_count >= 40,
+            "Expected at least 40 ASN info entries"
+        );
     }
 
     #[test]
@@ -608,7 +623,7 @@ mod tests {
         let provider = BgpGeoProvider::new();
 
         // Add overlapping prefixes
-        provider.add_ipv4_prefix([192, 0, 0, 0], 8, 1000);  // Broad
+        provider.add_ipv4_prefix([192, 0, 0, 0], 8, 1000); // Broad
         provider.add_ipv4_prefix([192, 168, 0, 0], 16, 2000); // More specific
         provider.add_ipv4_prefix([192, 168, 1, 0], 24, 3000); // Most specific
 

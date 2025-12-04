@@ -75,8 +75,7 @@ impl ContentStoreExtensions for ContentStore {
     }
 
     async fn get_total_size(&self) -> u64 {
-        // TODO: Implement actual size tracking
-        0
+        self.get_stats().await.total_bytes
     }
 
     async fn flush(&self) -> Result<()> {

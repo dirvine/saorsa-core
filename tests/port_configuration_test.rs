@@ -96,7 +96,7 @@ async fn test_port_range_configuration() -> Result<()> {
     // Verify port is in range
     let port = service.listen_addrs().await[0].port();
     assert!(
-        port >= 20000 && port <= 20010,
+        (20000..=20010).contains(&port),
         "Port should be in specified range"
     );
 

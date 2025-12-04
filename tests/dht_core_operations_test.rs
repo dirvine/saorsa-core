@@ -129,19 +129,18 @@ async fn test_lru_eviction_behavior() -> Result<()> {
     );
 
     // The last 5 records should be in cache (LRU evicted the first 5)
-    for i in 5..10 {
-        let key = &records[i].key;
-        let retrieved = storage.get(key).await;
+    for (offset, record) in records.iter().skip(5).enumerate() {
+        let retrieved = storage.get(&record.key).await;
         assert!(
             retrieved.is_some(),
             "Recently added record {} should still be in cache",
-            i
+            offset + 5
         );
     }
 
     // Access the first few records to make them recently used
-    for i in 5..7 {
-        let _ = storage.get(&records[i].key).await;
+    for record in records.iter().take(7).skip(5) {
+        let _ = storage.get(&record.key).await;
     }
 
     // Add more records to trigger more eviction
@@ -151,12 +150,12 @@ async fn test_lru_eviction_behavior() -> Result<()> {
     }
 
     // Recently accessed records should still be there
-    for i in 5..7 {
-        let retrieved = storage.get(&records[i].key).await;
+    for (idx, record) in records.iter().enumerate().take(7).skip(5) {
+        let retrieved = storage.get(&record.key).await;
         assert!(
             retrieved.is_some(),
             "Recently accessed record {} should not be evicted",
-            i
+            idx
         );
     }
 

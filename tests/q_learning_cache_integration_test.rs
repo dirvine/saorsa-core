@@ -496,7 +496,7 @@ async fn test_q_learning_convergence() {
     let q_manager = QLearningCacheManager::new(config, cache_capacity);
 
     // Fixed workload for testing convergence
-    let content_items = vec![
+    let content_items = [
         (ContentHash([1u8; 32]), 100 * 1024), // 100KB, accessed frequently
         (ContentHash([2u8; 32]), 200 * 1024), // 200KB, accessed moderately
         (ContentHash([3u8; 32]), 300 * 1024), // 300KB, accessed rarely

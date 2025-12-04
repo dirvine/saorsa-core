@@ -402,6 +402,8 @@ impl NetworkCoordinator {
                 window_duration: Duration::from_secs(60),
                 max_connections_per_node: 50,
                 max_joins_per_hour: 100,
+                max_tracked_nodes: 10000,
+                max_tracked_ips: 10000,
             },
             blacklist: BlacklistConfig {
                 entry_ttl: Duration::from_secs(86400), // 24 hours

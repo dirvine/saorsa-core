@@ -59,8 +59,12 @@ async fn main() -> Result<()> {
     info!("======================");
 
     // Create node configuration
-    let mut config = NodeConfig::default();
-    config.listen_addr = format!("127.0.0.1:{}", args.port).parse().unwrap();
+    let config = NodeConfig {
+        listen_addr: format!("127.0.0.1:{}", args.port)
+            .parse()
+            .expect("valid listen address"),
+        ..Default::default()
+    };
 
     // Create and start the node
     let node = P2PNode::new(config).await?;

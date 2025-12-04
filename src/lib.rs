@@ -268,9 +268,9 @@ pub use validation::{
 
 // Join rate limiting for Sybil protection
 pub use rate_limit::{
-    JoinRateLimitError, JoinRateLimiter, JoinRateLimiterConfig,
-    extract_ipv4_subnet_16, extract_ipv4_subnet_24, extract_ipv4_subnet_8,
-    extract_ipv6_subnet_32, extract_ipv6_subnet_48, extract_ipv6_subnet_64,
+    JoinRateLimitError, JoinRateLimiter, JoinRateLimiterConfig, extract_ipv4_subnet_8,
+    extract_ipv4_subnet_16, extract_ipv4_subnet_24, extract_ipv6_subnet_32, extract_ipv6_subnet_48,
+    extract_ipv6_subnet_64,
 };
 
 // Enhanced identity removed

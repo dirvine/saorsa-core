@@ -28,11 +28,11 @@
 //! time, which is costly and detectable.
 
 use crate::peer_record::UserId as NodeId;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use parking_lot::RwLock;
 use tracing::{debug, info, warn};
 
 /// Node age category based on time in network
@@ -66,14 +66,17 @@ impl NodeAgeCategory {
 
     /// Check if this category can be used for critical operations
     pub fn can_participate_in_critical_ops(&self) -> bool {
-        matches!(self, NodeAgeCategory::Established | NodeAgeCategory::Veteran)
+        matches!(
+            self,
+            NodeAgeCategory::Established | NodeAgeCategory::Veteran
+        )
     }
 
     /// Get minimum age for this category in seconds
     pub fn min_age_secs(&self) -> u64 {
         match self {
             NodeAgeCategory::New => 0,
-            NodeAgeCategory::Young => 3600,       // 1 hour
+            NodeAgeCategory::Young => 3600,        // 1 hour
             NodeAgeCategory::Established => 86400, // 24 hours
             NodeAgeCategory::Veteran => 604800,    // 7 days
         }
@@ -100,12 +103,12 @@ pub struct NodeAgeConfig {
 impl Default for NodeAgeConfig {
     fn default() -> Self {
         Self {
-            min_replication_age_secs: 3600,    // 1 hour
-            min_critical_ops_age_secs: 86400,  // 24 hours
+            min_replication_age_secs: 3600,   // 1 hour
+            min_critical_ops_age_secs: 86400, // 24 hours
             enforce_age_requirements: true,
             trust_bonus_per_day: 0.05,
             max_age_trust_bonus: 0.3,
-            veteran_age_secs: 604800,          // 7 days
+            veteran_age_secs: 604800, // 7 days
         }
     }
 }
@@ -140,10 +143,7 @@ impl NodeAgeRecord {
 
     /// Get age in seconds since first seen
     pub fn age_secs(&self) -> u64 {
-        self.first_seen
-            .elapsed()
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
+        self.first_seen.elapsed().map(|d| d.as_secs()).unwrap_or(0)
     }
 
     /// Get age category
@@ -240,7 +240,10 @@ impl NodeAgeVerifier {
             // Existing node - update or record rejoin
             if !record.is_active {
                 record.record_rejoin();
-                info!("Node {:?} rejoined (rejoin count: {})", node_id, record.rejoin_count);
+                info!(
+                    "Node {:?} rejoined (rejoin count: {})",
+                    node_id, record.rejoin_count
+                );
             } else {
                 record.update_seen();
             }
@@ -345,8 +348,7 @@ impl NodeAgeVerifier {
             .read()
             .iter()
             .filter(|(_, record)| {
-                record.is_active
-                    && record.age_secs() >= self.config.min_replication_age_secs
+                record.is_active && record.age_secs() >= self.config.min_replication_age_secs
             })
             .map(|(id, _)| id.clone())
             .collect()
@@ -358,8 +360,7 @@ impl NodeAgeVerifier {
             .read()
             .iter()
             .filter(|(_, record)| {
-                record.is_active
-                    && record.age_secs() >= self.config.min_critical_ops_age_secs
+                record.is_active && record.age_secs() >= self.config.min_critical_ops_age_secs
             })
             .map(|(id, _)| id.clone())
             .collect()
@@ -371,8 +372,7 @@ impl NodeAgeVerifier {
             .read()
             .iter()
             .filter(|(_, record)| {
-                record.is_active
-                    && record.age_secs() >= self.config.veteran_age_secs
+                record.is_active && record.age_secs() >= self.config.veteran_age_secs
             })
             .map(|(id, _)| id.clone())
             .collect()
@@ -425,9 +425,7 @@ impl NodeAgeVerifier {
         let cutoff = SystemTime::now() - retention_period;
         let mut records = self.records.write();
 
-        records.retain(|_, record| {
-            record.is_active || record.last_seen > cutoff
-        });
+        records.retain(|_, record| record.is_active || record.last_seen > cutoff);
     }
 
     /// Get configuration
@@ -490,9 +488,17 @@ mod tests {
 
     #[test]
     fn test_node_age_category() {
-        assert!(NodeAgeCategory::New.trust_multiplier() < NodeAgeCategory::Young.trust_multiplier());
-        assert!(NodeAgeCategory::Young.trust_multiplier() < NodeAgeCategory::Established.trust_multiplier());
-        assert!(NodeAgeCategory::Established.trust_multiplier() < NodeAgeCategory::Veteran.trust_multiplier());
+        assert!(
+            NodeAgeCategory::New.trust_multiplier() < NodeAgeCategory::Young.trust_multiplier()
+        );
+        assert!(
+            NodeAgeCategory::Young.trust_multiplier()
+                < NodeAgeCategory::Established.trust_multiplier()
+        );
+        assert!(
+            NodeAgeCategory::Established.trust_multiplier()
+                < NodeAgeCategory::Veteran.trust_multiplier()
+        );
 
         assert!(!NodeAgeCategory::New.can_replicate());
         assert!(NodeAgeCategory::Young.can_replicate());

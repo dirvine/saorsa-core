@@ -23,12 +23,12 @@
 
 use crate::dht::Key;
 use crate::peer_record::UserId as NodeId;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use parking_lot::RwLock;
 use tracing::debug;
 
 /// IP address family
@@ -235,11 +235,7 @@ impl CrossNetworkReplicator {
     }
 
     /// Select replica nodes for a record ensuring cross-network diversity
-    pub fn select_replica_nodes(
-        &self,
-        key: &Key,
-        exclude: &[NodeId],
-    ) -> ReplicaSelection {
+    pub fn select_replica_nodes(&self, key: &Key, exclude: &[NodeId]) -> ReplicaSelection {
         let nodes = self.nodes.read();
         let by_family = self.nodes_by_family.read();
         let dual_stack = self.dual_stack_nodes.read();
@@ -257,9 +253,13 @@ impl CrossNetworkReplicator {
                 .collect();
 
             // Sort by trust score descending
-            ds_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            ds_candidates
+                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-            for (node_id, _) in ds_candidates.iter().take(self.config.min_replicas_per_family) {
+            for (node_id, _) in ds_candidates
+                .iter()
+                .take(self.config.min_replicas_per_family)
+            {
                 selection.add_node(node_id.clone(), vec![IpFamily::IPv4, IpFamily::IPv6]);
             }
         }
@@ -269,7 +269,9 @@ impl CrossNetworkReplicator {
             let current = selection.count_by_family(family);
             let needed = self.config.min_replicas_per_family.saturating_sub(current);
 
-            if needed > 0 && let Some(family_nodes) = by_family.get(&family) {
+            if needed > 0
+                && let Some(family_nodes) = by_family.get(&family)
+            {
                 let mut candidates: Vec<_> = family_nodes
                     .iter()
                     .filter(|n| !excluded.contains(n))
@@ -277,9 +279,8 @@ impl CrossNetworkReplicator {
                     .filter_map(|n| nodes.get(n).map(|info| (n.clone(), info.trust_score)))
                     .collect();
 
-                candidates.sort_by(|a, b| {
-                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                candidates
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 for (node_id, _) in candidates.iter().take(needed) {
                     selection.add_node(node_id.clone(), vec![family]);
@@ -288,7 +289,10 @@ impl CrossNetworkReplicator {
         }
 
         // Fill up to target replication factor
-        let remaining = self.config.total_replication_factor.saturating_sub(selection.total());
+        let remaining = self
+            .config
+            .total_replication_factor
+            .saturating_sub(selection.total());
         if remaining > 0 {
             let all_candidates: Vec<_> = nodes
                 .iter()
@@ -309,12 +313,17 @@ impl CrossNetworkReplicator {
     }
 
     /// Check if a record has healthy replication
-    pub fn check_replication_health(&self, key: &Key, current_replicas: &[(NodeId, IpFamily)]) -> RecordReplicationStatus {
+    pub fn check_replication_health(
+        &self,
+        key: &Key,
+        current_replicas: &[(NodeId, IpFamily)],
+    ) -> RecordReplicationStatus {
         let mut status = RecordReplicationStatus::new(*key);
 
         // Count replicas by family
         for (node_id, family) in current_replicas {
-            status.replicas_by_family
+            status
+                .replicas_by_family
                 .entry(*family)
                 .or_default()
                 .push(node_id.clone());
@@ -348,7 +357,11 @@ impl CrossNetworkReplicator {
         for (family, missing_count) in &status.missing_replicas {
             let selection = self.select_replica_nodes(&status.key, &[]);
 
-            for node_id in selection.nodes_for_family(*family).iter().take(*missing_count) {
+            for node_id in selection
+                .nodes_for_family(*family)
+                .iter()
+                .take(*missing_count)
+            {
                 targets.push((node_id.clone(), *family));
             }
         }
@@ -551,13 +564,28 @@ mod tests {
 
         // Register nodes
         for i in 0..3 {
-            replicator.register_node(create_test_node(&format!("dual{}", i), true, true, 0.9 - i as f64 * 0.1));
+            replicator.register_node(create_test_node(
+                &format!("dual{}", i),
+                true,
+                true,
+                0.9 - i as f64 * 0.1,
+            ));
         }
         for i in 0..2 {
-            replicator.register_node(create_test_node(&format!("v4_{}", i), true, false, 0.6 - i as f64 * 0.1));
+            replicator.register_node(create_test_node(
+                &format!("v4_{}", i),
+                true,
+                false,
+                0.6 - i as f64 * 0.1,
+            ));
         }
         for i in 0..2 {
-            replicator.register_node(create_test_node(&format!("v6_{}", i), false, true, 0.5 - i as f64 * 0.1));
+            replicator.register_node(create_test_node(
+                &format!("v6_{}", i),
+                false,
+                true,
+                0.5 - i as f64 * 0.1,
+            ));
         }
 
         let key = [1u8; 32];
@@ -619,10 +647,9 @@ mod tests {
             IpFamily::IPv4,
             vec![NodeId { hash: [1u8; 32] }, NodeId { hash: [2u8; 32] }],
         );
-        status.replicas_by_family.insert(
-            IpFamily::IPv6,
-            vec![NodeId { hash: [3u8; 32] }],
-        );
+        status
+            .replicas_by_family
+            .insert(IpFamily::IPv6, vec![NodeId { hash: [3u8; 32] }]);
 
         assert_eq!(status.replica_count(IpFamily::IPv4), 2);
         assert_eq!(status.replica_count(IpFamily::IPv6), 1);
@@ -649,7 +676,12 @@ mod tests {
 
         // Register 5 dual-stack nodes
         for i in 0..5 {
-            replicator.register_node(create_test_node(&format!("node{}", i), true, true, 0.9 - i as f64 * 0.1));
+            replicator.register_node(create_test_node(
+                &format!("node{}", i),
+                true,
+                true,
+                0.9 - i as f64 * 0.1,
+            ));
         }
 
         // Exclude first two nodes

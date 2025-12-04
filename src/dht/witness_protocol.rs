@@ -15,9 +15,9 @@
 //! - `WitnessChallenge`: Challenge for distance verification
 //! - `WitnessAttestation`: Signed attestation from a witness node
 
+use crate::PeerId;
 use crate::dht::witness::OperationType;
 use crate::error::{P2PError, P2pResult as Result};
-use crate::PeerId;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -466,10 +466,12 @@ mod tests {
 
         let result = request.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("timestamp too old"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("timestamp too old")
+        );
     }
 
     #[test]
@@ -478,7 +480,7 @@ mod tests {
             WitnessRequest::new("source".to_string(), [0u8; 32], OperationType::Store).unwrap();
 
         // Set timestamp to 5 minutes in the future
-        request.timestamp = request.timestamp + 5 * 60 * 1000;
+        request.timestamp += 5 * 60 * 1000;
 
         let result = request.validate();
         assert!(result.is_err());
@@ -530,12 +532,9 @@ mod tests {
 
     #[test]
     fn test_witness_attestation_is_signed() {
-        let mut attestation = WitnessAttestation::new(
-            WitnessOperationId::new(),
-            "witness".to_string(),
-            [0u8; 32],
-        )
-        .unwrap();
+        let mut attestation =
+            WitnessAttestation::new(WitnessOperationId::new(), "witness".to_string(), [0u8; 32])
+                .unwrap();
 
         assert!(!attestation.is_signed());
 
@@ -547,12 +546,9 @@ mod tests {
 
     #[test]
     fn test_witness_response_accept() {
-        let attestation = WitnessAttestation::new(
-            WitnessOperationId::new(),
-            "witness".to_string(),
-            [1u8; 32],
-        )
-        .unwrap();
+        let attestation =
+            WitnessAttestation::new(WitnessOperationId::new(), "witness".to_string(), [1u8; 32])
+                .unwrap();
 
         let response = WitnessResponse::accept(attestation, 50);
 
@@ -580,12 +576,9 @@ mod tests {
 
     #[test]
     fn test_witness_response_validate_unsigned_accept() {
-        let attestation = WitnessAttestation::new(
-            WitnessOperationId::new(),
-            "witness".to_string(),
-            [1u8; 32],
-        )
-        .unwrap();
+        let attestation =
+            WitnessAttestation::new(WitnessOperationId::new(), "witness".to_string(), [1u8; 32])
+                .unwrap();
 
         let response = WitnessResponse::accept(attestation, 50);
 
@@ -597,12 +590,9 @@ mod tests {
 
     #[test]
     fn test_witness_response_validate_signed_accept() {
-        let mut attestation = WitnessAttestation::new(
-            WitnessOperationId::new(),
-            "witness".to_string(),
-            [1u8; 32],
-        )
-        .unwrap();
+        let mut attestation =
+            WitnessAttestation::new(WitnessOperationId::new(), "witness".to_string(), [1u8; 32])
+                .unwrap();
         attestation.signature = vec![1, 2, 3, 4]; // Mock signature
 
         let response = WitnessResponse::accept(attestation, 50);

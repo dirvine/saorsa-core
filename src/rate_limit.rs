@@ -389,7 +389,10 @@ mod tests {
         // Second join from same /64 should fail
         let ip2: IpAddr = "2001:db8::2".parse().unwrap();
         let result = limiter.check_join_allowed(&ip2);
-        assert!(matches!(result, Err(JoinRateLimitError::Subnet64LimitExceeded { .. })));
+        assert!(matches!(
+            result,
+            Err(JoinRateLimitError::Subnet64LimitExceeded { .. })
+        ));
     }
 
     #[test]
@@ -426,6 +429,9 @@ mod tests {
         // Third join from same /24 should fail
         let ip3: IpAddr = "192.168.1.3".parse().unwrap();
         let result = limiter.check_join_allowed(&ip3);
-        assert!(matches!(result, Err(JoinRateLimitError::Subnet24LimitExceeded { .. })));
+        assert!(matches!(
+            result,
+            Err(JoinRateLimitError::Subnet24LimitExceeded { .. })
+        ));
     }
 }

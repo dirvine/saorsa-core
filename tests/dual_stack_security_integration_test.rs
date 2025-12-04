@@ -96,7 +96,10 @@ fn test_bgp_provider_vpn_detection() {
     assert!(stats.vpn_asn_count > 0, "Should track VPN ASNs");
 
     // M247 is a known VPN infrastructure provider
-    assert!(provider.is_vpn_asn(9009), "M247 should be identified as VPN");
+    assert!(
+        provider.is_vpn_asn(9009),
+        "M247 should be identified as VPN"
+    );
     assert!(
         provider.is_vpn_asn(395954),
         "Mullvad should be identified as VPN"
@@ -302,9 +305,7 @@ fn test_node_age_registration() {
 #[test]
 fn test_node_age_categories() {
     // Test trust multipliers
-    assert!(
-        NodeAgeCategory::New.trust_multiplier() < NodeAgeCategory::Young.trust_multiplier()
-    );
+    assert!(NodeAgeCategory::New.trust_multiplier() < NodeAgeCategory::Young.trust_multiplier());
     assert!(
         NodeAgeCategory::Young.trust_multiplier() < NodeAgeCategory::Established.trust_multiplier()
     );

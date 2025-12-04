@@ -5,12 +5,14 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_q_learning_manager_updates_q_values() -> anyhow::Result<()> {
-    let mut cfg = QLearningConfig::default();
-    cfg.learning_rate = 0.5;
-    cfg.discount_factor = 0.9;
-    cfg.epsilon = 0.0;
-    cfg.buffer_size = 128;
-    cfg.batch_size = 8;
+    let cfg = QLearningConfig {
+        learning_rate: 0.5,
+        discount_factor: 0.9,
+        epsilon: 0.0,
+        buffer_size: 128,
+        batch_size: 8,
+        ..Default::default()
+    };
 
     let manager = QLearningCacheManager::new(cfg, 10 * 1024 * 1024);
 

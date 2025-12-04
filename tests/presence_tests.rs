@@ -19,7 +19,7 @@ fn valid_four_words(seed: u16) -> [String; 4] {
         (seed & 0xFF) as u8,
         (seed % 200) as u8,
     );
-    let port = 15000 + seed as u16;
+    let port = 15000 + seed;
     let encoding = encoder.encode_ipv4(ip, port).expect("encoder works");
     let w = encoding.words();
     [w[0].clone(), w[1].clone(), w[2].clone(), w[3].clone()]

@@ -68,6 +68,12 @@ pub struct RateLimitConfig {
 
     /// Max join requests per hour
     pub max_joins_per_hour: u32,
+
+    /// Max tracked nodes (memory bound)
+    pub max_tracked_nodes: usize,
+
+    /// Max tracked IPs (memory bound)
+    pub max_tracked_ips: usize,
 }
 
 impl Default for RateLimitConfig {
@@ -78,6 +84,8 @@ impl Default for RateLimitConfig {
             window_duration: Duration::from_secs(60),
             max_connections_per_node: 10,
             max_joins_per_hour: 20,
+            max_tracked_nodes: 10000,
+            max_tracked_ips: 10000,
         }
     }
 }
@@ -700,6 +708,18 @@ impl RateLimiter {
         let mut requests = self.node_requests.write().await;
         let now = Instant::now();
 
+        // Evict oldest entries if at capacity (before inserting new)
+        if requests.len() >= self.config.max_tracked_nodes && !requests.contains_key(node_id) {
+            // Find and remove the oldest entry
+            if let Some(oldest_key) = requests
+                .iter()
+                .min_by_key(|(_, window)| window.window_start)
+                .map(|(k, _)| k.clone())
+            {
+                requests.remove(&oldest_key);
+            }
+        }
+
         let window = requests.entry(node_id.clone()).or_insert(RequestWindow {
             count: 0,
             window_start: now,
@@ -720,10 +740,27 @@ impl RateLimiter {
         }
     }
 
+    /// Get count of tracked nodes (for testing/monitoring)
+    pub async fn get_tracked_node_count(&self) -> usize {
+        self.node_requests.read().await.len()
+    }
+
     /// Check IP rate limit
     pub async fn check_ip_rate(&self, ip: &IpAddr) -> bool {
         let mut requests = self.ip_requests.write().await;
         let now = Instant::now();
+
+        // Evict oldest entries if at capacity (before inserting new)
+        if requests.len() >= self.config.max_tracked_ips && !requests.contains_key(ip) {
+            // Find and remove the oldest entry
+            if let Some(oldest_key) = requests
+                .iter()
+                .min_by_key(|(_, window)| window.window_start)
+                .map(|(k, _)| *k)
+            {
+                requests.remove(&oldest_key);
+            }
+        }
 
         let window = requests.entry(*ip).or_insert(RequestWindow {
             count: 0,
@@ -743,6 +780,11 @@ impl RateLimiter {
         } else {
             false
         }
+    }
+
+    /// Get count of tracked IPs (for testing/monitoring)
+    pub async fn get_tracked_ip_count(&self) -> usize {
+        self.ip_requests.read().await.len()
     }
 
     /// Check join rate limit
@@ -1156,6 +1198,61 @@ mod tests {
 
         // Should allow again
         assert!(limiter.check_node_rate(&node_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_memory_bounds() {
+        let config = RateLimitConfig {
+            node_requests_per_window: 100,
+            window_duration: Duration::from_secs(60),
+            max_tracked_nodes: 10, // Only track 10 nodes
+            max_tracked_ips: 10,
+            ..Default::default()
+        };
+
+        let limiter = RateLimiter::new(config);
+
+        // Add requests from 20 different nodes
+        for i in 0..20u8 {
+            let mut hash = [0u8; 32];
+            hash[0] = i;
+            let node_id = NodeId { hash };
+            limiter.check_node_rate(&node_id).await;
+        }
+
+        // Should have evicted old entries, keeping only max_tracked_nodes
+        let node_count = limiter.get_tracked_node_count().await;
+        assert!(
+            node_count <= 10,
+            "Expected <= 10 tracked nodes, got {}",
+            node_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_ip_memory_bounds() {
+        let config = RateLimitConfig {
+            ip_requests_per_window: 100,
+            window_duration: Duration::from_secs(60),
+            max_tracked_ips: 10, // Only track 10 IPs
+            ..Default::default()
+        };
+
+        let limiter = RateLimiter::new(config);
+
+        // Add requests from 20 different IPs
+        for i in 0..20u8 {
+            let ip: IpAddr = format!("192.168.1.{}", i).parse().unwrap();
+            limiter.check_ip_rate(&ip).await;
+        }
+
+        // Should have evicted old entries, keeping only max_tracked_ips
+        let ip_count = limiter.get_tracked_ip_count().await;
+        assert!(
+            ip_count <= 10,
+            "Expected <= 10 tracked IPs, got {}",
+            ip_count
+        );
     }
 
     #[tokio::test]

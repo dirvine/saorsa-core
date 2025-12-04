@@ -27,4 +27,4 @@ criterion/
 
 # Local config
 .env
-.env.local
+.env.localpatches/

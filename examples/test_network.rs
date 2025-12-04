@@ -43,15 +43,17 @@ impl TestNode {
             .parse()
             .context("Failed to parse listen address")?;
 
-        let mut config = NodeConfig::default();
-        config.listen_addr = listen_addr;
         // Use valid addresses for testing - let the system assign actual addresses
-        config.listen_addrs = vec![
-            std::net::SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-                0,
-            ), // localhost with port 0 for system assignment
-        ];
+        let config = NodeConfig {
+            listen_addr,
+            listen_addrs: vec![
+                std::net::SocketAddr::new(
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+                    0,
+                ), // localhost with port 0 for system assignment
+            ],
+            ..Default::default()
+        };
 
         info!(
             "🔧 Node {} configured to listen on port {} ({})",

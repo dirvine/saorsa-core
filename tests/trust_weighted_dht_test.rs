@@ -407,7 +407,7 @@ async fn test_xor_distance() {
 
     // Distance to similar node should be small
     assert_eq!(distance1_3[0], 1);
-    for i in 1..32 {
-        assert_eq!(distance1_3[i], 0);
+    for byte in distance1_3.iter().skip(1) {
+        assert_eq!(*byte, 0);
     }
 }
