@@ -552,15 +552,18 @@ impl RegenerationTrigger {
     /// Count recent regeneration attempts within the attempt window.
     fn count_recent_attempts(&self) -> u32 {
         let state = self.state.read();
-        let cutoff = Instant::now()
-            .checked_sub(self.config.attempt_window)
-            .unwrap_or_else(Instant::now);
 
-        state
-            .attempts
-            .iter()
-            .filter(|a| a.timestamp >= cutoff)
-            .count() as u32
+        // On Windows, process uptime may be less than the attempt window (e.g., 1 hour).
+        // If checked_sub returns None, count ALL attempts as recent since
+        // the process hasn't been running long enough to have "old" attempts.
+        match Instant::now().checked_sub(self.config.attempt_window) {
+            Some(cutoff) => state
+                .attempts
+                .iter()
+                .filter(|a| a.timestamp >= cutoff)
+                .count() as u32,
+            None => state.attempts.len() as u32,
+        }
     }
 
     /// Record a regeneration attempt.
