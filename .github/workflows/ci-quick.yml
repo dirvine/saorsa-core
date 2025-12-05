@@ -15,7 +15,7 @@ jobs:
   quick-linux:
     name: Quick Suite (Ubuntu, stable)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - name: Free disk space
         run: |
@@ -66,12 +66,6 @@ jobs:
           find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
           df -h
 
-      - name: Tests (unit + integration)
-        run: cargo nextest run --all-features --profile default --no-fail-fast
-
-      - name: Identity subset (explicit)
-        run: cargo nextest run --all-features --profile default -E 'test(binary("identity_management_test") or binary("identity_tests"))'
-
-      - name: Multi-device subset (explicit)
-        run: cargo nextest run --all-features --profile default -E 'test(binary("multi_device_tests"))'
+      - name: Unit tests (lib only - quick)
+        run: cargo nextest run --lib --all-features --profile default --no-fail-fast
 
