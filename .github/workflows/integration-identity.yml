@@ -1,0 +1,130 @@
+name: Integration Tests (Identity & Security)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  integration-identity:
+    name: Identity Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-int-identity-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Build tests
+        run: cargo build --tests --all-features
+
+      - name: Clean incremental artifacts
+        run: |
+          find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
+          df -h
+
+      - name: Identity Tests
+        run: cargo nextest run --test identity_tests --all-features --no-fail-fast
+
+      - name: Identity Management
+        run: cargo nextest run --test identity_management_test --all-features --no-fail-fast
+
+      - name: Node Identity
+        run: cargo nextest run --test node_identity_test --all-features --no-fail-fast
+
+      - name: Multi-Device Tests
+        run: cargo nextest run --test multi_device_tests --all-features --no-fail-fast
+
+      - name: API Implementation
+        run: cargo nextest run --test api_implementation_tests --all-features --no-fail-fast
+
+  integration-security:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-int-security-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Build tests
+        run: cargo build --tests --all-features
+
+      - name: Clean incremental artifacts
+        run: |
+          find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
+          df -h
+
+      - name: Security Comprehensive
+        run: cargo nextest run --test security_comprehensive_test --all-features --no-fail-fast
+
+      - name: Validation Security
+        run: cargo nextest run --test validation_security_test --all-features --no-fail-fast
+
+      - name: Validation Tests
+        run: cargo nextest run --test validation_test --all-features --no-fail-fast
+
+      - name: Key Exchange
+        run: cargo nextest run --test key_exchange_integration_test --all-features --no-fail-fast
+
+      - name: EigenTrust
+        run: cargo nextest run --test eigentrust_integration_test --all-features --no-fail-fast

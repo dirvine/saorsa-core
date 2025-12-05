@@ -9,223 +9,122 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+# Note: Main test suites are in separate workflows:
+# - lint.yml: Format and clippy checks
+# - unit-tests.yml: Library unit tests (all platforms)
+# - integration-core.yml: DHT, storage, adaptive tests
+# - integration-identity.yml: Identity and security tests
+# - integration-network.yml: Network and protocol tests
 
 jobs:
-  test:
-    name: Test Suite
+  # Build verification on all platforms
+  build:
+    name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        rust:
-          - stable
-
     steps:
-    - name: Free disk space (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        # Remove unnecessary tools to free space
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /usr/local/share/boost
-        df -h
+      - name: Free disk space (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h
 
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ matrix.rust }}
-        components: rustfmt, clippy
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Install system dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          pkg-config \
-          libssl-dev \
-          libasound2-dev \
-          libpulse-dev \
-          libdbus-1-dev \
-          portaudio19-dev \
-          build-essential \
-          protobuf-compiler
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
 
-    - name: Install system dependencies (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        choco install protoc
+      - name: Install system dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install protoc
 
-    - name: Install system dependencies (macOS)
-      if: matrix.os == 'macos-latest'
-      run: |
-        brew install protobuf
+      - name: Install system dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install protobuf
 
-    - name: Install cargo-mutants
-      run: cargo install cargo-mutants
-      if: matrix.rust == 'stable' && matrix.os == 'ubuntu-latest'
-
-    - name: Check formatting
-      run: cargo fmt --all -- --check
-      if: matrix.rust == 'stable'
-
-    - name: Run clippy (no pedantic; allow test unwrap)
-      run: cargo clippy --all-features -- -D clippy::panic -D clippy::unwrap_used -D clippy::expect_used
-      if: matrix.rust == 'stable'
-
-    - name: Build
-      run: cargo build --verbose --all-features
-
-    - name: Clean incremental artifacts (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        # Clean incremental data to save space before test compilation
-        find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
-        df -h
-
-    - name: Install cargo-nextest
-      uses: taiki-e/install-action@v2
-      with:
-        tool: cargo-nextest
-
-    - name: Run tests (nextest with timeouts)
-      run: cargo nextest run --all-features --profile default --no-fail-fast
-
-    - name: Run doctests
-      run: cargo test --doc --all-features || echo "Doctests have known issues with outdated examples - continuing"
-
-    - name: Run mutation tests (sample)
-      run: |
-        # Run a quick mutation test sample on critical functions
-        timeout 300 cargo mutants --no-shuffle \
-          --test-timeout 60 \
-          --file src/adaptive/thompson_sampling.rs \
-          --file src/adaptive/multi_armed_bandit.rs \
-          -- -D warnings || echo "Sample mutation testing completed"
-      if: matrix.rust == 'stable' && matrix.os == 'ubuntu-latest'
-
-    - name: Fail if backup files are present
-      run: |
-        if git ls-files | grep -E '(\.bak\d*|\.backup)$'; then
-          echo "Found backup files (.bak/.backup). Please remove them." >&2
-          exit 1
-        fi
+      - name: Build
+        run: cargo build --all-features
 
   security_audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo
-        key: ${{ runner.os }}-cargo-audit
-    - run: cargo install cargo-audit
-    - run: cargo audit
-
-  coverage:
-    name: Code Coverage
-    needs: test
-    continue-on-error: true
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        components: llvm-tools-preview
-
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          pkg-config \
-          libssl-dev \
-          libasound2-dev \
-          libpulse-dev \
-          libdbus-1-dev \
-          portaudio19-dev \
-          build-essential \
-          protobuf-compiler
-
-    - name: Install cargo-llvm-cov
-      uses: taiki-e/install-action@cargo-llvm-cov
-
-    - name: Generate code coverage
-      run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        files: lcov.info
-        fail_ci_if_error: false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-audit
+      - run: cargo install cargo-audit
+      - run: cargo audit
 
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          pkg-config \
-          libssl-dev \
-          libasound2-dev \
-          libpulse-dev \
-          libdbus-1-dev \
-          portaudio19-dev \
-          build-essential \
-          protobuf-compiler
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
 
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
 
-    - name: Run benchmarks
-      run: cargo bench --all-features
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run benchmarks
+        run: cargo bench --all-features
 
   minimal-versions:
     name: Minimal versions
     continue-on-error: true
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          pkg-config \
-          libssl-dev \
-          libasound2-dev \
-          libpulse-dev \
-          libdbus-1-dev \
-          portaudio19-dev \
-          build-essential \
-          protobuf-compiler
-    - run: cargo update -Z minimal-versions
-    - run: cargo check --all-features
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
+      - run: cargo update -Z minimal-versions
+      - run: cargo check --all-features

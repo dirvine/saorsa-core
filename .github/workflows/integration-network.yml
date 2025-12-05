@@ -1,0 +1,130 @@
+name: Integration Tests (Network)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  integration-network:
+    name: Network & P2P Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-int-network-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Build tests
+        run: cargo build --tests --all-features
+
+      - name: Clean incremental artifacts
+        run: |
+          find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
+          df -h
+
+      - name: QUIC Integration
+        run: cargo nextest run --test ant_quic_integration_test --all-features --no-fail-fast
+
+      - name: Connection Lifecycle
+        run: cargo nextest run --test connection_lifecycle_integration_test --all-features --no-fail-fast
+
+      - name: NAT Integration
+        run: cargo nextest run --test p2p_nat_integration_test --all-features --no-fail-fast
+
+      - name: Network Error Tests
+        run: cargo nextest run --test network_error_tests --all-features --no-fail-fast
+
+      - name: Port Configuration
+        run: cargo nextest run --test port_configuration_test --all-features --no-fail-fast
+
+  integration-protocols:
+    name: Protocol Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-int-protocol-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Build tests
+        run: cargo build --tests --all-features
+
+      - name: Clean incremental artifacts
+        run: |
+          find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
+          df -h
+
+      - name: Gossipsub
+        run: cargo nextest run --test gossipsub_integration_test --all-features --no-fail-fast
+
+      - name: RSPS Integration
+        run: cargo nextest run --test rsps_integration_test --all-features --no-fail-fast
+
+      - name: Four Word Integration
+        run: cargo nextest run --test four_word_integration_test --all-features --no-fail-fast
+
+      - name: Coordinator Integration
+        run: cargo nextest run --test coordinator_integration_test --all-features --no-fail-fast
+
+      - name: Health Integration
+        run: cargo nextest run --test health_integration_test --all-features --no-fail-fast
