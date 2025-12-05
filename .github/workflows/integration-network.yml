@@ -56,19 +56,23 @@ jobs:
           df -h
 
       - name: QUIC Integration
-        run: cargo nextest run --test ant_quic_integration_test --all-features --no-fail-fast
+        # Run sequentially to avoid port binding conflicts
+        run: cargo nextest run --test ant_quic_integration_test --all-features --no-fail-fast --test-threads=1
 
       - name: Connection Lifecycle
-        run: cargo nextest run --test connection_lifecycle_integration_test --all-features --no-fail-fast
+        # Run sequentially to avoid port binding conflicts
+        run: cargo nextest run --test connection_lifecycle_integration_test --all-features --no-fail-fast --test-threads=1
 
       - name: NAT Integration
-        run: cargo nextest run --test p2p_nat_integration_test --all-features --no-fail-fast
+        # Run sequentially to avoid port binding conflicts
+        run: cargo nextest run --test p2p_nat_integration_test --all-features --no-fail-fast --test-threads=1
 
       - name: Network Error Tests
         run: cargo nextest run --test network_error_tests --all-features --no-fail-fast
 
       - name: Port Configuration
-        run: cargo nextest run --test port_configuration_test --all-features --no-fail-fast
+        # Run sequentially to avoid port binding conflicts
+        run: cargo nextest run --test port_configuration_test --all-features --no-fail-fast --test-threads=1
 
   integration-protocols:
     name: Protocol Tests
