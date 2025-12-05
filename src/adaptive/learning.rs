@@ -1048,12 +1048,23 @@ impl ChurnPredictor {
         };
 
         // Calculate recent disconnections
-        let one_week_ago = now - std::time::Duration::from_secs(7 * 24 * 3600);
-        let recent_disconnections = node_history
-            .sessions
-            .iter()
-            .filter(|(start, end)| end.is_some() && *start > one_week_ago)
-            .count() as f64;
+        // Use checked_sub to avoid panic on Windows when program uptime < 1 week
+        let recent_disconnections = if let Some(one_week_ago) =
+            now.checked_sub(std::time::Duration::from_secs(7 * 24 * 3600))
+        {
+            node_history
+                .sessions
+                .iter()
+                .filter(|(start, end)| end.is_some() && *start > one_week_ago)
+                .count() as f64
+        } else {
+            // If uptime < 1 week, count all disconnections
+            node_history
+                .sessions
+                .iter()
+                .filter(|(_, end)| end.is_some())
+                .count() as f64
+        };
 
         // Get latest snapshot for other features
         let latest_snapshot = node_history
