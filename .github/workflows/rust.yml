@@ -25,6 +25,15 @@ jobs:
           - stable
 
     steps:
+    - name: Free disk space (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Remove unnecessary tools to free space
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        df -h
+
     - uses: actions/checkout@v4
 
     - name: Install Rust
@@ -80,6 +89,13 @@ jobs:
 
     - name: Build
       run: cargo build --verbose --all-features
+
+    - name: Clean incremental artifacts (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Clean incremental data to save space before test compilation
+        find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
+        df -h
 
     - name: Install cargo-nextest
       uses: taiki-e/install-action@v2
