@@ -986,8 +986,10 @@ impl EclipseDetector {
         });
 
         // Keep only recent anomalies (last hour)
-        let cutoff = Instant::now() - Duration::from_secs(3600);
-        patterns.routing_anomalies.retain(|a| a.timestamp > cutoff);
+        // Use checked_sub to avoid panic on Windows when program uptime < 1 hour
+        if let Some(cutoff) = Instant::now().checked_sub(Duration::from_secs(3600)) {
+            patterns.routing_anomalies.retain(|a| a.timestamp > cutoff);
+        }
     }
 
     /// Get detection count

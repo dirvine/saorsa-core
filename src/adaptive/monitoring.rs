@@ -1269,13 +1269,15 @@ impl AnomalyDetector {
     /// Get recent anomalies
     pub async fn get_recent_anomalies(&self) -> Vec<Anomaly> {
         let anomalies = self.anomalies.read().await;
-        let cutoff = Instant::now() - Duration::from_secs(300);
-
-        anomalies
-            .iter()
-            .filter(|a| a.detected_at > cutoff)
-            .cloned()
-            .collect()
+        // Use checked_sub to avoid panic on Windows when program uptime < 5 minutes
+        match Instant::now().checked_sub(Duration::from_secs(300)) {
+            Some(cutoff) => anomalies
+                .iter()
+                .filter(|a| a.detected_at > cutoff)
+                .cloned()
+                .collect(),
+            None => anomalies.iter().cloned().collect(), // Return all if uptime < 5 min
+        }
     }
 }
 

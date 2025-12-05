@@ -1271,10 +1271,15 @@ impl ChurnPredictor {
             .push((std::time::Instant::now(), features));
 
         // Keep only recent snapshots (last 24 hours)
-        let cutoff = std::time::Instant::now() - std::time::Duration::from_secs(24 * 3600);
-        node_history
-            .snapshots
-            .retain(|(timestamp, _)| *timestamp > cutoff);
+        // Use checked_sub to avoid panic on Windows when program uptime < 24h
+        if let Some(cutoff) =
+            std::time::Instant::now().checked_sub(std::time::Duration::from_secs(24 * 3600))
+        {
+            node_history
+                .snapshots
+                .retain(|(timestamp, _)| *timestamp > cutoff);
+        }
+        // If checked_sub returns None, keep all snapshots (program hasn't run for 24h yet)
 
         Ok(())
     }
@@ -2084,16 +2089,18 @@ mod tests {
     #[tokio::test]
     async fn test_churn_predictor_model_persistence() -> Result<()> {
         let predictor = ChurnPredictor::new();
-        let temp_path = std::path::Path::new("/tmp/test_model.json");
+        // Use cross-platform temp directory
+        let temp_dir = std::env::temp_dir();
+        let temp_path = temp_dir.join("test_churn_model.json");
 
         // Save model
-        predictor.save_model(temp_path).await?;
+        predictor.save_model(&temp_path).await?;
 
         // Load model
-        predictor.load_model(temp_path).await?;
+        predictor.load_model(&temp_path).await?;
 
         // Clean up
-        let _ = std::fs::remove_file(temp_path);
+        let _ = std::fs::remove_file(&temp_path);
         Ok(())
     }
 }

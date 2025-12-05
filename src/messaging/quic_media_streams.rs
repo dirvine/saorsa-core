@@ -335,12 +335,14 @@ impl BandwidthController {
         self.usage_history.push_back((Instant::now(), kbps));
 
         // Keep only recent history
-        let cutoff = Instant::now() - Duration::from_secs(60);
-        while let Some((timestamp, _)) = self.usage_history.front() {
-            if *timestamp < cutoff {
-                self.usage_history.pop_front();
-            } else {
-                break;
+        // Use checked_sub to avoid panic on Windows when program uptime < 60s
+        if let Some(cutoff) = Instant::now().checked_sub(Duration::from_secs(60)) {
+            while let Some((timestamp, _)) = self.usage_history.front() {
+                if *timestamp < cutoff {
+                    self.usage_history.pop_front();
+                } else {
+                    break;
+                }
             }
         }
     }

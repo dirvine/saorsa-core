@@ -278,8 +278,10 @@ impl ChurnDetector {
     }
 
     fn update_rate(&mut self) {
-        let cutoff = Instant::now() - self.window;
-        self.events.retain(|(time, _)| *time > cutoff);
+        // Use checked_sub to avoid panic on Windows when program uptime < window
+        if let Some(cutoff) = Instant::now().checked_sub(self.window) {
+            self.events.retain(|(time, _)| *time > cutoff);
+        }
 
         let joins = self
             .events
@@ -639,9 +641,11 @@ impl AdaptiveGossipSub {
 
     /// Clean old seen messages
     async fn clean_seen_messages(&self) {
-        let cutoff = Instant::now() - Duration::from_secs(300); // 5 minutes
-        let mut seen = self.seen_messages.write().await;
-        seen.retain(|_, timestamp| *timestamp > cutoff);
+        // Use checked_sub to avoid panic on Windows when program uptime < 5 minutes
+        if let Some(cutoff) = Instant::now().checked_sub(Duration::from_secs(300)) {
+            let mut seen = self.seen_messages.write().await;
+            seen.retain(|_, timestamp| *timestamp > cutoff);
+        }
     }
 
     /// Compute message ID

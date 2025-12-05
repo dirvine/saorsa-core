@@ -144,6 +144,9 @@ impl RspsDhtStorage {
             root_cid, provider
         );
 
+        // Register RSPS with the cache for admission control
+        self.cache.register_rsps(rsps.clone());
+
         // Create provider record
         let record = ProviderRecord {
             provider: provider.clone(),
