@@ -791,14 +791,15 @@ impl RateLimiter {
     pub async fn check_join_rate(&self) -> bool {
         let mut join_requests = self.join_requests.write().await;
         let now = Instant::now();
-        let hour_ago = now - Duration::from_secs(3600);
 
-        // Remove old entries
-        while let Some(front) = join_requests.front() {
-            if *front < hour_ago {
-                join_requests.pop_front();
-            } else {
-                break;
+        // Remove old entries (use checked_sub for Windows compatibility)
+        if let Some(hour_ago) = now.checked_sub(Duration::from_secs(3600)) {
+            while let Some(front) = join_requests.front() {
+                if *front < hour_ago {
+                    join_requests.pop_front();
+                } else {
+                    break;
+                }
             }
         }
 

@@ -802,7 +802,10 @@ mod tests {
         let initial_trust = trust1.get(&node2).copied().unwrap_or(0.0);
 
         // Simulate time passing by manually updating the timestamp
-        *engine.last_update.write().await = Instant::now() - Duration::from_secs(3600);
+        // Use checked_sub for Windows compatibility (process uptime may be < 1 hour)
+        if let Some(past_time) = Instant::now().checked_sub(Duration::from_secs(3600)) {
+            *engine.last_update.write().await = past_time;
+        }
 
         // Recompute to apply decay and take second snapshot (also with timeout)
         let _ = tokio::time::timeout(
