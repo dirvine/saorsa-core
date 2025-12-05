@@ -132,7 +132,7 @@ use std::time::Duration;
 /// Default cache configuration
 pub const DEFAULT_MAX_CONTACTS: usize = 30_000;
 /// Default directory for storing bootstrap cache files
-pub const DEFAULT_CACHE_DIR: &str = ".cache/p2p_foundation";
+pub const DEFAULT_CACHE_DIR: &str = ".cache/saorsa";
 /// Default interval for merging instance cache files
 pub const DEFAULT_MERGE_INTERVAL: Duration = Duration::from_secs(30);
 /// Default interval for cleaning up stale contacts (1 hour)

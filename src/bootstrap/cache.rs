@@ -52,7 +52,7 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            cache_dir: PathBuf::from(".cache/p2p_foundation"),
+            cache_dir: PathBuf::from(".cache/saorsa"),
             max_contacts: crate::bootstrap::DEFAULT_MAX_CONTACTS,
             merge_interval: crate::bootstrap::DEFAULT_MERGE_INTERVAL,
             cleanup_interval: crate::bootstrap::DEFAULT_CLEANUP_INTERVAL,
