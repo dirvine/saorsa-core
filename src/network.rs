@@ -2065,17 +2065,73 @@ impl P2PNode {
     async fn connect_bootstrap_peers(&self) -> Result<()> {
         let mut bootstrap_contacts = Vec::new();
         let mut used_cache = false;
+        let mut seen_addresses = std::collections::HashSet::new();
 
-        // Try to get peers from bootstrap cache first
+        // CLI-provided bootstrap peers take priority - always include them first
+        let cli_bootstrap_peers = if !self.config.bootstrap_peers_str.is_empty() {
+            self.config.bootstrap_peers_str.clone()
+        } else {
+            // Convert Multiaddr to strings
+            self.config
+                .bootstrap_peers
+                .iter()
+                .map(|addr| addr.to_string())
+                .collect::<Vec<_>>()
+        };
+
+        if !cli_bootstrap_peers.is_empty() {
+            info!(
+                "Using {} CLI-provided bootstrap peers (priority)",
+                cli_bootstrap_peers.len()
+            );
+            for addr in &cli_bootstrap_peers {
+                if let Ok(socket_addr) = addr.parse::<std::net::SocketAddr>() {
+                    seen_addresses.insert(socket_addr);
+                    let contact = ContactEntry::new(
+                        format!("cli_peer_{}", addr.chars().take(8).collect::<String>()),
+                        vec![socket_addr],
+                    );
+                    bootstrap_contacts.push(contact);
+                } else {
+                    warn!("Invalid bootstrap address format: {}", addr);
+                }
+            }
+        }
+
+        // Supplement with cached bootstrap peers (after CLI peers)
         if let Some(ref bootstrap_manager) = self.bootstrap_manager {
             let manager = bootstrap_manager.read().await;
             match manager.get_bootstrap_peers(20).await {
                 // Try to get top 20 quality peers
                 Ok(contacts) => {
                     if !contacts.is_empty() {
-                        info!("Using {} cached bootstrap peers", contacts.len());
-                        bootstrap_contacts = contacts;
-                        used_cache = true;
+                        let mut added_from_cache = 0;
+                        for contact in contacts {
+                            // Only add if we haven't already added this address from CLI
+                            let new_addresses: Vec<_> = contact
+                                .addresses
+                                .iter()
+                                .filter(|addr| !seen_addresses.contains(addr))
+                                .copied()
+                                .collect();
+
+                            if !new_addresses.is_empty() {
+                                for addr in &new_addresses {
+                                    seen_addresses.insert(*addr);
+                                }
+                                let mut contact = contact.clone();
+                                contact.addresses = new_addresses;
+                                bootstrap_contacts.push(contact);
+                                added_from_cache += 1;
+                            }
+                        }
+                        if added_from_cache > 0 {
+                            info!(
+                                "Added {} cached bootstrap peers (supplementing CLI peers)",
+                                added_from_cache
+                            );
+                            used_cache = true;
+                        }
                     }
                 }
                 Err(e) => {
@@ -2084,38 +2140,9 @@ impl P2PNode {
             }
         }
 
-        // Fallback to configured bootstrap peers if no cache or cache is empty
         if bootstrap_contacts.is_empty() {
-            let bootstrap_peers = if !self.config.bootstrap_peers_str.is_empty() {
-                &self.config.bootstrap_peers_str
-            } else {
-                // Convert Multiaddr to strings for fallback
-                &self
-                    .config
-                    .bootstrap_peers
-                    .iter()
-                    .map(|addr| addr.to_string())
-                    .collect::<Vec<_>>()
-            };
-
-            if bootstrap_peers.is_empty() {
-                info!("No bootstrap peers configured and no cached peers available");
-                return Ok(());
-            }
-
-            info!("Using {} configured bootstrap peers", bootstrap_peers.len());
-
-            for addr in bootstrap_peers {
-                if let Ok(socket_addr) = addr.parse::<std::net::SocketAddr>() {
-                    let contact = ContactEntry::new(
-                        format!("unknown_peer_{}", addr.chars().take(8).collect::<String>()),
-                        vec![socket_addr],
-                    );
-                    bootstrap_contacts.push(contact);
-                } else {
-                    warn!("Invalid bootstrap address format: {}", addr);
-                }
-            }
+            info!("No bootstrap peers configured and no cached peers available");
+            return Ok(());
         }
 
         // Connect to bootstrap peers
