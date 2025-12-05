@@ -212,7 +212,10 @@ impl RollbackManager {
     }
 
     /// Get backup for a specific version.
-    pub async fn get_backup_for_version(&self, version: &str) -> Result<Option<BackupMetadata>, UpgradeError> {
+    pub async fn get_backup_for_version(
+        &self,
+        version: &str,
+    ) -> Result<Option<BackupMetadata>, UpgradeError> {
         let backups = self.load_metadata().await?;
         Ok(backups.into_iter().find(|b| b.version == version))
     }
@@ -270,7 +273,9 @@ impl RollbackManager {
         // Write the restored binary
         tokio::fs::write(&original_path, &contents)
             .await
-            .map_err(|e| UpgradeError::Rollback(format!("failed to restore binary: {}", e).into()))?;
+            .map_err(|e| {
+                UpgradeError::Rollback(format!("failed to restore binary: {}", e).into())
+            })?;
 
         // Set executable permissions on Unix
         #[cfg(unix)]
@@ -287,10 +292,9 @@ impl RollbackManager {
 
     /// Rollback to a specific version.
     pub async fn rollback_to_version(&self, version: &str) -> Result<BackupMetadata, UpgradeError> {
-        let backup = self
-            .get_backup_for_version(version)
-            .await?
-            .ok_or_else(|| UpgradeError::NoRollback(format!("no backup for version {}", version).into()))?;
+        let backup = self.get_backup_for_version(version).await?.ok_or_else(|| {
+            UpgradeError::NoRollback(format!("no backup for version {}", version).into())
+        })?;
 
         let backup_path = self.backup_dir.join(&backup.backup_filename);
 
@@ -313,7 +317,9 @@ impl RollbackManager {
         let original_path = PathBuf::from(&backup.original_path);
         tokio::fs::write(&original_path, &contents)
             .await
-            .map_err(|e| UpgradeError::Rollback(format!("failed to restore binary: {}", e).into()))?;
+            .map_err(|e| {
+                UpgradeError::Rollback(format!("failed to restore binary: {}", e).into())
+            })?;
 
         // Set executable permissions on Unix
         #[cfg(unix)]
@@ -443,7 +449,9 @@ mod tests {
 
         // Create a test binary
         let binary_path = temp_dir.path().join("test-binary");
-        tokio::fs::write(&binary_path, b"binary content").await.unwrap();
+        tokio::fs::write(&binary_path, b"binary content")
+            .await
+            .unwrap();
 
         // Create backup
         let backup = manager
@@ -487,7 +495,9 @@ mod tests {
         for i in 1..=5 {
             let version = format!("1.0.{}", i);
             let content = format!("version {}", i);
-            tokio::fs::write(&binary_path, content.as_bytes()).await.unwrap();
+            tokio::fs::write(&binary_path, content.as_bytes())
+                .await
+                .unwrap();
 
             manager
                 .create_backup(&binary_path, &version, Platform::LinuxX64)

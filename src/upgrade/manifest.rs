@@ -69,8 +69,8 @@ impl UpdateManifest {
         let mut manifest_for_signing = self.clone();
         manifest_for_signing.signature = String::new();
 
-        let json =
-            serde_json::to_string(&manifest_for_signing).map_err(|e| UpgradeError::manifest_parse(e.to_string()))?;
+        let json = serde_json::to_string(&manifest_for_signing)
+            .map_err(|e| UpgradeError::manifest_parse(e.to_string()))?;
 
         Ok(json.into_bytes())
     }
@@ -274,7 +274,12 @@ pub struct PlatformBinary {
 impl PlatformBinary {
     /// Create a new platform binary entry.
     #[must_use]
-    pub fn new(url: impl Into<String>, sha256: impl Into<String>, signature: impl Into<String>, size: u64) -> Self {
+    pub fn new(
+        url: impl Into<String>,
+        sha256: impl Into<String>,
+        signature: impl Into<String>,
+        size: u64,
+    ) -> Self {
         Self {
             url: url.into(),
             sha256: sha256.into(),
@@ -385,12 +390,7 @@ mod tests {
 
     #[test]
     fn test_platform_binary() {
-        let binary = PlatformBinary::new(
-            "https://example.com/binary",
-            "abc123",
-            "sig456",
-            1000,
-        );
+        let binary = PlatformBinary::new("https://example.com/binary", "abc123", "sig456", 1000);
 
         assert_eq!(binary.url, "https://example.com/binary");
         assert_eq!(binary.sha256, "abc123");

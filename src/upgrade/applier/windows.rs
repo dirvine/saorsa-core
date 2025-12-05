@@ -110,9 +110,9 @@ impl UpdateApplier for WindowsApplier {
 
         // Step 1: Rename current binary to .old
         if current.exists() {
-            tokio::fs::rename(current, &old_binary)
-                .await
-                .map_err(|e| UpgradeError::Apply(format!("failed to rename current binary: {}", e).into()))?;
+            tokio::fs::rename(current, &old_binary).await.map_err(|e| {
+                UpgradeError::Apply(format!("failed to rename current binary: {}", e).into())
+            })?;
         }
 
         // Step 2: Copy new binary to current location
@@ -167,8 +167,9 @@ impl UpdateApplier for WindowsApplier {
             cmd.args(&config.restart_args);
             cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 
-            cmd.spawn()
-                .map_err(|e| UpgradeError::Apply(format!("failed to spawn new process: {}", e).into()))?;
+            cmd.spawn().map_err(|e| {
+                UpgradeError::Apply(format!("failed to spawn new process: {}", e).into())
+            })?;
 
             // Exit current process
             std::process::exit(0);
@@ -177,7 +178,9 @@ impl UpdateApplier for WindowsApplier {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = config;
-            Err(UpgradeError::platform("Windows restart not available on this platform"))
+            Err(UpgradeError::platform(
+                "Windows restart not available on this platform",
+            ))
         }
     }
 }

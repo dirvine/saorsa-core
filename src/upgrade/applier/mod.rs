@@ -134,9 +134,7 @@ pub trait UpdateApplier: Send + Sync {
     async fn validate_staged(&self, staged: &StagedUpdate) -> Result<(), UpgradeError> {
         // Check binary exists
         if !staged.exists() {
-            return Err(UpgradeError::Apply(
-                "staged binary does not exist".into(),
-            ));
+            return Err(UpgradeError::Apply("staged binary does not exist".into()));
         }
 
         // Verify checksum
@@ -159,21 +157,16 @@ pub fn create_applier() -> Box<dyn UpdateApplier> {
     let platform = Platform::current();
 
     match platform {
-        Platform::WindowsX64 | Platform::WindowsArm64 => {
-            Box::new(WindowsApplier::new())
-        }
-        Platform::MacOsX64 | Platform::MacOsArm64 => {
-            Box::new(MacOsApplier::new())
-        }
-        Platform::LinuxX64 | Platform::LinuxArm64 => {
-            Box::new(LinuxApplier::new())
-        }
+        Platform::WindowsX64 | Platform::WindowsArm64 => Box::new(WindowsApplier::new()),
+        Platform::MacOsX64 | Platform::MacOsArm64 => Box::new(MacOsApplier::new()),
+        Platform::LinuxX64 | Platform::LinuxArm64 => Box::new(LinuxApplier::new()),
     }
 }
 
 /// Get the path to the current executable.
 pub fn current_exe() -> Result<PathBuf, UpgradeError> {
-    std::env::current_exe().map_err(|e| UpgradeError::platform(format!("failed to get current exe: {}", e)))
+    std::env::current_exe()
+        .map_err(|e| UpgradeError::platform(format!("failed to get current exe: {}", e)))
 }
 
 #[cfg(test)]

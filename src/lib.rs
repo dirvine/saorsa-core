@@ -278,13 +278,13 @@ pub use rate_limit::{
 };
 
 // Security and anti-Sybil exports (includes testnet configurations)
-pub use security::{
-    DiversityStats, GeoInfo, GeoProvider, IPAnalysis, IPDiversityConfig, IPDiversityEnforcer,
-    IPv4NodeID, IPv6NodeID, NodeReputation, ReputationManager, StubGeoProvider,
-};
 pub use dht::node_age_verifier::{
     AgeVerificationResult, NodeAgeCategory, NodeAgeConfig, NodeAgeRecord, NodeAgeStats,
     NodeAgeVerifier, OperationType,
+};
+pub use security::{
+    DiversityStats, GeoInfo, GeoProvider, IPAnalysis, IPDiversityConfig, IPDiversityEnforcer,
+    IPv4NodeID, IPv6NodeID, NodeReputation, ReputationManager, StubGeoProvider,
 };
 
 // Enhanced identity removed

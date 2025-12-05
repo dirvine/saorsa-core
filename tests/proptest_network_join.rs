@@ -1,11 +1,13 @@
 use proptest::prelude::*;
-use saorsa_core::identity::restart::{RestartManager, RestartConfig};
 use saorsa_core::identity::RegenerationDecision;
-use saorsa_core::identity::rejection::{RejectionInfo, RejectionReason, TargetRegion, KeyspaceRegion};
-use saorsa_core::identity::node_identity::NodeIdentity;
-use saorsa_core::identity::targeting::TargetingConfig;
 use saorsa_core::identity::fitness::FitnessConfig;
+use saorsa_core::identity::node_identity::NodeIdentity;
 use saorsa_core::identity::regeneration::RegenerationConfig;
+use saorsa_core::identity::rejection::{
+    KeyspaceRegion, RejectionInfo, RejectionReason, TargetRegion,
+};
+use saorsa_core::identity::restart::{RestartConfig, RestartManager};
+use saorsa_core::identity::targeting::TargetingConfig;
 use std::sync::Arc;
 use tempfile::tempdir;
 
@@ -21,7 +23,7 @@ fn create_test_manager() -> Arc<RestartManager> {
         event_channel_capacity: 100,
         persist_on_shutdown: false,
     };
-    
+
     let identity = NodeIdentity::generate().unwrap();
     RestartManager::new(config, identity).unwrap()
 }
@@ -36,15 +38,15 @@ proptest! {
         suggestion_confidence in 0.0f64..1.0f64
     ) {
         let manager = create_test_manager();
-        
+
         // Construct RejectionReason from byte (simulating network deserialization)
         let reason = RejectionReason::from_byte(reason_byte);
-        
+
         // Construct RejectionInfo
         let mut info = RejectionInfo::new(reason)
             .with_message(msg)
             .with_rejecting_node("test_peer");
-            
+
         if has_suggestion {
             let region = KeyspaceRegion {
                 prefix: suggestion_prefix,
@@ -59,14 +61,14 @@ proptest! {
             };
             info = info.with_suggested_target(target);
         }
-        
+
         // Handle rejection
         let decision = manager.handle_rejection(info);
-        
+
         // Invariants:
         // 1. Should never panic
         // 2. Decision should be consistent with reason (e.g. Blocklisted -> Blocked)
-        
+
         match reason {
             RejectionReason::Blocklisted => assert!(matches!(decision, RegenerationDecision::Blocked { .. })),
             RejectionReason::GeoIpPolicy => {

@@ -50,10 +50,7 @@ pub enum UpgradeError {
 
     /// Checksum verification failed.
     #[error("checksum mismatch: expected {expected}, got {actual}")]
-    ChecksumMismatch {
-        expected: String,
-        actual: String,
-    },
+    ChecksumMismatch { expected: String, actual: String },
 
     /// Signature verification failed.
     #[error("signature verification failed: {0}")]
@@ -205,11 +202,13 @@ mod tests {
     #[test]
     fn test_is_security_issue() {
         assert!(UpgradeError::SignatureVerification("invalid".into()).is_security_issue());
-        assert!(UpgradeError::ChecksumMismatch {
-            expected: "a".to_string(),
-            actual: "b".to_string()
-        }
-        .is_security_issue());
+        assert!(
+            UpgradeError::ChecksumMismatch {
+                expected: "a".to_string(),
+                actual: "b".to_string()
+            }
+            .is_security_issue()
+        );
         assert!(!UpgradeError::download("timeout").is_security_issue());
     }
 }

@@ -370,9 +370,7 @@ impl FitnessMonitor {
     fn calculate_stability(&self) -> f64 {
         let history = self.membership_history.read();
         let now = Instant::now();
-        let window_start = now
-            .checked_sub(self.config.stability_window)
-            .unwrap_or(now);
+        let window_start = now.checked_sub(self.config.stability_window).unwrap_or(now);
 
         // Count events in window
         let recent_events: Vec<_> = history
@@ -431,9 +429,7 @@ impl FitnessMonitor {
         let recent_churn = {
             let history = self.membership_history.read();
             let now = Instant::now();
-            let window_start = now
-                .checked_sub(self.config.stability_window)
-                .unwrap_or(now);
+            let window_start = now.checked_sub(self.config.stability_window).unwrap_or(now);
 
             history
                 .iter()
@@ -722,9 +718,7 @@ mod tests {
         let result = FitnessMonitorBuilder::new().build();
         assert!(result.is_none());
 
-        let result = FitnessMonitorBuilder::new()
-            .node_id(test_node_id())
-            .build();
+        let result = FitnessMonitorBuilder::new().node_id(test_node_id()).build();
         assert!(result.is_some());
     }
 

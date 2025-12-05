@@ -83,7 +83,9 @@ impl MacOsApplier {
 
             // xattr returns error if attribute doesn't exist, which is fine
             if !status.success() && status.code() != Some(1) {
-                return Err(UpgradeError::platform("failed to clear quarantine attribute"));
+                return Err(UpgradeError::platform(
+                    "failed to clear quarantine attribute",
+                ));
             }
         }
 
@@ -221,7 +223,9 @@ impl UpdateApplier for MacOsApplier {
         #[cfg(not(unix))]
         {
             let _ = config;
-            Err(UpgradeError::platform("Unix restart not available on this platform"))
+            Err(UpgradeError::platform(
+                "Unix restart not available on this platform",
+            ))
         }
     }
 }
@@ -252,7 +256,10 @@ mod tests {
         let applier = MacOsApplier::new();
         let platform = applier.platform();
 
-        assert!(matches!(platform, Platform::MacOsX64 | Platform::MacOsArm64));
+        assert!(matches!(
+            platform,
+            Platform::MacOsX64 | Platform::MacOsArm64
+        ));
     }
 
     #[test]

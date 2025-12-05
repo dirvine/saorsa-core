@@ -136,10 +136,7 @@ impl RejectedPrefix {
         }
 
         // Check remaining bits
-        if remaining_bits > 0
-            && full_bytes < self.prefix.len()
-            && full_bytes < node_bytes.len()
-        {
+        if remaining_bits > 0 && full_bytes < self.prefix.len() && full_bytes < node_bytes.len() {
             let mask = 0xFF << (8 - remaining_bits);
             if (self.prefix[full_bytes] & mask) != (node_bytes[full_bytes] & mask) {
                 return false;
@@ -167,10 +164,7 @@ impl RejectedPrefix {
         }
 
         // Count differing bits in partial byte
-        if remaining_bits > 0
-            && full_bytes < self.prefix.len()
-            && full_bytes < node_bytes.len()
-        {
+        if remaining_bits > 0 && full_bytes < self.prefix.len() && full_bytes < node_bytes.len() {
             let mask = 0xFF << (8 - remaining_bits);
             let xor = (self.prefix[full_bytes] ^ node_bytes[full_bytes]) & mask;
             distance += xor.count_ones();
@@ -427,10 +421,7 @@ impl IdentityTargeter {
         }
 
         // Count differing bits in partial byte
-        if remaining_bits > 0
-            && full_bytes < region.prefix.len()
-            && full_bytes < node_bytes.len()
-        {
+        if remaining_bits > 0 && full_bytes < region.prefix.len() && full_bytes < node_bytes.len() {
             let mask = 0xFF << (8 - remaining_bits);
             let xor = (region.prefix[full_bytes] ^ node_bytes[full_bytes]) & mask;
             distance += xor.count_ones();
@@ -566,11 +557,7 @@ impl IdentityTargeterBuilder {
 
         // Add initial rejected prefixes
         for rejected in self.initial_rejected {
-            targeter
-                .state
-                .write()
-                .rejected_prefixes
-                .insert(rejected);
+            targeter.state.write().rejected_prefixes.insert(rejected);
         }
 
         targeter

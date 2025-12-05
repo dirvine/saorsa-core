@@ -272,8 +272,7 @@ impl RestartManager {
         let fitness_monitor =
             Arc::new(FitnessMonitor::new(config.fitness.clone(), node_id.clone()));
 
-        let regeneration_trigger =
-            Arc::new(RegenerationTrigger::new(config.regeneration.clone()));
+        let regeneration_trigger = Arc::new(RegenerationTrigger::new(config.regeneration.clone()));
 
         let identity_targeter = Arc::new(IdentityTargeter::new(config.targeting.clone()));
 
@@ -370,7 +369,8 @@ impl RestartManager {
 
         // If decision is to proceed, trigger regeneration immediately
         if decision.should_proceed() {
-            let reason = crate::identity::regeneration::RegenerationReason::Rejection(rejection.reason);
+            let reason =
+                crate::identity::regeneration::RegenerationReason::Rejection(rejection.reason);
             if let Err(e) = self.regenerate(reason) {
                 tracing::warn!("Automatic regeneration after rejection failed: {}", e);
             }
@@ -389,11 +389,13 @@ impl RestartManager {
         let target = self.persistent_state.read().last_target.clone();
 
         // Emit regeneration triggered event
-        let _ = self.event_tx.send(IdentitySystemEvent::RegenerationTriggered {
-            reason: reason.clone(),
-            old_node_id: old_node_id.clone(),
-            target: target.clone(),
-        });
+        let _ = self
+            .event_tx
+            .send(IdentitySystemEvent::RegenerationTriggered {
+                reason: reason.clone(),
+                old_node_id: old_node_id.clone(),
+                target: target.clone(),
+            });
 
         // Record attempt
         self.regeneration_trigger
@@ -475,7 +477,9 @@ impl RestartManager {
         let manager = Arc::clone(self);
         *manager.monitoring_active.write() = true;
 
-        let _ = manager.event_tx.send(IdentitySystemEvent::MonitoringStarted);
+        let _ = manager
+            .event_tx
+            .send(IdentitySystemEvent::MonitoringStarted);
 
         tokio::spawn(async move {
             let mut last_verdict = FitnessVerdict::Healthy;
@@ -513,9 +517,11 @@ impl RestartManager {
                 }
             }
 
-            let _ = manager.event_tx.send(IdentitySystemEvent::MonitoringStopped {
-                reason: "normal shutdown".to_string(),
-            });
+            let _ = manager
+                .event_tx
+                .send(IdentitySystemEvent::MonitoringStopped {
+                    reason: "normal shutdown".to_string(),
+                });
         })
     }
 

@@ -66,7 +66,7 @@ pub mod verifier;
 
 use async_trait::async_trait;
 
-pub use applier::{create_applier, ApplierConfig, ApplyResult, UpdateApplier};
+pub use applier::{ApplierConfig, ApplyResult, UpdateApplier, create_applier};
 pub use config::{PinnedKey, ReleaseChannel, UpdateConfig, UpdateConfigBuilder, UpdatePolicy};
 pub use downloader::{DownloadProgress, Downloader, DownloaderConfig};
 pub use error::UpgradeError;

@@ -133,12 +133,12 @@ impl IPDiversityConfig {
     #[must_use]
     pub fn testnet() -> Self {
         Self {
-            max_nodes_per_64: 100,   // Allow many nodes per /64 subnet
-            max_nodes_per_48: 500,   // Allow many nodes per /48 allocation
-            max_nodes_per_32: 1000,  // Allow many nodes per /32 region
-            max_nodes_per_asn: 5000, // Allow many nodes from same ASN (e.g., Digital Ocean)
+            max_nodes_per_64: 100,           // Allow many nodes per /64 subnet
+            max_nodes_per_48: 500,           // Allow many nodes per /48 allocation
+            max_nodes_per_32: 1000,          // Allow many nodes per /32 region
+            max_nodes_per_asn: 5000,         // Allow many nodes from same ASN (e.g., Digital Ocean)
             enable_geolocation_check: false, // Disable geo checks for testing
-            min_geographic_diversity: 1, // Single region is acceptable for testing
+            min_geographic_diversity: 1,     // Single region is acceptable for testing
         }
     }
 

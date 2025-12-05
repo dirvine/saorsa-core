@@ -35,10 +35,7 @@ impl SignatureVerifier {
     /// Create a new verifier with the given pinned keys.
     #[must_use]
     pub fn new(keys: Vec<PinnedKey>) -> Self {
-        let keys = keys
-            .into_iter()
-            .map(|k| (k.key_id.clone(), k))
-            .collect();
+        let keys = keys.into_iter().map(|k| (k.key_id.clone(), k)).collect();
 
         Self { keys }
     }
@@ -81,30 +78,41 @@ impl SignatureVerifier {
         }
 
         // Decode the public key from base64
-        let public_key_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &key.public_key,
-        )
-        .map_err(|e| UpgradeError::SignatureVerification(format!("invalid public key encoding: {}", e).into()))?;
+        let public_key_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key.public_key)
+                .map_err(|e| {
+                    UpgradeError::SignatureVerification(
+                        format!("invalid public key encoding: {}", e).into(),
+                    )
+                })?;
 
         // Decode signature from base64
         let signature_bytes = base64::Engine::decode(
             &base64::engine::general_purpose::STANDARD,
             signature,
         )
-        .map_err(|e| UpgradeError::SignatureVerification(format!("invalid signature encoding: {}", e).into()))?;
+        .map_err(|e| {
+            UpgradeError::SignatureVerification(format!("invalid signature encoding: {}", e).into())
+        })?;
 
         // Use the quantum_crypto module for ML-DSA verification
-        let public_key =
-            crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(&public_key_bytes)
-                .map_err(|e| UpgradeError::SignatureVerification(format!("invalid public key: {:?}", e).into()))?;
+        let public_key = crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey::from_bytes(
+            &public_key_bytes,
+        )
+        .map_err(|e| {
+            UpgradeError::SignatureVerification(format!("invalid public key: {:?}", e).into())
+        })?;
 
-        let sig =
-            crate::quantum_crypto::ant_quic_integration::MlDsaSignature::from_bytes(&signature_bytes)
-                .map_err(|e| UpgradeError::SignatureVerification(format!("invalid signature: {:?}", e).into()))?;
+        let sig = crate::quantum_crypto::ant_quic_integration::MlDsaSignature::from_bytes(
+            &signature_bytes,
+        )
+        .map_err(|e| {
+            UpgradeError::SignatureVerification(format!("invalid signature: {:?}", e).into())
+        })?;
 
-        crate::quantum_crypto::ml_dsa_verify(&public_key, message, &sig)
-            .map_err(|e| UpgradeError::SignatureVerification(format!("verification error: {:?}", e).into()))
+        crate::quantum_crypto::ml_dsa_verify(&public_key, message, &sig).map_err(|e| {
+            UpgradeError::SignatureVerification(format!("verification error: {:?}", e).into())
+        })
     }
 
     /// Verify a file's checksum and signature.

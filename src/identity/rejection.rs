@@ -295,10 +295,7 @@ impl KeyspaceRegion {
         }
 
         // Check remaining bits
-        if remaining_bits > 0
-            && full_bytes < self.prefix.len()
-            && full_bytes < node_bytes.len()
-        {
+        if remaining_bits > 0 && full_bytes < self.prefix.len() && full_bytes < node_bytes.len() {
             let mask = 0xFF << (8 - remaining_bits);
             if (self.prefix[full_bytes] & mask) != (node_bytes[full_bytes] & mask) {
                 return false;
@@ -533,7 +530,10 @@ impl RejectionHistory {
     /// Count rejections by reason.
     #[must_use]
     pub fn count_by_reason(&self, reason: RejectionReason) -> usize {
-        self.rejections.iter().filter(|r| r.reason == reason).count()
+        self.rejections
+            .iter()
+            .filter(|r| r.reason == reason)
+            .count()
     }
 
     /// Check if there are too many recent rejections (potential loop detection).
@@ -627,8 +627,8 @@ mod tests {
             .with_regeneration_recommended(true);
         assert!(info1.should_regenerate());
 
-        let info2 = RejectionInfo::new(RejectionReason::Subnet64Limit)
-            .with_regeneration_recommended(true);
+        let info2 =
+            RejectionInfo::new(RejectionReason::Subnet64Limit).with_regeneration_recommended(true);
         // Subnet limit can't be helped by regeneration
         assert!(!info2.should_regenerate());
 

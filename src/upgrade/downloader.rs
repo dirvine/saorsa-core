@@ -19,8 +19,8 @@
 //! HTTP downloader for update binaries with resume support.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
@@ -292,13 +292,15 @@ impl Downloader {
                 return Err(UpgradeError::Cancelled("download cancelled".into()));
             }
 
-            let chunk = chunk_result.map_err(|e| UpgradeError::download(format!("stream error: {}", e)))?;
+            let chunk =
+                chunk_result.map_err(|e| UpgradeError::download(format!("stream error: {}", e)))?;
 
             file.write_all(&chunk)
                 .await
                 .map_err(|e| UpgradeError::io(format!("write error: {}", e)))?;
 
-            let current = downloaded.fetch_add(chunk.len() as u64, Ordering::Relaxed) + chunk.len() as u64;
+            let current =
+                downloaded.fetch_add(chunk.len() as u64, Ordering::Relaxed) + chunk.len() as u64;
 
             // Report progress
             if let Some(ref callback) = progress {

@@ -2,7 +2,9 @@
 use super::transport::{DeliveryReceipt, DeliveryStatus, ReceivedMessage};
 use super::types::*;
 use super::{DhtClient, KeyExchange, MessageStore, MessageTransport};
+use crate::control::ControlMessageHandler;
 use crate::identity::FourWordAddress;
+use crate::identity::restart::RestartManager;
 use crate::messaging::user_handle::UserHandle;
 use anyhow::Result;
 use chrono::{Duration, Utc};
@@ -10,8 +12,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
 use tracing::{info, warn};
-use crate::control::ControlMessageHandler;
-use crate::identity::restart::RestartManager;
 
 /// Resolve channel members to their FourWordAddress recipients
 /// This maps channel member user_ids to their FourWordAddress representation

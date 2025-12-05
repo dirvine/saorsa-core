@@ -126,12 +126,12 @@ impl NodeAgeConfig {
     #[must_use]
     pub fn testnet() -> Self {
         Self {
-            min_replication_age_secs: 0,      // No minimum age for replication
-            min_critical_ops_age_secs: 0,     // No minimum age for critical ops
-            enforce_age_requirements: false,  // Disable age enforcement entirely
-            trust_bonus_per_day: 0.0,         // No trust bonus from age
-            max_age_trust_bonus: 0.0,         // No maximum bonus
-            veteran_age_secs: 0,              // Instant veteran status
+            min_replication_age_secs: 0,     // No minimum age for replication
+            min_critical_ops_age_secs: 0,    // No minimum age for critical ops
+            enforce_age_requirements: false, // Disable age enforcement entirely
+            trust_bonus_per_day: 0.0,        // No trust bonus from age
+            max_age_trust_bonus: 0.0,        // No maximum bonus
+            veteran_age_secs: 0,             // Instant veteran status
         }
     }
 

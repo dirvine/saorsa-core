@@ -16,13 +16,13 @@
 //! This module provides core networking functionality for the P2P Foundation.
 //! It handles peer connections, network events, and node lifecycle management.
 
+use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
 use crate::control::RejectionMessage;
 use crate::dht::DHT;
 use crate::error::{NetworkError, P2PError, P2pResult as Result};
 use crate::identity::rejection::RejectionReason;
-use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
@@ -1693,7 +1693,8 @@ impl P2PNode {
                                 std::net::IpAddr::V4(v4) => {
                                     // Check if it's a hosting provider or VPN
                                     if let Some(asn) = geo_provider.lookup_ipv4_asn(v4) {
-                                        geo_provider.is_hosting_asn(asn) || geo_provider.is_vpn_asn(asn)
+                                        geo_provider.is_hosting_asn(asn)
+                                            || geo_provider.is_vpn_asn(asn)
                                     } else {
                                         false
                                     }
@@ -1713,8 +1714,9 @@ impl P2PNode {
                                 // Create rejection message
                                 let rejection = RejectionMessage {
                                     reason: RejectionReason::GeoIpPolicy,
-                                    message: "Connection rejected: Hosting/VPN providers not allowed"
-                                        .to_string(),
+                                    message:
+                                        "Connection rejected: Hosting/VPN providers not allowed"
+                                            .to_string(),
                                     suggested_target: None, // Could suggest a different region if we knew more
                                 };
 
@@ -1737,10 +1739,8 @@ impl P2PNode {
                                         // Send rejection message
                                         // We use send_to_peer directly on dual_node to avoid the checks in P2PNode::send_message
                                         // which might fail if we haven't fully registered the peer yet
-                                        let _ = dual_node
-                                            .send_to_peer(&peer_id, &msg_bytes)
-                                            .await;
-                                        
+                                        let _ = dual_node.send_to_peer(&peer_id, &msg_bytes).await;
+
                                         // Give it a moment to send before disconnecting?
                                         // ant-quic might handle this, but a small yield is safe
                                         tokio::task::yield_now().await;

@@ -126,7 +126,13 @@ impl LinuxApplier {
 
         // Try to get the service name from the unit file
         let output = tokio::process::Command::new("systemctl")
-            .args(["--user", "show", "--property=Id", "--value", "saorsa.service"])
+            .args([
+                "--user",
+                "show",
+                "--property=Id",
+                "--value",
+                "saorsa.service",
+            ])
             .output()
             .await
             .ok()?;
@@ -291,7 +297,10 @@ mod tests {
         let applier = LinuxApplier::new();
         let platform = applier.platform();
 
-        assert!(matches!(platform, Platform::LinuxX64 | Platform::LinuxArm64));
+        assert!(matches!(
+            platform,
+            Platform::LinuxX64 | Platform::LinuxArm64
+        ));
     }
 
     #[test]

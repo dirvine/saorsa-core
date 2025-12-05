@@ -52,10 +52,12 @@ pub use secure_node_identity::SecureNodeIdentity;
 // Identity restart system exports
 pub use fitness::{FitnessConfig, FitnessMetrics, FitnessMonitor, FitnessVerdict};
 pub use regeneration::{
-    BlockReason, RegenerationConfig, RegenerationDecision, RegenerationReason,
-    RegenerationTrigger, RegenerationUrgency,
+    BlockReason, RegenerationConfig, RegenerationDecision, RegenerationReason, RegenerationTrigger,
+    RegenerationUrgency,
 };
-pub use rejection::{KeyspaceRegion, RejectionHistory, RejectionInfo, RejectionReason, TargetRegion};
+pub use rejection::{
+    KeyspaceRegion, RejectionHistory, RejectionInfo, RejectionReason, TargetRegion,
+};
 pub use restart::{
     IdentitySystemEvent, PersistentState, RestartConfig, RestartManager, RestartManagerStatus,
 };

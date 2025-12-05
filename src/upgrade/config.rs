@@ -205,7 +205,7 @@ impl Default for UpdateConfig {
             staging_dir,
             backup_dir,
             signing_keys: Vec::new(),
-            max_download_size: 500 * 1024 * 1024, // 500 MB
+            max_download_size: 500 * 1024 * 1024,       // 500 MB
             download_timeout: Duration::from_secs(300), // 5 minutes
             verify_signatures: true,
             max_retries: 3,

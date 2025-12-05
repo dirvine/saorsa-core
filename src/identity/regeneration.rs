@@ -209,7 +209,11 @@ impl fmt::Display for BlockReason {
             Self::Blocklisted => write!(f, "node is blocklisted"),
             Self::CircuitBreakerOpen { .. } => write!(f, "circuit breaker open"),
             Self::BackoffActive { remaining } => {
-                write!(f, "backoff active ({:.0}s remaining)", remaining.as_secs_f64())
+                write!(
+                    f,
+                    "backoff active ({:.0}s remaining)",
+                    remaining.as_secs_f64()
+                )
             }
             Self::ManuallyDisabled => write!(f, "regeneration manually disabled"),
         }
@@ -650,7 +654,12 @@ impl RegenerationTrigger {
     /// Get rejected prefixes for targeting.
     #[must_use]
     pub fn rejected_prefixes(&self) -> Vec<Vec<u8>> {
-        self.state.read().rejected_prefixes.iter().cloned().collect()
+        self.state
+            .read()
+            .rejected_prefixes
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// Manually disable regeneration.

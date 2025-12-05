@@ -241,7 +241,9 @@ impl StagedUpdateManager {
     pub async fn ensure_staging_dir(&self) -> Result<(), UpgradeError> {
         tokio::fs::create_dir_all(&self.staging_dir)
             .await
-            .map_err(|e| UpgradeError::staging(format!("failed to create staging directory: {}", e)))
+            .map_err(|e| {
+                UpgradeError::staging(format!("failed to create staging directory: {}", e))
+            })
     }
 
     /// Get the path for a new staged binary.
@@ -348,9 +350,7 @@ impl StagedUpdateManager {
                     && let Ok(modified) = metadata.modified()
                 {
                     let age = modified.elapsed().unwrap_or_default();
-                    if age > self.max_age
-                        && tokio::fs::remove_file(&path).await.is_ok()
-                    {
+                    if age > self.max_age && tokio::fs::remove_file(&path).await.is_ok() {
                         cleaned += 1;
                     }
                 }
@@ -394,9 +394,15 @@ mod tests {
 
     #[test]
     fn test_staged_update_with_critical() {
-        let staged = StagedUpdate::new("1.0.0", PathBuf::from("/tmp/binary"), Platform::LinuxX64, "abc", 100)
-            .with_critical(true)
-            .with_release_notes("Security fix");
+        let staged = StagedUpdate::new(
+            "1.0.0",
+            PathBuf::from("/tmp/binary"),
+            Platform::LinuxX64,
+            "abc",
+            100,
+        )
+        .with_critical(true)
+        .with_release_notes("Security fix");
 
         assert!(staged.is_critical);
         assert_eq!(staged.release_notes, "Security fix");
@@ -404,8 +410,14 @@ mod tests {
 
     #[test]
     fn test_metadata_conversion() {
-        let staged = StagedUpdate::new("2.0.0", PathBuf::from("/staging/binary"), Platform::MacOsArm64, "def456", 2000)
-            .with_critical(true);
+        let staged = StagedUpdate::new(
+            "2.0.0",
+            PathBuf::from("/staging/binary"),
+            Platform::MacOsArm64,
+            "def456",
+            2000,
+        )
+        .with_critical(true);
 
         let metadata = StagedUpdateMetadata::from_staged(&staged);
         assert_eq!(metadata.version, "2.0.0");
