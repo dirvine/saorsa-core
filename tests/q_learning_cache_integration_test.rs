@@ -470,7 +470,10 @@ async fn test_q_learning_handles_mixed_content_sizes() {
     if large_cached {
         // If cached, verify it was accessed at least once
         let large_info = final_stats.access_frequency.get(&large_content).unwrap();
-        assert!(large_info.count > 0, "Large item should have at least one access");
+        assert!(
+            large_info.count > 0,
+            "Large item should have at least one access"
+        );
     }
 
     println!(
