@@ -21,6 +21,14 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/graalvm
+          sudo rm -rf /usr/local/julia*
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          docker system prune -af --volumes || true
+          sudo apt-get clean
           df -h
 
       - uses: actions/checkout@v4
@@ -99,6 +107,14 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/graalvm
+          sudo rm -rf /usr/local/julia*
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          docker system prune -af --volumes || true
+          sudo apt-get clean
           df -h
 
       - uses: actions/checkout@v4
@@ -108,6 +124,7 @@ jobs:
 
       - name: Cache cargo
         uses: actions/cache@v4
+        continue-on-error: true
         with:
           path: |
             ~/.cargo/registry
