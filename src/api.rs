@@ -515,16 +515,18 @@ fn derive_presence_key(identity_key: Key) -> Key {
 async fn store_direct(handle: &IdentityHandle, data: Vec<u8>) -> Result<StorageHandle> {
     let storage_id = Key::from(*blake3::hash(&data).as_bytes());
 
+    // Get presence BEFORE acquiring DHT write lock to avoid deadlock
+    let presence = get_presence(handle.key()).await?;
+    let device = presence.devices.first().context("No devices available")?;
+    let device_id = device.id;
+
     // Store in DHT
     let mut dht = DHT.write().await;
     dht.put(storage_id.clone(), data.clone()).await?;
-
-    // Get single device
-    let presence = get_presence(handle.key()).await?;
-    let device = presence.devices.first().context("No devices available")?;
+    drop(dht); // Release lock early
 
     let mut shard_map = crate::types::storage::ShardMap::new();
-    shard_map.assign_shard(device.id, 0);
+    shard_map.assign_shard(device_id, 0);
 
     Ok(StorageHandle {
         id: storage_id,
@@ -701,17 +703,19 @@ async fn store_replicated(
 ) -> Result<StorageHandle> {
     let storage_id = Key::from(*blake3::hash(&data).as_bytes());
 
-    // Store in DHT
-    let mut dht = DHT.write().await;
-    dht.put(storage_id.clone(), data.clone()).await?;
-
-    // Get devices for replicas
+    // Get presence BEFORE acquiring DHT write lock to avoid deadlock
     let presence = get_presence(handle.key()).await?;
-    let mut shard_map = crate::types::storage::ShardMap::new();
 
+    // Build shard map before acquiring lock
+    let mut shard_map = crate::types::storage::ShardMap::new();
     for (i, device) in presence.devices.iter().take(replicas).enumerate() {
         shard_map.assign_shard(device.id, i as u32);
     }
+
+    // Store in DHT
+    let mut dht = DHT.write().await;
+    dht.put(storage_id.clone(), data.clone()).await?;
+    drop(dht); // Release lock early
 
     Ok(StorageHandle {
         id: storage_id,
