@@ -870,9 +870,9 @@ async fn test_attack_scenarios() -> Result<()> {
 
     assert_eq!(
         blocked_operations,
-        privileged_operations.len() - 1,
-        "Only 'read' should be allowed"
-    ); // -1 because read should be allowed
+        privileged_operations.len(),
+        "All privileged operations should be blocked for read-only user"
+    );
     println!("    ✅ Privilege escalation attempts blocked");
 
     println!("✅ Attack scenarios test passed");
