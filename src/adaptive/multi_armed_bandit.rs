@@ -756,6 +756,9 @@ mod tests {
         // Manually persist
         mab.persist().await.unwrap();
 
+        // Small delay to ensure file sync completes on all platforms (especially macOS)
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
         // Create new instance and verify it loads the data
         let mab2 = MultiArmedBandit::new(config).await.unwrap();
         let stats = mab2.get_all_statistics().await;
