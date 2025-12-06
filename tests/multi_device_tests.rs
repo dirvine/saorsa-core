@@ -146,12 +146,17 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
     assert!(device_count >= 1, "Expected at least 1 device with shards");
 
     // Verify that we got the expected number of total shards assigned
-    let total_shards_assigned: usize = storage_handle.shard_map.devices()
+    let total_shards_assigned: usize = storage_handle
+        .shard_map
+        .devices()
         .iter()
         .filter_map(|d| storage_handle.shard_map.device_shards(d))
         .map(|shards| shards.len())
         .sum();
-    assert_eq!(total_shards_assigned, 12, "Expected 12 total shards (8 data + 4 parity)");
+    assert_eq!(
+        total_shards_assigned, 12,
+        "Expected 12 total shards (8 data + 4 parity)"
+    );
 
     // Retrieve and verify
     let retrieved = get_data(&storage_handle).await?;
