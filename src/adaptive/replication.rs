@@ -575,7 +575,10 @@ mod tests {
             storing_nodes: HashSet::new(),
             replication_factor: 3,
             target_factor: 5,
-            last_check: Instant::now() - Duration::from_secs(400), // Old check
+            // Use checked_sub for Windows compatibility (process uptime may be < 400s)
+            last_check: Instant::now()
+                .checked_sub(Duration::from_secs(400))
+                .unwrap_or_else(Instant::now),
             metadata: ContentMetadata {
                 size: 100,
                 content_type: ContentType::DataRetrieval,
