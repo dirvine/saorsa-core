@@ -165,7 +165,10 @@ pub struct MABMetrics {
 impl MultiArmedBandit {
     /// Create a new Multi-Armed Bandit instance
     pub async fn new(config: MABConfig) -> Result<Self> {
-        let initial_persist = Instant::now() - config.persist_interval;
+        // Use checked_sub for Windows compatibility (process uptime may be < persist_interval)
+        let initial_persist = Instant::now()
+            .checked_sub(config.persist_interval)
+            .unwrap_or_else(Instant::now);
 
         let mut mab = Self {
             config,

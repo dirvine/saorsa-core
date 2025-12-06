@@ -374,8 +374,10 @@ impl GeographicRoutingTable {
                     self.peer_selector.update_peer_metrics(peer_id, metrics)?;
                 }
 
-                bucket.last_maintenance =
-                    Instant::now() - bucket_state.last_maintenance.elapsed().unwrap_or_default();
+                // Use checked_sub for Windows compatibility (restored elapsed time may exceed process uptime)
+                bucket.last_maintenance = Instant::now()
+                    .checked_sub(bucket_state.last_maintenance.elapsed().unwrap_or_default())
+                    .unwrap_or_else(Instant::now);
             }
         }
 
