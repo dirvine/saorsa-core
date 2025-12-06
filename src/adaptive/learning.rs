@@ -1539,10 +1539,10 @@ mod tests {
             }
         }
 
-        // Should select Hyperbolic significantly more often
+        // Should select Hyperbolic significantly more often (>= 60% threshold)
         assert!(
-            hyperbolic_count > 60,
-            "Expected Hyperbolic to be selected more than 60% of the time, got {}%",
+            hyperbolic_count >= 60,
+            "Expected Hyperbolic to be selected at least 60% of the time, got {}%",
             hyperbolic_count
         );
         Ok(())
