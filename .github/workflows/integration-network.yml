@@ -79,7 +79,8 @@ jobs:
         run: sleep 5
 
       - name: Network Error Tests
-        run: cargo nextest run --test network_error_tests --all-features --no-fail-fast
+        # Run sequentially to avoid port binding conflicts
+        run: cargo nextest run --test network_error_tests --all-features --no-fail-fast --test-threads=1
 
       - name: Wait for socket cleanup
         run: sleep 5
