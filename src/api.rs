@@ -449,18 +449,84 @@ pub async fn store_with_fec(
     // Get presence to find devices
     let presence = get_presence(handle.key()).await?;
 
-    // Prefer headless nodes for storage
-    let mut devices = presence.devices.clone();
-    devices.sort_by_key(|d| match d.device_type {
-        crate::types::presence::DeviceType::Headless => 0,
-        crate::types::presence::DeviceType::Active => 1,
-        crate::types::presence::DeviceType::Mobile => 2,
-    });
+    // Separate devices by type for weighted distribution
+    let mut headless_devices: Vec<_> = presence
+        .devices
+        .iter()
+        .filter(|d| d.device_type == crate::types::presence::DeviceType::Headless)
+        .collect();
+    let mut active_devices: Vec<_> = presence
+        .devices
+        .iter()
+        .filter(|d| d.device_type == crate::types::presence::DeviceType::Active)
+        .collect();
+    let mobile_devices: Vec<_> = presence
+        .devices
+        .iter()
+        .filter(|d| d.device_type == crate::types::presence::DeviceType::Mobile)
+        .collect();
 
-    // Assign shards to devices
+    // Sort each category by storage capacity (descending)
+    headless_devices.sort_by(|a, b| b.storage_gb.cmp(&a.storage_gb));
+    active_devices.sort_by(|a, b| b.storage_gb.cmp(&a.storage_gb));
+
+    // Assign shards with weighted distribution:
+    // - Headless devices: get most shards (prefer always-online, high capacity)
+    // - Active devices: get some shards
+    // - Mobile devices: minimal/no shards (unreliable, low capacity)
     let total_shards = data_shards + parity_shards;
-    for (i, device) in devices.iter().take(total_shards).enumerate() {
-        shard_map.assign_shard(device.id, i as u32);
+    let mut shard_idx = 0u32;
+
+    // Headless devices get priority - assign multiple shards if needed
+    let headless_count = headless_devices.len();
+    if headless_count > 0 {
+        // Headless devices should get at least 60% of shards
+        let min_headless_shards = (total_shards * 3 + 4) / 5; // ceil(60%)
+        let shards_per_headless = (min_headless_shards + headless_count - 1) / headless_count;
+
+        for device in &headless_devices {
+            for _ in 0..shards_per_headless {
+                if (shard_idx as usize) < total_shards {
+                    shard_map.assign_shard(device.id, shard_idx);
+                    shard_idx += 1;
+                }
+            }
+        }
+    }
+
+    // Active devices get remaining shards (excluding mobile allocation)
+    for device in &active_devices {
+        if (shard_idx as usize) < total_shards {
+            shard_map.assign_shard(device.id, shard_idx);
+            shard_idx += 1;
+        }
+    }
+
+    // Mobile devices only get shards if we have no other option
+    if (shard_idx as usize) < total_shards
+        && headless_devices.is_empty()
+        && active_devices.is_empty()
+    {
+        for device in &mobile_devices {
+            if (shard_idx as usize) < total_shards {
+                shard_map.assign_shard(device.id, shard_idx);
+                shard_idx += 1;
+            }
+        }
+    }
+
+    // If we still don't have enough, cycle through available devices
+    while (shard_idx as usize) < total_shards {
+        let all_devices: Vec<_> = headless_devices
+            .iter()
+            .chain(active_devices.iter())
+            .collect();
+        if all_devices.is_empty() {
+            break;
+        }
+        let device = all_devices[(shard_idx as usize) % all_devices.len()];
+        shard_map.assign_shard(device.id, shard_idx);
+        shard_idx += 1;
     }
 
     // Store data in DHT
