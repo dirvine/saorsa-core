@@ -723,6 +723,7 @@ impl RegenerationTrigger {
 pub type SharedRegenerationTrigger = Arc<RegenerationTrigger>;
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 

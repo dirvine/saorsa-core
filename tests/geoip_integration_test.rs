@@ -5,6 +5,7 @@ use tokio::time::Duration;
 
 #[tokio::test]
 #[ignore = "Requires full P2P network - run with --ignored"]
+#[allow(clippy::collapsible_if)]
 async fn test_geoip_rejection_flow() {
     // 1. Setup Node A (The Rejector)
     let mut config_a = NodeConfig::new().unwrap();
@@ -95,7 +96,9 @@ async fn test_geoip_rejection_flow() {
                 if let saorsa_core::network::P2PEvent::Message { topic, data, .. } = event {
                     if topic == "control" {
                         if let Ok(msg) = serde_json::from_slice::<RejectionMessage>(&data) {
-                            if msg.reason == RejectionReason::GeoIpPolicy {
+                            // Check rejection reason
+                            let is_geoip_rejection = msg.reason == RejectionReason::GeoIpPolicy;
+                            if is_geoip_rejection {
                                 received_rejection = true;
                                 break;
                             }
