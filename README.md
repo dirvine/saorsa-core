@@ -10,6 +10,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-s
 
 - Contributor guide: see [AGENTS.md](AGENTS.md)
 - Architecture overview: see [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Security Model**: see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) - Comprehensive network security, anti-Sybil protections, and Byzantine fault tolerance
 - **Auto-Upgrade System**: see [docs/AUTO_UPGRADE.md](docs/AUTO_UPGRADE.md) - Cross-platform binary updates with ML-DSA-65 signatures
 
 ## Features
@@ -284,13 +285,50 @@ Key benchmarks:
 
 ## Security
 
+Saorsa Core implements defense-in-depth security designed for adversarial decentralized environments.
+
+**For complete security documentation, see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).**
+
+### Cryptographic Foundation
+
 - **Post-Quantum Signatures**: ML-DSA-65 (FIPS 204) for quantum-resistant digital signatures (~128-bit quantum security)
-- **PQC Encryption**: ChaCha20-Poly1305 with quantum-resistant key derivation
-- **Key Exchange**: ML-KEM-768 (FIPS 203) for quantum-resistant key encapsulation (~128-bit quantum security)
-- **BLAKE3 Hashing**: Fast and secure content addressing
-- **QUIC Encryption**: Transport-level encryption with PQC support
-- **Pure PQC**: No classical cryptographic algorithms - quantum-resistant from the ground up
-- **Secure Memory**: Platform-specific memory protection
+- **Key Exchange**: ML-KEM-768 (FIPS 203) for quantum-resistant key encapsulation
+- **Symmetric Encryption**: ChaCha20-Poly1305 with quantum-resistant key derivation
+- **Hashing**: BLAKE3 for fast, secure content addressing
+- **Pure PQC**: No classical cryptographic fallbacks - quantum-resistant from the ground up
+
+### Network Protection
+
+| Protection | Implementation |
+|------------|----------------|
+| **Node Monitoring** | Automatic eviction after 3 consecutive failures |
+| **Reputation System** | EigenTrust++ with multi-factor trust scoring |
+| **Sybil Resistance** | IP diversity limits (/64: 1, /48: 3, /32: 10, ASN: 20) |
+| **Geographic Diversity** | Minimum 3 regions for witness quorum |
+| **Byzantine Tolerance** | f=2 in 3f+1 model (5 of 7 witnesses required) |
+| **Data Verification** | Nonce-based attestation: BLAKE3(nonce || data) |
+
+### Anti-Centralization
+
+The network enforces geographic and infrastructure diversity to prevent centralization:
+
+```
+┌───────────────────────────────────────────────────┐
+│           Geographic Witness Distribution          │
+├───────────────────────────────────────────────────┤
+│  Region A      Region B      Region C      ...    │
+│  (max 2)       (max 2)       (max 2)              │
+│     │             │             │                 │
+│     └─────────────┼─────────────┘                 │
+│                   ▼                               │
+│        Quorum requires 3+ regions                 │
+│        (prevents regional collusion)              │
+└───────────────────────────────────────────────────┘
+```
+
+- **ASN Diversity**: Max 20 nodes per autonomous system
+- **Hosting Provider Limits**: Stricter limits (halved) for known VPS/cloud providers
+- **Eclipse Detection**: Continuous routing table diversity monitoring
 
 ## S/Kademlia Witness Protocol
 
