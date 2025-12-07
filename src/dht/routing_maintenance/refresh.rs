@@ -258,6 +258,38 @@ impl BucketRefreshManager {
 mod tests {
     use super::*;
 
+    /// Helper to create an instant in the past, handling Windows overflow gracefully.
+    /// On Windows, Instant can't be subtracted past system boot time.
+    /// Returns an instant that's as far back as possible (up to requested secs).
+    fn instant_in_past(secs: u64) -> Instant {
+        let now = Instant::now();
+        // Try decreasing durations until we find one that works
+        let durations = [
+            Duration::from_secs(secs),
+            Duration::from_secs(secs / 2),
+            Duration::from_secs(secs / 4),
+            Duration::from_secs(60),
+            Duration::from_secs(10),
+            Duration::from_secs(1),
+        ];
+
+        for dur in durations {
+            if let Some(instant) = now.checked_sub(dur) {
+                return instant;
+            }
+        }
+        // Fallback: return now (test will need to handle this case)
+        now
+    }
+
+    /// Check if we can create instants far enough in the past for time-based tests.
+    /// Returns true if the platform supports the needed time manipulation.
+    fn can_create_stale_instants() -> bool {
+        let now = Instant::now();
+        // We need at least 2 hours (7200s) for Background tier tests
+        now.checked_sub(Duration::from_secs(7200)).is_some()
+    }
+
     #[test]
     fn test_refresh_tier_default_intervals() {
         assert_eq!(
@@ -409,33 +441,43 @@ mod tests {
 
     #[test]
     fn test_get_buckets_needing_refresh_sorted_by_priority() {
+        // Skip this test on platforms where we can't create stale instants
+        // (e.g., freshly booted Windows CI runners with short uptime)
+        if !can_create_stale_instants() {
+            eprintln!(
+                "Skipping test_get_buckets_needing_refresh_sorted_by_priority: \
+                 platform cannot create instants far enough in the past"
+            );
+            return;
+        }
+
         let local_id = DhtNodeId::random();
         let mut manager = BucketRefreshManager::new(local_id);
         manager.initialize_buckets(256);
 
-        // Set up buckets with different tiers that all need refresh
-        // (use very short interval to simulate needing refresh)
+        // Set up buckets with different tiers that all need refresh.
+        // Use instant_in_past() helper to safely handle Windows Instant limitations.
         {
             let state = manager.get_or_create_state(100);
             state.tier = RefreshTier::Background;
-            state.last_refresh = Instant::now() - Duration::from_secs(7200); // 2 hours ago
+            state.last_refresh = instant_in_past(7200); // 2 hours ago (Background: 3600s interval)
         }
         {
             let state = manager.get_or_create_state(50);
             state.tier = RefreshTier::Critical;
-            state.last_refresh = Instant::now() - Duration::from_secs(120); // 2 min ago
+            state.last_refresh = instant_in_past(120); // 2 min ago (Critical: 60s interval)
         }
         {
             let state = manager.get_or_create_state(75);
             state.tier = RefreshTier::Important;
-            state.last_refresh = Instant::now() - Duration::from_secs(600); // 10 min ago
+            state.last_refresh = instant_in_past(600); // 10 min ago (Important: 300s interval)
         }
 
         let buckets = manager.get_buckets_needing_refresh();
 
-        // Critical should be first
+        // Critical should be first (priority 0), then Important (1), then Background (3)
         if !buckets.is_empty() {
-            assert_eq!(buckets[0], 50);
+            assert_eq!(buckets[0], 50, "Critical tier bucket should be first");
         }
     }
 
