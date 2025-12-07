@@ -18,9 +18,16 @@ jobs:
     steps:
       - name: Free disk space
         run: |
+          # Remove large directories not needed for Rust builds
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/swift
+          # Clean Docker images (saves ~3GB)
+          sudo docker system prune -af --volumes 2>/dev/null || true
+          # Show available space
           df -h
 
       - uses: actions/checkout@v4
@@ -74,9 +81,16 @@ jobs:
     steps:
       - name: Free disk space
         run: |
+          # Remove large directories not needed for Rust builds
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/swift
+          # Clean Docker images (saves ~3GB)
+          sudo docker system prune -af --volumes 2>/dev/null || true
+          # Show available space
           df -h
 
       - uses: actions/checkout@v4
