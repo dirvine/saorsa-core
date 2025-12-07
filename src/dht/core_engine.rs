@@ -32,6 +32,14 @@ impl DhtKey {
         &self.0
     }
 
+    /// Generate a random DhtKey (useful for testing and key generation)
+    #[must_use]
+    pub fn random() -> Self {
+        let mut bytes = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
+        Self(bytes)
+    }
+
     /// XOR distance metric for Kademlia
     pub fn distance(&self, other: &DhtKey) -> [u8; 32] {
         let mut result = [0u8; 32];

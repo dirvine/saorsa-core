@@ -481,8 +481,8 @@ pub async fn store_with_fec(
     let headless_count = headless_devices.len();
     if headless_count > 0 {
         // Headless devices should get at least 60% of shards
-        let min_headless_shards = (total_shards * 3 + 4) / 5; // ceil(60%)
-        let shards_per_headless = (min_headless_shards + headless_count - 1) / headless_count;
+        let min_headless_shards = (total_shards * 3).div_ceil(5); // ceil(60%)
+        let shards_per_headless = min_headless_shards.div_ceil(headless_count);
 
         for device in &headless_devices {
             for _ in 0..shards_per_headless {

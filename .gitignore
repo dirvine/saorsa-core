@@ -27,5 +27,9 @@ criterion/
 
 # Local config
 .env
-.env.localpatches/
+.env.local
 patches/
+
+# Tool state
+.serena/
+.claude/tasks/

@@ -155,3 +155,13 @@ pub mod cross_network_replication;
 
 /// Node age verification for anti-Sybil protection
 pub mod node_age_verifier;
+
+/// Routing table maintenance and node validation
+pub mod routing_maintenance;
+
+// Re-export routing maintenance types for convenience
+pub use routing_maintenance::{
+    BucketRefreshManager, DataChallenge, EvictionManager, EvictionReason, MaintenanceConfig,
+    MaintenanceScheduler, MaintenanceTask, NodeLivenessState, NodeValidationResult, RefreshTier,
+    ValidationFailure, WitnessSelectionCriteria, compute_attested_hash,
+};
