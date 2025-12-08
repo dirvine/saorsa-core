@@ -19,8 +19,8 @@
 //! - Close group consensus
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::RwLock;
 
 /// Security metrics data structure
@@ -230,7 +230,8 @@ impl SecurityMetricsCollector {
 
     /// Record witness validation result
     pub fn record_witness_validation(&self, success: bool) {
-        self.witness_validations_total.fetch_add(1, Ordering::Relaxed);
+        self.witness_validations_total
+            .fetch_add(1, Ordering::Relaxed);
         if !success {
             self.witness_failures_total.fetch_add(1, Ordering::Relaxed);
         }
@@ -312,7 +313,8 @@ impl SecurityMetricsCollector {
         self.sibling_broadcasts_rejected_total
             .store(0, Ordering::Relaxed);
         self.sibling_overlap_ratio.store(1000, Ordering::Relaxed);
-        self.close_group_validations_total.store(0, Ordering::Relaxed);
+        self.close_group_validations_total
+            .store(0, Ordering::Relaxed);
         self.close_group_consensus_failures_total
             .store(0, Ordering::Relaxed);
         self.witness_validations_total.store(0, Ordering::Relaxed);

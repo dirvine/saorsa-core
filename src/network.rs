@@ -639,7 +639,8 @@ impl P2PNode {
         }
 
         // Initialize DHT if needed
-        let (dht, security_dashboard) = if true { // Assuming DHT is always enabled for now, or check config
+        let (dht, security_dashboard) = if true {
+            // Assuming DHT is always enabled for now, or check config
             let _dht_config = crate::dht::DHTConfig {
                 replication_factor: config.dht_config.k_value,
                 bucket_size: config.dht_config.k_value,
@@ -661,17 +662,20 @@ impl P2PNode {
                 ))
             })?;
             dht_instance.start_maintenance_tasks();
-            
+
             // Create Security Dashboard
             let security_metrics = dht_instance.security_metrics();
-             let dashboard = crate::dht::metrics::SecurityDashboard::new(
+            let dashboard = crate::dht::metrics::SecurityDashboard::new(
                 security_metrics,
                 Arc::new(crate::dht::metrics::DhtMetricsCollector::new()),
                 Arc::new(crate::dht::metrics::TrustMetricsCollector::new()),
                 Arc::new(crate::dht::metrics::PlacementMetricsCollector::new()),
             );
-            
-            (Some(Arc::new(RwLock::new(dht_instance))), Some(Arc::new(dashboard)))
+
+            (
+                Some(Arc::new(RwLock::new(dht_instance))),
+                Some(Arc::new(dashboard)),
+            )
         } else {
             (None, None)
         };
@@ -817,7 +821,7 @@ impl P2PNode {
             dual_node,
             rate_limiter,
             active_connections,
-            security_dashboard, 
+            security_dashboard,
             connection_monitor_handle,
             keepalive_handle,
             shutdown,

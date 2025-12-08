@@ -20,7 +20,7 @@
 use crate::PeerId;
 use crate::dht::{DHTNode, DhtKey, Key};
 use crate::error::{P2PError, P2pResult as Result};
-use crate::quantum_crypto::ant_quic_integration::{ml_dsa_verify, MlDsaPublicKey, MlDsaSignature};
+use crate::quantum_crypto::ant_quic_integration::{MlDsaPublicKey, MlDsaSignature, ml_dsa_verify};
 use crate::security::ReputationManager;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -909,8 +909,11 @@ impl SKademlia {
                             );
 
                             // Update reputation for successful query
-                            self.reputation_manager
-                                .update_reputation(&node.id.to_string(), true, response_time);
+                            self.reputation_manager.update_reputation(
+                                &node.id.to_string(),
+                                true,
+                                response_time,
+                            );
 
                             // Add discovered nodes to the path
                             lookup.add_query_results(path_id, discovered_nodes);
@@ -923,8 +926,11 @@ impl SKademlia {
                             );
 
                             // Update reputation for failed query
-                            self.reputation_manager
-                                .update_reputation(&node.id.to_string(), false, response_time);
+                            self.reputation_manager.update_reputation(
+                                &node.id.to_string(),
+                                false,
+                                response_time,
+                            );
                         }
                     }
                 }
@@ -937,9 +943,7 @@ impl SKademlia {
         // Validate results across paths
         let is_consistent = lookup.validate_results()?;
         if !is_consistent {
-            warn!(
-                "Lookup results are not consistent across paths - potential attack detected"
-            );
+            warn!("Lookup results are not consistent across paths - potential attack detected");
         }
 
         // Store lookup for later reference
@@ -1257,8 +1261,11 @@ impl SKademlia {
                 Ok(mut measurement) => {
                     // Update reputation for successful query
                     let response_time = query_start.elapsed();
-                    self.reputation_manager
-                        .update_reputation(&witness.to_string(), true, response_time);
+                    self.reputation_manager.update_reputation(
+                        &witness.to_string(),
+                        true,
+                        response_time,
+                    );
 
                     // Recalculate confidence based on current reputation and response time
                     // (the measurement may have its own confidence, but we weight it by reputation)
@@ -1284,8 +1291,11 @@ impl SKademlia {
                 Err(e) => {
                     // Update reputation for failed query
                     let response_time = query_start.elapsed();
-                    self.reputation_manager
-                        .update_reputation(&witness.to_string(), false, response_time);
+                    self.reputation_manager.update_reputation(
+                        &witness.to_string(),
+                        false,
+                        response_time,
+                    );
 
                     tracing::warn!(
                         witness = %witness,
@@ -1490,9 +1500,7 @@ impl SKademlia {
         }
 
         // 3. Sort by score (descending) and select top witnesses
-        candidate_nodes.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        candidate_nodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let witness_nodes: Vec<PeerId> = candidate_nodes
             .into_iter()
@@ -2362,7 +2370,9 @@ mod tests {
         ];
 
         let querier = MockNetworkQuerier;
-        let report = skademlia.validate_routing_consistency(&nodes, &querier).await?;
+        let report = skademlia
+            .validate_routing_consistency(&nodes, &querier)
+            .await?;
 
         assert_eq!(report.nodes_checked, 2);
         // Since no reputation data exists, inconsistencies may be 0 or 2 depending on implementation

@@ -284,10 +284,7 @@ fn test_xor_distance_symmetry() {
     let distance_ab = xor_distance(&key_a, &key_b);
     let distance_ba = xor_distance(&key_b, &key_a);
 
-    assert_eq!(
-        distance_ab, distance_ba,
-        "XOR distance should be symmetric"
-    );
+    assert_eq!(distance_ab, distance_ba, "XOR distance should be symmetric");
 }
 
 #[test]
@@ -542,7 +539,10 @@ fn test_eclipse_attack_low_overlap_detection() {
     };
 
     let result = validator.validate_broadcast(&broadcast);
-    assert!(result.eclipse_suspected, "Eclipse attack should be detected");
+    assert!(
+        result.eclipse_suspected,
+        "Eclipse attack should be detected"
+    );
     assert!(
         result
             .failures
@@ -611,7 +611,10 @@ fn test_missing_membership_proof_rejection() {
     };
 
     let result = validator.validate_broadcast(&broadcast);
-    assert!(!result.is_valid, "Missing membership proof should be rejected");
+    assert!(
+        !result.is_valid,
+        "Missing membership proof should be rejected"
+    );
     assert!(
         result
             .failures

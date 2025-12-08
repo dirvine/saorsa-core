@@ -20,10 +20,8 @@
 
 use crate::{
     Multiaddr, P2PError, PeerId, Result,
+    dht::routing_maintenance::{MaintenanceConfig, MaintenanceScheduler, MaintenanceTask},
     dht::{DHTConfig, DhtCoreEngine, DhtKey, DhtNodeId, Key},
-    dht::routing_maintenance::{
-        MaintenanceConfig, MaintenanceScheduler, MaintenanceTask,
-    },
     error::{DhtError, NetworkError},
     network::{NodeConfig, P2PNode},
 };
@@ -304,7 +302,8 @@ impl DhtNetworkManager {
 
         // Create maintenance scheduler from DHT config
         let maintenance_config = MaintenanceConfig::from(&config.dht_config);
-        let maintenance_scheduler = Arc::new(RwLock::new(MaintenanceScheduler::new(maintenance_config)));
+        let maintenance_scheduler =
+            Arc::new(RwLock::new(MaintenanceScheduler::new(maintenance_config)));
 
         let manager = Self {
             dht,
@@ -1506,7 +1505,10 @@ impl DhtNetworkManager {
                                 .filter(|p| p.last_seen.elapsed() > Duration::from_secs(300))
                                 .count();
                             if stale_count > 0 {
-                                debug!("Found {} stale peers that need liveness check", stale_count);
+                                debug!(
+                                    "Found {} stale peers that need liveness check",
+                                    stale_count
+                                );
                             }
                             Ok(())
                         }
@@ -1523,12 +1525,13 @@ impl DhtNetworkManager {
                             // - Trust scores
                             // - Consecutive failures
                             let peers = dht_peers.read().await;
-                            let low_reliability = peers
-                                .values()
-                                .filter(|p| p.reliability_score < 0.3)
-                                .count();
+                            let low_reliability =
+                                peers.values().filter(|p| p.reliability_score < 0.3).count();
                             if low_reliability > 0 {
-                                info!("Found {} low-reliability peers for potential eviction", low_reliability);
+                                info!(
+                                    "Found {} low-reliability peers for potential eviction",
+                                    low_reliability
+                                );
                             }
                             Ok(())
                         }
@@ -1585,7 +1588,10 @@ impl DhtNetworkManager {
             }
         });
 
-        info!("DHT maintenance scheduler started with {} task types", MaintenanceTask::all().len());
+        info!(
+            "DHT maintenance scheduler started with {} task types",
+            MaintenanceTask::all().len()
+        );
         Ok(())
     }
 

@@ -791,4 +791,3 @@ async fn store_replicated(
         sealed_key: Some(vec![0u8; 32]),
     })
 }
-

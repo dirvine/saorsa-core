@@ -81,7 +81,10 @@ impl DataHealthStatus {
     /// Check if repair is needed
     #[must_use]
     pub fn needs_repair(&self) -> bool {
-        matches!(self, DataHealthStatus::Critical | DataHealthStatus::AtRisk | DataHealthStatus::Degraded)
+        matches!(
+            self,
+            DataHealthStatus::Critical | DataHealthStatus::AtRisk | DataHealthStatus::Degraded
+        )
     }
 
     /// Get priority level (0 = highest priority)
@@ -136,11 +139,7 @@ impl Default for DataHealthScore {
 impl DataHealthScore {
     /// Create a new health score
     #[must_use]
-    pub fn new(
-        valid_replicas: usize,
-        expected_replicas: usize,
-        min_required: usize,
-    ) -> Self {
+    pub fn new(valid_replicas: usize, expected_replicas: usize, min_required: usize) -> Self {
         let status = DataHealthStatus::from_counts(valid_replicas, expected_replicas, min_required);
         let health_percentage = if expected_replicas > 0 {
             valid_replicas as f64 / expected_replicas as f64
@@ -173,7 +172,6 @@ impl DataHealthScore {
             .and_then(|t| t.elapsed().ok())
             .is_none_or(|elapsed| elapsed > threshold)
     }
-
 }
 
 /// Record of an attestation challenge result
@@ -345,11 +343,20 @@ impl DataIntegrityMonitor {
     }
 
     /// Register storage nodes for a data key
-    pub fn register_storage(&mut self, key: DhtKey, nodes: Vec<DhtNodeId>, expected_replicas: usize) {
+    pub fn register_storage(
+        &mut self,
+        key: DhtKey,
+        nodes: Vec<DhtNodeId>,
+        expected_replicas: usize,
+    ) {
         self.storage_map.insert(key.clone(), nodes.clone());
 
         // Initialize health score
-        let score = DataHealthScore::new(nodes.len(), expected_replicas, self.config.min_healthy_replicas);
+        let score = DataHealthScore::new(
+            nodes.len(),
+            expected_replicas,
+            self.config.min_healthy_replicas,
+        );
         self.health_scores.insert(key, score);
     }
 
@@ -440,7 +447,11 @@ impl DataIntegrityMonitor {
 
         // Take up to max concurrent
         keys.into_iter()
-            .take(self.config.max_concurrent_challenges.saturating_sub(self.pending_challenges.len()))
+            .take(
+                self.config
+                    .max_concurrent_challenges
+                    .saturating_sub(self.pending_challenges.len()),
+            )
             .map(|(key, _)| key)
             .collect()
     }
@@ -460,7 +471,10 @@ impl DataIntegrityMonitor {
                 continue;
             }
 
-            let replicas_needed = self.config.min_healthy_replicas.saturating_sub(score.valid_replicas);
+            let replicas_needed = self
+                .config
+                .min_healthy_replicas
+                .saturating_sub(score.valid_replicas);
             if replicas_needed == 0 {
                 continue;
             }
@@ -502,13 +516,33 @@ impl DataIntegrityMonitor {
     #[must_use]
     pub fn get_metrics_summary(&self) -> DataIntegrityMetrics {
         let total_keys = self.health_scores.len();
-        let healthy_keys = self.health_scores.values().filter(|s| s.status == DataHealthStatus::Healthy).count();
-        let degraded_keys = self.health_scores.values().filter(|s| s.status == DataHealthStatus::Degraded).count();
-        let at_risk_keys = self.health_scores.values().filter(|s| s.status == DataHealthStatus::AtRisk).count();
-        let critical_keys = self.health_scores.values().filter(|s| s.status == DataHealthStatus::Critical).count();
+        let healthy_keys = self
+            .health_scores
+            .values()
+            .filter(|s| s.status == DataHealthStatus::Healthy)
+            .count();
+        let degraded_keys = self
+            .health_scores
+            .values()
+            .filter(|s| s.status == DataHealthStatus::Degraded)
+            .count();
+        let at_risk_keys = self
+            .health_scores
+            .values()
+            .filter(|s| s.status == DataHealthStatus::AtRisk)
+            .count();
+        let critical_keys = self
+            .health_scores
+            .values()
+            .filter(|s| s.status == DataHealthStatus::Critical)
+            .count();
 
         let avg_replicas: f64 = if total_keys > 0 {
-            self.health_scores.values().map(|s| s.valid_replicas as f64).sum::<f64>() / total_keys as f64
+            self.health_scores
+                .values()
+                .map(|s| s.valid_replicas as f64)
+                .sum::<f64>()
+                / total_keys as f64
         } else {
             0.0
         };
@@ -546,7 +580,8 @@ impl DataIntegrityMonitor {
     /// Clean up stale pending challenges
     pub fn cleanup_stale_challenges(&mut self, timeout: Duration) {
         let now = Instant::now();
-        self.pending_challenges.retain(|_, started| now.duration_since(*started) < timeout);
+        self.pending_challenges
+            .retain(|_, started| now.duration_since(*started) < timeout);
     }
 
     /// Set the minimum number of distinct geographic regions required for repair node selection
@@ -589,9 +624,7 @@ impl DataIntegrityMonitor {
         // Filter candidates: exclude specified nodes and those below minimum trust
         let filtered: Vec<&RepairNodeCandidate> = candidates
             .iter()
-            .filter(|c| {
-                !exclude_nodes.contains(&c.node_id) && c.trust_score >= min_trust
-            })
+            .filter(|c| !exclude_nodes.contains(&c.node_id) && c.trust_score >= min_trust)
             .collect();
 
         if filtered.is_empty() {
@@ -839,7 +872,10 @@ mod tests {
 
         // Now 0 valid replicas
         assert_eq!(monitor.get_health(&key).unwrap().valid_replicas, 0);
-        assert_eq!(monitor.get_health(&key).unwrap().status, DataHealthStatus::Critical);
+        assert_eq!(
+            monitor.get_health(&key).unwrap().status,
+            DataHealthStatus::Critical
+        );
     }
 
     #[test]
@@ -1217,7 +1253,10 @@ mod tests {
         }];
 
         let selection = monitor.select_repair_nodes_seeded(&candidates, 1, &[node_id], 12345);
-        assert!(selection.is_empty(), "Should return empty when no valid candidates");
+        assert!(
+            selection.is_empty(),
+            "Should return empty when no valid candidates"
+        );
     }
 
     #[test]

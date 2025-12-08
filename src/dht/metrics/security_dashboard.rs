@@ -431,8 +431,8 @@ impl SecurityDashboard {
                 severity: AlertSeverity::Warning,
                 category: AlertCategory::SecurityAttack,
                 message: "BFT consensus mode is active due to detected threats".to_string(),
-                recommendation:
-                    "Monitor for attack patterns and investigate root cause".to_string(),
+                recommendation: "Monitor for attack patterns and investigate root cause"
+                    .to_string(),
                 triggered_at: now,
                 metric_value: 1.0,
                 threshold: 0.0,
@@ -499,8 +499,8 @@ impl SecurityDashboard {
                     "Critical Sybil attack detected: {:.1}%",
                     security.sybil_score * 100.0
                 ),
-                recommendation:
-                    "Activate BFT mode and increase node validation requirements".to_string(),
+                recommendation: "Activate BFT mode and increase node validation requirements"
+                    .to_string(),
                 triggered_at: now,
                 metric_value: security.sybil_score,
                 threshold: self.thresholds.sybil_critical,
@@ -717,10 +717,7 @@ impl SecurityDashboard {
                 id: "low_trust_nodes".to_string(),
                 severity: AlertSeverity::Warning,
                 category: AlertCategory::TrustDegradation,
-                message: format!(
-                    "{} nodes are below trust threshold",
-                    trust.low_trust_nodes
-                ),
+                message: format!("{} nodes are below trust threshold", trust.low_trust_nodes),
                 recommendation: "Investigate causes and consider eviction for persistent offenders"
                     .to_string(),
                 triggered_at: now,
@@ -777,8 +774,7 @@ impl SecurityDashboard {
                     "Low geographic diversity: {:.1}%",
                     placement.geographic_diversity * 100.0
                 ),
-                recommendation:
-                    "Encourage node deployment in underrepresented regions".to_string(),
+                recommendation: "Encourage node deployment in underrepresented regions".to_string(),
                 triggered_at: now,
                 metric_value: placement.geographic_diversity,
                 threshold: 0.5,
@@ -878,10 +874,7 @@ impl SecurityDashboard {
         {
             return SystemStatus::Emergency;
         }
-        if alerts
-            .iter()
-            .any(|a| a.severity == AlertSeverity::Critical)
-        {
+        if alerts.iter().any(|a| a.severity == AlertSeverity::Critical) {
             return SystemStatus::Critical;
         }
         if alerts.iter().any(|a| a.severity == AlertSeverity::Warning) {
@@ -1185,9 +1178,11 @@ mod tests {
             !eclipse_alerts.is_empty(),
             "Should have eclipse alert when score >= 0.3"
         );
-        assert!(eclipse_alerts
-            .iter()
-            .any(|a| a.severity == AlertSeverity::Warning));
+        assert!(
+            eclipse_alerts
+                .iter()
+                .any(|a| a.severity == AlertSeverity::Warning)
+        );
     }
 
     #[tokio::test]
@@ -1241,9 +1236,11 @@ mod tests {
             !sybil_alerts.is_empty(),
             "Should have sybil alert when score >= 0.6"
         );
-        assert!(sybil_alerts
-            .iter()
-            .any(|a| a.severity == AlertSeverity::Critical));
+        assert!(
+            sybil_alerts
+                .iter()
+                .any(|a| a.severity == AlertSeverity::Critical)
+        );
     }
 
     #[tokio::test]
@@ -1284,7 +1281,9 @@ mod tests {
         dashboard.set_bft_mode(true).await;
 
         // Get only critical or higher alerts
-        let critical_alerts = dashboard.get_alerts_by_severity(AlertSeverity::Critical).await;
+        let critical_alerts = dashboard
+            .get_alerts_by_severity(AlertSeverity::Critical)
+            .await;
 
         // All returned alerts should be critical or higher
         for alert in &critical_alerts {
@@ -1473,8 +1472,8 @@ mod tests {
             ..Default::default()
         };
 
-        let dashboard_custom =
-            SecurityDashboard::new(security, dht, trust, placement).with_thresholds(custom_thresholds);
+        let dashboard_custom = SecurityDashboard::new(security, dht, trust, placement)
+            .with_thresholds(custom_thresholds);
         let snapshot2 = dashboard_custom.refresh().await;
 
         let custom_eclipse_alerts: Vec<_> = snapshot2

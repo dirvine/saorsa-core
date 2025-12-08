@@ -117,7 +117,11 @@ pub struct CollusionGroup {
 impl CollusionGroup {
     /// Create a new collusion group
     #[must_use]
-    pub fn new(members: HashSet<PeerId>, confidence: f64, evidence: Vec<CollusionEvidence>) -> Self {
+    pub fn new(
+        members: HashSet<PeerId>,
+        confidence: f64,
+        evidence: Vec<CollusionEvidence>,
+    ) -> Self {
         Self {
             members,
             confidence,
@@ -342,7 +346,11 @@ impl CollusionDetector {
                 .iter()
                 .flat_map(|(a, b, _)| vec![a.clone(), b.clone()])
                 .collect();
-            let min_diff = suspicious_pairs.iter().map(|(_, _, d)| *d).min().unwrap_or_default();
+            let min_diff = suspicious_pairs
+                .iter()
+                .map(|(_, _, d)| *d)
+                .min()
+                .unwrap_or_default();
 
             return Some(CollusionEvidence::TemporalCorrelation {
                 peers,
@@ -484,12 +492,8 @@ impl CollusionDetector {
                 CollusionEvidence::LocationMismatch { peer, .. } => {
                     [peer.clone()].into_iter().collect()
                 }
-                CollusionEvidence::TrustCoMovement { peers, .. } => {
-                    peers.iter().cloned().collect()
-                }
-                CollusionEvidence::BehavioralMatch { peers, .. } => {
-                    peers.iter().cloned().collect()
-                }
+                CollusionEvidence::TrustCoMovement { peers, .. } => peers.iter().cloned().collect(),
+                CollusionEvidence::BehavioralMatch { peers, .. } => peers.iter().cloned().collect(),
             };
 
             // Find existing group that overlaps
@@ -680,7 +684,12 @@ mod tests {
         // Record votes for both peers
         for _ in 0..10 {
             let target = DhtNodeId::random();
-            detector.record_vote(peer_a.clone(), target.clone(), true, Duration::from_millis(50));
+            detector.record_vote(
+                peer_a.clone(),
+                target.clone(),
+                true,
+                Duration::from_millis(50),
+            );
             detector.record_vote(peer_b.clone(), target, true, Duration::from_millis(55));
             detector.record_agreement(peer_a.clone(), peer_b.clone());
         }
@@ -773,8 +782,15 @@ mod tests {
         }
 
         // Verify we have enough history
-        let history_len = detector.trust_history.get(&peer_a).map(|h| h.len()).unwrap_or(0);
-        assert!(history_len >= 5, "Expected at least 5 trust history entries");
+        let history_len = detector
+            .trust_history
+            .get(&peer_a)
+            .map(|h| h.len())
+            .unwrap_or(0);
+        assert!(
+            history_len >= 5,
+            "Expected at least 5 trust history entries"
+        );
 
         // The correlation check requires at least 3 changes, so we verify the check runs
         // (Whether it finds evidence depends on the correlation threshold)
@@ -790,7 +806,12 @@ mod tests {
         });
 
         let peer = random_peer_id();
-        detector.record_vote(peer.clone(), DhtNodeId::random(), true, Duration::from_millis(50));
+        detector.record_vote(
+            peer.clone(),
+            DhtNodeId::random(),
+            true,
+            Duration::from_millis(50),
+        );
 
         // Wait a bit and cleanup
         std::thread::sleep(Duration::from_millis(15));
@@ -814,16 +835,35 @@ mod tests {
         // Record many agreements
         for _ in 0..10 {
             let target = DhtNodeId::random();
-            detector.record_vote(peer_a.clone(), target.clone(), true, Duration::from_millis(50));
+            detector.record_vote(
+                peer_a.clone(),
+                target.clone(),
+                true,
+                Duration::from_millis(50),
+            );
             detector.record_vote(peer_b.clone(), target, true, Duration::from_millis(55));
             detector.record_agreement(peer_a.clone(), peer_b.clone());
         }
 
         // Verify voting history was recorded
-        let votes_a = detector.voting_history.get(&peer_a).map(|p| p.total_votes).unwrap_or(0);
-        let votes_b = detector.voting_history.get(&peer_b).map(|p| p.total_votes).unwrap_or(0);
-        assert!(votes_a >= 3, "Expected at least 3 votes for peer_a, got {votes_a}");
-        assert!(votes_b >= 3, "Expected at least 3 votes for peer_b, got {votes_b}");
+        let votes_a = detector
+            .voting_history
+            .get(&peer_a)
+            .map(|p| p.total_votes)
+            .unwrap_or(0);
+        let votes_b = detector
+            .voting_history
+            .get(&peer_b)
+            .map(|p| p.total_votes)
+            .unwrap_or(0);
+        assert!(
+            votes_a >= 3,
+            "Expected at least 3 votes for peer_a, got {votes_a}"
+        );
+        assert!(
+            votes_b >= 3,
+            "Expected at least 3 votes for peer_b, got {votes_b}"
+        );
 
         // Check agreement rate manually before run_analysis
         let agreement_evidence = detector.check_agreement_rates();
@@ -835,12 +875,17 @@ mod tests {
         let correlation = detector.get_peer_correlation(&peer_a, &peer_b);
 
         // At minimum, the correlation matrix should track our agreements
-        assert!(correlation >= 10.0, "Expected correlation >= 10.0, got {correlation}");
+        assert!(
+            correlation >= 10.0,
+            "Expected correlation >= 10.0, got {correlation}"
+        );
 
         // If agreement evidence was found, groups should exist
         if !agreement_evidence.is_empty() {
-            assert!(!detector.get_suspected_groups().is_empty(),
-                "Expected suspected groups when agreement evidence exists");
+            assert!(
+                !detector.get_suspected_groups().is_empty(),
+                "Expected suspected groups when agreement evidence exists"
+            );
         }
     }
 }

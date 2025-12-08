@@ -394,7 +394,7 @@ impl SiblingBroadcastValidator {
         public_key_bytes: &[u8],
     ) -> bool {
         use crate::quantum_crypto::ant_quic_integration::{
-            ml_dsa_verify, MlDsaPublicKey, MlDsaSignature,
+            MlDsaPublicKey, MlDsaSignature, ml_dsa_verify,
         };
 
         // Parse public key from bytes
@@ -688,9 +688,11 @@ mod tests {
 
         let result = validator.validate_broadcast(&broadcast);
         assert!(!result.is_valid);
-        assert!(result
-            .failures
-            .contains(&BroadcastValidationFailure::StaleTimestamp));
+        assert!(
+            result
+                .failures
+                .contains(&BroadcastValidationFailure::StaleTimestamp)
+        );
     }
 
     #[test]
@@ -717,9 +719,11 @@ mod tests {
 
         let result = validator.validate_broadcast(&broadcast);
         assert!(!result.is_valid);
-        assert!(result
-            .failures
-            .contains(&BroadcastValidationFailure::TooFewSiblings));
+        assert!(
+            result
+                .failures
+                .contains(&BroadcastValidationFailure::TooFewSiblings)
+        );
     }
 
     #[test]
@@ -767,7 +771,11 @@ mod tests {
 
         let result = validator.validate_broadcast(&broadcast);
         assert!(result.eclipse_suspected);
-        assert!(result.failures.contains(&BroadcastValidationFailure::LowOverlap));
+        assert!(
+            result
+                .failures
+                .contains(&BroadcastValidationFailure::LowOverlap)
+        );
     }
 
     #[test]
@@ -799,9 +807,11 @@ mod tests {
 
         let result = validator.validate_broadcast(&broadcast);
         assert!(!result.is_valid);
-        assert!(result
-            .failures
-            .contains(&BroadcastValidationFailure::MissingMembershipProof));
+        assert!(
+            result
+                .failures
+                .contains(&BroadcastValidationFailure::MissingMembershipProof)
+        );
     }
 
     #[test]
@@ -932,9 +942,11 @@ mod tests {
 
         let result = validator.validate_broadcast(&broadcast);
         assert!(!result.is_valid);
-        assert!(result
-            .failures
-            .contains(&BroadcastValidationFailure::DuplicateEntries));
+        assert!(
+            result
+                .failures
+                .contains(&BroadcastValidationFailure::DuplicateEntries)
+        );
     }
 
     // ==========================================================================
@@ -1120,7 +1132,11 @@ mod tests {
             .expect("Should build and sign successfully");
 
         let result = validator.validate_broadcast_with_signature(&broadcast, public_key.as_bytes());
-        assert!(result.is_valid, "Validation should succeed: {:?}", result.failures);
+        assert!(
+            result.is_valid,
+            "Validation should succeed: {:?}",
+            result.failures
+        );
     }
 
     #[test]
@@ -1157,9 +1173,14 @@ mod tests {
             .expect("Should build and sign successfully");
 
         // Validate with key2 - should fail with InvalidSignature
-        let result = validator.validate_broadcast_with_signature(&broadcast, public_key2.as_bytes());
+        let result =
+            validator.validate_broadcast_with_signature(&broadcast, public_key2.as_bytes());
         assert!(!result.is_valid);
-        assert!(result.failures.contains(&BroadcastValidationFailure::InvalidSignature));
+        assert!(
+            result
+                .failures
+                .contains(&BroadcastValidationFailure::InvalidSignature)
+        );
     }
 
     #[test]
@@ -1199,6 +1220,9 @@ mod tests {
         let bytes1 = broadcast.to_bytes_for_signing();
         let bytes2 = broadcast2.to_bytes_for_signing();
 
-        assert_eq!(bytes1, bytes2, "Serialization should be deterministic and exclude signature");
+        assert_eq!(
+            bytes1, bytes2,
+            "Serialization should be deterministic and exclude signature"
+        );
     }
 }

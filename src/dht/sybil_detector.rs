@@ -438,7 +438,8 @@ impl SybilDetector {
         let mut similarity_scores = Vec::new();
 
         // Compare average latencies
-        if let (Some(lat_a), Some(lat_b)) = (profile_a.average_latency(), profile_b.average_latency())
+        if let (Some(lat_a), Some(lat_b)) =
+            (profile_a.average_latency(), profile_b.average_latency())
         {
             let lat_sim = 1.0
                 - (lat_a.as_micros() as f64 - lat_b.as_micros() as f64).abs()
@@ -451,8 +452,7 @@ impl SybilDetector {
             profile_a.average_response_size(),
             profile_b.average_response_size(),
         ) {
-            let size_sim = 1.0
-                - (size_a as f64 - size_b as f64).abs() / size_a.max(size_b) as f64;
+            let size_sim = 1.0 - (size_a as f64 - size_b as f64).abs() / size_a.max(size_b) as f64;
             similarity_scores.push(size_sim.max(0.0));
         }
 
@@ -517,7 +517,9 @@ impl SybilDetector {
             let involved_peers: HashSet<PeerId> = match ev {
                 SybilEvidence::SubnetBurst { peers, .. } => peers.iter().cloned().collect(),
                 SybilEvidence::IdPrefixClustering { peers, .. } => peers.iter().cloned().collect(),
-                SybilEvidence::BehavioralClustering { peers, .. } => peers.iter().cloned().collect(),
+                SybilEvidence::BehavioralClustering { peers, .. } => {
+                    peers.iter().cloned().collect()
+                }
                 SybilEvidence::ResourceAsymmetry { peer, .. } => {
                     [peer.clone()].into_iter().collect()
                 }

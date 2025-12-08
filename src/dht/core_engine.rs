@@ -4,21 +4,22 @@
 
 use crate::dht::{
     content_addressing::ContentAddress,
-    reed_solomon::ReedSolomonEncoder,
-    witness::{DhtOperation, OperationMetadata, OperationType, WitnessReceiptSystem},
-    routing_maintenance::{
-        BucketRefreshManager,
-        close_group_validator::{CloseGroupValidator, CloseGroupValidatorConfig, CloseGroupFailure},
-        data_integrity_monitor::DataIntegrityMonitor,
-        EvictionReason,
-    },
     metrics::SecurityMetricsCollector,
+    reed_solomon::ReedSolomonEncoder,
+    routing_maintenance::{
+        BucketRefreshManager, EvictionReason,
+        close_group_validator::{
+            CloseGroupFailure, CloseGroupValidator, CloseGroupValidatorConfig,
+        },
+        data_integrity_monitor::DataIntegrityMonitor,
+    },
+    witness::{DhtOperation, OperationMetadata, OperationType, WitnessReceiptSystem},
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 
 /// DHT key type (256-bit)
@@ -373,7 +374,7 @@ pub struct DhtCoreEngine {
     load_balancer: Arc<RwLock<LoadBalancer>>,
     witness_system: Arc<WitnessReceiptSystem>,
     _reed_solomon: Arc<ReedSolomonEncoder>,
-    
+
     // Security Components (using parking_lot RwLock as they are synchronous)
     security_metrics: Arc<SecurityMetricsCollector>,
     bucket_refresh_manager: Arc<parking_lot::RwLock<BucketRefreshManager>>,
@@ -386,17 +387,21 @@ impl DhtCoreEngine {
     pub fn new(node_id: NodeId) -> Result<Self> {
         // Initialize security components
         let security_metrics = Arc::new(SecurityMetricsCollector::new());
-        let close_group_validator = Arc::new(parking_lot::RwLock::new(CloseGroupValidator::with_defaults()));
-        
+        let close_group_validator = Arc::new(parking_lot::RwLock::new(
+            CloseGroupValidator::with_defaults(),
+        ));
+
         let mut bucket_refresh_manager = BucketRefreshManager::new_with_validation(
             node_id.clone(),
-            CloseGroupValidatorConfig::default()
+            CloseGroupValidatorConfig::default(),
         );
         // Link validator to refresh manager
         bucket_refresh_manager.set_validator(close_group_validator.clone());
         let bucket_refresh_manager = Arc::new(parking_lot::RwLock::new(bucket_refresh_manager));
-        
-        let data_integrity_monitor = Arc::new(parking_lot::RwLock::new(DataIntegrityMonitor::with_defaults()));
+
+        let data_integrity_monitor = Arc::new(parking_lot::RwLock::new(
+            DataIntegrityMonitor::with_defaults(),
+        ));
 
         Ok(Self {
             node_id: node_id.clone(),
@@ -418,35 +423,35 @@ impl DhtCoreEngine {
         let refresh_manager = self.bucket_refresh_manager.clone();
         let integrity_monitor = self.data_integrity_monitor.clone();
         let _metrics = self.security_metrics.clone();
-        
+
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
             loop {
                 interval.tick().await;
-                
+
                 // 1. Run Bucket Refresh Logic
                 {
                     let mut mgr = refresh_manager.write();
                     let buckets = mgr.get_buckets_needing_refresh();
                     if !buckets.is_empty() {
-                       // In a real impl, we would trigger lookups here
-                       // For now, we just update the state to verify integration
-                       for bucket in buckets {
-                           mgr.record_refresh_success(bucket, 0); 
-                       }
+                        // In a real impl, we would trigger lookups here
+                        // For now, we just update the state to verify integration
+                        for bucket in buckets {
+                            mgr.record_refresh_success(bucket, 0);
+                        }
                     }
                 }
-                
+
                 // 2. Run Data Integrity Checks
                 {
-                   let mut monitor = integrity_monitor.write();
-                   if monitor.is_check_due() {
-                       monitor.mark_check_started();
-                       let _keys = monitor.get_keys_needing_check();
-                       // Dispatch attestation challenges (placeholder)
-                   }
+                    let mut monitor = integrity_monitor.write();
+                    if monitor.is_check_due() {
+                        monitor.mark_check_started();
+                        let _keys = monitor.get_keys_needing_check();
+                        // Dispatch attestation challenges (placeholder)
+                    }
                 }
-                
+
                 // 3. Update Metrics
                 // (Example: update churn rate)
                 // metrics.update_churn(...)
@@ -470,7 +475,7 @@ impl DhtCoreEngine {
         // Select nodes based on load
         let load_balancer = self.load_balancer.read().await;
         let selected_nodes = load_balancer.select_least_loaded(&target_nodes, 8);
-        
+
         // Hook: Track content in DataIntegrityMonitor
         {
             let mut monitor = self.data_integrity_monitor.write();
@@ -667,7 +672,7 @@ impl DhtCoreEngine {
         // 2. Add to routing table
         let mut routing = self.routing_table.write().await;
         routing.add_node(node)?;
-        
+
         // 3. Update Metrics
         // (Placeholder: Add metric for new node joining if available)
         // self.security_metrics.nodes_evicted_total.fetch_add(0, std::sync::atomic::Ordering::Relaxed);
@@ -688,9 +693,18 @@ impl std::fmt::Debug for DhtCoreEngine {
             .field("witness_system", &"Arc<WitnessReceiptSystem>")
             .field("_reed_solomon", &"Arc<ReedSolomonEncoder>")
             .field("security_metrics", &"Arc<SecurityMetricsCollector>")
-            .field("bucket_refresh_manager", &"Arc<parking_lot::RwLock<BucketRefreshManager>>")
-            .field("data_integrity_monitor", &"Arc<parking_lot::RwLock<DataIntegrityMonitor>>")
-            .field("close_group_validator", &"Arc<parking_lot::RwLock<CloseGroupValidator>>")
+            .field(
+                "bucket_refresh_manager",
+                &"Arc<parking_lot::RwLock<BucketRefreshManager>>",
+            )
+            .field(
+                "data_integrity_monitor",
+                &"Arc<parking_lot::RwLock<DataIntegrityMonitor>>",
+            )
+            .field(
+                "close_group_validator",
+                &"Arc<parking_lot::RwLock<CloseGroupValidator>>",
+            )
             .finish()
     }
 }

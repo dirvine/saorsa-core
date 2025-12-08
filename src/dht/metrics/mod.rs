@@ -559,8 +559,8 @@ impl DhtMetricsAggregator {
         trust: &TrustMetrics,
     ) -> f64 {
         // Weighted average of component scores
-        let security_score = 1.0
-            - (security.eclipse_score + security.sybil_score + security.collusion_score) / 3.0;
+        let security_score =
+            1.0 - (security.eclipse_score + security.sybil_score + security.collusion_score) / 3.0;
         let dht_score = dht_health.success_rate;
         let trust_score = trust.eigentrust_avg;
 

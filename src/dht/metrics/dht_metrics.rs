@@ -17,8 +17,8 @@
 //! - Bucket refresh and liveness checks
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -154,7 +154,8 @@ impl DhtMetricsCollector {
     /// Update replication health (0.0 - 1.0)
     pub fn set_replication_health(&self, health: f64) {
         let millipercent = (health.clamp(0.0, 1.0) * 1000.0) as u64;
-        self.replication_health.store(millipercent, Ordering::Relaxed);
+        self.replication_health
+            .store(millipercent, Ordering::Relaxed);
     }
 
     /// Update under-replicated keys count
@@ -182,7 +183,8 @@ impl DhtMetricsCollector {
         // Update operation counters
         self.operations_total.fetch_add(1, Ordering::Relaxed);
         if success {
-            self.operations_success_total.fetch_add(1, Ordering::Relaxed);
+            self.operations_success_total
+                .fetch_add(1, Ordering::Relaxed);
         } else {
             self.operations_failed_total.fetch_add(1, Ordering::Relaxed);
         }
@@ -225,7 +227,8 @@ impl DhtMetricsCollector {
             let p95 = Self::calculate_percentile(&latencies, 95.0);
             let p99 = Self::calculate_percentile(&latencies, 99.0);
 
-            let avg_hops = samples.iter().map(|s| s.hops as f64).sum::<f64>() / samples.len() as f64;
+            let avg_hops =
+                samples.iter().map(|s| s.hops as f64).sum::<f64>() / samples.len() as f64;
 
             (p50, p95, p99, avg_hops)
         };

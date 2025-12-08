@@ -16,8 +16,8 @@
 //! - Trust score trends
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
 
 /// Trust metrics data structure
@@ -210,10 +210,7 @@ impl TrustMetricsCollector {
         // Calculate and update statistics
         if !scores.is_empty() {
             let avg = scores.iter().sum::<f64>() / scores.len() as f64;
-            let min = scores
-                .iter()
-                .cloned()
-                .fold(f64::INFINITY, |a, b| a.min(b));
+            let min = scores.iter().cloned().fold(f64::INFINITY, |a, b| a.min(b));
             let max = scores
                 .iter()
                 .cloned()
@@ -261,7 +258,8 @@ impl TrustMetricsCollector {
         self.eigentrust_max.store(1000, Ordering::Relaxed);
         self.eigentrust_epochs_total.store(0, Ordering::Relaxed);
         self.low_trust_nodes.store(0, Ordering::Relaxed);
-        self.witness_receipts_issued_total.store(0, Ordering::Relaxed);
+        self.witness_receipts_issued_total
+            .store(0, Ordering::Relaxed);
         self.witness_receipts_verified_total
             .store(0, Ordering::Relaxed);
         self.witness_receipts_rejected_total
@@ -355,7 +353,7 @@ mod tests {
         let scores = vec![
             0.1, 0.15, // 0.0-0.2 bucket (2)
             0.3, 0.35, 0.38, // 0.2-0.4 bucket (3)
-            0.5, // 0.4-0.6 bucket (1)
+            0.5,  // 0.4-0.6 bucket (1)
             0.7, 0.75, // 0.6-0.8 bucket (2)
             0.9, 0.95, // 0.8-1.0 bucket (2)
         ];
@@ -363,26 +361,11 @@ mod tests {
         collector.update_trust_distribution(&scores).await;
 
         let metrics = collector.get_metrics().await;
-        assert_eq!(
-            metrics.trust_distribution.get("0.0-0.2").copied(),
-            Some(2)
-        );
-        assert_eq!(
-            metrics.trust_distribution.get("0.2-0.4").copied(),
-            Some(3)
-        );
-        assert_eq!(
-            metrics.trust_distribution.get("0.4-0.6").copied(),
-            Some(1)
-        );
-        assert_eq!(
-            metrics.trust_distribution.get("0.6-0.8").copied(),
-            Some(2)
-        );
-        assert_eq!(
-            metrics.trust_distribution.get("0.8-1.0").copied(),
-            Some(2)
-        );
+        assert_eq!(metrics.trust_distribution.get("0.0-0.2").copied(), Some(2));
+        assert_eq!(metrics.trust_distribution.get("0.2-0.4").copied(), Some(3));
+        assert_eq!(metrics.trust_distribution.get("0.4-0.6").copied(), Some(1));
+        assert_eq!(metrics.trust_distribution.get("0.6-0.8").copied(), Some(2));
+        assert_eq!(metrics.trust_distribution.get("0.8-1.0").copied(), Some(2));
     }
 
     #[tokio::test]

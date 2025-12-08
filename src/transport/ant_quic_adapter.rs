@@ -340,12 +340,7 @@ impl P2PNetworkNode {
                 Err(err) => {
                     match config.enforcement_mode {
                         GeoEnforcementMode::Strict => {
-                            tracing::warn!(
-                                "REJECTED peer {} from {} - {}",
-                                peer_id,
-                                addr,
-                                err
-                            );
+                            tracing::warn!("REJECTED peer {} from {} - {}", peer_id, addr, err);
                             return; // Do not add peer
                         }
                         GeoEnforcementMode::LogOnly => {

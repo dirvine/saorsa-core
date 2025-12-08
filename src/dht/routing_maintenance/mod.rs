@@ -29,18 +29,18 @@ pub use close_group_validator::{
     CloseGroupValidationResult, CloseGroupValidator, CloseGroupValidatorConfig,
 };
 pub use config::MaintenanceConfig;
+pub use data_integrity_monitor::{
+    AttestationResult, DataHealthScore, DataHealthStatus, DataIntegrityConfig,
+    DataIntegrityMetrics, DataIntegrityMonitor, NodeAttestationHistory, RepairRecommendation,
+};
 pub use eviction::{EvictionManager, EvictionReason};
 pub use liveness::NodeLivenessState;
 pub use refresh::{BucketRefreshManager, BucketRefreshState, RefreshTier};
 pub use scheduler::{MaintenanceScheduler, MaintenanceTask, ScheduledTask, TaskStats};
-pub use validator::{
-    NodeValidationResult, ValidationFailure, WitnessResponse, WitnessSelectionCriteria,
-};
 pub use security_coordinator::{
     CloseGroupEviction, CloseGroupEvictionTracker, EvictionRecord, SecurityCoordinator,
     SecurityCoordinatorConfig,
 };
-pub use data_integrity_monitor::{
-    AttestationResult, DataHealthScore, DataHealthStatus, DataIntegrityConfig,
-    DataIntegrityMetrics, DataIntegrityMonitor, NodeAttestationHistory, RepairRecommendation,
+pub use validator::{
+    NodeValidationResult, ValidationFailure, WitnessResponse, WitnessSelectionCriteria,
 };

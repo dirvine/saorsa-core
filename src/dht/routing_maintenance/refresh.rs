@@ -399,9 +399,15 @@ impl BucketRefreshManager {
     /// Get overall validation rate across all buckets
     #[must_use]
     pub fn overall_validation_rate(&self) -> f64 {
-        let (total_passed, total_failed) = self.bucket_states.values().fold((0u64, 0u64), |acc, state| {
-            (acc.0 + state.validated_nodes, acc.1 + state.validation_failures)
-        });
+        let (total_passed, total_failed) =
+            self.bucket_states
+                .values()
+                .fold((0u64, 0u64), |acc, state| {
+                    (
+                        acc.0 + state.validated_nodes,
+                        acc.1 + state.validation_failures,
+                    )
+                });
         let total = total_passed + total_failed;
         if total == 0 {
             1.0
@@ -433,9 +439,18 @@ impl BucketRefreshManager {
         &mut self,
         bucket_idx: usize,
         nodes: &[DhtNodeId],
-        responses_by_node: &std::collections::HashMap<DhtNodeId, Vec<super::close_group_validator::CloseGroupResponse>>,
+        responses_by_node: &std::collections::HashMap<
+            DhtNodeId,
+            Vec<super::close_group_validator::CloseGroupResponse>,
+        >,
         trust_scores: &std::collections::HashMap<DhtNodeId, f64>,
-    ) -> (Vec<DhtNodeId>, Vec<(DhtNodeId, Vec<super::close_group_validator::CloseGroupFailure>)>) {
+    ) -> (
+        Vec<DhtNodeId>,
+        Vec<(
+            DhtNodeId,
+            Vec<super::close_group_validator::CloseGroupFailure>,
+        )>,
+    ) {
         let mut valid_nodes = Vec::new();
         let mut invalid_nodes = Vec::new();
 
@@ -463,7 +478,9 @@ impl BucketRefreshManager {
                 let trust_score = trust_scores.get(node_id).copied();
 
                 // Perform validation
-                let result = validator.read().validate_membership(node_id, responses, trust_score);
+                let result = validator
+                    .read()
+                    .validate_membership(node_id, responses, trust_score);
                 (node_id.clone(), result)
             })
             .collect();
@@ -490,7 +507,10 @@ impl BucketRefreshManager {
     fn update_attack_indicators_from_results(
         &self,
         valid_nodes: &[DhtNodeId],
-        invalid_nodes: &[(DhtNodeId, Vec<super::close_group_validator::CloseGroupFailure>)],
+        invalid_nodes: &[(
+            DhtNodeId,
+            Vec<super::close_group_validator::CloseGroupFailure>,
+        )],
     ) {
         let Some(validator) = &self.validator else {
             return;
@@ -550,7 +570,9 @@ impl BucketRefreshManager {
 
     /// Get nodes that should be evicted based on validation failures
     #[must_use]
-    pub fn get_nodes_for_eviction(&self) -> Vec<(DhtNodeId, super::close_group_validator::CloseGroupFailure)> {
+    pub fn get_nodes_for_eviction(
+        &self,
+    ) -> Vec<(DhtNodeId, super::close_group_validator::CloseGroupFailure)> {
         let mut eviction_candidates = Vec::new();
 
         let Some(validator) = &self.validator else {
@@ -594,7 +616,9 @@ impl BucketRefreshManager {
     /// Get current attack indicators for monitoring
     #[must_use]
     pub fn get_attack_indicators(&self) -> Option<super::close_group_validator::AttackIndicators> {
-        self.validator.as_ref().map(|v| v.read().get_attack_indicators())
+        self.validator
+            .as_ref()
+            .map(|v| v.read().get_attack_indicators())
     }
 }
 

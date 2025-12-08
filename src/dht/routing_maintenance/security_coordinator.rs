@@ -17,10 +17,10 @@ use std::time::{Duration, Instant, SystemTime};
 use parking_lot::RwLock;
 use tokio::sync::broadcast;
 
+use crate::dht::DhtNodeId;
 use crate::dht::collusion_detector::{CollusionDetector, CollusionDetectorConfig};
 use crate::dht::metrics::security_metrics::SecurityMetricsCollector;
 use crate::dht::sybil_detector::{SybilDetector, SybilDetectorConfig};
-use crate::dht::DhtNodeId;
 // PeerId from trust_weighted_dht is the identity::NodeId
 use crate::dht::trust_weighted_dht::PeerId;
 use crate::identity::node_identity::NodeId as IdentityNodeId;
@@ -326,14 +326,13 @@ impl SecurityCoordinator {
         let trust_score = self.get_trust_score(node_id);
 
         // Perform validation
-        let result = self
-            .close_group_validator
-            .read()
-            .validate_membership(node_id, responses, trust_score);
+        let result =
+            self.close_group_validator
+                .read()
+                .validate_membership(node_id, responses, trust_score);
 
         // Update metrics
-        self.metrics
-            .record_close_group_validation(result.is_valid);
+        self.metrics.record_close_group_validation(result.is_valid);
 
         // If validation failed, process the failure
         if !result.is_valid {
@@ -347,11 +346,7 @@ impl SecurityCoordinator {
     }
 
     /// Handle a validation failure
-    fn handle_validation_failure(
-        &self,
-        node_id: &DhtNodeId,
-        result: &CloseGroupValidationResult,
-    ) {
+    fn handle_validation_failure(&self, node_id: &DhtNodeId, result: &CloseGroupValidationResult) {
         // Record eviction in tracker
         let peer_confirmations = (result.confirmation_ratio * 10.0) as usize; // Approximate
 
@@ -362,9 +357,7 @@ impl SecurityCoordinator {
         );
 
         // Update eviction manager
-        self.eviction_manager
-            .write()
-            .record_failure(node_id);
+        self.eviction_manager.write().record_failure(node_id);
 
         // Update metrics based on failure reason
         for reason in &result.failure_reasons {
@@ -386,7 +379,13 @@ impl SecurityCoordinator {
         // Convert DhtNodeId to PeerId (identity::NodeId)
         let temporal_data: Vec<(PeerId, Duration, Instant)> = responses
             .iter()
-            .map(|r| (dht_to_identity_id(&r.peer_id), r.response_latency, r.received_at))
+            .map(|r| {
+                (
+                    dht_to_identity_id(&r.peer_id),
+                    r.response_latency,
+                    r.received_at,
+                )
+            })
             .collect();
 
         // Check for temporal correlation
@@ -539,7 +538,10 @@ impl SecurityCoordinator {
                 for member in &group.members {
                     let dht_id = identity_to_dht_id(member);
                     if !candidates.iter().any(|(id, _)| id == &dht_id) {
-                        candidates.push((dht_id, EvictionReason::LowTrust("Sybil suspected".to_string())));
+                        candidates.push((
+                            dht_id,
+                            EvictionReason::LowTrust("Sybil suspected".to_string()),
+                        ));
                     }
                 }
             }
@@ -551,7 +553,10 @@ impl SecurityCoordinator {
                 for member in &group.members {
                     let dht_id = identity_to_dht_id(member);
                     if !candidates.iter().any(|(id, _)| id == &dht_id) {
-                        candidates.push((dht_id, EvictionReason::LowTrust("Collusion suspected".to_string())));
+                        candidates.push((
+                            dht_id,
+                            EvictionReason::LowTrust("Collusion suspected".to_string()),
+                        ));
                     }
                 }
             }
@@ -564,10 +569,7 @@ impl SecurityCoordinator {
     #[must_use]
     pub fn validate_geographic_diversity(&self, node_ids: &[DhtNodeId]) -> bool {
         let regions = self.node_regions.read();
-        let unique_regions: HashSet<_> = node_ids
-            .iter()
-            .filter_map(|id| regions.get(id))
-            .collect();
+        let unique_regions: HashSet<_> = node_ids.iter().filter_map(|id| regions.get(id)).collect();
 
         unique_regions.len() >= self.config.min_geographic_regions
     }
@@ -581,11 +583,13 @@ impl SecurityCoordinator {
         let peer_id = dht_to_identity_id(node_id);
 
         let sybil_penalty = self.sybil_detector.read().sybil_risk_score(&peer_id);
-        let collusion_penalty = self.collusion_detector.read().collusion_risk_score(&peer_id);
+        let collusion_penalty = self
+            .collusion_detector
+            .read()
+            .collusion_risk_score(&peer_id);
 
         // Composite score with penalties
-        let score =
-            base_trust * (1.0 - sybil_penalty * 0.5) * (1.0 - collusion_penalty * 0.5);
+        let score = base_trust * (1.0 - sybil_penalty * 0.5) * (1.0 - collusion_penalty * 0.5);
         score.clamp(0.0, 1.0)
     }
 
@@ -598,7 +602,10 @@ impl SecurityCoordinator {
         self.get_security_score(node_id) >= 0.7
             && !self.sybil_detector.read().is_peer_suspected(&peer_id)
             && !self.collusion_detector.read().is_peer_suspected(&peer_id)
-            && !self.eviction_tracker.read().was_evicted(node_id, Duration::from_secs(3600))
+            && !self
+                .eviction_tracker
+                .read()
+                .was_evicted(node_id, Duration::from_secs(3600))
     }
 
     /// Get current attack mode status
@@ -692,7 +699,9 @@ impl SecurityCoordinator {
             let mut modified = result.clone();
             if modified.is_valid {
                 modified.is_valid = false;
-                modified.failure_reasons.push(CloseGroupFailure::SuspectedCollusion);
+                modified
+                    .failure_reasons
+                    .push(CloseGroupFailure::SuspectedCollusion);
             }
             return modified;
         }
@@ -702,17 +711,25 @@ impl SecurityCoordinator {
             let mut modified = result.clone();
             if modified.is_valid {
                 modified.is_valid = false;
-                modified.failure_reasons.push(CloseGroupFailure::SuspectedCollusion);
+                modified
+                    .failure_reasons
+                    .push(CloseGroupFailure::SuspectedCollusion);
             }
             return modified;
         }
 
         // Check if recently evicted
-        if self.eviction_tracker.read().was_evicted(node_id, Duration::from_secs(3600)) {
+        if self
+            .eviction_tracker
+            .read()
+            .was_evicted(node_id, Duration::from_secs(3600))
+        {
             let mut modified = result.clone();
             if modified.is_valid {
                 modified.is_valid = false;
-                modified.failure_reasons.push(CloseGroupFailure::EvictedFromCloseGroup);
+                modified
+                    .failure_reasons
+                    .push(CloseGroupFailure::EvictedFromCloseGroup);
             }
             return modified;
         }
@@ -840,7 +857,10 @@ impl SecurityCoordinator {
     ///
     /// This spawns an async task that periodically runs security analysis
     /// and checks for attack indicators.
-    pub fn start_background_monitoring(self: &Arc<Self>, interval: Duration) -> tokio::task::JoinHandle<()> {
+    pub fn start_background_monitoring(
+        self: &Arc<Self>,
+        interval: Duration,
+    ) -> tokio::task::JoinHandle<()> {
         let coordinator = Arc::clone(self);
 
         tokio::spawn(async move {
@@ -901,7 +921,9 @@ impl SecurityCoordinator {
     pub fn get_attack_indicators_summary(&self) -> AttackIndicatorsSummary {
         let sybil_risk = self.sybil_detector.read().overall_risk_score();
         let collusion_groups = self.collusion_detector.read().group_count();
-        let recent_evictions = self.eviction_tracker.read()
+        let recent_evictions = self
+            .eviction_tracker
+            .read()
             .get_recently_evicted(Duration::from_secs(300))
             .len();
 
@@ -994,10 +1016,12 @@ mod tests {
         let node_id = random_node_id();
 
         // Initially not evicted
-        assert!(!coordinator.eviction_tracker.read().was_evicted(
-            &node_id,
-            Duration::from_secs(3600)
-        ));
+        assert!(
+            !coordinator
+                .eviction_tracker
+                .read()
+                .was_evicted(&node_id, Duration::from_secs(3600))
+        );
 
         // Record eviction
         coordinator.eviction_tracker.write().record_eviction(
@@ -1007,10 +1031,12 @@ mod tests {
         );
 
         // Now evicted
-        assert!(coordinator.eviction_tracker.read().was_evicted(
-            &node_id,
-            Duration::from_secs(3600)
-        ));
+        assert!(
+            coordinator
+                .eviction_tracker
+                .read()
+                .was_evicted(&node_id, Duration::from_secs(3600))
+        );
     }
 
     #[test]

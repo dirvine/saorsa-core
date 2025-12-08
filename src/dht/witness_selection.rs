@@ -379,10 +379,7 @@ impl WitnessSelector {
             .collect();
 
         // Sort by E-S key (highest first = most likely to be selected)
-        weighted.sort_by(|a, b| {
-            b.0.partial_cmp(&a.0)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        weighted.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
         // Select witnesses while ensuring geographic diversity
         let selected = self.select_with_diversity_from_weighted(weighted);
@@ -866,7 +863,11 @@ mod tests {
         let selection_base = selector
             .select_witnesses_weighted_seeded(&candidates, None, None, 12345)
             .unwrap();
-        let ids_base: Vec<_> = selection_base.witnesses.iter().map(|w| &w.peer_id).collect();
+        let ids_base: Vec<_> = selection_base
+            .witnesses
+            .iter()
+            .map(|w| &w.peer_id)
+            .collect();
 
         let mut found_different = false;
         for seed in [99999, 11111, 77777, 33333] {
@@ -943,9 +944,9 @@ mod tests {
 
         // Three candidates with trust ratio 3:2:1
         let candidates = vec![
-            create_test_candidate("high", 1, GeographicRegion::Europe, 0.6),   // weight 3x
+            create_test_candidate("high", 1, GeographicRegion::Europe, 0.6), // weight 3x
             create_test_candidate("medium", 2, GeographicRegion::Europe, 0.4), // weight 2x
-            create_test_candidate("low", 3, GeographicRegion::Europe, 0.2),    // weight 1x
+            create_test_candidate("low", 3, GeographicRegion::Europe, 0.2),  // weight 1x
         ];
 
         let mut counts = std::collections::HashMap::new();
@@ -1109,12 +1110,7 @@ mod tests {
 
         for seed in 0..20 {
             let selection = selector
-                .select_witnesses_weighted_seeded(
-                    &candidates,
-                    Some(&source),
-                    Some(&target),
-                    seed,
-                )
+                .select_witnesses_weighted_seeded(&candidates, Some(&source), Some(&target), seed)
                 .unwrap();
             assert!(
                 !selection.witnesses.iter().any(|w| w.peer_id == "source"),

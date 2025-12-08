@@ -7,8 +7,8 @@
 //! SPDX-License-Identifier: AGPL-3.0-or-later OR Commercial
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use parking_lot::RwLock;
@@ -450,7 +450,11 @@ impl CloseGroupValidator {
     }
 
     /// BFT consensus validation (attack mode)
-    fn validate_bft(&self, responses: &[CloseGroupResponse], result: &mut CloseGroupValidationResult) {
+    fn validate_bft(
+        &self,
+        responses: &[CloseGroupResponse],
+        result: &mut CloseGroupValidationResult,
+    ) {
         // Filter responses to only include trusted witnesses
         let trusted_responses: Vec<_> = responses
             .iter()
@@ -667,7 +671,11 @@ mod tests {
         let result = validator.validate_membership(&node_id, &responses, Some(0.5));
 
         assert!(!result.is_valid);
-        assert!(result.failure_reasons.contains(&CloseGroupFailure::InsufficientConfirmation));
+        assert!(
+            result
+                .failure_reasons
+                .contains(&CloseGroupFailure::InsufficientConfirmation)
+        );
     }
 
     #[test]
@@ -731,7 +739,11 @@ mod tests {
         let result = validator.validate_membership(&node_id, &responses, Some(0.5));
 
         assert!(!result.is_valid);
-        assert!(result.failure_reasons.contains(&CloseGroupFailure::InsufficientConfirmation));
+        assert!(
+            result
+                .failure_reasons
+                .contains(&CloseGroupFailure::InsufficientConfirmation)
+        );
     }
 
     #[test]
@@ -751,7 +763,11 @@ mod tests {
         let result = validator.validate_membership(&node_id, &responses, Some(0.1));
 
         assert!(!result.is_valid);
-        assert!(result.failure_reasons.contains(&CloseGroupFailure::LowTrustScore));
+        assert!(
+            result
+                .failure_reasons
+                .contains(&CloseGroupFailure::LowTrustScore)
+        );
     }
 
     #[test]
@@ -904,7 +920,11 @@ mod tests {
 
         // Should still be valid in normal mode but with diversity warning
         assert!(result.is_valid);
-        assert!(result.failure_reasons.contains(&CloseGroupFailure::InsufficientGeographicDiversity));
+        assert!(
+            result
+                .failure_reasons
+                .contains(&CloseGroupFailure::InsufficientGeographicDiversity)
+        );
         assert_eq!(result.confirming_regions, 1);
     }
 }
