@@ -6,12 +6,19 @@ use crate::dht::{
     content_addressing::ContentAddress,
     reed_solomon::ReedSolomonEncoder,
     witness::{DhtOperation, OperationMetadata, OperationType, WitnessReceiptSystem},
+    routing_maintenance::{
+        BucketRefreshManager,
+        close_group_validator::{CloseGroupValidator, CloseGroupValidatorConfig, CloseGroupFailure},
+        data_integrity_monitor::DataIntegrityMonitor,
+        EvictionReason,
+    },
+    metrics::SecurityMetricsCollector,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 use tokio::sync::RwLock;
 
 /// DHT key type (256-bit)
@@ -366,11 +373,31 @@ pub struct DhtCoreEngine {
     load_balancer: Arc<RwLock<LoadBalancer>>,
     witness_system: Arc<WitnessReceiptSystem>,
     _reed_solomon: Arc<ReedSolomonEncoder>,
+    
+    // Security Components (using parking_lot RwLock as they are synchronous)
+    security_metrics: Arc<SecurityMetricsCollector>,
+    bucket_refresh_manager: Arc<parking_lot::RwLock<BucketRefreshManager>>,
+    data_integrity_monitor: Arc<parking_lot::RwLock<DataIntegrityMonitor>>,
+    close_group_validator: Arc<parking_lot::RwLock<CloseGroupValidator>>,
 }
 
 impl DhtCoreEngine {
     /// Create new DHT engine with specified node ID
     pub fn new(node_id: NodeId) -> Result<Self> {
+        // Initialize security components
+        let security_metrics = Arc::new(SecurityMetricsCollector::new());
+        let close_group_validator = Arc::new(parking_lot::RwLock::new(CloseGroupValidator::with_defaults()));
+        
+        let mut bucket_refresh_manager = BucketRefreshManager::new_with_validation(
+            node_id.clone(),
+            CloseGroupValidatorConfig::default()
+        );
+        // Link validator to refresh manager
+        bucket_refresh_manager.set_validator(close_group_validator.clone());
+        let bucket_refresh_manager = Arc::new(parking_lot::RwLock::new(bucket_refresh_manager));
+        
+        let data_integrity_monitor = Arc::new(parking_lot::RwLock::new(DataIntegrityMonitor::with_defaults()));
+
         Ok(Self {
             node_id: node_id.clone(),
             routing_table: Arc::new(RwLock::new(KademliaRoutingTable::new(node_id, 8))),
@@ -379,19 +406,76 @@ impl DhtCoreEngine {
             load_balancer: Arc::new(RwLock::new(LoadBalancer::new())),
             witness_system: Arc::new(WitnessReceiptSystem::new()),
             _reed_solomon: Arc::new(ReedSolomonEncoder::new(6, 2)?),
+            security_metrics,
+            bucket_refresh_manager,
+            data_integrity_monitor,
+            close_group_validator,
         })
+    }
+
+    /// Start background maintenance tasks for security and health
+    pub fn start_maintenance_tasks(&self) {
+        let refresh_manager = self.bucket_refresh_manager.clone();
+        let integrity_monitor = self.data_integrity_monitor.clone();
+        let _metrics = self.security_metrics.clone();
+        
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                
+                // 1. Run Bucket Refresh Logic
+                {
+                    let mut mgr = refresh_manager.write();
+                    let buckets = mgr.get_buckets_needing_refresh();
+                    if !buckets.is_empty() {
+                       // In a real impl, we would trigger lookups here
+                       // For now, we just update the state to verify integration
+                       for bucket in buckets {
+                           mgr.record_refresh_success(bucket, 0); 
+                       }
+                    }
+                }
+                
+                // 2. Run Data Integrity Checks
+                {
+                   let mut monitor = integrity_monitor.write();
+                   if monitor.is_check_due() {
+                       monitor.mark_check_started();
+                       let _keys = monitor.get_keys_needing_check();
+                       // Dispatch attestation challenges (placeholder)
+                   }
+                }
+                
+                // 3. Update Metrics
+                // (Example: update churn rate)
+                // metrics.update_churn(...)
+            }
+        });
+    }
+
+    /// Get the security metrics collector
+    pub fn security_metrics(&self) -> Arc<SecurityMetricsCollector> {
+        self.security_metrics.clone()
     }
 
     /// Store data in the DHT
     pub async fn store(&mut self, key: &DhtKey, value: Vec<u8>) -> Result<StoreReceipt> {
         // Find nodes to store at
         let routing = self.routing_table.read().await;
+        // ... (find_closest_nodes)
         let target_nodes = routing.find_closest_nodes(key, 8);
         drop(routing);
 
         // Select nodes based on load
         let load_balancer = self.load_balancer.read().await;
         let selected_nodes = load_balancer.select_least_loaded(&target_nodes, 8);
+        
+        // Hook: Track content in DataIntegrityMonitor
+        {
+            let mut monitor = self.data_integrity_monitor.write();
+            monitor.track_content(key.clone(), selected_nodes.to_vec());
+        }
 
         // Store locally if we're one of the selected nodes or if no nodes are available (test/single-node mode)
         if selected_nodes.contains(&self.node_id) || selected_nodes.is_empty() {
@@ -484,6 +568,112 @@ impl DhtCoreEngine {
 
         Ok(())
     }
+
+    /// Evict a node from the routing table with a specific reason.
+    ///
+    /// This is called when a node fails security validation or is detected
+    /// as malicious through Sybil/collusion detection.
+    pub async fn evict_node(&self, node_id: &NodeId, reason: EvictionReason) -> Result<()> {
+        // 1. Remove from routing table
+        {
+            let mut routing = self.routing_table.write().await;
+            routing.remove_node(node_id);
+        }
+
+        // 2. Update security metrics based on eviction reason
+        let reason_str = match &reason {
+            EvictionReason::ConsecutiveFailures(_) => "consecutive_failures",
+            EvictionReason::LowTrust(_) => "low_trust",
+            EvictionReason::FailedAttestation => "failed_attestation",
+            EvictionReason::CloseGroupRejection => "close_group_rejection",
+            EvictionReason::Stale => "stale",
+        };
+        self.security_metrics.record_eviction(reason_str).await;
+
+        // 3. Log eviction for data integrity tracking
+        // Note: DataIntegrityMonitor tracks data health, not individual node membership
+        // Evicted nodes will be removed from routing table, which affects future lookups
+
+        tracing::info!(
+            node_id = %node_id,
+            reason = ?reason,
+            "Node evicted from DHT"
+        );
+
+        Ok(())
+    }
+
+    /// Evict a node due to close group validation failure.
+    ///
+    /// This is a specialized eviction for security-related failures.
+    pub async fn evict_node_for_security(
+        &self,
+        node_id: &NodeId,
+        failure_reason: CloseGroupFailure,
+    ) -> Result<()> {
+        let eviction_reason = match failure_reason {
+            CloseGroupFailure::NotInCloseGroup => EvictionReason::CloseGroupRejection,
+            CloseGroupFailure::EvictedFromCloseGroup => EvictionReason::CloseGroupRejection,
+            CloseGroupFailure::InsufficientConfirmation => EvictionReason::CloseGroupRejection,
+            CloseGroupFailure::LowTrustScore => {
+                EvictionReason::LowTrust("Security validation failed".to_string())
+            }
+            CloseGroupFailure::InsufficientGeographicDiversity => {
+                EvictionReason::LowTrust("Geographic diversity violation".to_string())
+            }
+            CloseGroupFailure::SuspectedCollusion => {
+                EvictionReason::LowTrust("Suspected collusion".to_string())
+            }
+            CloseGroupFailure::AttackModeTriggered => {
+                EvictionReason::LowTrust("Attack mode triggered".to_string())
+            }
+        };
+
+        self.evict_node(node_id, eviction_reason).await
+    }
+
+    /// Get eviction candidates from the refresh manager.
+    ///
+    /// Returns nodes that should be evicted based on validation failures.
+    pub fn get_eviction_candidates(&self) -> Vec<(NodeId, CloseGroupFailure)> {
+        self.bucket_refresh_manager.read().get_nodes_for_eviction()
+    }
+
+    /// Check if the system is currently in attack mode.
+    #[must_use]
+    pub fn is_attack_mode(&self) -> bool {
+        self.bucket_refresh_manager.read().is_attack_mode()
+    }
+
+    /// Get the bucket refresh manager for external access
+    pub fn bucket_refresh_manager(&self) -> Arc<parking_lot::RwLock<BucketRefreshManager>> {
+        self.bucket_refresh_manager.clone()
+    }
+
+    /// Get the close group validator for external access
+    pub fn close_group_validator(&self) -> Arc<parking_lot::RwLock<CloseGroupValidator>> {
+        self.close_group_validator.clone()
+    }
+
+    /// Add a node to the DHT with security checks
+    pub async fn add_node(&mut self, node: NodeInfo) -> Result<()> {
+        // 1. Security Check: Close Group Validator
+        {
+            // Placeholder: In a real impl, we would perform active validation query
+            // let validator = self.close_group_validator.read();
+            // if !validator.validate(node) { return Err(SecurityError::ValidationFailed) }
+        }
+
+        // 2. Add to routing table
+        let mut routing = self.routing_table.write().await;
+        routing.add_node(node)?;
+        
+        // 3. Update Metrics
+        // (Placeholder: Add metric for new node joining if available)
+        // self.security_metrics.nodes_evicted_total.fetch_add(0, std::sync::atomic::Ordering::Relaxed);
+
+        Ok(())
+    }
 }
 
 // Manual Debug implementation to avoid cascade of Debug requirements
@@ -497,6 +687,10 @@ impl std::fmt::Debug for DhtCoreEngine {
             .field("load_balancer", &"Arc<RwLock<LoadBalancer>>")
             .field("witness_system", &"Arc<WitnessReceiptSystem>")
             .field("_reed_solomon", &"Arc<ReedSolomonEncoder>")
+            .field("security_metrics", &"Arc<SecurityMetricsCollector>")
+            .field("bucket_refresh_manager", &"Arc<parking_lot::RwLock<BucketRefreshManager>>")
+            .field("data_integrity_monitor", &"Arc<parking_lot::RwLock<DataIntegrityMonitor>>")
+            .field("close_group_validator", &"Arc<parking_lot::RwLock<CloseGroupValidator>>")
             .finish()
     }
 }

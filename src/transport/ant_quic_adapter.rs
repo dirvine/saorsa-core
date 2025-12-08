@@ -33,9 +33,11 @@
 //! - Connection state metrics
 //! - Stream performance data
 
+use crate::error::{GeoEnforcementMode, GeoRejectionError, GeographicConfig};
 use crate::telemetry::StreamClass;
 use anyhow::Result;
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -78,6 +80,10 @@ pub struct P2PNetworkNode {
     shutdown: Arc<AtomicBool>,
     /// Event polling task handle
     poll_task_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Geographic configuration for diversity enforcement
+    geo_config: Option<GeographicConfig>,
+    /// Peer region tracking for geographic diversity
+    peer_regions: Arc<RwLock<HashMap<String, usize>>>,
 }
 
 impl P2PNetworkNode {
@@ -134,6 +140,8 @@ impl P2PNetworkNode {
             event_tx,
             shutdown,
             poll_task_handle,
+            geo_config: None,
+            peer_regions: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -318,13 +326,144 @@ impl P2PNetworkNode {
         Ok(connected_peers)
     }
 
-    /// Internal helper to register a peer
+    /// Internal helper to register a peer with geographic validation
+    ///
+    /// If geographic config is set to Strict mode, this will reject peers
+    /// from blocked regions or if diversity thresholds would be violated.
     async fn add_peer(&self, peer_id: PeerId, addr: SocketAddr) {
+        // Perform geographic validation if configured
+        if let Some(ref config) = self.geo_config {
+            match self.validate_geographic_diversity(&addr, config).await {
+                Ok(()) => {
+                    // Validation passed, continue to add peer
+                }
+                Err(err) => {
+                    match config.enforcement_mode {
+                        GeoEnforcementMode::Strict => {
+                            tracing::warn!(
+                                "REJECTED peer {} from {} - {}",
+                                peer_id,
+                                addr,
+                                err
+                            );
+                            return; // Do not add peer
+                        }
+                        GeoEnforcementMode::LogOnly => {
+                            tracing::info!(
+                                "GEO_AUDIT: Would reject peer {} from {} - {} (log-only mode)",
+                                peer_id,
+                                addr,
+                                err
+                            );
+                            // Continue to add peer in log-only mode
+                        }
+                    }
+                }
+            }
+        }
+
         let mut peers = self.peers.write().await;
         // Avoid duplicates
         if !peers.iter().any(|(p, _)| *p == peer_id) {
             peers.push((peer_id, addr));
+
+            // Track region for this peer
+            let region = self.get_region_for_ip(&addr.ip());
+            let mut regions = self.peer_regions.write().await;
+            *regions.entry(region).or_insert(0) += 1;
+
+            tracing::debug!("Added peer {} from {}", peer_id, addr);
         }
+    }
+
+    /// Validate geographic diversity before adding a peer
+    async fn validate_geographic_diversity(
+        &self,
+        addr: &SocketAddr,
+        config: &GeographicConfig,
+    ) -> Result<(), GeoRejectionError> {
+        let region = self.get_region_for_ip(&addr.ip());
+
+        // Check blocked regions first
+        if config.blocked_regions.contains(&region) {
+            return Err(GeoRejectionError::BlockedRegion(region));
+        }
+
+        // Check diversity ratio
+        let regions = self.peer_regions.read().await;
+        let total_peers: usize = regions.values().sum();
+
+        if total_peers > 0 {
+            let region_count = *regions.get(&region).unwrap_or(&0);
+            let new_ratio = (region_count + 1) as f64 / (total_peers + 1) as f64;
+
+            if new_ratio > config.max_single_region_ratio {
+                return Err(GeoRejectionError::DiversityViolation {
+                    region,
+                    current_ratio: new_ratio * 100.0,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get region for an IP address
+    ///
+    /// This is a simplified implementation that maps IP ranges to regions.
+    /// In production, this would use a GeoIP database.
+    fn get_region_for_ip(&self, ip: &IpAddr) -> String {
+        // Simple region mapping based on IP characteristics
+        // In production, use MaxMind GeoIP or similar
+        match ip {
+            IpAddr::V4(ipv4) => {
+                let octets = ipv4.octets();
+                // Simple mapping based on first octet (placeholder logic)
+                match octets[0] {
+                    0..=63 => "NA".to_string(),      // North America
+                    64..=127 => "EU".to_string(),    // Europe
+                    128..=191 => "APAC".to_string(), // Asia-Pacific
+                    192..=223 => "SA".to_string(),   // South America
+                    224..=255 => "OTHER".to_string(),
+                }
+            }
+            IpAddr::V6(_) => {
+                // For IPv6, would need proper GeoIP lookup
+                "UNKNOWN".to_string()
+            }
+        }
+    }
+
+    /// Get current region ratio for a specific region
+    pub async fn get_region_ratio(&self, region: &str) -> f64 {
+        let regions = self.peer_regions.read().await;
+        let total_peers: usize = regions.values().sum();
+        if total_peers == 0 {
+            return 0.0;
+        }
+        let region_count = *regions.get(region).unwrap_or(&0);
+        (region_count as f64 / total_peers as f64) * 100.0
+    }
+
+    /// Set geographic configuration for diversity enforcement
+    pub fn set_geographic_config(&mut self, config: GeographicConfig) {
+        tracing::info!(
+            "Geographic validation enabled: mode={:?}, max_ratio={}%, blocked_regions={:?}",
+            config.enforcement_mode,
+            config.max_single_region_ratio * 100.0,
+            config.blocked_regions
+        );
+        self.geo_config = Some(config);
+    }
+
+    /// Check if geographic validation is enabled
+    pub fn is_geo_validation_enabled(&self) -> bool {
+        self.geo_config.is_some()
+    }
+
+    /// Get peer region distribution statistics
+    pub async fn get_region_stats(&self) -> HashMap<String, usize> {
+        self.peer_regions.read().await.clone()
     }
 
     /// Send data to a peer using String PeerId (for compatibility with our P2P core)

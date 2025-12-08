@@ -499,6 +499,9 @@ pub struct P2PNode {
     /// This set is synchronized with ant-quic's connection state via event monitoring
     active_connections: Arc<RwLock<HashSet<PeerId>>>,
 
+    /// Security dashboard for monitoring
+    pub security_dashboard: Option<Arc<crate::dht::metrics::SecurityDashboard>>,
+
     /// Connection lifecycle monitor task handle
     #[allow(dead_code)]
     connection_monitor_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
@@ -607,6 +610,7 @@ impl P2PNode {
             keepalive_handle: Arc::new(RwLock::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
             geo_provider: Arc::new(BgpGeoProvider::new()),
+            security_dashboard: None,
         })
     }
     /// Create a new P2P node with the given configuration
@@ -635,8 +639,7 @@ impl P2PNode {
         }
 
         // Initialize DHT if needed
-        let dht = if true {
-            // Always enable DHT for now
+        let (dht, security_dashboard) = if true { // Assuming DHT is always enabled for now, or check config
             let _dht_config = crate::dht::DHTConfig {
                 replication_factor: config.dht_config.k_value,
                 bucket_size: config.dht_config.k_value,
@@ -644,7 +647,7 @@ impl P2PNode {
                 record_ttl: config.dht_config.record_ttl,
                 bucket_refresh_interval: config.dht_config.refresh_interval,
                 republish_interval: config.dht_config.refresh_interval,
-                max_distance: 160, // 160 bits for SHA-256
+                max_distance: 160,
             };
             // Convert peer_id String to NodeId
             let peer_bytes = peer_id.as_bytes();
@@ -657,9 +660,20 @@ impl P2PNode {
                     e.to_string().into(),
                 ))
             })?;
-            Some(Arc::new(RwLock::new(dht_instance)))
+            dht_instance.start_maintenance_tasks();
+            
+            // Create Security Dashboard
+            let security_metrics = dht_instance.security_metrics();
+             let dashboard = crate::dht::metrics::SecurityDashboard::new(
+                security_metrics,
+                Arc::new(crate::dht::metrics::DhtMetricsCollector::new()),
+                Arc::new(crate::dht::metrics::TrustMetricsCollector::new()),
+                Arc::new(crate::dht::metrics::PlacementMetricsCollector::new()),
+            );
+            
+            (Some(Arc::new(RwLock::new(dht_instance))), Some(Arc::new(dashboard)))
         } else {
-            None
+            (None, None)
         };
 
         // MCP removed
@@ -803,6 +817,7 @@ impl P2PNode {
             dual_node,
             rate_limiter,
             active_connections,
+            security_dashboard, 
             connection_monitor_handle,
             keepalive_handle,
             shutdown,

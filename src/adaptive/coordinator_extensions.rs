@@ -306,16 +306,30 @@ pub trait EigenTrustEngineExtensions {
 
 impl EigenTrustEngineExtensions for EigenTrustEngine {
     async fn start_computation(&self) -> Result<()> {
-        // TODO: Implement trust computation start
+        // Trigger an initial trust computation
+        // Note: start_background_updates requires Arc<Self> which we don't have here
+        // Instead, trigger a single computation which updates caches
+        let _ = self.compute_global_trust().await;
+        tracing::info!("EigenTrust computation started - global trust scores computed");
         Ok(())
     }
 
     async fn get_average_trust(&self) -> f64 {
-        0.8 // Default trust
+        let global_trust = self.get_global_trust();
+        if global_trust.is_empty() {
+            return 0.5; // Default trust for empty network
+        }
+        let sum: f64 = global_trust.values().sum();
+        sum / global_trust.len() as f64
     }
 
-    async fn get_storage_candidates(&self, _count: usize) -> Vec<(NodeId, f64)> {
-        vec![] // TODO: Implement
+    async fn get_storage_candidates(&self, count: usize) -> Vec<(NodeId, f64)> {
+        let global_trust = self.get_global_trust();
+        let mut candidates: Vec<(NodeId, f64)> = global_trust.into_iter().collect();
+        // Sort by trust descending
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.truncate(count);
+        candidates
     }
 }
 

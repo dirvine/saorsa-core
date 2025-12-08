@@ -20,11 +20,64 @@
 use crate::PeerId;
 use crate::dht::{DHTNode, DhtKey, Key};
 use crate::error::{P2PError, P2pResult as Result};
+use crate::quantum_crypto::ant_quic_integration::{ml_dsa_verify, MlDsaPublicKey, MlDsaSignature};
 use crate::security::ReputationManager;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{Duration, Instant, SystemTime};
 use tracing::{debug, info, warn};
+
+/// Trait for querying nodes in the DHT network
+///
+/// Implementations of this trait provide the actual network communication
+/// capabilities for S/Kademlia security operations.
+pub trait NetworkQuerier: Send + Sync {
+    /// Query a node for its closest nodes to a target key
+    ///
+    /// # Arguments
+    /// * `node` - The node to query
+    /// * `target` - The target key to find nodes closest to
+    ///
+    /// # Returns
+    /// A list of nodes that the queried node knows about that are close to the target
+    fn query_closest_nodes(
+        &self,
+        node: &DHTNode,
+        target: &Key,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<DHTNode>>> + Send + '_>>;
+
+    /// Query a node for distance measurement (for witness verification)
+    ///
+    /// # Arguments
+    /// * `witness` - The witness node to query
+    /// * `target_node` - The node whose distance is being measured
+    /// * `target_key` - The key to measure distance from
+    ///
+    /// # Returns
+    /// A distance measurement from the witness's perspective
+    fn query_distance_measurement(
+        &self,
+        witness: &PeerId,
+        target_node: &PeerId,
+        target_key: &Key,
+    ) -> Pin<Box<dyn Future<Output = Result<DistanceMeasurement>> + Send + '_>>;
+
+    /// Request routing table entries from a node for cross-validation
+    ///
+    /// # Arguments
+    /// * `node` - The node to query
+    /// * `bucket_index` - Optional bucket index to request (None for all)
+    ///
+    /// # Returns
+    /// A list of nodes from the queried node's routing table
+    fn query_routing_table(
+        &self,
+        node: &DHTNode,
+        bucket_index: Option<usize>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<DHTNode>>> + Send + '_>>;
+}
 
 /// S/Kademlia configuration parameters
 #[derive(Debug, Clone)]
@@ -229,6 +282,8 @@ pub struct SKademlia {
     pub active_lookups: HashMap<Key, DisjointPathLookup>,
     /// Distance verification challenges
     pub pending_challenges: HashMap<PeerId, DistanceChallenge>,
+    /// Registry of peer public keys for signature verification (ML-DSA-65)
+    pub peer_public_keys: HashMap<PeerId, Vec<u8>>,
 }
 
 impl DisjointPathLookup {
@@ -726,10 +781,24 @@ impl SKademlia {
             reputation_manager,
             active_lookups: HashMap::new(),
             pending_challenges: HashMap::new(),
+            peer_public_keys: HashMap::new(),
         }
     }
 
-    /// Perform a secure lookup using disjoint paths
+    /// Register a peer's public key for signature verification
+    pub fn register_peer_public_key(&mut self, peer_id: PeerId, public_key: Vec<u8>) {
+        self.peer_public_keys.insert(peer_id, public_key);
+    }
+
+    /// Get a peer's public key for signature verification
+    pub fn get_peer_public_key(&self, peer_id: &PeerId) -> Option<&Vec<u8>> {
+        self.peer_public_keys.get(peer_id)
+    }
+
+    /// Perform a secure lookup using disjoint paths (without network querier)
+    ///
+    /// This is a simplified version that returns the initial nodes.
+    /// Use `secure_lookup_with_querier` for full network-based lookups.
     pub async fn secure_lookup(
         &mut self,
         target: Key,
@@ -755,10 +824,7 @@ impl SKademlia {
         // Store active lookup
         self.active_lookups.insert(target, lookup);
 
-        // TODO: Implement actual network queries across paths
-        // This would involve querying nodes in each path and building results
-
-        // For now, return the initial setup
+        // Return initial results (for backwards compatibility)
         if let Some(lookup) = self.active_lookups.get(&target) {
             Ok(lookup.get_results())
         } else {
@@ -766,6 +832,128 @@ impl SKademlia {
                 format!("{:?}: Lookup disappeared", target).into(),
             )))
         }
+    }
+
+    /// Perform a secure lookup using disjoint paths with network queries
+    ///
+    /// This method implements the full S/Kademlia disjoint path lookup algorithm:
+    /// 1. Initialize d disjoint paths from initial nodes
+    /// 2. Query nodes along each path in parallel
+    /// 3. Validate results across paths for consensus
+    /// 4. Return results that have consensus across majority of paths
+    ///
+    /// # Arguments
+    /// * `target` - The key to look up
+    /// * `initial_nodes` - Initial nodes to start the lookup from
+    /// * `querier` - Network querier implementation for actual network calls
+    ///
+    /// # Returns
+    /// The closest nodes to the target that were validated across disjoint paths
+    pub async fn secure_lookup_with_querier<Q: NetworkQuerier>(
+        &mut self,
+        target: Key,
+        initial_nodes: Vec<DHTNode>,
+        querier: &Q,
+    ) -> Result<Vec<DHTNode>> {
+        info!(
+            "Starting secure lookup with querier for target: {}",
+            hex::encode(target)
+        );
+
+        // Create disjoint path lookup
+        let mut lookup = DisjointPathLookup::new(
+            target,
+            self.config.disjoint_path_count,
+            self.config.max_shared_nodes,
+        );
+
+        // Initialize paths with initial nodes
+        lookup.initialize_paths(initial_nodes)?;
+
+        // Verify paths are sufficiently disjoint
+        if !lookup.verify_disjointness() {
+            warn!("Initial paths are not sufficiently disjoint, proceeding with caution");
+        }
+
+        let timeout = self.config.lookup_timeout;
+        let start_time = Instant::now();
+
+        // Iteratively query nodes across all paths until complete or timeout
+        while !lookup.is_complete() && start_time.elapsed() < timeout {
+            // Query each path concurrently
+            for path_id in 0..lookup.path_count {
+                // Get next node to query for this path
+                let next_node = lookup.get_next_node(path_id);
+
+                if let Some(node) = next_node {
+                    debug!(
+                        "Path {}: Querying node {} for target {}",
+                        path_id,
+                        node.address,
+                        hex::encode(target)
+                    );
+
+                    // Track query timing for reputation
+                    let query_start = std::time::Instant::now();
+
+                    // Perform the network query
+                    match querier.query_closest_nodes(&node, &target).await {
+                        Ok(discovered_nodes) => {
+                            let response_time = query_start.elapsed();
+                            debug!(
+                                "Path {}: Discovered {} nodes from {} in {:?}",
+                                path_id,
+                                discovered_nodes.len(),
+                                node.address,
+                                response_time
+                            );
+
+                            // Update reputation for successful query
+                            self.reputation_manager
+                                .update_reputation(&node.id.to_string(), true, response_time);
+
+                            // Add discovered nodes to the path
+                            lookup.add_query_results(path_id, discovered_nodes);
+                        }
+                        Err(e) => {
+                            let response_time = query_start.elapsed();
+                            warn!(
+                                "Path {}: Query to {} failed after {:?}: {}",
+                                path_id, node.address, response_time, e
+                            );
+
+                            // Update reputation for failed query
+                            self.reputation_manager
+                                .update_reputation(&node.id.to_string(), false, response_time);
+                        }
+                    }
+                }
+            }
+
+            // Small delay to avoid overwhelming the network
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // Validate results across paths
+        let is_consistent = lookup.validate_results()?;
+        if !is_consistent {
+            warn!(
+                "Lookup results are not consistent across paths - potential attack detected"
+            );
+        }
+
+        // Store lookup for later reference
+        self.active_lookups.insert(target, lookup.clone());
+
+        // Get and return consolidated results
+        let results = lookup.get_results();
+        info!(
+            "Secure lookup complete: {} results found, consistent: {}",
+            results.len(),
+            is_consistent
+        );
+
+        Ok(results)
     }
 
     /// Update sibling list for a key range
@@ -885,56 +1073,228 @@ impl SKademlia {
             return Ok(false);
         }
 
-        // TODO: Implement cryptographic signature verification
-        // This would verify that proof_nodes actually signed the challenge
+        // Generate the message that was signed from the challenge
+        let message = Self::challenge_to_bytes_for_signing(&proof.challenge);
 
-        // For now, accept if we have enough proof nodes
+        // Verify each signature using ML-DSA-65
+        let mut valid_signatures = 0;
+        for (i, (peer_id, signature_bytes)) in proof
+            .proof_nodes
+            .iter()
+            .zip(proof.signatures.iter())
+            .enumerate()
+        {
+            // Look up the peer's public key from registry
+            let public_key_bytes = match self.peer_public_keys.get(peer_id) {
+                Some(pk) => pk,
+                None => {
+                    debug!(
+                        "Distance proof verification: No public key for peer {} (signature {})",
+                        peer_id, i
+                    );
+                    continue; // Skip unknown peers - they don't count toward validation
+                }
+            };
+
+            // Parse the public key
+            let public_key = match MlDsaPublicKey::from_bytes(public_key_bytes) {
+                Ok(pk) => pk,
+                Err(e) => {
+                    warn!(
+                        "Distance proof verification: Invalid public key format for peer {}: {}",
+                        peer_id, e
+                    );
+                    continue;
+                }
+            };
+
+            // Parse the signature
+            let signature = match MlDsaSignature::from_bytes(signature_bytes) {
+                Ok(sig) => sig,
+                Err(e) => {
+                    warn!(
+                        "Distance proof verification: Invalid signature format for peer {}: {}",
+                        peer_id, e
+                    );
+                    continue;
+                }
+            };
+
+            // Verify the signature
+            match ml_dsa_verify(&public_key, &message, &signature) {
+                Ok(true) => {
+                    debug!(
+                        "Distance proof: Valid signature from peer {} ({})",
+                        peer_id, i
+                    );
+                    valid_signatures += 1;
+                }
+                Ok(false) => {
+                    warn!(
+                        "Distance proof: Invalid signature from peer {} - signature verification failed",
+                        peer_id
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Distance proof: Signature verification error for peer {}: {}",
+                        peer_id, e
+                    );
+                }
+            }
+        }
+
+        // Require a majority of valid signatures (BFT threshold)
         let min_proofs = self.config.disjoint_path_count.div_ceil(2);
-        Ok(proof.proof_nodes.len() >= min_proofs)
+        let result = valid_signatures >= min_proofs;
+
+        if result {
+            info!(
+                "Distance proof verified: {}/{} valid signatures (threshold: {})",
+                valid_signatures,
+                proof.proof_nodes.len(),
+                min_proofs
+            );
+        } else {
+            warn!(
+                "Distance proof rejected: {}/{} valid signatures (threshold: {})",
+                valid_signatures,
+                proof.proof_nodes.len(),
+                min_proofs
+            );
+        }
+
+        Ok(result)
+    }
+
+    /// Generate deterministic bytes from a DistanceChallenge for cryptographic signing
+    ///
+    /// The format is:
+    /// - 32 bytes: challenger peer ID (padded/truncated)
+    /// - 32 bytes: target_key
+    /// - 32 bytes: expected_distance
+    /// - 32 bytes: nonce
+    /// - 8 bytes: timestamp (as Unix epoch seconds, big-endian)
+    pub fn challenge_to_bytes_for_signing(challenge: &DistanceChallenge) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(136); // 32*4 + 8
+
+        // Challenger peer ID (padded to 32 bytes)
+        let challenger_bytes = challenge.challenger.as_bytes();
+        let mut challenger_padded = [0u8; 32];
+        let len = challenger_bytes.len().min(32);
+        challenger_padded[..len].copy_from_slice(&challenger_bytes[..len]);
+        bytes.extend_from_slice(&challenger_padded);
+
+        // Target key (32 bytes)
+        bytes.extend_from_slice(&challenge.target_key);
+
+        // Expected distance (32 bytes)
+        bytes.extend_from_slice(&challenge.expected_distance);
+
+        // Nonce (32 bytes)
+        bytes.extend_from_slice(&challenge.nonce);
+
+        // Timestamp as Unix epoch seconds (8 bytes, big-endian)
+        let timestamp_secs = challenge
+            .timestamp
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        bytes.extend_from_slice(&timestamp_secs.to_be_bytes());
+
+        bytes
+    }
+
+    /// Convert a 256-bit XOR distance to a score between 0.0 and 1.0
+    ///
+    /// Smaller distances (closer nodes) get higher scores.
+    /// Uses the position of the first non-zero bit to determine closeness.
+    fn distance_to_score(distance: &Key) -> f64 {
+        // Count leading zero bits - more zeros = closer = higher score
+        let mut leading_zeros = 0u32;
+        for byte in distance {
+            if *byte == 0 {
+                leading_zeros += 8;
+            } else {
+                leading_zeros += byte.leading_zeros();
+                break;
+            }
+        }
+
+        // Maximum possible leading zeros is 256 (for zero distance)
+        // Score: closer = higher score (max 1.0 for zero distance)
+        let max_bits = 256.0;
+        let score = leading_zeros as f64 / max_bits;
+
+        // Clamp to [0.0, 1.0] range
+        score.clamp(0.0, 1.0)
     }
 
     /// Perform multi-node distance consensus verification
-    pub async fn verify_distance_consensus(
+    ///
+    /// # Arguments
+    /// * `target_node` - The node whose distance is being verified
+    /// * `target_key` - The key to measure distance from
+    /// * `witness_nodes` - List of witness nodes to query
+    /// * `querier` - Network querier for making actual network calls
+    pub async fn verify_distance_consensus<Q: NetworkQuerier>(
         &mut self,
         target_node: &PeerId,
         target_key: &Key,
         witness_nodes: Vec<PeerId>,
+        querier: &Q,
     ) -> Result<DistanceConsensus> {
         let mut measurements = Vec::new();
 
         for witness in &witness_nodes {
-            let start_time = Instant::now();
+            // Request distance measurement from witness node via network call
+            let query_start = std::time::Instant::now();
 
-            // Request distance measurement from witness node
-            // TODO: Implement actual network call to witness
-            // For now, simulate the measurement
-            // Since target_key is already [u8; 32] and target_node is a PeerId (string)
-            let target_node_key = {
-                let bytes = target_node.as_bytes();
-                let mut key = [0u8; 32];
-                let len = bytes.len().min(32);
-                key[..len].copy_from_slice(&bytes[..len]);
-                key
-            };
-            let simulated_distance =
-                DhtKey::from_bytes(*target_key).distance(&DhtKey::from_bytes(target_node_key));
-            let response_time = start_time.elapsed();
+            match querier
+                .query_distance_measurement(witness, target_node, target_key)
+                .await
+            {
+                Ok(mut measurement) => {
+                    // Update reputation for successful query
+                    let response_time = query_start.elapsed();
+                    self.reputation_manager
+                        .update_reputation(&witness.to_string(), true, response_time);
 
-            // Calculate confidence based on witness reputation and response time
-            let confidence = self
-                .reputation_manager
-                .get_reputation(witness)
-                .map(|rep| rep.response_rate * rep.consistency_score)
-                .unwrap_or(0.5);
+                    // Recalculate confidence based on current reputation and response time
+                    // (the measurement may have its own confidence, but we weight it by reputation)
+                    let reputation_factor = self
+                        .reputation_manager
+                        .get_reputation(witness)
+                        .map(|rep| rep.response_rate * rep.consistency_score)
+                        .unwrap_or(0.5);
 
-            let measurement = DistanceMeasurement {
-                witness: witness.clone(),
-                distance: simulated_distance,
-                confidence,
-                response_time,
-            };
+                    // Blend the witness's reported confidence with our reputation assessment
+                    measurement.confidence = (measurement.confidence + reputation_factor) / 2.0;
+                    measurement.response_time = response_time;
 
-            measurements.push(measurement);
+                    tracing::debug!(
+                        witness = %witness,
+                        confidence = %measurement.confidence,
+                        response_time_ms = %response_time.as_millis(),
+                        "Distance measurement received from witness"
+                    );
+
+                    measurements.push(measurement);
+                }
+                Err(e) => {
+                    // Update reputation for failed query
+                    let response_time = query_start.elapsed();
+                    self.reputation_manager
+                        .update_reputation(&witness.to_string(), false, response_time);
+
+                    tracing::warn!(
+                        witness = %witness,
+                        error = %e,
+                        "Failed to get distance measurement from witness"
+                    );
+                    // Continue with other witnesses - don't fail the entire consensus
+                }
+            }
         }
 
         // Calculate overall confidence
@@ -989,9 +1349,14 @@ impl SKademlia {
     }
 
     /// Verify distance using multi-round challenge protocol
-    pub async fn verify_distance_multi_round(
+    ///
+    /// # Arguments
+    /// * `challenge` - The distance challenge to verify
+    /// * `querier` - Network querier for making actual network calls
+    pub async fn verify_distance_multi_round<Q: NetworkQuerier>(
         &mut self,
         challenge: &EnhancedDistanceChallenge,
+        querier: &Q,
     ) -> Result<bool> {
         let mut successful_rounds = 0;
         let required_rounds = challenge.max_rounds.div_ceil(2); // Majority
@@ -1009,12 +1374,13 @@ impl SKademlia {
                 break;
             }
 
-            // Perform consensus verification for this round
+            // Perform consensus verification for this round via network calls
             let consensus = self
                 .verify_distance_consensus(
                     &challenge.challenger,
                     &challenge.target_key,
                     round_witnesses,
+                    querier,
                 )
                 .await?;
 
@@ -1043,6 +1409,11 @@ impl SKademlia {
     }
 
     /// Create distance verification challenge with adaptive difficulty
+    ///
+    /// Selects witness nodes from the routing table based on:
+    /// 1. Trusted nodes from security buckets (highest priority)
+    /// 2. Sibling nodes close to the target key
+    /// 3. Reputation filtering (must meet minimum threshold)
     pub fn create_adaptive_distance_challenge(
         &mut self,
         target: &PeerId,
@@ -1052,14 +1423,89 @@ impl SKademlia {
         let witness_count = if suspected_attack { 7 } else { 3 }; // More witnesses if attack suspected
         let max_rounds = if suspected_attack { 5 } else { 3 }; // More rounds if attack suspected
 
-        // Select witness nodes based on proximity to target key
-        let mut witness_nodes = Vec::new();
+        // Select witness nodes from routing table based on proximity and reputation
+        let mut candidate_nodes: Vec<(DHTNode, f64)> = Vec::new(); // (node, score)
 
-        // TODO: Select actual witness nodes from routing table
-        // For now, create placeholder witnesses
-        for i in 0..witness_count {
-            witness_nodes.push(format!("witness_{i}"));
+        // 1. First, collect trusted nodes from security buckets (highest priority)
+        for security_bucket in self.security_buckets.values() {
+            for node in &security_bucket.trusted_nodes {
+                let node_id_str = hex::encode(node.id.as_bytes());
+                // Don't select the target as a witness
+                if &node_id_str == target {
+                    continue;
+                }
+
+                // Get reputation score (trusted nodes get bonus)
+                let reputation_score = self
+                    .reputation_manager
+                    .get_reputation(&node_id_str)
+                    .map(|rep| rep.response_rate * rep.consistency_score)
+                    .unwrap_or(0.5)
+                    * 1.5; // Trusted node bonus
+
+                // Calculate distance-based score (closer to key = better witness)
+                let node_dht_key = DhtKey::from_bytes(*node.id.as_bytes());
+                let distance = node_dht_key.distance(&DhtKey::from_bytes(*key));
+                let distance_score = Self::distance_to_score(&distance);
+
+                let combined_score = reputation_score * 0.6 + distance_score * 0.4;
+                candidate_nodes.push((node.clone(), combined_score));
+            }
         }
+
+        // 2. Then collect sibling nodes from sibling lists
+        for sibling_list in self.sibling_lists.values() {
+            for node in &sibling_list.siblings {
+                let node_id_str = hex::encode(node.id.as_bytes());
+                // Don't select the target as a witness
+                if &node_id_str == target {
+                    continue;
+                }
+
+                // Check if already in candidates
+                if candidate_nodes.iter().any(|(n, _)| n.id == node.id) {
+                    continue;
+                }
+
+                // Get reputation score
+                let reputation_score = self
+                    .reputation_manager
+                    .get_reputation(&node_id_str)
+                    .map(|rep| rep.response_rate * rep.consistency_score)
+                    .unwrap_or(0.5);
+
+                // Filter out nodes with poor reputation
+                if reputation_score < self.config.min_routing_reputation {
+                    continue;
+                }
+
+                // Calculate distance-based score
+                let node_dht_key = DhtKey::from_bytes(*node.id.as_bytes());
+                let distance = node_dht_key.distance(&DhtKey::from_bytes(*key));
+                let distance_score = Self::distance_to_score(&distance);
+
+                let combined_score = reputation_score * 0.6 + distance_score * 0.4;
+                candidate_nodes.push((node.clone(), combined_score));
+            }
+        }
+
+        // 3. Sort by score (descending) and select top witnesses
+        candidate_nodes.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let witness_nodes: Vec<PeerId> = candidate_nodes
+            .into_iter()
+            .take(witness_count)
+            .map(|(node, _)| hex::encode(node.id.as_bytes()))
+            .collect();
+
+        tracing::debug!(
+            witness_count = %witness_nodes.len(),
+            target = %target,
+            suspected_attack = %suspected_attack,
+            "Selected witness nodes for distance challenge"
+        );
 
         // Create enhanced challenge with proper configuration
         let mut nonce = [0u8; 32];
@@ -1084,26 +1530,100 @@ impl SKademlia {
     }
 
     /// Validate routing table consistency
-    pub async fn validate_routing_consistency(
+    ///
+    /// Cross-validates nodes by querying multiple trusted validators about each
+    /// node's claimed neighbors. Detects inconsistencies that may indicate Sybil attacks.
+    pub async fn validate_routing_consistency<Q: NetworkQuerier>(
         &self,
         nodes: &[DHTNode],
+        querier: &Q,
     ) -> Result<ConsistencyReport> {
         let mut inconsistencies = 0;
         let mut suspicious_nodes = Vec::new();
 
+        // Collect trusted validators from security buckets for cross-validation
+        let mut validators: Vec<DHTNode> = Vec::new();
+        for security_bucket in self.security_buckets.values() {
+            for trusted_node in &security_bucket.trusted_nodes {
+                // Only use nodes with good reputation as validators
+                if let Some(reputation) = self
+                    .reputation_manager
+                    .get_reputation(&hex::encode(trusted_node.id.as_bytes()))
+                    && reputation.response_rate >= 0.7
+                    && reputation.consistency_score >= 0.8
+                {
+                    validators.push(trusted_node.clone());
+                }
+            }
+        }
+
+        // Limit number of validators to reduce network overhead
+        let max_validators = 5;
+        validators.truncate(max_validators);
+
         for node in nodes {
-            // Check reputation
-            if let Some(reputation) = self
-                .reputation_manager
-                .get_reputation(&hex::encode(node.id.as_bytes()))
+            let node_id_hex = hex::encode(node.id.as_bytes());
+
+            // Check reputation threshold
+            if let Some(reputation) = self.reputation_manager.get_reputation(&node_id_hex)
                 && reputation.response_rate < self.config.min_routing_reputation
             {
                 inconsistencies += 1;
-                suspicious_nodes.push(hex::encode(node.id.as_bytes()));
+                suspicious_nodes.push(node_id_hex.clone());
+                continue; // Don't waste network resources on known bad nodes
             }
 
-            // TODO: Implement cross-validation with other nodes
-            // This would query multiple nodes about each node's claimed neighbors
+            // Cross-validation: Query multiple validators about this node's routing table
+            if validators.len() >= 2 {
+                let mut validator_reports: Vec<Vec<DHTNode>> = Vec::new();
+                let mut responding_validators = 0;
+
+                for validator in &validators {
+                    // Don't query a node about itself
+                    if validator.id == node.id {
+                        continue;
+                    }
+
+                    // Query the validator about the target node's routing table
+                    match querier.query_routing_table(validator, None).await {
+                        Ok(reported_neighbors) => {
+                            responding_validators += 1;
+                            validator_reports.push(reported_neighbors);
+                            tracing::debug!(
+                                "Validator {} reported {} neighbors for cross-validation",
+                                hex::encode(validator.id.as_bytes()),
+                                validator_reports.last().map(|v| v.len()).unwrap_or(0)
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Cross-validation query to {} failed: {}",
+                                hex::encode(validator.id.as_bytes()),
+                                e
+                            );
+                        }
+                    }
+                }
+
+                // Analyze cross-validation results for inconsistencies
+                if responding_validators >= 2 {
+                    let inconsistency_score =
+                        Self::calculate_cross_validation_inconsistency(&validator_reports, node);
+
+                    // High inconsistency score indicates potential Sybil node
+                    if inconsistency_score > 0.5 {
+                        inconsistencies += 1;
+                        if !suspicious_nodes.contains(&node_id_hex) {
+                            suspicious_nodes.push(node_id_hex.clone());
+                        }
+                        tracing::warn!(
+                            "Node {} flagged as suspicious: cross-validation inconsistency score {}",
+                            node_id_hex,
+                            inconsistency_score
+                        );
+                    }
+                }
+            }
         }
 
         Ok(ConsistencyReport {
@@ -1112,6 +1632,60 @@ impl SKademlia {
             suspicious_nodes,
             validated_at: Instant::now(),
         })
+    }
+
+    /// Calculate inconsistency score from cross-validation reports
+    ///
+    /// Compares what different validators report about a node's neighbors.
+    /// High score (>0.5) indicates suspicious inconsistencies.
+    fn calculate_cross_validation_inconsistency(
+        validator_reports: &[Vec<DHTNode>],
+        target_node: &DHTNode,
+    ) -> f64 {
+        if validator_reports.len() < 2 {
+            return 0.0;
+        }
+
+        // Check if the target node appears consistently in validator reports
+        let target_id = &target_node.id;
+        let mut appearance_count = 0;
+
+        for report in validator_reports {
+            if report.iter().any(|n| &n.id == target_id) {
+                appearance_count += 1;
+            }
+        }
+
+        // If node appears in some reports but not others, that's suspicious
+        let appearance_ratio = appearance_count as f64 / validator_reports.len() as f64;
+
+        // Check for address consistency across reports
+        let mut address_variations = std::collections::HashSet::new();
+        for report in validator_reports {
+            for node in report {
+                if &node.id == target_id {
+                    // Track the address reported for this node
+                    address_variations.insert(node.address.to_string());
+                }
+            }
+        }
+
+        // Calculate inconsistency score:
+        // - Partial appearance (neither 0% nor 100%) is suspicious
+        // - Multiple different addresses for same node is suspicious
+        let appearance_inconsistency = if appearance_ratio > 0.0 && appearance_ratio < 1.0 {
+            (0.5 - (appearance_ratio - 0.5).abs()) * 2.0 // Max at 50% appearance
+        } else {
+            0.0
+        };
+
+        let address_inconsistency = if address_variations.len() > 1 {
+            ((address_variations.len() - 1) as f64 * 0.2).min(0.5)
+        } else {
+            0.0
+        };
+
+        (appearance_inconsistency + address_inconsistency).min(1.0)
     }
 
     /// Select nodes using security-aware criteria

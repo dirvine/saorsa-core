@@ -4,14 +4,22 @@
 //! - Generating keys that land in specific buckets
 //! - Performing lookups to find nodes for sparse buckets
 //! - Tracking bucket refresh timestamps
+//! - Validating nodes via close group consensus
 //!
 //! Copyright 2024 Saorsa Labs
 //! SPDX-License-Identifier: AGPL-3.0-or-later OR Commercial
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use parking_lot::RwLock;
+
 use crate::dht::{DhtKey, DhtNodeId};
+
+use super::close_group_validator::{
+    CloseGroupValidationResult, CloseGroupValidator, CloseGroupValidatorConfig,
+};
 
 /// Tier classification for bucket refresh intervals
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +60,12 @@ pub struct BucketRefreshState {
     pub success_count: u64,
     /// Number of failed refresh attempts
     pub failure_count: u64,
+    /// Number of nodes that passed validation
+    pub validated_nodes: u64,
+    /// Number of nodes that failed validation
+    pub validation_failures: u64,
+    /// Last validation timestamp
+    pub last_validation: Option<Instant>,
 }
 
 impl Default for BucketRefreshState {
@@ -70,6 +84,9 @@ impl BucketRefreshState {
             tier: RefreshTier::Background,
             success_count: 0,
             failure_count: 0,
+            validated_nodes: 0,
+            validation_failures: 0,
+            last_validation: None,
         }
     }
 
@@ -109,6 +126,38 @@ impl BucketRefreshState {
             RefreshTier::Background
         };
     }
+
+    /// Record a node passing validation
+    pub fn record_validation_pass(&mut self) {
+        self.validated_nodes += 1;
+        self.last_validation = Some(Instant::now());
+    }
+
+    /// Record a node failing validation
+    pub fn record_validation_failure(&mut self) {
+        self.validation_failures += 1;
+        self.last_validation = Some(Instant::now());
+    }
+
+    /// Get the validation success rate (0.0 - 1.0)
+    #[must_use]
+    pub fn validation_rate(&self) -> f64 {
+        let total = self.validated_nodes + self.validation_failures;
+        if total == 0 {
+            1.0 // No validations yet, assume healthy
+        } else {
+            self.validated_nodes as f64 / total as f64
+        }
+    }
+
+    /// Check if this bucket needs validation based on validation age
+    #[must_use]
+    pub fn needs_validation(&self, max_age: Duration) -> bool {
+        match self.last_validation {
+            Some(last) => last.elapsed() > max_age,
+            None => true, // Never validated
+        }
+    }
 }
 
 /// Manages refresh operations for all buckets
@@ -121,6 +170,12 @@ pub struct BucketRefreshManager {
     close_group_buckets: Vec<usize>,
     /// Recently used bucket indices
     recently_used_buckets: Vec<usize>,
+    /// Optional close group validator for hybrid validation
+    validator: Option<Arc<RwLock<CloseGroupValidator>>>,
+    /// Total validation failures across all buckets (for attack detection)
+    total_validation_failures: u64,
+    /// Validation age threshold (default 5 minutes)
+    validation_age_threshold: Duration,
 }
 
 impl BucketRefreshManager {
@@ -132,7 +187,53 @@ impl BucketRefreshManager {
             bucket_states: HashMap::new(),
             close_group_buckets: Vec::new(),
             recently_used_buckets: Vec::new(),
+            validator: None,
+            total_validation_failures: 0,
+            validation_age_threshold: Duration::from_secs(300), // 5 minutes
         }
+    }
+
+    /// Create a new bucket refresh manager with validation enabled
+    #[must_use]
+    pub fn new_with_validation(local_id: DhtNodeId, config: CloseGroupValidatorConfig) -> Self {
+        let validator = CloseGroupValidator::new(config);
+        Self {
+            local_id,
+            bucket_states: HashMap::new(),
+            close_group_buckets: Vec::new(),
+            recently_used_buckets: Vec::new(),
+            validator: Some(Arc::new(RwLock::new(validator))),
+            total_validation_failures: 0,
+            validation_age_threshold: Duration::from_secs(300),
+        }
+    }
+
+    /// Set the close group validator
+    pub fn set_validator(&mut self, validator: Arc<RwLock<CloseGroupValidator>>) {
+        self.validator = Some(validator);
+    }
+
+    /// Get a reference to the validator if available
+    #[must_use]
+    pub fn validator(&self) -> Option<&Arc<RwLock<CloseGroupValidator>>> {
+        self.validator.as_ref()
+    }
+
+    /// Check if validation is enabled
+    #[must_use]
+    pub fn validation_enabled(&self) -> bool {
+        self.validator.is_some()
+    }
+
+    /// Get total validation failures for attack detection
+    #[must_use]
+    pub fn total_validation_failures(&self) -> u64 {
+        self.total_validation_failures
+    }
+
+    /// Set the validation age threshold
+    pub fn set_validation_age_threshold(&mut self, threshold: Duration) {
+        self.validation_age_threshold = threshold;
     }
 
     /// Generate a DHT key that will land in a specific bucket
@@ -251,6 +352,249 @@ impl BucketRefreshManager {
     #[must_use]
     pub fn get_bucket_state(&self, bucket_idx: usize) -> Option<&BucketRefreshState> {
         self.bucket_states.get(&bucket_idx)
+    }
+
+    /// Record a successful validation for a node in a bucket
+    pub fn record_node_validation_pass(&mut self, bucket_idx: usize) {
+        let state = self.get_or_create_state(bucket_idx);
+        state.record_validation_pass();
+    }
+
+    /// Record a failed validation for a node in a bucket
+    pub fn record_node_validation_failure(&mut self, bucket_idx: usize) {
+        let state = self.get_or_create_state(bucket_idx);
+        state.record_validation_failure();
+        self.total_validation_failures += 1;
+    }
+
+    /// Process a validation result and update state
+    pub fn process_validation_result(
+        &mut self,
+        bucket_idx: usize,
+        result: &CloseGroupValidationResult,
+    ) {
+        if result.is_valid {
+            self.record_node_validation_pass(bucket_idx);
+        } else {
+            self.record_node_validation_failure(bucket_idx);
+        }
+
+        // Cache the result in the validator if available
+        if let Some(validator) = &self.validator {
+            validator.write().cache_result(result.clone());
+        }
+    }
+
+    /// Get list of buckets needing validation
+    #[must_use]
+    pub fn get_buckets_needing_validation(&self) -> Vec<usize> {
+        let threshold = self.validation_age_threshold;
+        self.bucket_states
+            .iter()
+            .filter(|(_, state)| state.needs_validation(threshold) && state.node_count > 0)
+            .map(|(&idx, _)| idx)
+            .collect()
+    }
+
+    /// Get overall validation rate across all buckets
+    #[must_use]
+    pub fn overall_validation_rate(&self) -> f64 {
+        let (total_passed, total_failed) = self.bucket_states.values().fold((0u64, 0u64), |acc, state| {
+            (acc.0 + state.validated_nodes, acc.1 + state.validation_failures)
+        });
+        let total = total_passed + total_failed;
+        if total == 0 {
+            1.0
+        } else {
+            total_passed as f64 / total as f64
+        }
+    }
+
+    /// Check if attack mode should be triggered based on validation failures
+    #[must_use]
+    pub fn should_trigger_attack_mode(&self) -> bool {
+        // Trigger if overall validation rate drops below 70%
+        // or if we've seen more than 10 failures in recent history
+        self.overall_validation_rate() < 0.7 || self.total_validation_failures > 10
+    }
+
+    /// Reset validation failure counter (call after attack mode resolves)
+    pub fn reset_validation_failures(&mut self) {
+        self.total_validation_failures = 0;
+    }
+
+    /// Validate a list of nodes returned from a refresh operation.
+    ///
+    /// This is the main integration point that ensures every node returned from
+    /// bucket refresh is validated through close group consensus.
+    ///
+    /// Returns: (valid_nodes, invalid_nodes_with_reasons)
+    pub fn validate_refreshed_nodes(
+        &mut self,
+        bucket_idx: usize,
+        nodes: &[DhtNodeId],
+        responses_by_node: &std::collections::HashMap<DhtNodeId, Vec<super::close_group_validator::CloseGroupResponse>>,
+        trust_scores: &std::collections::HashMap<DhtNodeId, f64>,
+    ) -> (Vec<DhtNodeId>, Vec<(DhtNodeId, Vec<super::close_group_validator::CloseGroupFailure>)>) {
+        let mut valid_nodes = Vec::new();
+        let mut invalid_nodes = Vec::new();
+
+        let Some(validator) = &self.validator else {
+            // No validator configured - all nodes pass by default
+            return (nodes.to_vec(), Vec::new());
+        };
+
+        // Check if we should be in attack mode
+        if self.should_trigger_attack_mode() {
+            validator.write().escalate_to_bft();
+        }
+
+        // Collect all validation results first (to avoid borrow issues)
+        let validation_results: Vec<_> = nodes
+            .iter()
+            .map(|node_id| {
+                // Get responses for this node (empty if not available)
+                let responses = responses_by_node
+                    .get(node_id)
+                    .map(|r| r.as_slice())
+                    .unwrap_or(&[]);
+
+                // Get trust score for this node
+                let trust_score = trust_scores.get(node_id).copied();
+
+                // Perform validation
+                let result = validator.read().validate_membership(node_id, responses, trust_score);
+                (node_id.clone(), result)
+            })
+            .collect();
+
+        // Now process results (separate loop to avoid borrow conflicts)
+        for (node_id, result) in validation_results {
+            // Process result
+            self.process_validation_result(bucket_idx, &result);
+
+            if result.is_valid {
+                valid_nodes.push(node_id);
+            } else {
+                invalid_nodes.push((node_id, result.failure_reasons));
+            }
+        }
+
+        // Update attack indicators in validator based on validation results
+        self.update_attack_indicators_from_results(&valid_nodes, &invalid_nodes);
+
+        (valid_nodes, invalid_nodes)
+    }
+
+    /// Update attack indicators based on validation results
+    fn update_attack_indicators_from_results(
+        &self,
+        valid_nodes: &[DhtNodeId],
+        invalid_nodes: &[(DhtNodeId, Vec<super::close_group_validator::CloseGroupFailure>)],
+    ) {
+        let Some(validator) = &self.validator else {
+            return;
+        };
+
+        let total = valid_nodes.len() + invalid_nodes.len();
+        if total == 0 {
+            return;
+        }
+
+        // Failure rate is used for attack detection via attack indicators update
+        let _failure_rate = invalid_nodes.len() as f64 / total as f64;
+        let churn_rate = self.calculate_churn_rate();
+
+        // Count specific failure types for attack detection
+        let mut eclipse_indicators = 0;
+        let mut sybil_indicators = 0;
+        let mut collusion_indicators = 0;
+
+        for (_, reasons) in invalid_nodes {
+            for reason in reasons {
+                match reason {
+                    super::close_group_validator::CloseGroupFailure::InsufficientGeographicDiversity => {
+                        eclipse_indicators += 1;
+                    }
+                    super::close_group_validator::CloseGroupFailure::SuspectedCollusion => {
+                        collusion_indicators += 1;
+                    }
+                    super::close_group_validator::CloseGroupFailure::AttackModeTriggered => {
+                        sybil_indicators += 1;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let invalid_count = invalid_nodes.len().max(1) as f64;
+        let indicators = super::close_group_validator::AttackIndicators {
+            eclipse_risk: (eclipse_indicators as f64 / invalid_count).min(1.0),
+            sybil_risk: (sybil_indicators as f64 / invalid_count).min(1.0),
+            routing_manipulation: collusion_indicators > 0,
+            churn_rate,
+            recent_failures: self.total_validation_failures,
+            last_updated: Instant::now(),
+        };
+
+        validator.write().update_attack_indicators(indicators);
+    }
+
+    /// Calculate churn rate across all buckets
+    fn calculate_churn_rate(&self) -> f64 {
+        let Some(validator) = &self.validator else {
+            return 0.0;
+        };
+        validator.read().calculate_overall_churn_rate()
+    }
+
+    /// Get nodes that should be evicted based on validation failures
+    #[must_use]
+    pub fn get_nodes_for_eviction(&self) -> Vec<(DhtNodeId, super::close_group_validator::CloseGroupFailure)> {
+        let mut eviction_candidates = Vec::new();
+
+        let Some(validator) = &self.validator else {
+            return eviction_candidates;
+        };
+
+        // Get nodes removed from close groups
+        // node_id is the observer that reported these removals
+        for (_node_id, removed_nodes) in validator.read().detect_removed_nodes() {
+            for removed in removed_nodes {
+                eviction_candidates.push((
+                    removed,
+                    super::close_group_validator::CloseGroupFailure::EvictedFromCloseGroup,
+                ));
+            }
+        }
+
+        eviction_candidates
+    }
+
+    /// Check and potentially de-escalate from attack mode
+    pub fn check_deescalation(&self) {
+        let Some(validator) = &self.validator else {
+            return;
+        };
+
+        // Only de-escalate if validation rate is good and we have few recent failures
+        if self.overall_validation_rate() > 0.9 && self.total_validation_failures < 3 {
+            validator.write().deescalate_from_bft();
+        }
+    }
+
+    /// Check if we are currently in attack mode
+    #[must_use]
+    pub fn is_attack_mode(&self) -> bool {
+        self.validator
+            .as_ref()
+            .is_some_and(|v| v.read().is_attack_mode())
+    }
+
+    /// Get current attack indicators for monitoring
+    #[must_use]
+    pub fn get_attack_indicators(&self) -> Option<super::close_group_validator::AttackIndicators> {
+        self.validator.as_ref().map(|v| v.read().get_attack_indicators())
     }
 }
 

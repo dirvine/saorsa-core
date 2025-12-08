@@ -156,12 +156,61 @@ pub mod cross_network_replication;
 /// Node age verification for anti-Sybil protection
 pub mod node_age_verifier;
 
+/// Witness collusion detection for Byzantine-robust consensus
+pub mod collusion_detector;
+
+/// Sybil attack detection for DHT protection
+pub mod sybil_detector;
+
+/// Authenticated sibling broadcast for eclipse attack prevention
+pub mod authenticated_sibling_broadcast;
+
 /// Routing table maintenance and node validation
 pub mod routing_maintenance;
+
+/// Comprehensive metrics for security, DHT health, trust, and placement
+pub mod metrics;
 
 // Re-export routing maintenance types for convenience
 pub use routing_maintenance::{
     BucketRefreshManager, DataChallenge, EvictionManager, EvictionReason, MaintenanceConfig,
     MaintenanceScheduler, MaintenanceTask, NodeLivenessState, NodeValidationResult, RefreshTier,
     ValidationFailure, WitnessSelectionCriteria, compute_attested_hash,
+};
+
+// Re-export security coordinator types
+pub use routing_maintenance::{
+    CloseGroupEviction, CloseGroupEvictionTracker, EvictionRecord, SecurityCoordinator,
+    SecurityCoordinatorConfig,
+};
+
+// Re-export close group validator types
+pub use routing_maintenance::close_group_validator::{
+    AttackIndicators, CloseGroupFailure, CloseGroupHistory, CloseGroupResponse,
+    CloseGroupValidationResult, CloseGroupValidator, CloseGroupValidatorConfig,
+};
+
+// Re-export collusion detector types for witness validation
+pub use collusion_detector::{
+    CollusionDetector, CollusionDetectorConfig, CollusionEvidence, CollusionGroup, VotingPattern,
+    VotingRecord,
+};
+
+// Re-export sybil detector types for DHT protection
+pub use sybil_detector::{
+    BehaviorProfile, JoinRecord, SybilDetector, SybilDetectorConfig, SybilEvidence, SybilGroup,
+};
+
+// Re-export authenticated sibling broadcast types
+pub use authenticated_sibling_broadcast::{
+    AuthenticatedSiblingBroadcast, BroadcastValidationFailure, BroadcastValidationResult,
+    MembershipProof, MembershipProofType, SiblingBroadcastBuilder, SiblingBroadcastConfig,
+    SiblingBroadcastValidator, SignedSiblingEntry,
+};
+
+// Re-export comprehensive metrics types for security, DHT health, trust, and placement
+pub use metrics::{
+    DhtHealthMetrics, DhtMetricsAggregator, DhtMetricsCollector, MetricsSummary, PlacementMetrics,
+    PlacementMetricsCollector, SecurityMetrics, SecurityMetricsCollector, TrustMetrics,
+    TrustMetricsCollector,
 };

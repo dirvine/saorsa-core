@@ -508,6 +508,80 @@ pub enum BootstrapError {
     RateLimited(Cow<'static, str>),
 }
 
+/// Geographic validation errors for connection rejection
+#[derive(Debug, Error, Clone)]
+pub enum GeoRejectionError {
+    #[error("Peer from blocked region: {0}")]
+    BlockedRegion(String),
+
+    #[error("Geographic diversity violation in region {region} (ratio: {current_ratio:.1}%)")]
+    DiversityViolation { region: String, current_ratio: f64 },
+
+    #[error("Region lookup failed: {0}")]
+    LookupFailed(String),
+}
+
+/// Geographic enforcement mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GeoEnforcementMode {
+    /// Audit mode - log violations but allow connections
+    LogOnly,
+    /// Strict mode - reject connections that violate rules
+    #[default]
+    Strict,
+}
+
+/// Configuration for geographic diversity enforcement
+#[derive(Debug, Clone)]
+pub struct GeographicConfig {
+    /// Minimum number of regions required (default: 3)
+    pub min_regions: usize,
+    /// Maximum ratio of peers from a single region (default: 0.4 = 40%)
+    pub max_single_region_ratio: f64,
+    /// Regions to outright block
+    pub blocked_regions: Vec<String>,
+    /// Enforcement mode (LogOnly or Strict)
+    pub enforcement_mode: GeoEnforcementMode,
+}
+
+impl Default for GeographicConfig {
+    fn default() -> Self {
+        Self {
+            min_regions: 3,
+            max_single_region_ratio: 0.4,
+            blocked_regions: Vec::new(),
+            enforcement_mode: GeoEnforcementMode::Strict,
+        }
+    }
+}
+
+impl GeographicConfig {
+    /// Create a new config with strict enforcement (default)
+    pub fn strict() -> Self {
+        Self::default()
+    }
+
+    /// Create a config for logging only (no rejection)
+    pub fn log_only() -> Self {
+        Self {
+            enforcement_mode: GeoEnforcementMode::LogOnly,
+            ..Default::default()
+        }
+    }
+
+    /// Add a blocked region
+    pub fn with_blocked_region(mut self, region: impl Into<String>) -> Self {
+        self.blocked_regions.push(region.into());
+        self
+    }
+
+    /// Set maximum single region ratio
+    pub fn with_max_ratio(mut self, ratio: f64) -> Self {
+        self.max_single_region_ratio = ratio;
+        self
+    }
+}
+
 /// Result type alias for P2P operations
 pub type P2pResult<T> = Result<T, P2PError>;
 

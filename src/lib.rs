@@ -200,18 +200,8 @@ pub mod geographic_enhanced_network;
 /// Placement Loop & Storage Orchestration System
 pub mod placement;
 
-/// Virtual disk for encrypted file storage
-pub mod virtual_disk;
-
-/// Entity-based system for unified identity, storage, and collaboration
-pub mod entities;
-
 /// Auto-upgrade system for cross-platform binary updates
 pub mod upgrade;
-
-/// Mock DHT for testing
-#[cfg(any(test, feature = "test-utils"))]
-pub mod mock_dht;
 
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
