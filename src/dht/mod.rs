@@ -214,3 +214,6 @@ pub use metrics::{
     PlacementMetricsCollector, SecurityMetrics, SecurityMetricsCollector, TrustMetrics,
     TrustMetricsCollector,
 };
+
+#[cfg(test)]
+mod security_tests;

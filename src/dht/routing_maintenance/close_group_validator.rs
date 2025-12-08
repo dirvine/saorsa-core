@@ -358,6 +358,17 @@ impl CloseGroupValidator {
         }
     }
 
+    /// Check if a node is valid based on cached validation results
+    pub fn validate(&self, node_id: &DhtNodeId) -> bool {
+        if let Some(result) = self.get_cached_result(node_id) {
+            return result.is_valid;
+        }
+
+        // Optimistic default: if not known bad, assume valid for now.
+        // In a strict mode, we might want to return false here and force active validation.
+        true
+    }
+
     /// Validate close group membership with hybrid approach
     ///
     /// Uses trust-weighted validation normally, BFT consensus when attack mode is active.

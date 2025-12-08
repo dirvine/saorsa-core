@@ -81,6 +81,14 @@ pub struct SecurityMetrics {
     pub churn_rate_5m: f64,
     /// Total high churn alerts triggered
     pub high_churn_alerts_total: u64,
+
+    // Diversity enforcement metrics
+    /// Total nodes rejected due to IP diversity limits
+    pub ip_diversity_rejections_total: u64,
+    /// Total nodes rejected due to geographic diversity limits
+    pub geographic_diversity_rejections_total: u64,
+    /// Node counts per geographic region
+    pub nodes_per_region: HashMap<String, u64>,
 }
 
 /// Thread-safe security metrics collector
@@ -120,6 +128,11 @@ pub struct SecurityMetricsCollector {
     // Churn metrics
     churn_rate_5m: AtomicU64,
     high_churn_alerts_total: AtomicU64,
+
+    // Diversity enforcement
+    ip_diversity_rejections_total: AtomicU64,
+    geographic_diversity_rejections_total: AtomicU64,
+    nodes_per_region: Arc<RwLock<HashMap<String, u64>>>,
 }
 
 impl SecurityMetricsCollector {
@@ -146,6 +159,9 @@ impl SecurityMetricsCollector {
             eviction_by_reason: Arc::new(RwLock::new(HashMap::new())),
             churn_rate_5m: AtomicU64::new(0),
             high_churn_alerts_total: AtomicU64::new(0),
+            ip_diversity_rejections_total: AtomicU64::new(0),
+            geographic_diversity_rejections_total: AtomicU64::new(0),
+            nodes_per_region: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -255,9 +271,42 @@ impl SecurityMetricsCollector {
         }
     }
 
+    /// Record a node rejection due to IP diversity limits
+    pub fn record_ip_diversity_rejection(&self) {
+        self.ip_diversity_rejections_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a node rejection due to geographic diversity limits
+    pub fn record_geographic_diversity_rejection(&self) {
+        self.geographic_diversity_rejections_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Update node count for a geographic region
+    pub async fn set_region_node_count(&self, region: &str, count: u64) {
+        let mut regions = self.nodes_per_region.write().await;
+        regions.insert(region.to_string(), count);
+    }
+
+    /// Increment node count for a geographic region
+    pub async fn increment_region_node_count(&self, region: &str) {
+        let mut regions = self.nodes_per_region.write().await;
+        *regions.entry(region.to_string()).or_insert(0) += 1;
+    }
+
+    /// Decrement node count for a geographic region
+    pub async fn decrement_region_node_count(&self, region: &str) {
+        let mut regions = self.nodes_per_region.write().await;
+        if let Some(count) = regions.get_mut(region) {
+            *count = count.saturating_sub(1);
+        }
+    }
+
     /// Get current metrics snapshot
     pub async fn get_metrics(&self) -> SecurityMetrics {
         let eviction_by_reason = self.eviction_by_reason.read().await.clone();
+        let nodes_per_region = self.nodes_per_region.read().await.clone();
 
         SecurityMetrics {
             eclipse_score: self.eclipse_score.load(Ordering::Relaxed) as f64 / 1000.0,
@@ -293,6 +342,13 @@ impl SecurityMetricsCollector {
             eviction_by_reason,
             churn_rate_5m: self.churn_rate_5m.load(Ordering::Relaxed) as f64 / 1000.0,
             high_churn_alerts_total: self.high_churn_alerts_total.load(Ordering::Relaxed),
+            ip_diversity_rejections_total: self
+                .ip_diversity_rejections_total
+                .load(Ordering::Relaxed),
+            geographic_diversity_rejections_total: self
+                .geographic_diversity_rejections_total
+                .load(Ordering::Relaxed),
+            nodes_per_region,
         }
     }
 
@@ -323,6 +379,11 @@ impl SecurityMetricsCollector {
         self.eviction_by_reason.write().await.clear();
         self.churn_rate_5m.store(0, Ordering::Relaxed);
         self.high_churn_alerts_total.store(0, Ordering::Relaxed);
+        self.ip_diversity_rejections_total
+            .store(0, Ordering::Relaxed);
+        self.geographic_diversity_rejections_total
+            .store(0, Ordering::Relaxed);
+        self.nodes_per_region.write().await.clear();
     }
 }
 
@@ -492,5 +553,46 @@ mod tests {
         collector.set_sybil_score(-0.5);
         let metrics = collector.get_metrics().await;
         assert!((metrics.sybil_score - 0.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_diversity_metrics() {
+        let collector = SecurityMetricsCollector::new();
+
+        // Test IP diversity rejection tracking
+        collector.record_ip_diversity_rejection();
+        collector.record_ip_diversity_rejection();
+
+        // Test geographic diversity rejection tracking
+        collector.record_geographic_diversity_rejection();
+        collector.record_geographic_diversity_rejection();
+        collector.record_geographic_diversity_rejection();
+
+        // Test region node count tracking
+        collector.increment_region_node_count("NorthAmerica").await;
+        collector.increment_region_node_count("NorthAmerica").await;
+        collector.increment_region_node_count("Europe").await;
+        collector.set_region_node_count("AsiaPacific", 5).await;
+
+        let metrics = collector.get_metrics().await;
+        assert_eq!(metrics.ip_diversity_rejections_total, 2);
+        assert_eq!(metrics.geographic_diversity_rejections_total, 3);
+        assert_eq!(
+            metrics.nodes_per_region.get("NorthAmerica").copied(),
+            Some(2)
+        );
+        assert_eq!(metrics.nodes_per_region.get("Europe").copied(), Some(1));
+        assert_eq!(
+            metrics.nodes_per_region.get("AsiaPacific").copied(),
+            Some(5)
+        );
+
+        // Test decrement
+        collector.decrement_region_node_count("NorthAmerica").await;
+        let metrics = collector.get_metrics().await;
+        assert_eq!(
+            metrics.nodes_per_region.get("NorthAmerica").copied(),
+            Some(1)
+        );
     }
 }

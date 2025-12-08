@@ -50,12 +50,29 @@ pub struct IPv6NodeID {
 /// Configuration for IP diversity enforcement at multiple subnet levels
 #[derive(Debug, Clone)]
 pub struct IPDiversityConfig {
+    // === IPv6 subnet limits (existing) ===
     /// Maximum nodes per /64 subnet (default: 1)
     pub max_nodes_per_64: usize,
     /// Maximum nodes per /48 allocation (default: 3)
     pub max_nodes_per_48: usize,
     /// Maximum nodes per /32 region (default: 10)
     pub max_nodes_per_32: usize,
+
+    // === IPv4 subnet limits (new) ===
+    /// Maximum nodes per single IPv4 address (/32) - dynamic by default
+    pub max_nodes_per_ipv4_32: usize,
+    /// Maximum nodes per /24 subnet (Class C) - default: 3x per-IP
+    pub max_nodes_per_ipv4_24: usize,
+    /// Maximum nodes per /16 subnet (Class B) - default: 10x per-IP
+    pub max_nodes_per_ipv4_16: usize,
+
+    // === Network-relative limits (new) ===
+    /// Absolute maximum nodes allowed per single IP (default: 50)
+    pub max_per_ip_cap: usize,
+    /// Maximum fraction of network any single IP can represent (default: 0.005 = 0.5%)
+    pub max_network_fraction: f64,
+
+    // === ASN and GeoIP (existing) ===
     /// Maximum nodes per AS number (default: 20)
     pub max_nodes_per_asn: usize,
     /// Enable GeoIP-based diversity checks
@@ -85,6 +102,38 @@ pub struct IPAnalysis {
     pub reputation_score: f64,
 }
 
+/// Analysis of an IPv4 address for diversity enforcement
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IPv4Analysis {
+    /// The exact IPv4 address
+    pub ip_addr: Ipv4Addr,
+    /// /24 subnet (Class C equivalent)
+    pub subnet_24: Ipv4Addr,
+    /// /16 subnet (Class B equivalent)
+    pub subnet_16: Ipv4Addr,
+    /// /8 subnet (Class A equivalent)
+    pub subnet_8: Ipv4Addr,
+    /// Autonomous System Number (if available)
+    pub asn: Option<u32>,
+    /// Country code from GeoIP lookup
+    pub country: Option<String>,
+    /// Whether this is a known hosting/VPS provider
+    pub is_hosting_provider: bool,
+    /// Whether this is a known VPN provider
+    pub is_vpn_provider: bool,
+    /// Historical reputation score for this IP range
+    pub reputation_score: f64,
+}
+
+/// Unified IP analysis that handles both IPv4 and IPv6 addresses
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum UnifiedIPAnalysis {
+    /// IPv4 address analysis
+    IPv4(IPv4Analysis),
+    /// IPv6 address analysis
+    IPv6(IPAnalysis),
+}
+
 /// Node reputation tracking for security-aware routing
 #[derive(Debug, Clone)]
 pub struct NodeReputation {
@@ -109,9 +158,18 @@ pub struct NodeReputation {
 impl Default for IPDiversityConfig {
     fn default() -> Self {
         Self {
+            // IPv6 limits
             max_nodes_per_64: 1,
             max_nodes_per_48: 3,
             max_nodes_per_32: 10,
+            // IPv4 limits (defaults based on network-relative formula)
+            max_nodes_per_ipv4_32: 1,  // Will be dynamically adjusted
+            max_nodes_per_ipv4_24: 3,  // 3x per-IP limit
+            max_nodes_per_ipv4_16: 10, // 10x per-IP limit
+            // Network-relative limits
+            max_per_ip_cap: 50,          // Hard cap of 50 nodes per IP
+            max_network_fraction: 0.005, // 0.5% of network max
+            // ASN and GeoIP
             max_nodes_per_asn: 20,
             enable_geolocation_check: true,
             min_geographic_diversity: 3,
@@ -133,12 +191,21 @@ impl IPDiversityConfig {
     #[must_use]
     pub fn testnet() -> Self {
         Self {
-            max_nodes_per_64: 100,           // Allow many nodes per /64 subnet
-            max_nodes_per_48: 500,           // Allow many nodes per /48 allocation
-            max_nodes_per_32: 1000,          // Allow many nodes per /32 region
-            max_nodes_per_asn: 5000,         // Allow many nodes from same ASN (e.g., Digital Ocean)
+            // IPv6 relaxed limits
+            max_nodes_per_64: 100,  // Allow many nodes per /64 subnet
+            max_nodes_per_48: 500,  // Allow many nodes per /48 allocation
+            max_nodes_per_32: 1000, // Allow many nodes per /32 region
+            // IPv4 relaxed limits
+            max_nodes_per_ipv4_32: 100,  // Allow many nodes per IPv4
+            max_nodes_per_ipv4_24: 500,  // Allow many nodes per /24
+            max_nodes_per_ipv4_16: 1000, // Allow many nodes per /16
+            // Network-relative limits (relaxed for testnet)
+            max_per_ip_cap: 100,       // Higher cap for testing
+            max_network_fraction: 0.1, // Allow 10% of network from one IP (relaxed from 0.5%)
+            // ASN and GeoIP
+            max_nodes_per_asn: 5000, // Allow many nodes from same ASN (e.g., Digital Ocean)
             enable_geolocation_check: false, // Disable geo checks for testing
-            min_geographic_diversity: 1,     // Single region is acceptable for testing
+            min_geographic_diversity: 1, // Single region is acceptable for testing
         }
     }
 
@@ -149,9 +216,18 @@ impl IPDiversityConfig {
     #[must_use]
     pub fn permissive() -> Self {
         Self {
+            // IPv6 - effectively disabled
             max_nodes_per_64: usize::MAX,
             max_nodes_per_48: usize::MAX,
             max_nodes_per_32: usize::MAX,
+            // IPv4 - effectively disabled
+            max_nodes_per_ipv4_32: usize::MAX,
+            max_nodes_per_ipv4_24: usize::MAX,
+            max_nodes_per_ipv4_16: usize::MAX,
+            // Network-relative - effectively disabled
+            max_per_ip_cap: usize::MAX,
+            max_network_fraction: 1.0, // Allow 100% of network
+            // ASN and GeoIP
             max_nodes_per_asn: usize::MAX,
             enable_geolocation_check: false,
             min_geographic_diversity: 0,
@@ -407,12 +483,20 @@ impl IPv4NodeID {
 #[derive(Debug)]
 pub struct IPDiversityEnforcer {
     config: IPDiversityConfig,
+    // IPv6 tracking
     subnet_64_counts: HashMap<Ipv6Addr, usize>,
     subnet_48_counts: HashMap<Ipv6Addr, usize>,
     subnet_32_counts: HashMap<Ipv6Addr, usize>,
+    // IPv4 tracking (new)
+    ipv4_32_counts: HashMap<Ipv4Addr, usize>, // Per exact IP
+    ipv4_24_counts: HashMap<Ipv4Addr, usize>, // Per /24 subnet
+    ipv4_16_counts: HashMap<Ipv4Addr, usize>, // Per /16 subnet
+    // Shared tracking
     asn_counts: HashMap<u32, usize>,
     country_counts: HashMap<String, usize>,
     geo_provider: Option<Arc<dyn GeoProvider + Send + Sync>>,
+    // Network size for dynamic limits
+    network_size: usize,
 }
 
 impl IPDiversityEnforcer {
@@ -420,12 +504,19 @@ impl IPDiversityEnforcer {
     pub fn new(config: IPDiversityConfig) -> Self {
         Self {
             config,
+            // IPv6
             subnet_64_counts: HashMap::new(),
             subnet_48_counts: HashMap::new(),
             subnet_32_counts: HashMap::new(),
+            // IPv4
+            ipv4_32_counts: HashMap::new(),
+            ipv4_24_counts: HashMap::new(),
+            ipv4_16_counts: HashMap::new(),
+            // Shared
             asn_counts: HashMap::new(),
             country_counts: HashMap::new(),
             geo_provider: None,
+            network_size: 0,
         }
     }
 
@@ -636,6 +727,234 @@ impl IPDiversityEnforcer {
             max_nodes_per_64: self.subnet_64_counts.values().max().copied().unwrap_or(0),
             max_nodes_per_48: self.subnet_48_counts.values().max().copied().unwrap_or(0),
             max_nodes_per_32: self.subnet_32_counts.values().max().copied().unwrap_or(0),
+            // IPv4 stats
+            total_ipv4_32: self.ipv4_32_counts.len(),
+            total_ipv4_24_subnets: self.ipv4_24_counts.len(),
+            total_ipv4_16_subnets: self.ipv4_16_counts.len(),
+            max_nodes_per_ipv4_32: self.ipv4_32_counts.values().max().copied().unwrap_or(0),
+            max_nodes_per_ipv4_24: self.ipv4_24_counts.values().max().copied().unwrap_or(0),
+            max_nodes_per_ipv4_16: self.ipv4_16_counts.values().max().copied().unwrap_or(0),
+        }
+    }
+
+    // === IPv4 Methods (new) ===
+
+    /// Set the current network size for dynamic limit calculation
+    pub fn set_network_size(&mut self, size: usize) {
+        self.network_size = size;
+    }
+
+    /// Get the current network size
+    pub fn get_network_size(&self) -> usize {
+        self.network_size
+    }
+
+    /// Calculate the dynamic per-IP limit: min(cap, floor(network_size * fraction))
+    /// Formula: min(50, floor(network_size * 0.005))
+    pub fn get_per_ip_limit(&self) -> usize {
+        let fraction_limit =
+            (self.network_size as f64 * self.config.max_network_fraction).floor() as usize;
+        std::cmp::min(self.config.max_per_ip_cap, std::cmp::max(1, fraction_limit))
+    }
+
+    /// Extract /24 subnet from IPv4 address
+    fn extract_ipv4_subnet_24(addr: Ipv4Addr) -> Ipv4Addr {
+        let octets = addr.octets();
+        Ipv4Addr::new(octets[0], octets[1], octets[2], 0)
+    }
+
+    /// Extract /16 subnet from IPv4 address
+    fn extract_ipv4_subnet_16(addr: Ipv4Addr) -> Ipv4Addr {
+        let octets = addr.octets();
+        Ipv4Addr::new(octets[0], octets[1], 0, 0)
+    }
+
+    /// Extract /8 subnet from IPv4 address
+    fn extract_ipv4_subnet_8(addr: Ipv4Addr) -> Ipv4Addr {
+        let octets = addr.octets();
+        Ipv4Addr::new(octets[0], 0, 0, 0)
+    }
+
+    /// Analyze an IPv4 address for diversity enforcement
+    pub fn analyze_ipv4(&self, ipv4_addr: Ipv4Addr) -> Result<IPv4Analysis> {
+        let subnet_24 = Self::extract_ipv4_subnet_24(ipv4_addr);
+        let subnet_16 = Self::extract_ipv4_subnet_16(ipv4_addr);
+        let subnet_8 = Self::extract_ipv4_subnet_8(ipv4_addr);
+
+        // For IPv4, we don't have GeoIP lookup yet (would need IPv4 support in GeoProvider)
+        // Using defaults for now
+        let asn = None;
+        let country = None;
+        let is_hosting_provider = false;
+        let is_vpn_provider = false;
+        let reputation_score = 0.5;
+
+        Ok(IPv4Analysis {
+            ip_addr: ipv4_addr,
+            subnet_24,
+            subnet_16,
+            subnet_8,
+            asn,
+            country,
+            is_hosting_provider,
+            is_vpn_provider,
+            reputation_score,
+        })
+    }
+
+    /// Analyze any IP address (IPv4 or IPv6) for diversity enforcement
+    pub fn analyze_unified(&self, addr: std::net::IpAddr) -> Result<UnifiedIPAnalysis> {
+        match addr {
+            std::net::IpAddr::V4(ipv4) => {
+                let analysis = self.analyze_ipv4(ipv4)?;
+                Ok(UnifiedIPAnalysis::IPv4(analysis))
+            }
+            std::net::IpAddr::V6(ipv6) => {
+                let analysis = self.analyze_ip(ipv6)?;
+                Ok(UnifiedIPAnalysis::IPv6(analysis))
+            }
+        }
+    }
+
+    /// Check if a node can be accepted based on unified IP diversity constraints
+    pub fn can_accept_unified(&self, analysis: &UnifiedIPAnalysis) -> bool {
+        match analysis {
+            UnifiedIPAnalysis::IPv4(ipv4_analysis) => self.can_accept_ipv4(ipv4_analysis),
+            UnifiedIPAnalysis::IPv6(ipv6_analysis) => self.can_accept_node(ipv6_analysis),
+        }
+    }
+
+    /// Check if an IPv4 node can be accepted based on diversity constraints
+    fn can_accept_ipv4(&self, analysis: &IPv4Analysis) -> bool {
+        // Get dynamic per-IP limit
+        let per_ip_limit = self.get_per_ip_limit();
+
+        // Determine multipliers for subnet limits
+        let limit_32 = per_ip_limit;
+        let limit_24 = std::cmp::min(self.config.max_nodes_per_ipv4_24, per_ip_limit * 3);
+        let limit_16 = std::cmp::min(self.config.max_nodes_per_ipv4_16, per_ip_limit * 10);
+
+        // Apply stricter limits for hosting/VPN providers
+        let (limit_32, limit_24, limit_16) =
+            if analysis.is_hosting_provider || analysis.is_vpn_provider {
+                (
+                    std::cmp::max(1, limit_32 / 2),
+                    std::cmp::max(1, limit_24 / 2),
+                    std::cmp::max(1, limit_16 / 2),
+                )
+            } else {
+                (limit_32, limit_24, limit_16)
+            };
+
+        // Check /32 (exact IP) limit
+        if let Some(&count) = self.ipv4_32_counts.get(&analysis.ip_addr)
+            && count >= limit_32
+        {
+            return false;
+        }
+
+        // Check /24 subnet limit
+        if let Some(&count) = self.ipv4_24_counts.get(&analysis.subnet_24)
+            && count >= limit_24
+        {
+            return false;
+        }
+
+        // Check /16 subnet limit
+        if let Some(&count) = self.ipv4_16_counts.get(&analysis.subnet_16)
+            && count >= limit_16
+        {
+            return false;
+        }
+
+        // Check ASN limit (shared with IPv6)
+        if let Some(asn) = analysis.asn
+            && let Some(&count) = self.asn_counts.get(&asn)
+            && count >= self.config.max_nodes_per_asn
+        {
+            return false;
+        }
+
+        true
+    }
+
+    /// Add a unified node to the diversity tracking
+    pub fn add_unified(&mut self, analysis: &UnifiedIPAnalysis) -> Result<()> {
+        match analysis {
+            UnifiedIPAnalysis::IPv4(ipv4_analysis) => self.add_ipv4(ipv4_analysis),
+            UnifiedIPAnalysis::IPv6(ipv6_analysis) => self.add_node(ipv6_analysis),
+        }
+    }
+
+    /// Add an IPv4 node to diversity tracking
+    fn add_ipv4(&mut self, analysis: &IPv4Analysis) -> Result<()> {
+        if !self.can_accept_ipv4(analysis) {
+            return Err(anyhow!("IPv4 diversity limits exceeded"));
+        }
+
+        // Update counts
+        *self.ipv4_32_counts.entry(analysis.ip_addr).or_insert(0) += 1;
+        *self.ipv4_24_counts.entry(analysis.subnet_24).or_insert(0) += 1;
+        *self.ipv4_16_counts.entry(analysis.subnet_16).or_insert(0) += 1;
+
+        if let Some(asn) = analysis.asn {
+            *self.asn_counts.entry(asn).or_insert(0) += 1;
+        }
+
+        if let Some(ref country) = analysis.country {
+            *self.country_counts.entry(country.clone()).or_insert(0) += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Remove a unified node from diversity tracking
+    pub fn remove_unified(&mut self, analysis: &UnifiedIPAnalysis) {
+        match analysis {
+            UnifiedIPAnalysis::IPv4(ipv4_analysis) => self.remove_ipv4(ipv4_analysis),
+            UnifiedIPAnalysis::IPv6(ipv6_analysis) => self.remove_node(ipv6_analysis),
+        }
+    }
+
+    /// Remove an IPv4 node from diversity tracking
+    fn remove_ipv4(&mut self, analysis: &IPv4Analysis) {
+        if let Some(count) = self.ipv4_32_counts.get_mut(&analysis.ip_addr) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.ipv4_32_counts.remove(&analysis.ip_addr);
+            }
+        }
+
+        if let Some(count) = self.ipv4_24_counts.get_mut(&analysis.subnet_24) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.ipv4_24_counts.remove(&analysis.subnet_24);
+            }
+        }
+
+        if let Some(count) = self.ipv4_16_counts.get_mut(&analysis.subnet_16) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.ipv4_16_counts.remove(&analysis.subnet_16);
+            }
+        }
+
+        if let Some(asn) = analysis.asn
+            && let Some(count) = self.asn_counts.get_mut(&asn)
+        {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.asn_counts.remove(&asn);
+            }
+        }
+
+        if let Some(ref country) = analysis.country
+            && let Some(count) = self.country_counts.get_mut(country)
+        {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.country_counts.remove(country);
+            }
         }
     }
 }
@@ -698,22 +1017,39 @@ impl GeoProvider for StubGeoProvider {
 /// Diversity statistics for monitoring
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiversityStats {
+    // === IPv6 stats ===
     /// Number of unique /64 subnets represented
     pub total_64_subnets: usize,
     /// Number of unique /48 subnets represented
     pub total_48_subnets: usize,
     /// Number of unique /32 subnets represented
     pub total_32_subnets: usize,
-    /// Number of unique ASNs represented
-    pub total_asns: usize,
-    /// Number of unique countries represented
-    pub total_countries: usize,
     /// Maximum nodes in any single /64 subnet
     pub max_nodes_per_64: usize,
     /// Maximum nodes in any single /48 subnet
     pub max_nodes_per_48: usize,
     /// Maximum nodes in any single /32 subnet
     pub max_nodes_per_32: usize,
+
+    // === IPv4 stats (new) ===
+    /// Number of unique IPv4 addresses (/32)
+    pub total_ipv4_32: usize,
+    /// Number of unique /24 subnets represented
+    pub total_ipv4_24_subnets: usize,
+    /// Number of unique /16 subnets represented
+    pub total_ipv4_16_subnets: usize,
+    /// Maximum nodes from any single IPv4 address
+    pub max_nodes_per_ipv4_32: usize,
+    /// Maximum nodes in any single /24 subnet
+    pub max_nodes_per_ipv4_24: usize,
+    /// Maximum nodes in any single /16 subnet
+    pub max_nodes_per_ipv4_16: usize,
+
+    // === Shared stats ===
+    /// Number of unique ASNs represented
+    pub total_asns: usize,
+    /// Number of unique countries represented
+    pub total_countries: usize,
 }
 
 /// Reputation manager for tracking node behavior
@@ -814,9 +1150,18 @@ mod tests {
 
     fn create_test_diversity_config() -> IPDiversityConfig {
         IPDiversityConfig {
+            // IPv6 limits
             max_nodes_per_64: 1,
             max_nodes_per_48: 3,
             max_nodes_per_32: 10,
+            // IPv4 limits
+            max_nodes_per_ipv4_32: 1,
+            max_nodes_per_ipv4_24: 3,
+            max_nodes_per_ipv4_16: 10,
+            // Network-relative limits
+            max_per_ip_cap: 50,
+            max_network_fraction: 0.005,
+            // ASN and GeoIP
             max_nodes_per_asn: 20,
             enable_geolocation_check: true,
             min_geographic_diversity: 3,
@@ -1453,24 +1798,42 @@ mod tests {
     #[test]
     fn test_diversity_stats_structure() {
         let stats = DiversityStats {
+            // IPv6 stats
             total_64_subnets: 100,
             total_48_subnets: 50,
             total_32_subnets: 25,
-            total_asns: 15,
-            total_countries: 8,
             max_nodes_per_64: 1,
             max_nodes_per_48: 3,
             max_nodes_per_32: 10,
+            // IPv4 stats
+            total_ipv4_32: 80,
+            total_ipv4_24_subnets: 40,
+            total_ipv4_16_subnets: 20,
+            max_nodes_per_ipv4_32: 1,
+            max_nodes_per_ipv4_24: 3,
+            max_nodes_per_ipv4_16: 10,
+            // Shared stats
+            total_asns: 15,
+            total_countries: 8,
         };
 
+        // IPv6 assertions
         assert_eq!(stats.total_64_subnets, 100);
         assert_eq!(stats.total_48_subnets, 50);
         assert_eq!(stats.total_32_subnets, 25);
-        assert_eq!(stats.total_asns, 15);
-        assert_eq!(stats.total_countries, 8);
         assert_eq!(stats.max_nodes_per_64, 1);
         assert_eq!(stats.max_nodes_per_48, 3);
         assert_eq!(stats.max_nodes_per_32, 10);
+        // IPv4 assertions
+        assert_eq!(stats.total_ipv4_32, 80);
+        assert_eq!(stats.total_ipv4_24_subnets, 40);
+        assert_eq!(stats.total_ipv4_16_subnets, 20);
+        assert_eq!(stats.max_nodes_per_ipv4_32, 1);
+        assert_eq!(stats.max_nodes_per_ipv4_24, 3);
+        assert_eq!(stats.max_nodes_per_ipv4_16, 10);
+        // Shared assertions
+        assert_eq!(stats.total_asns, 15);
+        assert_eq!(stats.total_countries, 8);
     }
 
     #[test]
