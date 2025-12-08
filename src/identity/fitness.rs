@@ -688,7 +688,12 @@ mod tests {
 
     #[test]
     fn test_membership_event_recording() {
-        let config = FitnessConfig::default();
+        // Use a short stability window to avoid Instant::checked_sub issues on Windows
+        // (checked_sub can fail if the duration exceeds what's representable from the epoch)
+        let config = FitnessConfig {
+            stability_window: Duration::from_secs(1),
+            ..FitnessConfig::default()
+        };
         let monitor = FitnessMonitor::new(config, test_node_id());
 
         monitor.record_membership_event(MembershipEventType::Joined, None);
