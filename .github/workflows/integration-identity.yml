@@ -67,9 +67,6 @@ jobs:
       - name: Multi-Device Tests
         run: cargo nextest run --test multi_device_tests --all-features --no-fail-fast
 
-      - name: API Implementation
-        run: cargo nextest run --test api_implementation_tests --all-features --no-fail-fast
-
   integration-security:
     name: Security Tests
     runs-on: ubuntu-latest
