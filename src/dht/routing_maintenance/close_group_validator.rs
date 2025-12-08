@@ -37,6 +37,34 @@ pub enum CloseGroupFailure {
     AttackModeTriggered,
 }
 
+/// Enforcement mode for close group validation
+///
+/// Controls whether validation failures result in node rejection or just logging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CloseGroupEnforcementMode {
+    /// Log-only mode - log validation failures but allow unknown nodes
+    /// Use during initial deployment or for monitoring
+    LogOnly,
+    /// Strict mode - reject nodes that fail validation (default)
+    /// Use in production for full security
+    #[default]
+    Strict,
+}
+
+impl CloseGroupEnforcementMode {
+    /// Check if this mode is strict (rejects invalid nodes)
+    #[must_use]
+    pub fn is_strict(&self) -> bool {
+        matches!(self, Self::Strict)
+    }
+
+    /// Check if this mode is log-only (allows all nodes, just logs issues)
+    #[must_use]
+    pub fn is_log_only(&self) -> bool {
+        matches!(self, Self::LogOnly)
+    }
+}
+
 /// Result of close group validation
 #[derive(Debug, Clone)]
 pub struct CloseGroupValidationResult {
@@ -244,6 +272,8 @@ pub struct CloseGroupValidatorConfig {
     pub query_timeout: Duration,
     /// Enable automatic BFT escalation
     pub auto_escalate: bool,
+    /// Enforcement mode (Strict or LogOnly)
+    pub enforcement_mode: CloseGroupEnforcementMode,
 }
 
 impl Default for CloseGroupValidatorConfig {
@@ -257,11 +287,34 @@ impl Default for CloseGroupValidatorConfig {
             min_regions: 3,
             query_timeout: Duration::from_secs(5),
             auto_escalate: true,
+            enforcement_mode: CloseGroupEnforcementMode::default(),
         }
     }
 }
 
 impl CloseGroupValidatorConfig {
+    /// Create config with strict enforcement (default)
+    #[must_use]
+    pub fn strict() -> Self {
+        Self::default()
+    }
+
+    /// Create config with log-only enforcement (for monitoring without rejection)
+    #[must_use]
+    pub fn log_only() -> Self {
+        Self {
+            enforcement_mode: CloseGroupEnforcementMode::LogOnly,
+            ..Default::default()
+        }
+    }
+
+    /// Set the enforcement mode
+    #[must_use]
+    pub fn with_enforcement_mode(mut self, mode: CloseGroupEnforcementMode) -> Self {
+        self.enforcement_mode = mode;
+        self
+    }
+
     /// Create config from maintenance config
     #[must_use]
     pub fn from_maintenance_config(config: &MaintenanceConfig) -> Self {
@@ -359,14 +412,47 @@ impl CloseGroupValidator {
     }
 
     /// Check if a node is valid based on cached validation results
+    ///
+    /// Behavior depends on enforcement mode:
+    /// - Strict: Unknown nodes are rejected (return false)
+    /// - LogOnly: Unknown nodes are allowed (return true) with warning logged
     pub fn validate(&self, node_id: &DhtNodeId) -> bool {
         if let Some(result) = self.get_cached_result(node_id) {
+            if !result.is_valid && self.config.enforcement_mode.is_log_only() {
+                tracing::warn!(
+                    node_id = ?node_id,
+                    "Close group validation failed but allowed (LogOnly mode)"
+                );
+                return true;
+            }
             return result.is_valid;
         }
 
-        // Optimistic default: if not known bad, assume valid for now.
-        // In a strict mode, we might want to return false here and force active validation.
-        true
+        // Node not in cache - behavior depends on enforcement mode
+        match self.config.enforcement_mode {
+            CloseGroupEnforcementMode::Strict => {
+                // Strict mode: unknown nodes are rejected
+                tracing::debug!(
+                    node_id = ?node_id,
+                    "Unknown node rejected (Strict mode)"
+                );
+                false
+            }
+            CloseGroupEnforcementMode::LogOnly => {
+                // LogOnly mode: allow unknown nodes
+                tracing::debug!(
+                    node_id = ?node_id,
+                    "Unknown node allowed (LogOnly mode)"
+                );
+                true
+            }
+        }
+    }
+
+    /// Get the current enforcement mode
+    #[must_use]
+    pub fn enforcement_mode(&self) -> CloseGroupEnforcementMode {
+        self.config.enforcement_mode
     }
 
     /// Validate close group membership with hybrid approach
@@ -937,5 +1023,100 @@ mod tests {
                 .contains(&CloseGroupFailure::InsufficientGeographicDiversity)
         );
         assert_eq!(result.confirming_regions, 1);
+    }
+
+    #[test]
+    fn test_enforcement_mode_enum() {
+        // Test default is Strict
+        assert_eq!(
+            CloseGroupEnforcementMode::default(),
+            CloseGroupEnforcementMode::Strict
+        );
+
+        // Test helper methods
+        assert!(CloseGroupEnforcementMode::Strict.is_strict());
+        assert!(!CloseGroupEnforcementMode::Strict.is_log_only());
+        assert!(!CloseGroupEnforcementMode::LogOnly.is_strict());
+        assert!(CloseGroupEnforcementMode::LogOnly.is_log_only());
+    }
+
+    #[test]
+    fn test_config_strict() {
+        let config = CloseGroupValidatorConfig::strict();
+        assert_eq!(config.enforcement_mode, CloseGroupEnforcementMode::Strict);
+    }
+
+    #[test]
+    fn test_config_log_only() {
+        let config = CloseGroupValidatorConfig::log_only();
+        assert_eq!(config.enforcement_mode, CloseGroupEnforcementMode::LogOnly);
+    }
+
+    #[test]
+    fn test_config_with_enforcement_mode() {
+        let config = CloseGroupValidatorConfig::default()
+            .with_enforcement_mode(CloseGroupEnforcementMode::LogOnly);
+        assert_eq!(config.enforcement_mode, CloseGroupEnforcementMode::LogOnly);
+    }
+
+    #[test]
+    fn test_strict_mode_rejects_unknown_nodes() {
+        let config = CloseGroupValidatorConfig::strict();
+        let validator = CloseGroupValidator::new(config);
+        let unknown_node = DhtNodeId::random();
+
+        // Unknown nodes should be rejected in strict mode
+        assert!(!validator.validate(&unknown_node));
+        assert!(validator.enforcement_mode().is_strict());
+    }
+
+    #[test]
+    fn test_log_only_mode_allows_unknown_nodes() {
+        let config = CloseGroupValidatorConfig::log_only();
+        let validator = CloseGroupValidator::new(config);
+        let unknown_node = DhtNodeId::random();
+
+        // Unknown nodes should be allowed in log-only mode
+        assert!(validator.validate(&unknown_node));
+        assert!(validator.enforcement_mode().is_log_only());
+    }
+
+    #[test]
+    fn test_strict_mode_respects_cached_results() {
+        let config = CloseGroupValidatorConfig::strict();
+        let validator = CloseGroupValidator::new(config);
+        let node_id = DhtNodeId::random();
+
+        // Cache a valid result
+        let mut valid_result = CloseGroupValidationResult::new(node_id.clone());
+        valid_result.is_valid = true;
+        validator.cache_result(valid_result);
+
+        // Should return true because cached result is valid
+        assert!(validator.validate(&node_id));
+
+        // Cache an invalid result for a different node
+        let invalid_node = DhtNodeId::random();
+        let mut invalid_result = CloseGroupValidationResult::new(invalid_node.clone());
+        invalid_result.is_valid = false;
+        validator.cache_result(invalid_result);
+
+        // Should return false because cached result is invalid (strict mode)
+        assert!(!validator.validate(&invalid_node));
+    }
+
+    #[test]
+    fn test_log_only_mode_allows_failed_cached_results() {
+        let config = CloseGroupValidatorConfig::log_only();
+        let validator = CloseGroupValidator::new(config);
+        let node_id = DhtNodeId::random();
+
+        // Cache an invalid result
+        let mut invalid_result = CloseGroupValidationResult::new(node_id.clone());
+        invalid_result.is_valid = false;
+        validator.cache_result(invalid_result);
+
+        // Should return true because log-only mode allows failed nodes
+        assert!(validator.validate(&node_id));
     }
 }
