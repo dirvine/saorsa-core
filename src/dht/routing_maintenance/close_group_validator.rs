@@ -455,6 +455,75 @@ impl CloseGroupValidator {
         self.config.enforcement_mode
     }
 
+    /// Validate node using trust score only (no peer responses required)
+    ///
+    /// This is a lightweight validation for use during background refresh when
+    /// full close group consensus is not available. It validates based on:
+    /// - Trust score threshold
+    /// - Cached validation results
+    ///
+    /// Returns (is_valid, failure_reason)
+    #[must_use]
+    pub fn validate_trust_only(
+        &self,
+        node_id: &DhtNodeId,
+        trust_score: Option<f64>,
+    ) -> (bool, Option<CloseGroupFailure>) {
+        // Check cache first
+        if let Some(cached) = self.get_cached_result(node_id) {
+            // In LogOnly mode, return valid even if cached result is invalid
+            if !cached.is_valid && self.config.enforcement_mode.is_log_only() {
+                return (true, None);
+            }
+            return (cached.is_valid, cached.failure_reasons.first().cloned());
+        }
+
+        // Check trust score
+        let min_threshold = if self.is_attack_mode() {
+            // Higher threshold in attack mode
+            self.config.min_witness_trust
+        } else {
+            // Lower threshold in normal mode (0.15 default)
+            self.config.min_witness_trust * 0.5
+        };
+
+        match trust_score {
+            Some(score) if score < min_threshold => {
+                if self.config.enforcement_mode.is_log_only() {
+                    tracing::warn!(
+                        node_id = ?node_id,
+                        trust_score = score,
+                        min_threshold = min_threshold,
+                        "Trust validation failed but allowed (LogOnly mode)"
+                    );
+                    (true, None)
+                } else {
+                    tracing::debug!(
+                        node_id = ?node_id,
+                        trust_score = score,
+                        min_threshold = min_threshold,
+                        "Node failed trust validation"
+                    );
+                    (false, Some(CloseGroupFailure::LowTrustScore))
+                }
+            }
+            Some(_) => (true, None), // Trust score above threshold
+            None => {
+                // No trust score available - allow in LogOnly mode, reject in Strict
+                match self.config.enforcement_mode {
+                    CloseGroupEnforcementMode::LogOnly => (true, None),
+                    CloseGroupEnforcementMode::Strict => {
+                        tracing::debug!(
+                            node_id = ?node_id,
+                            "Node rejected due to missing trust score (Strict mode)"
+                        );
+                        (false, Some(CloseGroupFailure::LowTrustScore))
+                    }
+                }
+            }
+        }
+    }
+
     /// Validate close group membership with hybrid approach
     ///
     /// Uses trust-weighted validation normally, BFT consensus when attack mode is active.

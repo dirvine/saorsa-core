@@ -1,458 +1,452 @@
-# S/Kademlia Security Review & Production Readiness Plan
+# Comprehensive S/Kademlia Security Review & Production Readiness Plan
 
 ## Executive Summary
 
-The saorsa-core codebase has **excellent security infrastructure** with all major components implemented. However, there's a **critical integration gap** where security validators are not actively invoked during routing table refresh operations. This plan addresses that gap and ensures production readiness.
+This plan ensures the saorsa-core S/Kademlia implementation is production-ready with:
+- Full EigenTrust/geographic blocking integration
+- Complete close group validation during routing table refresh
+- Comprehensive metrics for security, node health, and data integrity
+- All recorded security measures operational
 
 ---
 
-## Current State Assessment
+## PART 1: AUDIT FINDINGS SUMMARY
 
-### Fully Implemented (Production Ready)
-- Close Group Validator (hybrid trust/BFT validation)
-- Sybil Detector (clustering detection)
-- Collusion Detector (temporal/voting analysis)
-- Authenticated Sibling Broadcast (eclipse prevention)
-- Data Integrity Monitor (health tracking & attestation)
-- EigenTrust++ Engine (reputation management)
-- Placement System (weighted selection, Byzantine tolerance)
-- Metrics Infrastructure (40+ security metrics)
-- Bucket Refresh Tier System (4-level prioritization)
+### Current Security Architecture Status
 
-### Critical Integration Gap
-**The Close Group Validation is IMPLEMENTED but NOT INTEGRATED** into the routing refresh flow. The refresh manager has the validator but doesn't call it during refresh operations.
+| Component | Status | Production Ready |
+|-----------|--------|-----------------|
+| S/Kademlia Core | Implemented | Yes |
+| Close Group Validator | Implemented | Needs Integration |
+| EigenTrust++ | Implemented | Yes |
+| IP Diversity (IPv4+IPv6) | Implemented | Yes |
+| Geographic Blocking | Implemented | Yes |
+| Sybil Detection | Implemented | Yes |
+| Collusion Detection | Implemented | Yes |
+| Witness Protocol | Implemented | Yes |
+| Data Integrity Monitor | Implemented | Needs Integration |
+| Security Metrics | Partial | Needs Enhancement |
 
-### Missing/Incomplete
-- Active validation invocation during bucket refresh
-- Automatic escalation to BFT mode during attacks
-- Continuous attestation challenge flow
-- Active eviction enforcement
-- Geographic diversity enforcement in routing table
+### Critical Gap Identified
 
----
-
-## Implementation Plan
-
-### Phase 1: Routing Table Refresh Integration (CRITICAL)
-
-#### Task 1.1: Integrate Close Group Validation into Refresh Flow
-**File**: `src/dht/routing_maintenance/refresh.rs`
-
-**Changes Required**:
-1. Add async method `validate_refreshed_nodes()` that:
-   - Takes list of nodes returned from bucket refresh
-   - Calls `validator.validate_membership()` for each node
-   - Checks attack indicators and escalates to BFT if needed
-   - Returns list of valid/invalid nodes
-
-2. Modify `record_refresh_success()` to:
-   - Invoke validation for returned nodes
-   - Track validation results in bucket state
-   - Update security metrics
-
-3. Add validation callback during node lookup completion
-
-**Acceptance Criteria**:
-- Every node returned from a refresh lookup is validated
-- Invalid nodes are flagged for eviction
-- Metrics track validation success/failure rates
-- Attack indicators trigger BFT escalation
-
-#### Task 1.2: Implement Eviction Flow
-**File**: `src/dht/routing_maintenance/eviction.rs` + `src/dht/core_engine.rs`
-
-**Changes Required**:
-1. Add `evict_node()` method to core engine that:
-   - Removes node from routing table
-   - Records eviction reason
-   - Broadcasts eviction event via security coordinator
-   - Updates metrics
-
-2. Connect validation failures to eviction:
-   - Nodes failing validation get evicted
-   - Nodes detected as Sybil/colluding get evicted
-   - Geographic concentration violations trigger eviction
-
-**Acceptance Criteria**:
-- Invalid nodes are actually removed from routing table
-- Eviction events are broadcast to network
-- Eviction reasons are tracked in metrics
-
-#### Task 1.3: Security Coordinator Orchestration
-**File**: `src/dht/routing_maintenance/security_coordinator.rs`
-
-**Changes Required**:
-1. Add `orchestrate_refresh_validation()` method that coordinates:
-   - Close group validator invocation
-   - Sybil detector checks
-   - Collusion detector checks
-   - Eviction decisions
-
-2. Add background task for continuous security monitoring
-
-3. Implement attack response escalation:
-   - Automatic BFT mode activation on high attack indicators
-   - Increased validation frequency during attacks
-   - Alert broadcasting
-
-**Acceptance Criteria**:
-- Single entry point for security validation
-- Automatic escalation based on attack indicators
-- Background monitoring active
+**Close Group Validation During Routing Table Refresh:**
+- Validator EXISTS in `close_group_validator.rs` (1,122 lines)
+- Refresh logic EXISTS in `refresh.rs` (29,862 bytes)
+- **INTEGRATION NOT VERIFIED** - Need to ensure validator is called during refresh
 
 ---
 
-### Phase 2: Close Group Agreement Validation
+## PART 2: IMPLEMENTATION PHASES
 
-#### Task 2.1: Multi-Node Close Group Consensus
-**File**: `src/dht/routing_maintenance/close_group_validator.rs`
+### Phase 1: Verify Close Group Validation Integration
+**Priority: CRITICAL**
 
-**Changes Required**:
-1. Add `verify_close_group_agreement()` method that:
-   - Queries multiple nodes for their view of close group
-   - Compares responses for consistency
-   - Flags disagreements as potential attacks
-   - Uses BFT consensus (5/7 threshold) for validation
+#### 1.1 Audit Routing Table Refresh Flow
+**Files to Review:**
+- `src/dht/routing_maintenance/refresh.rs` - Refresh orchestration
+- `src/dht/routing_maintenance/close_group_validator.rs` - Validation logic
+- `src/dht/routing_maintenance/security_coordinator.rs` - Security orchestration
 
-2. Implement close group membership proof verification:
-   - Verify each node is in its claimed close group
-   - Check that close group members agree on membership
-   - Detect nodes claiming false close group membership
+**Verification Checklist:**
+- [ ] Each node discovered during refresh is validated via `CloseGroupValidator`
+- [ ] Validation uses hybrid approach (trust-weighted + BFT when under attack)
+- [ ] Failed validations trigger node eviction
+- [ ] Metrics track validation success/failure rates
 
-**Acceptance Criteria**:
-- Close group membership is verified by multiple sources
-- Disagreements are flagged and investigated
-- False membership claims are detected
+#### 1.2 Close Group Agreement Verification
+**Requirement:** During routing table refresh, verify each close node is:
+1. Confirmed by peers as belonging to the close group
+2. Not evicted from its own close group
+3. Has valid EigenTrust score above threshold
 
-#### Task 2.2: Churn Detection and Response
-**File**: `src/dht/routing_maintenance/close_group_validator.rs`
+**Implementation Verification:**
+```rust
+// Expected flow in refresh.rs:
+async fn refresh_node(&self, node: &NodeInfo) -> Result<RefreshResult> {
+    // 1. Validate node still in close group
+    let validation = self.close_group_validator
+        .validate_membership(node.id, &self.attack_indicators)
+        .await?;
 
-**Existing**: Churn rate tracking exists but isn't triggering responses
+    // 2. Check validation result
+    if !validation.is_valid {
+        self.evict_node(node.id, EvictionReason::FailedCloseGroupValidation)?;
+        return Ok(RefreshResult::Evicted);
+    }
 
-**Changes Required**:
-1. Add `should_escalate_security()` method that checks:
-   - Churn rate > 30% in 5 minutes
-   - Multiple validation failures in short period
-   - Geographic concentration increasing
+    // 3. Verify trust score
+    if self.trust_engine.get_trust(&node.id) < MIN_TRUST_THRESHOLD {
+        self.evict_node(node.id, EvictionReason::LowTrust)?;
+        return Ok(RefreshResult::Evicted);
+    }
 
-2. Connect churn detection to BFT escalation:
-   - High churn triggers BFT validation mode
-   - Increases validation frequency
-   - Reduces trust in new nodes temporarily
+    // 4. Continue with normal refresh
+    Ok(RefreshResult::Refreshed)
+}
+```
 
-**Acceptance Criteria**:
-- High churn automatically triggers heightened security
-- New nodes during high churn get extra scrutiny
-- Metrics track churn-related escalations
-
----
-
-### Phase 3: EigenTrust Integration Verification
-
-#### Task 3.1: Trust Score Usage in Routing
-**Files**: `src/dht/core_engine.rs`, `src/adaptive/trust.rs`
-
-**Verification Tasks**:
-1. Verify trust scores are used in:
-   - Node selection for lookups
-   - Witness selection
-   - Close group validation weighting
-
-2. Ensure trust score updates based on:
-   - Validation results (correct/incorrect responses)
-   - Uptime and reliability
-   - Resource contributions
-
-**Changes Required**:
-1. Add trust score consideration to `find_closest_nodes()`
-2. Weight routing decisions by trust score
-3. Penalize nodes that fail validation
-
-**Acceptance Criteria**:
-- High-trust nodes preferred for routing
-- Low-trust nodes gradually removed
-- Trust scores update based on behavior
-
-#### Task 3.2: Trust-Based Eviction Thresholds
-**File**: `src/dht/routing_maintenance/eviction.rs`
-
-**Changes Required**:
-1. Implement trust-based eviction:
-   - Nodes below trust threshold (0.3) get evicted
-   - Trust decay over time for inactive nodes
-   - Grace period for new nodes
-
-**Acceptance Criteria**:
-- Low-trust nodes are automatically evicted
-- Trust threshold is configurable
-- Metrics track trust-based evictions
+#### 1.3 Add Missing Integration Points
+**If not present, add:**
+- Validation call during bucket refresh
+- BFT escalation triggers
+- Eviction enforcement
+- Metric recording
 
 ---
 
-### Phase 4: Geographic Blocking & Diversity
+### Phase 2: EigenTrust Integration Verification
+**Priority: HIGH**
 
-#### Task 4.1: Geographic Enforcement in Routing Table
-**File**: `src/dht/core_engine.rs`, `src/dht/routing_maintenance/refresh.rs`
+#### 2.1 Audit Trust Score Usage
+**Files to Review:**
+- `src/adaptive/trust.rs` - EigenTrust++ engine (871 lines)
+- `src/dht/witness_selection.rs` - Witness selection with trust
+- `src/placement/algorithms.rs` - Placement with trust weighting
 
-**Current State**: Geographic diversity required in placement but not in routing table
+**Verification Checklist:**
+- [ ] Trust scores are updated on successful/failed interactions
+- [ ] Trust scores influence routing decisions
+- [ ] Trust scores influence witness selection (50% weight)
+- [ ] Trust scores influence placement decisions
+- [ ] Pre-trusted nodes are configured for bootstrap
 
-**Changes Required**:
-1. Add geographic concentration check during node addition:
-   - Limit nodes from same region in each bucket
-   - Require minimum regional diversity in close group
+#### 2.2 Trust Thresholds
+**Current Configuration:**
+```rust
+min_trust_threshold: 0.15     // Minimum for routing table
+min_witness_trust: 0.3        // Minimum for witness selection
+trust_weighted_threshold: 0.7  // For close group validation
+```
 
-2. Implement geographic blocking:
-   - Configurable blocked regions/ASNs
-   - Automatic blocking of suspicious geographic patterns
-
-**Acceptance Criteria**:
-- Routing table maintains geographic diversity
-- Blocked regions cannot add nodes
-- Metrics track geographic distribution
-
-#### Task 4.2: Latency-Based Geographic Verification
-**File**: `src/dht/collusion_detector.rs`
-
-**Existing**: Geographic verification maps claimed locations to latency
-
-**Changes Required**:
-1. Make geographic verification active during refresh:
-   - Measure latency to refreshed nodes
-   - Compare to claimed location
-   - Flag discrepancies
-
-**Acceptance Criteria**:
-- Nodes claiming false locations are detected
-- Latency measurements stored for verification
-- Metrics track geographic verification results
+**Verification:**
+- [ ] Thresholds are enforced at all decision points
+- [ ] Nodes below threshold are evicted/excluded
+- [ ] Trust decay is applied over time
 
 ---
 
-### Phase 5: Data Integrity Validation
+### Phase 3: Geographic Blocking Verification
+**Priority: HIGH**
 
-#### Task 5.1: Continuous Attestation Challenges
-**File**: `src/dht/routing_maintenance/data_integrity_monitor.rs`
+#### 3.1 Audit IP Diversity Enforcement
+**Files to Review:**
+- `src/security.rs` - IP diversity enforcer (1,915 lines)
+- `src/bgp_geo_provider.rs` - GeoIP provider (636 lines)
+- `src/dht/ipv4_identity.rs` - IPv4 identity binding
+- `src/dht/ipv6_identity.rs` - IPv6 identity binding
 
-**Existing**: Framework ready but not actively challenging
+**Current Limits:**
+```rust
+// IPv6
+max_nodes_per_64: 1      // Per host (/64)
+max_nodes_per_48: 3      // Per site (/48)
+max_nodes_per_32: 10     // Per ISP (/32)
+max_nodes_per_asn: 20    // Per ASN
 
-**Changes Required**:
-1. Add background attestation task:
-   - Periodically challenge storage nodes
-   - Track challenge/response success rates
-   - Escalate on failures
+// IPv4
+max_nodes_per_ipv4_32: 1   // Per IP
+max_nodes_per_ipv4_24: 3   // Per /24
+max_nodes_per_ipv4_16: 10  // Per /16
+max_per_ip_cap: 50         // Hard limit
+max_network_fraction: 0.005 // 0.5% of network
+```
 
-2. Connect to refresh flow:
-   - During refresh, challenge nodes for data they should hold
-   - Verify data availability and integrity
+**Verification Checklist:**
+- [ ] IPv4 diversity is enforced (recently added)
+- [ ] IPv6 diversity is enforced
+- [ ] ASN limits are enforced
+- [ ] Geographic diversity minimum (3 regions) is enforced
+- [ ] Hosting/VPN provider detection works
 
-**Acceptance Criteria**:
-- Storage nodes are regularly challenged
-- Failed challenges trigger investigation
-- Data integrity metrics continuously updated
-
-#### Task 5.2: Repair Initiation
-**File**: `src/dht/routing_maintenance/data_integrity_monitor.rs`
-
-**Existing**: Repair recommendations generated but not acted upon
-
-**Changes Required**:
-1. Implement repair workflow:
-   - Detect degraded data (health < threshold)
-   - Identify repair nodes (diverse geography, high trust)
-   - Initiate replication to repair nodes
-
-**Acceptance Criteria**:
-- Degraded data is automatically repaired
-- Repairs maintain geographic diversity
-- Repair metrics tracked
-
----
-
-### Phase 6: Comprehensive Metrics
-
-#### Task 6.1: Security Dashboard Completion
-**File**: `src/dht/metrics/security_dashboard.rs`
-
-**Existing**: Dashboard present but needs integration
-
-**Changes Required**:
-1. Add missing metrics:
-   - Bucket refresh success/failure rates
-   - Close group validation attempt counts
-   - Validation failure breakdown by reason
-   - Time to close group consensus
-   - Eviction rate trends
-   - Recovery time from attacks
-
-2. Implement aggregation:
-   - Rolling windows for rate calculations
-   - Percentile latencies for validation
-
-**Acceptance Criteria**:
-- All security operations have metrics
-- Dashboard provides complete visibility
-- Alerts configurable for thresholds
-
-#### Task 6.2: Node Health Metrics
-**File**: `src/dht/metrics/dht_metrics.rs`
-
-**Changes Required**:
-1. Add per-node health tracking:
-   - Uptime
-   - Response success rate
-   - Trust score history
-   - Validation results
-
-2. Add aggregate health metrics:
-   - Network-wide health score
-   - Regional health breakdown
-
-**Acceptance Criteria**:
-- Individual node health visible
-- Network health aggregated
-- Degraded nodes identifiable
-
-#### Task 6.3: Data Health Metrics
-**File**: `src/dht/metrics/placement_metrics.rs`
-
-**Changes Required**:
-1. Add data-level metrics:
-   - Per-key replica count
-   - Geographic distribution of replicas
-   - Attestation success rates
-   - Time since last verification
-
-**Acceptance Criteria**:
-- Data health visible per key
-- At-risk data identifiable
-- Repair needs surfaced
+#### 3.2 Geographic Diversity in Routing Table
+**Verification:**
+- [ ] Routing table maintains geographic diversity
+- [ ] Close group includes nodes from multiple regions
+- [ ] Witness selection requires min 2 distinct regions
 
 ---
 
-### Phase 7: Integration Testing
+### Phase 4: Data Integrity Verification
+**Priority: HIGH**
 
-#### Task 7.1: Security Integration Tests
-**File**: `tests/security_integration_verification.rs`
+#### 4.1 Audit Data Integrity Monitor
+**File:** `src/dht/routing_maintenance/data_integrity_monitor.rs` (1,321 lines)
 
-**Changes Required**:
-1. Expand existing test to cover:
-   - Refresh with validation flow
-   - Eviction on validation failure
-   - BFT escalation trigger
-   - Geographic diversity enforcement
+**Verification Checklist:**
+- [ ] Attestation challenges are issued periodically (every 5 min)
+- [ ] Challenge-response protocol verifies data presence
+- [ ] Health status tracks replica counts
+- [ ] Degraded/AtRisk/Critical statuses trigger repair
+- [ ] Storage node trust is verified (min 0.3)
 
-2. Add attack scenario tests:
-   - Eclipse attack simulation
-   - Sybil attack simulation
-   - Collusion simulation
+#### 4.2 Data Health States
+```rust
+enum DataHealthStatus {
+    Healthy,    // All replicas above minimum (3)
+    Degraded,   // Some failed, above minimum
+    AtRisk,     // Below minimum
+    Critical,   // Immediate action needed
+    Unknown,    // No verification
+}
+```
 
-**Acceptance Criteria**:
-- All security flows have integration tests
-- Attack scenarios tested
-- Edge cases covered
-
-#### Task 7.2: End-to-End Security Test Suite
-**File**: `tests/security_e2e_test.rs` (new)
-
-**Create comprehensive test that**:
-1. Spins up multi-node test network
-2. Performs normal operations
-3. Introduces malicious nodes
-4. Verifies detection and eviction
-5. Confirms data integrity maintained
-
-**Acceptance Criteria**:
-- Full security system tested end-to-end
-- Attack detection verified
-- Recovery verified
+**Verification:**
+- [ ] Each state triggers appropriate action
+- [ ] Metrics track health distribution
+- [ ] Repair recommendations are generated
 
 ---
 
-## Implementation Priority
+### Phase 5: Security Metrics Enhancement
+**Priority: HIGH**
 
-### CRITICAL (Must Complete First)
-1. Task 1.1: Integrate Close Group Validation into Refresh Flow
-2. Task 1.2: Implement Eviction Flow
-3. Task 2.1: Multi-Node Close Group Consensus
+#### 5.1 Audit Current Metrics
+**File:** `src/dht/metrics/security_metrics.rs` (598 lines)
 
-### HIGH (Required for Production)
-4. Task 1.3: Security Coordinator Orchestration
-5. Task 3.1: Trust Score Usage in Routing
-6. Task 4.1: Geographic Enforcement in Routing Table
-7. Task 6.1: Security Dashboard Completion
+**Current Metrics:**
+- `eclipse_score`, `sybil_score`, `collusion_score`
+- `eclipse_attempts_total`, `sybil_nodes_detected_total`
+- `close_group_validations_total`, `consensus_failures_total`
+- `nodes_evicted_total`, `eviction_by_reason`
+- `ip_diversity_rejections_total`, `nodes_per_region`
 
-### MEDIUM (Recommended)
-8. Task 2.2: Churn Detection and Response
-9. Task 3.2: Trust-Based Eviction Thresholds
-10. Task 5.1: Continuous Attestation Challenges
-11. Task 7.1: Security Integration Tests
+#### 5.2 Required Additional Metrics
 
-### LOWER (Enhancement)
-12. Task 4.2: Latency-Based Geographic Verification
-13. Task 5.2: Repair Initiation
-14. Task 6.2: Node Health Metrics
-15. Task 6.3: Data Health Metrics
-16. Task 7.2: End-to-End Security Test Suite
+**Node Health Metrics:**
+```rust
+// Add to security_metrics.rs
+pub struct NodeHealthMetrics {
+    // Trust distribution
+    trust_score_histogram: Histogram,  // Distribution of trust scores
+    trust_score_by_region: GaugeVec,   // Average trust per region
+
+    // Routing table health
+    routing_table_size: Gauge,
+    stale_nodes_count: Gauge,
+    validation_latency_ms: Histogram,
+
+    // Connection health
+    active_connections: Gauge,
+    connection_failures_total: Counter,
+    keepalive_timeouts_total: Counter,
+}
+```
+
+**Data Health Metrics:**
+```rust
+pub struct DataHealthMetrics {
+    // Replication health
+    data_items_total: Gauge,
+    healthy_items: Gauge,
+    degraded_items: Gauge,
+    at_risk_items: Gauge,
+    critical_items: Gauge,
+
+    // Attestation metrics
+    attestation_challenges_issued: Counter,
+    attestation_challenges_passed: Counter,
+    attestation_challenges_failed: Counter,
+    attestation_latency_ms: Histogram,
+
+    // Repair metrics
+    repairs_initiated: Counter,
+    repairs_completed: Counter,
+    repairs_failed: Counter,
+}
+```
+
+**Routing Table Refresh Metrics:**
+```rust
+pub struct RefreshMetrics {
+    // Refresh operations
+    refreshes_initiated: Counter,
+    refreshes_completed: Counter,
+    refreshes_failed: Counter,
+
+    // Per-tier tracking
+    critical_tier_refreshes: Counter,    // 60s interval
+    important_tier_refreshes: Counter,   // 5min interval
+    standard_tier_refreshes: Counter,    // 15min interval
+    background_tier_refreshes: Counter,  // 60min interval
+
+    // Validation during refresh
+    nodes_validated_during_refresh: Counter,
+    nodes_evicted_during_refresh: Counter,
+    bft_escalations_during_refresh: Counter,
+}
+```
 
 ---
 
-## Success Criteria
+### Phase 6: Comprehensive Testing
+**Priority: HIGH**
+
+#### 6.1 Integration Tests Required
+**File:** `tests/security_comprehensive_test.rs`
+
+```rust
+// Tests to add/verify
+#[tokio::test]
+async fn test_close_group_validation_during_refresh() {
+    // Setup routing table with known nodes
+    // Trigger refresh
+    // Verify each node was validated
+    // Verify invalid nodes were evicted
+}
+
+#[tokio::test]
+async fn test_bft_escalation_under_attack() {
+    // Setup routing table
+    // Inject attack indicators
+    // Verify BFT mode is activated
+    // Verify stricter thresholds apply
+}
+
+#[tokio::test]
+async fn test_eigentrust_integration() {
+    // Create nodes with varying trust scores
+    // Verify low-trust nodes are excluded from routing
+    // Verify trust influences witness selection
+}
+
+#[tokio::test]
+async fn test_geographic_diversity_enforcement() {
+    // Add nodes from single region
+    // Verify additional nodes from same region rejected after limit
+    // Verify routing maintains diversity
+}
+
+#[tokio::test]
+async fn test_data_integrity_attestation() {
+    // Store data
+    // Wait for attestation challenge
+    // Verify challenge-response works
+    // Verify health status is tracked
+}
+
+#[tokio::test]
+async fn test_security_metrics_coverage() {
+    // Perform various operations
+    // Verify all metrics are populated
+    // Verify metrics accurately reflect state
+}
+```
+
+---
+
+## PART 3: IMPLEMENTATION TASKS
+
+### Task List
+
+1. **Verify Close Group Validation Integration**
+   - [ ] Read `refresh.rs` to confirm validator is called
+   - [ ] Trace validation flow from refresh to eviction
+   - [ ] Add integration if missing
+
+2. **Verify EigenTrust Integration**
+   - [ ] Trace trust score usage in routing decisions
+   - [ ] Verify trust thresholds are enforced
+   - [ ] Confirm trust decay is applied
+
+3. **Verify Geographic Blocking**
+   - [ ] Test IPv4 diversity enforcement
+   - [ ] Test IPv6 diversity enforcement
+   - [ ] Verify ASN limits work
+
+4. **Enhance Security Metrics**
+   - [ ] Add NodeHealthMetrics
+   - [ ] Add DataHealthMetrics
+   - [ ] Add RefreshMetrics
+   - [ ] Wire metrics into operations
+
+5. **Add Missing Integration Tests**
+   - [ ] Close group validation during refresh
+   - [ ] BFT escalation under attack
+   - [ ] EigenTrust integration
+   - [ ] Geographic diversity enforcement
+   - [ ] Data integrity attestation
+
+6. **Documentation Update**
+   - [ ] Update CLAUDE.md with security architecture
+   - [ ] Document all metrics
+   - [ ] Document configuration options
+
+---
+
+## PART 4: PRODUCTION CONFIGURATION
+
+### Recommended Settings
+
+```rust
+// Close Group Validator
+CloseGroupValidatorConfig {
+    enforcement_mode: CloseGroupEnforcementMode::Strict,
+    min_peers_to_query: 5,
+    max_peers_to_query: 10,
+    trust_weighted_threshold: 0.7,
+    bft_threshold: 0.71,  // 5/7 for f=2
+    min_witness_trust: 0.3,
+    min_regions: 3,
+    auto_escalate: true,
+}
+
+// IP Diversity
+IPDiversityConfig {
+    max_nodes_per_64: 1,
+    max_nodes_per_48: 3,
+    max_nodes_per_32: 10,
+    max_nodes_per_ipv4_32: 1,
+    max_nodes_per_ipv4_24: 3,
+    max_nodes_per_ipv4_16: 10,
+    max_per_ip_cap: 50,
+    max_network_fraction: 0.005,
+    max_nodes_per_asn: 20,
+    enable_geolocation_check: true,
+    min_geographic_diversity: 3,
+}
+
+// Data Integrity
+DataIntegrityConfig {
+    check_interval: Duration::from_secs(300),
+    min_healthy_replicas: 3,
+    attestation_success_threshold: 0.9,
+    stale_data_threshold: Duration::from_secs(3600),
+    min_storage_trust: 0.3,
+}
+
+// Maintenance
+MaintenanceConfig {
+    bucket_refresh_interval: Duration::from_secs(3600),
+    bft_fault_tolerance: 2,
+    min_trust_threshold: 0.15,
+}
+```
+
+---
+
+## PART 5: SUCCESS CRITERIA
 
 ### Production Readiness Checklist
-- [ ] Every routing table refresh validates returned nodes
-- [ ] Invalid nodes are evicted from routing table
-- [ ] Close group membership verified by multiple sources
-- [ ] Attack indicators trigger automatic BFT escalation
-- [ ] EigenTrust scores influence routing decisions
-- [ ] Geographic diversity enforced in routing table
-- [ ] All security operations have metrics
-- [ ] Integration tests cover all security flows
+
+- [ ] All routing table refresh operations validate nodes
+- [ ] Invalid/evicted nodes are detected and removed
+- [ ] EigenTrust scores influence all routing decisions
+- [ ] Geographic diversity is enforced in routing table
+- [ ] IPv4 and IPv6 diversity limits are enforced
+- [ ] Data integrity is continuously monitored
+- [ ] All security metrics are populated
+- [ ] Integration tests pass for all security scenarios
 - [ ] Zero compilation warnings
-- [ ] All tests pass
-
-### Security Metrics Coverage
-- [ ] Eclipse attack detection rate
-- [ ] Sybil attack detection rate
-- [ ] Collusion detection rate
-- [ ] Validation success/failure rates
-- [ ] Eviction rates by reason
-- [ ] Churn rate tracking
-- [ ] Trust score distribution
-- [ ] Geographic distribution
-- [ ] Data integrity scores
-- [ ] Repair operation counts
+- [ ] Zero clippy warnings
+- [ ] Documentation is complete
 
 ---
 
-## Files to Modify
+## PART 6: NEXT STEPS
 
-### Core Changes
-- `src/dht/routing_maintenance/refresh.rs` - Validation integration
-- `src/dht/routing_maintenance/security_coordinator.rs` - Orchestration
-- `src/dht/routing_maintenance/eviction.rs` - Eviction flow
-- `src/dht/core_engine.rs` - Trust-based routing, eviction
-
-### Enhancements
-- `src/dht/routing_maintenance/close_group_validator.rs` - Agreement validation
-- `src/dht/routing_maintenance/data_integrity_monitor.rs` - Active attestation
-- `src/dht/metrics/security_dashboard.rs` - Complete metrics
-- `src/dht/metrics/dht_metrics.rs` - Node health
-- `src/dht/metrics/placement_metrics.rs` - Data health
-
-### Tests
-- `tests/security_integration_verification.rs` - Expand tests
-- `tests/security_e2e_test.rs` - New comprehensive test
-
----
-
-## Estimated Scope
-
-- **Phase 1**: ~800-1000 lines of code changes
-- **Phase 2**: ~400-500 lines
-- **Phase 3**: ~300-400 lines
-- **Phase 4**: ~300-400 lines
-- **Phase 5**: ~400-500 lines
-- **Phase 6**: ~500-600 lines
-- **Phase 7**: ~800-1000 lines of test code
-
-**Total**: ~3500-4400 lines of changes/additions
+1. **Begin with Phase 1** - Verify close group validation integration
+2. **Run existing tests** to establish baseline
+3. **Add missing integration** where gaps found
+4. **Enhance metrics** for full observability
+5. **Add integration tests** for complete coverage
+6. **Document** all changes

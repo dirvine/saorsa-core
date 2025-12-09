@@ -89,6 +89,26 @@ pub struct SecurityMetrics {
     pub geographic_diversity_rejections_total: u64,
     /// Node counts per geographic region
     pub nodes_per_region: HashMap<String, u64>,
+
+    // Data attestation challenge metrics
+    /// Total attestation challenges sent
+    pub attestation_challenges_sent_total: u64,
+    /// Total attestation challenges passed
+    pub attestation_challenges_passed_total: u64,
+    /// Total attestation challenges failed
+    pub attestation_challenges_failed_total: u64,
+
+    // Trust threshold violation metrics
+    /// Total trust threshold violations detected
+    pub trust_threshold_violations_total: u64,
+    /// Current count of nodes below trust threshold
+    pub low_trust_nodes_current: u64,
+
+    // Close group validation detail metrics
+    /// Whether strict enforcement mode is active
+    pub enforcement_mode_strict: bool,
+    /// Close group failures by type
+    pub close_group_failure_by_type: HashMap<String, u64>,
 }
 
 /// Thread-safe security metrics collector
@@ -133,6 +153,19 @@ pub struct SecurityMetricsCollector {
     ip_diversity_rejections_total: AtomicU64,
     geographic_diversity_rejections_total: AtomicU64,
     nodes_per_region: Arc<RwLock<HashMap<String, u64>>>,
+
+    // Data attestation challenges
+    attestation_challenges_sent_total: AtomicU64,
+    attestation_challenges_passed_total: AtomicU64,
+    attestation_challenges_failed_total: AtomicU64,
+
+    // Trust threshold violations
+    trust_threshold_violations_total: AtomicU64,
+    low_trust_nodes_current: AtomicU64,
+
+    // Close group validation details
+    enforcement_mode_strict: AtomicBool,
+    close_group_failure_by_type: Arc<RwLock<HashMap<String, u64>>>,
 }
 
 impl SecurityMetricsCollector {
@@ -162,6 +195,13 @@ impl SecurityMetricsCollector {
             ip_diversity_rejections_total: AtomicU64::new(0),
             geographic_diversity_rejections_total: AtomicU64::new(0),
             nodes_per_region: Arc::new(RwLock::new(HashMap::new())),
+            attestation_challenges_sent_total: AtomicU64::new(0),
+            attestation_challenges_passed_total: AtomicU64::new(0),
+            attestation_challenges_failed_total: AtomicU64::new(0),
+            trust_threshold_violations_total: AtomicU64::new(0),
+            low_trust_nodes_current: AtomicU64::new(0),
+            enforcement_mode_strict: AtomicBool::new(false),
+            close_group_failure_by_type: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -244,6 +284,22 @@ impl SecurityMetricsCollector {
         }
     }
 
+    /// Record validation during background refresh
+    ///
+    /// Tracks node validations performed during routing table refresh,
+    /// including the number of nodes validated and evicted.
+    pub fn record_validation_during_refresh(&self, validated: usize, evicted: usize) {
+        // Record as close group validations
+        self.close_group_validations_total
+            .fetch_add(validated as u64, Ordering::Relaxed);
+        // Record failures/evictions
+        self.close_group_consensus_failures_total
+            .fetch_add(evicted as u64, Ordering::Relaxed);
+        // Also update eviction counter
+        self.nodes_evicted_total
+            .fetch_add(evicted as u64, Ordering::Relaxed);
+    }
+
     /// Record witness validation result
     pub fn record_witness_validation(&self, success: bool) {
         self.witness_validations_total
@@ -303,10 +359,76 @@ impl SecurityMetricsCollector {
         }
     }
 
+    // ---- Data Attestation Challenge Methods ----
+
+    /// Record an attestation challenge sent
+    pub fn record_attestation_challenge_sent(&self) {
+        self.attestation_challenges_sent_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record an attestation challenge result
+    pub fn record_attestation_result(&self, passed: bool) {
+        if passed {
+            self.attestation_challenges_passed_total
+                .fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.attestation_challenges_failed_total
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    // ---- Trust Threshold Violation Methods ----
+
+    /// Record a trust threshold violation
+    pub fn record_trust_threshold_violation(&self) {
+        self.trust_threshold_violations_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Update the current count of low trust nodes
+    pub fn set_low_trust_nodes_count(&self, count: u64) {
+        self.low_trust_nodes_current.store(count, Ordering::Relaxed);
+    }
+
+    // ---- Close Group Validation Detail Methods ----
+
+    /// Set enforcement mode status
+    pub fn set_enforcement_mode_strict(&self, strict: bool) {
+        self.enforcement_mode_strict
+            .store(strict, Ordering::Relaxed);
+    }
+
+    /// Record a close group validation failure by type
+    ///
+    /// Failure types include: NotInCloseGroup, LowTrustScore,
+    /// InsufficientGeographicDiversity, SuspectedCollusion, AttackModeTriggered
+    pub async fn record_close_group_failure_type(&self, failure_type: &str) {
+        let mut failures = self.close_group_failure_by_type.write().await;
+        *failures.entry(failure_type.to_string()).or_insert(0) += 1;
+    }
+
+    /// Record a low trust eviction with the actual trust score
+    ///
+    /// This provides more detailed tracking than the generic eviction counter
+    pub async fn record_low_trust_eviction(&self, trust_score: f64) {
+        // Record in the eviction_by_reason with trust score bucket
+        let bucket = if trust_score < 0.05 {
+            "low_trust_critical"
+        } else if trust_score < 0.10 {
+            "low_trust_severe"
+        } else {
+            "low_trust_moderate"
+        };
+        self.record_eviction(bucket).await;
+        self.record_trust_threshold_violation();
+    }
+
     /// Get current metrics snapshot
     pub async fn get_metrics(&self) -> SecurityMetrics {
         let eviction_by_reason = self.eviction_by_reason.read().await.clone();
         let nodes_per_region = self.nodes_per_region.read().await.clone();
+        let close_group_failure_by_type = self.close_group_failure_by_type.read().await.clone();
 
         SecurityMetrics {
             eclipse_score: self.eclipse_score.load(Ordering::Relaxed) as f64 / 1000.0,
@@ -349,6 +471,21 @@ impl SecurityMetricsCollector {
                 .geographic_diversity_rejections_total
                 .load(Ordering::Relaxed),
             nodes_per_region,
+            attestation_challenges_sent_total: self
+                .attestation_challenges_sent_total
+                .load(Ordering::Relaxed),
+            attestation_challenges_passed_total: self
+                .attestation_challenges_passed_total
+                .load(Ordering::Relaxed),
+            attestation_challenges_failed_total: self
+                .attestation_challenges_failed_total
+                .load(Ordering::Relaxed),
+            trust_threshold_violations_total: self
+                .trust_threshold_violations_total
+                .load(Ordering::Relaxed),
+            low_trust_nodes_current: self.low_trust_nodes_current.load(Ordering::Relaxed),
+            enforcement_mode_strict: self.enforcement_mode_strict.load(Ordering::Relaxed),
+            close_group_failure_by_type,
         }
     }
 
@@ -384,6 +521,17 @@ impl SecurityMetricsCollector {
         self.geographic_diversity_rejections_total
             .store(0, Ordering::Relaxed);
         self.nodes_per_region.write().await.clear();
+        self.attestation_challenges_sent_total
+            .store(0, Ordering::Relaxed);
+        self.attestation_challenges_passed_total
+            .store(0, Ordering::Relaxed);
+        self.attestation_challenges_failed_total
+            .store(0, Ordering::Relaxed);
+        self.trust_threshold_violations_total
+            .store(0, Ordering::Relaxed);
+        self.low_trust_nodes_current.store(0, Ordering::Relaxed);
+        self.enforcement_mode_strict.store(false, Ordering::Relaxed);
+        self.close_group_failure_by_type.write().await.clear();
     }
 }
 

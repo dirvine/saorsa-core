@@ -40,6 +40,8 @@ pub struct EvictionManager {
     trust_scores: HashMap<DhtNodeId, f64>,
     /// Nodes that have failed attestation
     failed_attestations: HashMap<DhtNodeId, u32>,
+    /// Nodes explicitly marked for eviction with reason
+    marked_for_eviction: HashMap<DhtNodeId, EvictionReason>,
 }
 
 impl EvictionManager {
@@ -51,6 +53,7 @@ impl EvictionManager {
             liveness_states: HashMap::new(),
             trust_scores: HashMap::new(),
             failed_attestations: HashMap::new(),
+            marked_for_eviction: HashMap::new(),
         }
     }
 
@@ -62,6 +65,7 @@ impl EvictionManager {
             liveness_states: HashMap::new(),
             trust_scores,
             failed_attestations: HashMap::new(),
+            marked_for_eviction: HashMap::new(),
         }
     }
 
@@ -82,6 +86,14 @@ impl EvictionManager {
         *self.failed_attestations.entry(node_id.clone()).or_insert(0) += 1;
     }
 
+    /// Mark a node for eviction with a specific reason
+    ///
+    /// This is used when a node fails validation during close group
+    /// validation or other explicit eviction scenarios.
+    pub fn record_eviction(&mut self, node_id: &DhtNodeId, reason: EvictionReason) {
+        self.marked_for_eviction.insert(node_id.clone(), reason);
+    }
+
     /// Reset attestation failures (e.g., after successful attestation)
     pub fn reset_attestation_failures(&mut self, node_id: &DhtNodeId) {
         self.failed_attestations.remove(node_id);
@@ -90,6 +102,15 @@ impl EvictionManager {
     /// Update trust score for a node
     pub fn update_trust_score(&mut self, node_id: &DhtNodeId, score: f64) {
         self.trust_scores.insert(node_id.clone(), score);
+    }
+
+    /// Get trust score for a node
+    ///
+    /// Returns the cached EigenTrust score for a node, or None if unknown.
+    /// This cache is populated by the EigenTrust engine via `update_trust_score()`.
+    #[must_use]
+    pub fn get_trust_score(&self, node_id: &DhtNodeId) -> Option<f64> {
+        self.trust_scores.get(node_id).copied()
     }
 
     /// Get consecutive failure count for a node
@@ -132,7 +153,12 @@ impl EvictionManager {
     /// Get the eviction reason if any
     #[must_use]
     pub fn get_eviction_reason(&self, node_id: &DhtNodeId) -> Option<EvictionReason> {
-        // Check consecutive failures first (most common)
+        // Check explicitly marked nodes first (highest priority)
+        if let Some(reason) = self.marked_for_eviction.get(node_id) {
+            return Some(reason.clone());
+        }
+
+        // Check consecutive failures (most common)
         if let Some(state) = self
             .liveness_states
             .get(node_id)
@@ -165,8 +191,17 @@ impl EvictionManager {
     pub fn get_eviction_candidates(&self) -> Vec<(DhtNodeId, EvictionReason)> {
         let mut candidates = Vec::new();
 
+        // Check explicitly marked nodes first (highest priority)
+        for (node_id, reason) in &self.marked_for_eviction {
+            candidates.push((node_id.clone(), reason.clone()));
+        }
+
         // Check all nodes in liveness states
         for node_id in self.liveness_states.keys() {
+            // Skip if already marked
+            if self.marked_for_eviction.contains_key(node_id) {
+                continue;
+            }
             if let Some(reason) = self.get_eviction_reason(node_id) {
                 candidates.push((node_id.clone(), reason));
             }
@@ -174,9 +209,13 @@ impl EvictionManager {
 
         // Also check nodes only in trust scores
         for node_id in self.trust_scores.keys() {
-            if !self.liveness_states.contains_key(node_id)
-                && let Some(reason) = self.get_eviction_reason(node_id)
+            // Skip if already marked or in liveness states
+            if self.marked_for_eviction.contains_key(node_id)
+                || self.liveness_states.contains_key(node_id)
             {
+                continue;
+            }
+            if let Some(reason) = self.get_eviction_reason(node_id) {
                 candidates.push((node_id.clone(), reason));
             }
         }
@@ -189,6 +228,7 @@ impl EvictionManager {
         self.liveness_states.remove(node_id);
         self.trust_scores.remove(node_id);
         self.failed_attestations.remove(node_id);
+        self.marked_for_eviction.remove(node_id);
     }
 
     /// Get liveness state for a node

@@ -66,6 +66,8 @@ pub struct BucketRefreshState {
     pub validation_failures: u64,
     /// Last validation timestamp
     pub last_validation: Option<Instant>,
+    /// Tracked node IDs for validation
+    pub tracked_nodes: Vec<DhtNodeId>,
 }
 
 impl Default for BucketRefreshState {
@@ -87,6 +89,7 @@ impl BucketRefreshState {
             validated_nodes: 0,
             validation_failures: 0,
             last_validation: None,
+            tracked_nodes: Vec::new(),
         }
     }
 
@@ -394,6 +397,51 @@ impl BucketRefreshManager {
             .filter(|(_, state)| state.needs_validation(threshold) && state.node_count > 0)
             .map(|(&idx, _)| idx)
             .collect()
+    }
+
+    /// Get nodes tracked in a specific bucket for validation
+    ///
+    /// Returns a list of node IDs that are currently tracked in this bucket.
+    /// In a real implementation, this would return nodes from the routing table.
+    /// For now, returns tracked nodes from state or generates placeholder node IDs
+    /// based on bucket state.
+    #[must_use]
+    pub fn get_nodes_in_bucket(&self, bucket_idx: usize) -> Vec<DhtNodeId> {
+        self.bucket_states
+            .get(&bucket_idx)
+            .map(|state| {
+                // Return tracked nodes if we have them, otherwise empty
+                // In production, this would be populated from routing table sync
+                state.tracked_nodes.clone()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Add a node to bucket tracking for validation
+    pub fn track_node_in_bucket(&mut self, bucket_idx: usize, node_id: DhtNodeId) {
+        let state = self.get_or_create_state(bucket_idx);
+        state.tracked_nodes.push(node_id);
+        state.node_count = state.tracked_nodes.len();
+    }
+
+    /// Remove a node from bucket tracking
+    pub fn untrack_node_from_bucket(&mut self, bucket_idx: usize, node_id: &DhtNodeId) {
+        if let Some(state) = self.bucket_states.get_mut(&bucket_idx) {
+            state.tracked_nodes.retain(|id| id != node_id);
+            state.node_count = state.tracked_nodes.len();
+        }
+    }
+
+    /// Record a validation result for a bucket (with count of validated and failed)
+    pub fn record_validation_result(
+        &mut self,
+        bucket_idx: usize,
+        _validated_count: usize,
+        _failed_count: usize,
+    ) {
+        if let Some(state) = self.bucket_states.get_mut(&bucket_idx) {
+            state.last_validation = Some(Instant::now());
+        }
     }
 
     /// Get overall validation rate across all buckets

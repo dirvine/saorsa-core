@@ -476,7 +476,8 @@ impl DhtCoreEngine {
         let refresh_manager = self.bucket_refresh_manager.clone();
         let integrity_monitor = self.data_integrity_monitor.clone();
         let eviction_manager = self.eviction_manager.clone();
-        let _metrics = self.security_metrics.clone();
+        let close_group_validator = self.close_group_validator.clone();
+        let security_metrics = self.security_metrics.clone();
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -508,21 +509,80 @@ impl DhtCoreEngine {
                     if !buckets.is_empty() {
                         // Get buckets that also need validation
                         let validation_buckets = mgr.get_buckets_needing_validation();
+                        let mut total_validated = 0usize;
+                        let mut total_evicted = 0usize;
 
                         for bucket in buckets {
                             // Record refresh (in a real impl, trigger network lookups first)
                             mgr.record_refresh_success(bucket, 0);
 
-                            // Mark validation as needed for this bucket if due
+                            // Perform trust-based validation during refresh
                             if validation_buckets.contains(&bucket) {
-                                // In production, validate_refreshed_nodes() would be called
-                                // after network lookups return node responses and trust scores.
-                                // For now, mark that validation was attempted.
+                                // Get nodes that need validation from the refresh manager
+                                let nodes_to_validate = mgr.get_nodes_in_bucket(bucket);
+
+                                // Validate each node using trust-based validation
+                                let validator = close_group_validator.read();
+                                let mut evict_list = Vec::new();
+
+                                for node_id in &nodes_to_validate {
+                                    // Query trust score from eviction manager's trust cache
+                                    // This cache is populated by EigenTrust updates via update_trust_score()
+                                    let trust_score = {
+                                        let evict_mgr = eviction_manager.read();
+                                        evict_mgr.get_trust_score(node_id)
+                                    };
+
+                                    let (is_valid, failure_reason) =
+                                        validator.validate_trust_only(node_id, trust_score);
+
+                                    if !is_valid && let Some(reason) = failure_reason {
+                                        tracing::info!(
+                                            node_id = ?node_id,
+                                            bucket = bucket,
+                                            reason = ?reason,
+                                            "Node failed validation during refresh"
+                                        );
+                                        evict_list.push((
+                                            node_id.clone(),
+                                            EvictionReason::CloseGroupRejection,
+                                        ));
+                                    }
+                                }
+                                drop(validator);
+
+                                total_validated += nodes_to_validate.len();
+
+                                // Queue evictions
+                                if !evict_list.is_empty() {
+                                    let mut evict_mgr = eviction_manager.write();
+                                    for (node_id, reason) in evict_list {
+                                        evict_mgr.record_eviction(&node_id, reason);
+                                        total_evicted += 1;
+                                    }
+                                }
+
+                                // Record validation metrics
+                                let nodes_count = nodes_to_validate.len();
+                                mgr.record_validation_result(bucket, nodes_count, 0);
+
                                 tracing::debug!(
-                                    "Bucket {} marked for validation during refresh",
-                                    bucket
+                                    bucket = bucket,
+                                    nodes_validated = nodes_count,
+                                    "Bucket validation completed during refresh"
                                 );
                             }
+                        }
+
+                        // Update security metrics
+                        if total_validated > 0 || total_evicted > 0 {
+                            security_metrics
+                                .record_validation_during_refresh(total_validated, total_evicted);
+                            tracing::info!(
+                                total_validated = total_validated,
+                                total_evicted = total_evicted,
+                                "Refresh validation cycle completed"
+                            );
                         }
                     }
                 }
