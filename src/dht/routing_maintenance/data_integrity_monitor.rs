@@ -1133,8 +1133,12 @@ mod tests {
 
         // Source nodes should be excluded
         for seed in 0..20 {
-            let selection =
-                monitor.select_repair_nodes_seeded(&candidates, 1, std::slice::from_ref(&source_id), seed);
+            let selection = monitor.select_repair_nodes_seeded(
+                &candidates,
+                1,
+                std::slice::from_ref(&source_id),
+                seed,
+            );
             assert!(
                 !selection.iter().any(|n| n.node_id == source_id),
                 "Source node should be excluded"
