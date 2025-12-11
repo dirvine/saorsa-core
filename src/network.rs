@@ -33,7 +33,6 @@ use crate::validation::RateLimitConfig;
 use crate::validation::RateLimiter;
 use crate::{NetworkAddress, PeerId};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -142,11 +142,12 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
     let device_count = storage_handle.shard_map.devices().len();
 
     // Should use multiple devices from the storing user for redundancy
-    // User 0 has 1 active + 2 headless = 3 devices, with 12 total shards (8+4)
-    // Headless devices should receive multiple shards
+    // User 0 has 1 active + 2 headless = 3 devices
+    // With replication, each replica goes to a device (up to MAX_REPLICATION_TARGET=8)
     assert!(device_count >= 1, "Expected at least 1 device with shards");
 
     // Verify that we got the expected number of total shards assigned
+    // Note: store_with_fec(8, 4) requests 8+4=12 replicas, but MAX_REPLICATION_TARGET=8
     let total_shards_assigned: usize = storage_handle
         .shard_map
         .devices()
@@ -155,8 +156,8 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
         .map(|shards| shards.len())
         .sum();
     assert_eq!(
-        total_shards_assigned, 12,
-        "Expected 12 total shards (8 data + 4 parity)"
+        total_shards_assigned, 8,
+        "Expected 8 total shards (clamped to MAX_REPLICATION_TARGET)"
     );
 
     // Retrieve and verify
