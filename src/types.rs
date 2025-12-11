@@ -32,9 +32,7 @@ pub use identity::{Identity, IdentityHandle, MlDsaKeyPair};
 pub use presence::{
     Device, DeviceCapabilities, DeviceId, DeviceType, Endpoint, Presence, PresenceReceipt,
 };
-pub use storage::{
-    MAX_REPLICATION_TARGET, ShardAssignment, ShardMap, ShardRole, StorageHandle, StorageStrategy,
-};
+pub use storage::{MAX_REPLICATION_TARGET, ShardMap, StorageHandle, StorageStrategy};
 
 /// Example strong typing implementations (future replacements for string-based IDs)
 ///

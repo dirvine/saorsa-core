@@ -103,25 +103,3 @@ impl Default for ShardMap {
         Self::new()
     }
 }
-
-/// Shard assignment for a device
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShardAssignment {
-    /// Container ID this shard belongs to
-    pub container_id: Key,
-    /// Indices of shards assigned to this device
-    pub shard_indices: Vec<u32>,
-    /// Role of these shards
-    pub role: ShardRole,
-}
-
-/// Role of a shard on a device
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ShardRole {
-    /// Primary storage location
-    Primary,
-    /// Backup/replica
-    Backup,
-    /// Cache for performance
-    Cache,
-}
