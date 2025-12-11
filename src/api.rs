@@ -12,7 +12,7 @@
 //! This module provides the simplified public API for:
 //! - Identity registration and management
 //! - Presence and device management
-//! - Storage with saorsa-seal and saorsa-fec
+//! - Storage with replication
 
 use crate::auth::Sig;
 use crate::fwid::{Key, compute_key, fw_check, fw_to_key};

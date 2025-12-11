@@ -7,7 +7,7 @@
 // For AGPL-3.0 license, see LICENSE-AGPL-3.0
 // For commercial licensing, contact: saorsalabs@gmail.com
 
-//! Storage types with saorsa-seal and saorsa-fec integration
+//! Storage types for replication-based storage
 
 use crate::fwid::Key;
 use crate::types::presence::DeviceId;
@@ -104,59 +104,6 @@ impl Default for ShardMap {
     }
 }
 
-/// Parameters for saorsa-seal encryption
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SealParameters {
-    /// Algorithm identifier
-    pub algorithm: String,
-    /// Nonce for encryption
-    pub nonce: Vec<u8>,
-    /// Additional authenticated data
-    pub aad: Option<Vec<u8>>,
-}
-
-impl Default for SealParameters {
-    fn default() -> Self {
-        Self {
-            algorithm: "ChaCha20-Poly1305".to_string(),
-            nonce: vec![0u8; 12], // Will be generated properly
-            aad: None,
-        }
-    }
-}
-
-/// Parameters for saorsa-fec encoding
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct FecParameters {
-    /// Number of data shards (k)
-    pub data_shards: u16,
-    /// Number of parity shards (m)
-    pub parity_shards: u16,
-    /// Size of each shard in bytes
-    pub shard_size: u32,
-}
-
-impl FecParameters {
-    /// Create new FEC parameters
-    pub fn new(data_shards: u16, parity_shards: u16, shard_size: u32) -> Self {
-        Self {
-            data_shards,
-            parity_shards,
-            shard_size,
-        }
-    }
-
-    /// Get total number of shards
-    pub fn total_shards(&self) -> u16 {
-        self.data_shards + self.parity_shards
-    }
-
-    /// Calculate redundancy ratio
-    pub fn redundancy_ratio(&self) -> f32 {
-        self.parity_shards as f32 / self.data_shards as f32
-    }
-}
-
 /// Shard assignment for a device
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShardAssignment {
@@ -177,17 +124,4 @@ pub enum ShardRole {
     Backup,
     /// Cache for performance
     Cache,
-}
-
-/// Plan for distributing shards across devices
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShardDistributionPlan {
-    /// FEC parameters used
-    pub fec_params: FecParameters,
-    /// Assignments per device
-    pub assignments: HashMap<DeviceId, Vec<ShardAssignment>>,
-    /// Preferred devices for primary storage
-    pub primary_devices: Vec<DeviceId>,
-    /// Backup devices
-    pub backup_devices: Vec<DeviceId>,
 }

@@ -6,7 +6,6 @@ use crate::dht::{
     content_addressing::ContentAddress,
     geographic_routing::GeographicRegion,
     metrics::SecurityMetricsCollector,
-    reed_solomon::ReedSolomonEncoder,
     routing_maintenance::{
         BucketRefreshManager, EvictionManager, EvictionReason, MaintenanceConfig,
         close_group_validator::{
@@ -407,7 +406,6 @@ pub struct DhtCoreEngine {
     replication_manager: Arc<RwLock<ReplicationManager>>,
     load_balancer: Arc<RwLock<LoadBalancer>>,
     witness_system: Arc<WitnessReceiptSystem>,
-    _reed_solomon: Arc<ReedSolomonEncoder>,
 
     // Security Components (using parking_lot RwLock as they are synchronous)
     security_metrics: Arc<SecurityMetricsCollector>,
@@ -460,7 +458,6 @@ impl DhtCoreEngine {
             replication_manager: Arc::new(RwLock::new(ReplicationManager::new(8))),
             load_balancer: Arc::new(RwLock::new(LoadBalancer::new())),
             witness_system: Arc::new(WitnessReceiptSystem::new()),
-            _reed_solomon: Arc::new(ReedSolomonEncoder::new(6, 2)?),
             security_metrics,
             bucket_refresh_manager,
             data_integrity_monitor,
@@ -906,7 +903,6 @@ impl std::fmt::Debug for DhtCoreEngine {
             .field("replication_manager", &"Arc<RwLock<ReplicationManager>>")
             .field("load_balancer", &"Arc<RwLock<LoadBalancer>>")
             .field("witness_system", &"Arc<WitnessReceiptSystem>")
-            .field("_reed_solomon", &"Arc<ReedSolomonEncoder>")
             .field("security_metrics", &"Arc<SecurityMetricsCollector>")
             .field(
                 "bucket_refresh_manager",

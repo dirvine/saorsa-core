@@ -37,8 +37,9 @@ struct TestUser {
 }
 
 impl TestUser {
-    async fn new(username: String, port: u16) -> Result<Self> {
-        let listen_addr = format!("127.0.0.1:{}", port);
+    async fn new(username: String) -> Result<Self> {
+        // Bind to an ephemeral port to avoid CI flakiness from port collisions.
+        let listen_addr = "127.0.0.1:0";
         let mut config = NodeConfig::with_listen_addr(&listen_addr)?;
         config.bootstrap_peers.clear();
         config.bootstrap_peers_str.clear();
@@ -71,8 +72,7 @@ impl EndToEndTestFramework {
 
         for i in 0..user_count {
             let username = format!("user_{}", i + 1);
-            let port = 5000 + i as u16;
-            let user = TestUser::new(username, port).await?;
+            let user = TestUser::new(username).await?;
             users.push(user);
         }
 

@@ -33,8 +33,7 @@ pub use presence::{
     Device, DeviceCapabilities, DeviceId, DeviceType, Endpoint, Presence, PresenceReceipt,
 };
 pub use storage::{
-    FecParameters, MAX_REPLICATION_TARGET, SealParameters, ShardAssignment, ShardDistributionPlan,
-    ShardMap, ShardRole, StorageHandle, StorageStrategy,
+    MAX_REPLICATION_TARGET, ShardAssignment, ShardMap, ShardRole, StorageHandle, StorageStrategy,
 };
 
 /// Example strong typing implementations (future replacements for string-based IDs)

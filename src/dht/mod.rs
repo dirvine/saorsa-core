@@ -134,7 +134,6 @@ pub mod latency_aware_selection;
 pub mod network_integration;
 pub mod node_failure_tracker;
 pub mod optimized_storage;
-pub mod reed_solomon;
 pub mod replication_grace_period;
 pub mod rsps_integration;
 pub mod skademlia;
