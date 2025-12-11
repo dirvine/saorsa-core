@@ -5,7 +5,7 @@
 // - Commercial License
 //
 // For AGPL-3.0 license, see LICENSE-AGPL-3.0
-// For commercial licensing, contact: saorsalabs@gmail.com
+// For commercial licensing, contact: david@saorsalabs.com
 
 //! Trust metrics for EigenTrust reputation and witness validation
 //!

@@ -252,6 +252,6 @@ let receipt = engine.store_with_witnesses(
 
 Dual-licensed:
 - **AGPL-3.0**: For open source use
-- **Commercial**: Contact saorsalabs@gmail.com
+- **Commercial**: Contact david@saorsalabs.com
 
 All files must include the copyright header with dual-licensing notice.

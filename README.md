@@ -820,7 +820,7 @@ This project is dual-licensed:
 - **AGPL-3.0**: Open source license for open source projects
 - **Commercial**: Commercial license for proprietary projects
 
-For commercial licensing, contact: saorsalabs@gmail.com
+For commercial licensing, contact: david@saorsalabs.com
 
 ## Dependencies
 
@@ -862,7 +862,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 - **Issues**: [GitHub Issues](https://github.com/dirvine/saorsa-core-foundation/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/dirvine/saorsa-core-foundation/discussions)
-- **Email**: saorsalabs@gmail.com
+- **Email**: david@saorsalabs.com
 
 ---
 

@@ -355,7 +355,7 @@ Planned security enhancements:
 ## Contact
 
 For security concerns or vulnerability reports:
-- Email: saorsalabs@gmail.com
+- Email: david@saorsalabs.com
 - Security advisories: See GitHub Security tab
 
 ---

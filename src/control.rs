@@ -5,7 +5,7 @@
 // - Commercial License
 //
 // For AGPL-3.0 license, see LICENSE-AGPL-3.0
-// For commercial licensing, contact: saorsalabs@gmail.com
+// For commercial licensing, contact: david@saorsalabs.com
 
 //! Control module for network-level control messages and handling.
 //!

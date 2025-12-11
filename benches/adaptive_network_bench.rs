@@ -6,7 +6,7 @@
 // - Commercial License
 //
 // For AGPL-3.0 license, see LICENSE-AGPL-3.0
-// For commercial licensing, contact: saorsalabs@gmail.com
+// For commercial licensing, contact: david@saorsalabs.com
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under these licenses is distributed on an "AS IS" BASIS.
