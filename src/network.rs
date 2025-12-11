@@ -87,6 +87,12 @@ pub struct NodeConfig {
 
     /// Bootstrap cache configuration
     pub bootstrap_cache_config: Option<crate::bootstrap::CacheConfig>,
+
+    /// Optional IP diversity configuration for Sybil protection tuning.
+    ///
+    /// When set, this configuration is used by bootstrap peer discovery and
+    /// other diversity-enforcing subsystems. If `None`, defaults are used.
+    pub diversity_config: Option<crate::security::IPDiversityConfig>,
 }
 
 /// DHT-specific configuration
@@ -177,6 +183,7 @@ impl NodeConfig {
             security_config: SecurityConfig::default(),
             production_config: None,
             bootstrap_cache_config: None,
+            diversity_config: None,
             // identity_config: None,
         })
     }
@@ -220,6 +227,7 @@ impl Default for NodeConfig {
             security_config: SecurityConfig::default(),
             production_config: None, // Use default production config if enabled
             bootstrap_cache_config: None,
+            diversity_config: None,
             // identity_config: None, // Use default identity config if enabled
         }
     }
@@ -276,6 +284,7 @@ impl NodeConfig {
                 rate_limits: crate::production::RateLimitConfig::default(),
             }),
             bootstrap_cache_config: None,
+            diversity_config: None,
             // identity_config: Some(IdentityManagerConfig {
             //     cache_ttl: Duration::from_secs(3600),
             //     challenge_timeout: Duration::from_secs(30),
@@ -304,6 +313,7 @@ impl NodeConfig {
         let cfg = NodeConfig {
             listen_addr,
             listen_addrs: vec![listen_addr],
+            diversity_config: None,
             ..Default::default()
         };
         Ok(cfg)
@@ -689,8 +699,15 @@ impl P2PNode {
             .map(|prod_config| Arc::new(ResourceManager::new(prod_config)));
 
         // Initialize bootstrap cache manager
+        let diversity_config = config.diversity_config.clone().unwrap_or_default();
         let bootstrap_manager = if let Some(ref cache_config) = config.bootstrap_cache_config {
-            match BootstrapManager::with_config(cache_config.clone()).await {
+            match BootstrapManager::with_full_config(
+                cache_config.clone(),
+                crate::rate_limit::JoinRateLimiterConfig::default(),
+                diversity_config.clone(),
+            )
+            .await
+            {
                 Ok(manager) => Some(Arc::new(RwLock::new(manager))),
                 Err(e) => {
                     warn!(
@@ -701,7 +718,13 @@ impl P2PNode {
                 }
             }
         } else {
-            match BootstrapManager::new().await {
+            match BootstrapManager::with_full_config(
+                crate::bootstrap::CacheConfig::default(),
+                crate::rate_limit::JoinRateLimiterConfig::default(),
+                diversity_config,
+            )
+            .await
+            {
                 Ok(manager) => Some(Arc::new(RwLock::new(manager))),
                 Err(e) => {
                     warn!(
@@ -2369,6 +2392,15 @@ impl NodeBuilder {
         self
     }
 
+    /// Configure IP diversity limits for Sybil protection.
+    pub fn with_diversity_config(
+        mut self,
+        diversity_config: crate::security::IPDiversityConfig,
+    ) -> Self {
+        self.config.diversity_config = Some(diversity_config);
+        self
+    }
+
     /// Configure DHT settings
     pub fn with_dht(mut self, dht_config: DHTConfig) -> Self {
         self.config.dht_config = dht_config;
@@ -2384,6 +2416,46 @@ impl NodeBuilder {
     /// Build the P2P node
     pub async fn build(self) -> Result<P2PNode> {
         P2PNode::new(self.config).await
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod diversity_tests {
+    use super::*;
+    use crate::security::IPDiversityConfig;
+
+    async fn build_bootstrap_manager_like_prod(config: &NodeConfig) -> BootstrapManager {
+        let diversity_config = config.diversity_config.clone().unwrap_or_default();
+        if let Some(ref cache_config) = config.bootstrap_cache_config {
+            BootstrapManager::with_full_config(
+                cache_config.clone(),
+                crate::rate_limit::JoinRateLimiterConfig::default(),
+                diversity_config,
+            )
+            .await
+            .expect("bootstrap manager")
+        } else {
+            BootstrapManager::with_full_config(
+                crate::bootstrap::CacheConfig::default(),
+                crate::rate_limit::JoinRateLimiterConfig::default(),
+                diversity_config,
+            )
+            .await
+            .expect("bootstrap manager")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_nodeconfig_diversity_config_used_for_bootstrap() {
+        let config = NodeConfig {
+            diversity_config: Some(IPDiversityConfig::testnet()),
+            ..Default::default()
+        };
+
+        let manager = build_bootstrap_manager_like_prod(&config).await;
+        assert!(manager.diversity_config().is_relaxed());
+        assert_eq!(manager.diversity_config().max_nodes_per_asn, 5000);
     }
 }
 
@@ -2628,6 +2700,7 @@ mod tests {
             security_config: SecurityConfig::default(),
             production_config: None,
             bootstrap_cache_config: None,
+            diversity_config: None,
             // identity_config: None,
         }
     }

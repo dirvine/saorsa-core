@@ -1,5 +1,5 @@
 // Copyright (c) 2025 Saorsa Labs Limited
-
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 // This file is part of the Saorsa P2P network.
 
 // Licensed under the AGPL-3.0 license:

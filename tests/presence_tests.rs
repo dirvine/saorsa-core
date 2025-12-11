@@ -1,4 +1,5 @@
 // Copyright 2024 Saorsa Labs Limited
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 // Tests for presence and device management
 
 use anyhow::Result;

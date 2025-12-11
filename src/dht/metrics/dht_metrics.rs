@@ -321,8 +321,8 @@ mod tests {
         let collector = DhtMetricsCollector::new();
 
         // Add some lookup samples
-        for i in 0..100 {
-            let duration = Duration::from_millis(10 + (i % 50) as u64);
+        for i in 0u64..100 {
+            let duration = Duration::from_millis(10 + (i % 50));
             let hops = 3 + (i % 3);
             collector.record_lookup(duration, hops, true).await;
         }

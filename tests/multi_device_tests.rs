@@ -1,4 +1,5 @@
 // Copyright 2024 Saorsa Labs Limited
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 // Multi-device integration tests
 
 use anyhow::Result;
@@ -131,7 +132,7 @@ async fn test_multi_user_multi_device_storage() -> Result<()> {
         all_devices.extend(user_devices);
     }
 
-    // Store data using FEC across all users' devices
+    // Store data using replication across all users' devices
     let data = vec![0xABu8; 100_000]; // 100KB
     let storage_handle = store_with_fec(&handles[0], data.clone(), 8, 4).await?;
 
@@ -226,7 +227,7 @@ async fn test_headless_node_preference() -> Result<()> {
 
     register_presence(&handle, all_devices, active1.id).await?;
 
-    // Store data with FEC
+    // Store data with replication across devices
     let data = vec![0xFFu8; 50_000];
     let storage_handle = store_with_fec(&handle, data.clone(), 4, 2).await?;
 
@@ -290,7 +291,7 @@ async fn test_device_failure_recovery() -> Result<()> {
 
     register_presence(&handle, devices.clone(), devices[0].id).await?;
 
-    // Store with FEC (4 data, 2 parity = can lose 2 devices)
+    // Store with custom replication target (legacy FEC params)
     let data = b"Critical data with redundancy".to_vec();
     let storage_handle = store_with_fec(&handle, data.clone(), 4, 2).await?;
 
@@ -332,7 +333,7 @@ async fn test_dynamic_device_addition() -> Result<()> {
 
     register_presence(&handle, vec![initial_device.clone()], initial_device.id).await?;
 
-    // Store initial data (no FEC, single device)
+    // Store initial data (no replication, single device)
     let data1 = b"Initial data on single device".to_vec();
     let storage1 = store_data(&handle, data1.clone(), 1).await?;
     assert!(matches!(storage1.strategy, StorageStrategy::Direct));
@@ -358,14 +359,14 @@ async fn test_dynamic_device_addition() -> Result<()> {
     )
     .await?;
 
-    // Store new data with FEC now that we have redundancy
+    // Store new data with replication now that we have redundancy
     let data2 = vec![0x42u8; 50_000];
     let storage2 = store_with_fec(&handle, data2.clone(), 3, 2).await?;
 
-    // Verify FEC is used with new devices
+    // Verify replication strategy is used with new devices
     assert!(matches!(
         storage2.strategy,
-        StorageStrategy::FecEncoded { .. }
+        StorageStrategy::FullReplication { .. }
     ));
 
     // Verify new devices are being used
@@ -436,15 +437,10 @@ async fn test_cross_user_collaboration() -> Result<()> {
 
     // Verify strategy is appropriate for 3-person group
     match storage_handle.strategy {
-        StorageStrategy::FecEncoded {
-            data_shards,
-            parity_shards,
-            ..
-        } => {
-            assert_eq!(data_shards, 3);
-            assert_eq!(parity_shards, 2);
+        StorageStrategy::FullReplication { replicas } => {
+            assert_eq!(replicas, 3);
         }
-        _ => panic!("Expected FEC encoding for 3-person group"),
+        _ => panic!("Expected replication for 3-person group"),
     }
 
     // All users should be able to retrieve
@@ -491,7 +487,7 @@ async fn test_mobile_device_handling() -> Result<()> {
             cpu_cores: 2,
             bandwidth_mbps: 50,
             always_online: false,
-            supports_fec: false, // Mobile devices don't do FEC
+            supports_fec: false, // Legacy flag indicating mobiles shouldn't be used for replication
             supports_seal: true,
         },
     };
@@ -543,7 +539,7 @@ async fn test_mobile_device_handling() -> Result<()> {
     )
     .await?;
 
-    // Store data - should avoid mobile for FEC
+    // Store data - planner should still avoid mobiles when placing replicas
     let data = vec![0x55u8; 30_000];
     let storage_handle = store_with_fec(&handle, data.clone(), 3, 2).await?;
 

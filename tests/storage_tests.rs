@@ -1,4 +1,5 @@
 // Copyright 2024 Saorsa Labs Limited
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 // Tests for storage API with saorsa-seal and saorsa-fec
 
 use anyhow::Result;
@@ -29,7 +30,7 @@ fn words_refs(w: &[String; 4]) -> [&str; 4] {
 
 #[tokio::test]
 async fn test_store_and_retrieve_single_user() -> Result<()> {
-    // Test basic store/retrieve for single user (no FEC)
+    // Test basic store/retrieve for single user (no replication)
     let w = valid_four_words(1);
     let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
@@ -65,7 +66,7 @@ async fn test_store_and_retrieve_single_user() -> Result<()> {
 
 #[tokio::test]
 async fn test_store_dyad_optimization() -> Result<()> {
-    // Test optimized storage for 2-person groups (no FEC, just replication)
+    // Test optimized storage for 2-person groups (full replication)
     let w1 = valid_four_words(2);
     let w2 = valid_four_words(3);
     let words1 = words_refs(&w1);
@@ -122,8 +123,8 @@ async fn test_store_dyad_optimization() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_store_with_fec_small_group() -> Result<()> {
-    // Test FEC storage for small group (3-5 members)
+async fn test_store_with_replication_small_group() -> Result<()> {
+    // Test replication strategy for small multi-device groups
     let w = valid_four_words(4);
     let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
@@ -150,25 +151,20 @@ async fn test_store_with_fec_small_group() -> Result<()> {
 
     register_presence(&handle, devices.clone(), devices[0].id).await?;
 
-    // Store data with FEC for group size 4
+    // Store data for group size 4 (should replicate across available devices)
     let data = vec![42u8; 10000]; // 10KB of data
     let storage_handle = store_data(&handle, data.clone(), 4).await?;
 
-    // Verify FEC strategy
+    // Verify replication strategy matches available device count
     match &storage_handle.strategy {
-        StorageStrategy::FecEncoded {
-            data_shards,
-            parity_shards,
-            ..
-        } => {
-            assert_eq!(*data_shards, 3);
-            assert_eq!(*parity_shards, 2);
+        StorageStrategy::FullReplication { replicas } => {
+            assert_eq!(*replicas, devices.len());
         }
-        _ => panic!("Expected FEC encoding for group size 4"),
+        _ => panic!("Expected replication for group size 4"),
     }
 
     // Verify shard distribution across devices
-    assert_eq!(storage_handle.shard_map.devices().len(), 3);
+    assert_eq!(storage_handle.shard_map.devices().len(), devices.len());
 
     // Retrieve and verify
     let retrieved = get_data(&storage_handle).await?;
@@ -178,8 +174,8 @@ async fn test_store_with_fec_small_group() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_store_with_custom_fec_params() -> Result<()> {
-    // Test custom FEC parameters
+async fn test_store_with_custom_replication_params() -> Result<()> {
+    // Test custom replication parameters via the legacy FEC API
     let w = valid_four_words(5);
     let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
@@ -206,21 +202,16 @@ async fn test_store_with_custom_fec_params() -> Result<()> {
 
     register_presence(&handle, devices.clone(), devices[0].id).await?;
 
-    // Store with custom FEC (8 data, 4 parity)
+    // Store with custom replication (8 data, 4 parity -> target 12 replicas, clamped to MAX)
     let data = vec![0xABu8; 100000]; // 100KB
     let storage_handle = store_with_fec(&handle, data.clone(), 8, 4).await?;
 
-    // Verify custom parameters
+    // Verify replication strategy reflects requested replica target (clamped to 8)
     match &storage_handle.strategy {
-        StorageStrategy::FecEncoded {
-            data_shards,
-            parity_shards,
-            ..
-        } => {
-            assert_eq!(*data_shards, 8);
-            assert_eq!(*parity_shards, 4);
+        StorageStrategy::FullReplication { replicas } => {
+            assert_eq!(*replicas, 8);
         }
-        _ => panic!("Expected FEC encoding with custom params"),
+        _ => panic!("Expected replication strategy with custom params"),
     }
 
     // Retrieve and verify
@@ -231,14 +222,14 @@ async fn test_store_with_custom_fec_params() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_fec_recovery_with_missing_shards() -> Result<()> {
-    // Test that data can be recovered even with missing shards
+async fn test_replication_recovery_with_missing_devices() -> Result<()> {
+    // Test that data can be retrieved even if some replicas go missing
     let w = valid_four_words(6);
     let words = words_refs(&w);
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
 
-    // Register enough devices for FEC
+    // Register enough devices for multi-device replication
     let mut devices = vec![];
     for i in 0..6 {
         devices.push(Device {
@@ -255,12 +246,11 @@ async fn test_fec_recovery_with_missing_shards() -> Result<()> {
 
     register_presence(&handle, devices.clone(), devices[0].id).await?;
 
-    // Store with FEC (4 data, 2 parity = can lose 2 shards)
+    // Store replicated data (target 6 replicas)
     let data = b"Important data that must survive failures".to_vec();
     let storage_handle = store_with_fec(&handle, data.clone(), 4, 2).await?;
 
-    // TODO: Simulate losing 2 shards (would require lower-level API)
-    // For now, just verify we can retrieve
+    // TODO: Simulate losing replicas once lower-level API exists.
     let retrieved = get_data(&storage_handle).await?;
     assert_eq!(retrieved, data);
 
@@ -268,8 +258,8 @@ async fn test_fec_recovery_with_missing_shards() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_seal_encryption() -> Result<()> {
-    // Test that data is properly sealed (encrypted)
+async fn test_plain_storage_has_no_sealed_key() -> Result<()> {
+    // Plain DHT storage should not expose a sealed key placeholder
     let words = ["regime", "abstract", "abandon", "ancient"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
@@ -291,11 +281,10 @@ async fn test_seal_encryption() -> Result<()> {
     let sensitive_data = b"Secret information that must be encrypted".to_vec();
     let storage_handle = store_data(&handle, sensitive_data.clone(), 1).await?;
 
-    // Verify sealed_key is present (encryption was applied)
-    assert!(storage_handle.sealed_key.is_some());
-    assert!(!storage_handle.sealed_key.as_ref().unwrap().is_empty());
+    // Verify sealed_key is absent (no fake encryption metadata)
+    assert!(storage_handle.sealed_key.is_none());
 
-    // Retrieve should decrypt automatically
+    // Retrieve should return the same bytes
     let retrieved = get_data(&storage_handle).await?;
     assert_eq!(retrieved, sensitive_data);
 
@@ -304,7 +293,7 @@ async fn test_seal_encryption() -> Result<()> {
 
 #[tokio::test]
 async fn test_large_file_storage() -> Result<()> {
-    // Test storing larger files with FEC
+    // Test storing larger files with replication across headless devices
     let words = ["court", "absurd", "abandon", "picture"];
     let keypair = MlDsaKeyPair::generate()?;
     let handle = register_identity(words, &keypair).await?;
@@ -402,7 +391,7 @@ async fn test_shard_distribution_preference() -> Result<()> {
     )
     .await?;
 
-    // Store data with FEC
+    // Store data with replication plan
     let data = vec![123u8; 50000];
     let storage_handle = store_with_fec(&handle, data, 4, 2).await?;
 
@@ -456,30 +445,9 @@ async fn test_group_size_strategy_selection() -> Result<()> {
     let test_cases = vec![
         (1, StorageStrategy::Direct),
         (2, StorageStrategy::FullReplication { replicas: 2 }),
-        (
-            4,
-            StorageStrategy::FecEncoded {
-                data_shards: 3,
-                parity_shards: 2,
-                shard_size: 65536,
-            },
-        ),
-        (
-            8,
-            StorageStrategy::FecEncoded {
-                data_shards: 4,
-                parity_shards: 3,
-                shard_size: 65536,
-            },
-        ),
-        (
-            15,
-            StorageStrategy::FecEncoded {
-                data_shards: 6,
-                parity_shards: 4,
-                shard_size: 131072,
-            },
-        ),
+        (4, StorageStrategy::FullReplication { replicas: 4 }),
+        (8, StorageStrategy::FullReplication { replicas: 8 }),
+        (15, StorageStrategy::FullReplication { replicas: 8 }),
     ];
 
     for (group_size, expected_strategy) in test_cases {
@@ -491,21 +459,6 @@ async fn test_group_size_strategy_selection() -> Result<()> {
                 StorageStrategy::FullReplication { replicas: r1 },
                 StorageStrategy::FullReplication { replicas: r2 },
             ) => assert_eq!(r1, r2),
-            (
-                StorageStrategy::FecEncoded {
-                    data_shards: d1,
-                    parity_shards: p1,
-                    ..
-                },
-                StorageStrategy::FecEncoded {
-                    data_shards: d2,
-                    parity_shards: p2,
-                    ..
-                },
-            ) => {
-                assert_eq!(d1, d2);
-                assert_eq!(p1, p2);
-            }
             _ => panic!(
                 "Strategy mismatch for group size {}: got {:?}, expected {:?}",
                 group_size, storage_handle.strategy, expected_strategy

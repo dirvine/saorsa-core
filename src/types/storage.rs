@@ -29,22 +29,16 @@ pub struct StorageHandle {
     pub sealed_key: Option<Vec<u8>>,
 }
 
+/// Maximum number of replicas the storage layer targets.
+pub const MAX_REPLICATION_TARGET: usize = 8;
+
 /// Storage strategy based on group size
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StorageStrategy {
-    /// Full replication for 2-person groups (dyads)
+    /// Full replication for multi-device or group storage
     FullReplication {
-        /// Number of replicas
+        /// Number of replicas targeted
         replicas: usize,
-    },
-    /// FEC encoding for larger groups
-    FecEncoded {
-        /// Data shards (k)
-        data_shards: usize,
-        /// Parity shards (m)
-        parity_shards: usize,
-        /// Size of each shard
-        shard_size: usize,
     },
     /// Direct storage without redundancy (single user)
     Direct,
@@ -54,34 +48,12 @@ impl StorageStrategy {
     /// Create strategy based on group size
     pub fn from_group_size(size: usize) -> Self {
         match size {
-            1 => Self::Direct,
-            2 => Self::FullReplication { replicas: 2 },
-            3..=5 => Self::FecEncoded {
-                data_shards: 3,
-                parity_shards: 2,
-                shard_size: 65536,
-            },
-            6..=10 => Self::FecEncoded {
-                data_shards: 4,
-                parity_shards: 3,
-                shard_size: 65536,
-            },
-            _ => Self::FecEncoded {
-                data_shards: 6,
-                parity_shards: 4,
-                shard_size: 131072,
-            },
+            0 | 1 => Self::Direct,
+            _ => {
+                let replicas = size.clamp(2, MAX_REPLICATION_TARGET);
+                Self::FullReplication { replicas }
+            }
         }
-    }
-
-    /// Check if this strategy uses FEC
-    pub fn uses_fec(&self) -> bool {
-        matches!(self, Self::FecEncoded { .. })
-    }
-
-    /// Check if this strategy uses full replication
-    pub fn uses_replication(&self) -> bool {
-        matches!(self, Self::FullReplication { .. })
     }
 }
 

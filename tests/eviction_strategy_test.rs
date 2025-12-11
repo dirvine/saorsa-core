@@ -1,5 +1,6 @@
 // Copyright 2024 Saorsa Labs Limited
 //
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Cache eviction strategy integration tests
 
 use saorsa_core::adaptive::eviction::QValue;
@@ -17,7 +18,7 @@ fn create_test_data() -> HashMap<ContentHash, AccessInfo> {
     let mut data = HashMap::new();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs();
 
     // Frequently accessed, recently used, small

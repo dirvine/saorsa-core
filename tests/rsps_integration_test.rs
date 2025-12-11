@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use anyhow::Result;
 
 use saorsa_core::dht::optimized_storage::OptimizedDHTStorage;

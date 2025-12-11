@@ -444,6 +444,13 @@ impl BootstrapManager {
     }
 }
 
+#[cfg(test)]
+impl BootstrapManager {
+    pub fn diversity_config(&self) -> &IPDiversityConfig {
+        self.diversity_enforcer.config()
+    }
+}
+
 /// Cache statistics for monitoring
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CacheStats {

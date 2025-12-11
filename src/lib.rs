@@ -107,6 +107,7 @@ pub mod storage;
 pub use api::{
     GroupKeyPair,
     MemberRef,
+    clear_dht_client,
     get_data,
     get_identity,
     get_presence,

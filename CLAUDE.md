@@ -111,10 +111,10 @@ let storage_handle = store_data(&handle, data, 1).await?;
 // Two users - Full replication  
 let storage_handle = store_dyad(&handle1, handle2.key(), data).await?;
 
-// Group - Automatic FEC based on size
-let storage_handle = store_data(&handle, data, 10).await?; // FEC(4,3)
+// Group - Automatic replication based on size (capped at 8 replicas)
+let storage_handle = store_data(&handle, data, 10).await?; // Replicates to 8 peers
 
-// Custom FEC parameters
+// Custom replication target (legacy API name)
 let storage_handle = store_with_fec(&handle, data, 8, 4).await?;
 
 // Retrieve (automatic decryption/reconstruction)
@@ -122,12 +122,9 @@ let retrieved = get_data(&storage_handle).await?;
 ```
 
 Storage strategies are automatically selected based on group size:
-- **1 user**: Direct storage
-- **2 users**: Full replication
-- **3-5 users**: FEC(3,2) encoding
-- **6-10 users**: FEC(4,3) encoding
-- **11-20 users**: FEC(6,4) encoding
-- **20+ users**: FEC(8,5) encoding
+- **1 user**: Direct storage (single active device)
+- **2+ users**: Full replication across `min(group_size, 8)` devices (headless-first)
+- **Custom**: `store_with_fec` interprets `data_shards + parity_shards` as the desired replica count (legacy name retained for compatibility)
 
 ### Multi-Layer P2P Architecture
 
@@ -187,7 +184,7 @@ metrics = ["dep:prometheus", "ant-quic/prometheus"]  # Prometheus monitoring
 ```bash
 # New API Tests (v0.3.16+)
 cargo test --test api_implementation_tests       # Clean API implementation
-cargo test --test storage_tests                  # Storage strategies & FEC
+cargo test --test storage_tests                  # Storage strategies & replication
 
 # Core functionality  
 cargo test --test ant_quic_integration_test      # QUIC transport

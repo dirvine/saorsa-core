@@ -491,7 +491,7 @@ mod tests {
 2. Threshold signature implementation via saorsa-seal
 3. Post-quantum signature verification
 4. CRDT implementation for DeviceSetV1
-5. FEC integration with saorsa-fec
+5. Advanced replication health checks (adaptive replica repair)
 
 ### Extension Points
 - Custom authentication adapters (implement WriteAuth)

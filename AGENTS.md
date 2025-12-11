@@ -50,11 +50,11 @@ let storage_handle = store_data(&handle, data, 1).await?;
 // Two users (Full replication) 
 let storage_handle = store_dyad(&handle1, handle2.key(), data).await?;
 
-// Group storage (FEC encoding)
+// Group storage (automatic replication)
 let storage_handle = store_data(&handle, data, 8).await?;  // 8-person group
 
-// Custom FEC parameters
-let storage_handle = store_with_fec(&handle, data, 8, 4).await?;  // 8 data, 4 parity
+// Custom replication target (legacy FEC API)
+let storage_handle = store_with_fec(&handle, data, 8, 4).await?;  // Target ~12 replicas (clamped)
 
 // Retrieve data
 let retrieved = get_data(&storage_handle).await?;
@@ -62,11 +62,8 @@ let retrieved = get_data(&storage_handle).await?;
 
 ### Storage Strategy Selection
 - **1 user**: Direct storage on user's devices
-- **2 users**: Full replication across both users' devices  
-- **3-5 users**: FEC with (3,2) encoding
-- **6-10 users**: FEC with (4,3) encoding
-- **11-20 users**: FEC with (6,4) encoding
-- **20+ users**: FEC with (8,5) encoding
+- **2+ users**: Full replication across up to 8 devices (headless nodes prioritized)
+- **Custom**: Use `store_with_fec` to request an explicit replica target (legacy API name)
 
 ## Build/Test Commands
 - **Build**: `cargo build --all-features` (release: `cargo build --release`)

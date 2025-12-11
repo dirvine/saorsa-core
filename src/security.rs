@@ -48,7 +48,7 @@ pub struct IPv6NodeID {
 }
 
 /// Configuration for IP diversity enforcement at multiple subnet levels
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IPDiversityConfig {
     // === IPv6 subnet limits (existing) ===
     /// Maximum nodes per /64 subnet (default: 1)
@@ -956,6 +956,13 @@ impl IPDiversityEnforcer {
                 self.country_counts.remove(country);
             }
         }
+    }
+}
+
+#[cfg(test)]
+impl IPDiversityEnforcer {
+    pub fn config(&self) -> &IPDiversityConfig {
+        &self.config
     }
 }
 

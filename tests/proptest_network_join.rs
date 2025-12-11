@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use proptest::prelude::*;
 use saorsa_core::identity::RegenerationDecision;
 use saorsa_core::identity::fitness::FitnessConfig;

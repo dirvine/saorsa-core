@@ -17,13 +17,14 @@
 use crate::auth::Sig;
 use crate::fwid::{Key, compute_key, fw_check, fw_to_key};
 use crate::types::{
-    Device, DeviceId, Endpoint, Identity, IdentityHandle, MlDsaKeyPair, Presence, PresenceReceipt,
-    StorageHandle, StorageStrategy,
+    Device, DeviceId, DeviceType, Endpoint, Identity, IdentityHandle, MAX_REPLICATION_TARGET,
+    MlDsaKeyPair, Presence, PresenceReceipt, StorageHandle, StorageStrategy,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::RwLock;
 // tracing not currently used in this module
 
@@ -57,20 +58,29 @@ static DHT: once_cell::sync::Lazy<Arc<RwLock<MockDht>>> =
     once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(MockDht::new())));
 
 // Optional global DHT client (real engine). If not set, we fall back to MockDht.
-static GLOBAL_DHT_CLIENT: once_cell::sync::OnceCell<Arc<crate::dht::client::DhtClient>> =
-    once_cell::sync::OnceCell::new();
+static GLOBAL_DHT_CLIENT: once_cell::sync::Lazy<
+    AsyncRwLock<Option<Arc<crate::dht::client::DhtClient>>>,
+> = once_cell::sync::Lazy::new(|| AsyncRwLock::new(None));
 
 /// Install a process-global DHT client for API operations.
-pub fn set_dht_client(client: crate::dht::client::DhtClient) -> bool {
-    GLOBAL_DHT_CLIENT.set(Arc::new(client)).is_ok()
+pub async fn set_dht_client(client: crate::dht::client::DhtClient) -> bool {
+    let mut guard = GLOBAL_DHT_CLIENT.write().await;
+    let was_empty = guard.is_none();
+    *guard = Some(Arc::new(client));
+    was_empty
 }
 
-fn get_dht_client() -> Option<Arc<crate::dht::client::DhtClient>> {
-    GLOBAL_DHT_CLIENT.get().cloned()
+/// Remove any configured global DHT client, forcing API calls to use the mock fallback.
+pub async fn clear_dht_client() {
+    GLOBAL_DHT_CLIENT.write().await.take();
+}
+
+async fn get_dht_client_async() -> Option<Arc<crate::dht::client::DhtClient>> {
+    GLOBAL_DHT_CLIENT.read().await.clone()
 }
 
 async fn dht_put_bytes(key: &Key, value: Vec<u8>) -> Result<()> {
-    if let Some(client) = get_dht_client() {
+    if let Some(client) = get_dht_client_async().await {
         let k = hex::encode(key.as_bytes());
         let _ = client
             .put(k, value)
@@ -83,16 +93,23 @@ async fn dht_put_bytes(key: &Key, value: Vec<u8>) -> Result<()> {
     }
 }
 
-async fn dht_get_bytes(key: &Key) -> Result<Vec<u8>> {
-    if let Some(client) = get_dht_client() {
+async fn dht_try_get_bytes(key: &Key) -> Result<Option<Vec<u8>>> {
+    if let Some(client) = get_dht_client_async().await {
         let k = hex::encode(key.as_bytes());
-        match client.get(k).await.context("DHT get failed")? {
-            Some(v) => Ok(v),
-            None => anyhow::bail!("Key not found"),
-        }
+        client.get(k).await.context("DHT get failed")
     } else {
         let dht = DHT.read().await;
-        dht.get(key).await
+        match dht.get(key).await {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(_) => Ok(None),
+        }
+    }
+}
+
+async fn dht_get_bytes(key: &Key) -> Result<Vec<u8>> {
+    match dht_try_get_bytes(key).await? {
+        Some(bytes) => Ok(bytes),
+        None => anyhow::bail!("Key not found"),
     }
 }
 
@@ -179,11 +196,9 @@ pub async fn register_identity(words: [&str; 4], keypair: &MlDsaKeyPair) -> Resu
     let key = fw_to_key(words_owned.clone())?;
 
     // Check if already registered
-    let dht = DHT.read().await;
-    if dht.get(&key).await.is_ok() {
+    if dht_try_get_bytes(&key).await?.is_some() {
         anyhow::bail!("Identity already registered");
     }
-    drop(dht);
 
     // Create identity (typed) and store packet for compatibility
     let identity = Identity {
@@ -279,9 +294,7 @@ pub async fn register_presence(
 
     // Store in DHT with presence key
     let presence_key = derive_presence_key(handle.key());
-    let mut dht = DHT.write().await;
-    dht.put(presence_key, serde_json::to_vec(&signed_presence)?)
-        .await?;
+    dht_put_bytes(&presence_key, serde_json::to_vec(&signed_presence)?).await?;
 
     // Create receipt
     let receipt = PresenceReceipt {
@@ -302,8 +315,9 @@ pub async fn register_presence(
 /// * `Presence` - Current presence information
 pub async fn get_presence(identity_key: Key) -> Result<Presence> {
     let presence_key = derive_presence_key(identity_key);
-    let dht = DHT.read().await;
-    let data = dht.get(&presence_key).await.context("Presence not found")?;
+    let data = dht_get_bytes(&presence_key)
+        .await
+        .context("Presence not found")?;
     let presence: Presence = serde_json::from_slice(&data)?;
     Ok(presence)
 }
@@ -395,11 +409,6 @@ pub async fn store_data(
         StorageStrategy::FullReplication { replicas } => {
             store_replicated(handle, data, replicas).await
         }
-        StorageStrategy::FecEncoded {
-            data_shards,
-            parity_shards,
-            ..
-        } => store_with_fec(handle, data, data_shards, parity_shards).await,
     }
 }
 
@@ -421,132 +430,20 @@ pub async fn store_dyad(
     store_replicated(handle1, data, 2).await
 }
 
-/// Store data with custom FEC parameters
+/// Store data with a custom replication target (legacy FEC API)
 ///
-/// # Arguments
-/// * `handle` - Identity handle
-/// * `data` - Data to store
-/// * `data_shards` - Number of data shards (k)
-/// * `parity_shards` - Number of parity shards (m)
-///
-/// # Returns
-/// * `StorageHandle` - Handle to retrieve the data
+/// This function now interprets `data_shards + parity_shards` as the desired
+/// replica count (clamped to the global maximum) and stores full copies of
+/// the data on the selected devices.
 pub async fn store_with_fec(
     handle: &IdentityHandle,
     data: Vec<u8>,
     data_shards: usize,
     parity_shards: usize,
 ) -> Result<StorageHandle> {
-    // Generate storage ID
-    let storage_id = Key::from(*blake3::hash(&data).as_bytes());
-
-    // TODO: Actual FEC encoding with saorsa-fec
-    // For now, just store the data directly
-
-    // Create shard map (mock)
-    let mut shard_map = crate::types::storage::ShardMap::new();
-
-    // Get presence to find devices
-    let presence = get_presence(handle.key()).await?;
-
-    // Separate devices by type for weighted distribution
-    let mut headless_devices: Vec<_> = presence
-        .devices
-        .iter()
-        .filter(|d| d.device_type == crate::types::presence::DeviceType::Headless)
-        .collect();
-    let mut active_devices: Vec<_> = presence
-        .devices
-        .iter()
-        .filter(|d| d.device_type == crate::types::presence::DeviceType::Active)
-        .collect();
-    let mobile_devices: Vec<_> = presence
-        .devices
-        .iter()
-        .filter(|d| d.device_type == crate::types::presence::DeviceType::Mobile)
-        .collect();
-
-    // Sort each category by storage capacity (descending)
-    headless_devices.sort_by(|a, b| b.storage_gb.cmp(&a.storage_gb));
-    active_devices.sort_by(|a, b| b.storage_gb.cmp(&a.storage_gb));
-
-    // Assign shards with weighted distribution:
-    // - Headless devices: get most shards (prefer always-online, high capacity)
-    // - Active devices: get some shards
-    // - Mobile devices: minimal/no shards (unreliable, low capacity)
-    let total_shards = data_shards + parity_shards;
-    let mut shard_idx = 0u32;
-
-    // Headless devices get priority - assign multiple shards if needed
-    let headless_count = headless_devices.len();
-    if headless_count > 0 {
-        // Headless devices should get at least 60% of shards
-        let min_headless_shards = (total_shards * 3).div_ceil(5); // ceil(60%)
-        let shards_per_headless = min_headless_shards.div_ceil(headless_count);
-
-        for device in &headless_devices {
-            for _ in 0..shards_per_headless {
-                if (shard_idx as usize) < total_shards {
-                    shard_map.assign_shard(device.id, shard_idx);
-                    shard_idx += 1;
-                }
-            }
-        }
-    }
-
-    // Active devices get remaining shards (excluding mobile allocation)
-    for device in &active_devices {
-        if (shard_idx as usize) < total_shards {
-            shard_map.assign_shard(device.id, shard_idx);
-            shard_idx += 1;
-        }
-    }
-
-    // Mobile devices only get shards if we have no other option
-    if (shard_idx as usize) < total_shards
-        && headless_devices.is_empty()
-        && active_devices.is_empty()
-    {
-        for device in &mobile_devices {
-            if (shard_idx as usize) < total_shards {
-                shard_map.assign_shard(device.id, shard_idx);
-                shard_idx += 1;
-            }
-        }
-    }
-
-    // If we still don't have enough, cycle through available devices
-    while (shard_idx as usize) < total_shards {
-        let all_devices: Vec<_> = headless_devices
-            .iter()
-            .chain(active_devices.iter())
-            .collect();
-        if all_devices.is_empty() {
-            break;
-        }
-        let device = all_devices[(shard_idx as usize) % all_devices.len()];
-        shard_map.assign_shard(device.id, shard_idx);
-        shard_idx += 1;
-    }
-
-    // Store data in DHT
-    let mut dht = DHT.write().await;
-    dht.put(storage_id.clone(), data.clone()).await?;
-
-    // Create storage handle
-    let handle = StorageHandle {
-        id: storage_id,
-        size: data.len() as u64,
-        strategy: StorageStrategy::FecEncoded {
-            data_shards,
-            parity_shards,
-            shard_size: 65536,
-        },
-        shard_map,
-        sealed_key: Some(vec![0u8; 32]), // Mock sealed key
-    };
-
-    Ok(handle)
+    let requested = data_shards.saturating_add(parity_shards).max(1);
+    let replicas = requested.min(MAX_REPLICATION_TARGET);
+    store_replicated(handle, data, replicas).await
 }
 
 /// Retrieve data from the network
@@ -557,7 +454,7 @@ pub async fn store_with_fec(
 /// # Returns
 /// * `Vec<u8>` - The retrieved data
 pub async fn get_data(handle: &StorageHandle) -> Result<Vec<u8>> {
-    // TODO: Handle different strategies (FEC decoding, unsealing, etc.)
+    // TODO: Handle different strategies (e.g. encrypted blobs, multi-peer retrieval)
     // For now, just retrieve from DHT
 
     let dht = DHT.read().await;
@@ -587,9 +484,7 @@ async fn store_direct(handle: &IdentityHandle, data: Vec<u8>) -> Result<StorageH
     let device_id = device.id;
 
     // Store in DHT
-    let mut dht = DHT.write().await;
-    dht.put(storage_id.clone(), data.clone()).await?;
-    drop(dht); // Release lock early
+    dht_put_bytes(&storage_id, data.clone()).await?;
 
     let mut shard_map = crate::types::storage::ShardMap::new();
     shard_map.assign_shard(device_id, 0);
@@ -599,7 +494,7 @@ async fn store_direct(handle: &IdentityHandle, data: Vec<u8>) -> Result<StorageH
         size: data.len() as u64,
         strategy: StorageStrategy::Direct,
         shard_map,
-        sealed_key: Some(vec![0u8; 32]),
+        sealed_key: None,
     })
 }
 
@@ -769,25 +664,100 @@ async fn store_replicated(
 ) -> Result<StorageHandle> {
     let storage_id = Key::from(*blake3::hash(&data).as_bytes());
 
-    // Get presence BEFORE acquiring DHT write lock to avoid deadlock
     let presence = get_presence(handle.key()).await?;
 
-    // Build shard map before acquiring lock
-    let mut shard_map = crate::types::storage::ShardMap::new();
-    for (i, device) in presence.devices.iter().take(replicas).enumerate() {
-        shard_map.assign_shard(device.id, i as u32);
+    if presence.devices.is_empty() {
+        anyhow::bail!("No devices available");
     }
 
+    let shard_map = build_replication_plan(&presence.devices, replicas);
+
     // Store in DHT
-    let mut dht = DHT.write().await;
-    dht.put(storage_id.clone(), data.clone()).await?;
-    drop(dht); // Release lock early
+    dht_put_bytes(&storage_id, data.clone()).await?;
 
     Ok(StorageHandle {
         id: storage_id,
         size: data.len() as u64,
         strategy: StorageStrategy::FullReplication { replicas },
         shard_map,
-        sealed_key: Some(vec![0u8; 32]),
+        sealed_key: None,
     })
+}
+
+fn build_replication_plan(
+    devices: &[Device],
+    desired_shards: usize,
+) -> crate::types::storage::ShardMap {
+    let mut shard_map = crate::types::storage::ShardMap::new();
+    if devices.is_empty() || desired_shards == 0 {
+        return shard_map;
+    }
+
+    let mut headless_devices: Vec<&Device> = devices
+        .iter()
+        .filter(|d| d.device_type == DeviceType::Headless)
+        .collect();
+    let mut active_devices: Vec<&Device> = devices
+        .iter()
+        .filter(|d| d.device_type == DeviceType::Active)
+        .collect();
+    let mobile_devices: Vec<&Device> = devices
+        .iter()
+        .filter(|d| d.device_type == DeviceType::Mobile)
+        .collect();
+
+    headless_devices.sort_by(|a, b| b.storage_gb.cmp(&a.storage_gb));
+    active_devices.sort_by(|a, b| b.storage_gb.cmp(&a.storage_gb));
+
+    let total_shards = desired_shards;
+    let mut shard_idx = 0u32;
+
+    if !headless_devices.is_empty() {
+        let min_headless_shards = (total_shards * 3).div_ceil(5);
+        let shards_per_headless = min_headless_shards.div_ceil(headless_devices.len());
+
+        for device in &headless_devices {
+            for _ in 0..shards_per_headless {
+                if (shard_idx as usize) < total_shards {
+                    shard_map.assign_shard(device.id, shard_idx);
+                    shard_idx += 1;
+                }
+            }
+        }
+    }
+
+    for device in &active_devices {
+        if (shard_idx as usize) < total_shards {
+            shard_map.assign_shard(device.id, shard_idx);
+            shard_idx += 1;
+        }
+    }
+
+    if (shard_idx as usize) < total_shards
+        && headless_devices.is_empty()
+        && active_devices.is_empty()
+    {
+        for device in &mobile_devices {
+            if (shard_idx as usize) < total_shards {
+                shard_map.assign_shard(device.id, shard_idx);
+                shard_idx += 1;
+            }
+        }
+    }
+
+    while (shard_idx as usize) < total_shards {
+        let all_devices: Vec<&Device> = headless_devices
+            .iter()
+            .chain(active_devices.iter())
+            .copied()
+            .collect();
+        if all_devices.is_empty() {
+            break;
+        }
+        let device = all_devices[(shard_idx as usize) % all_devices.len()];
+        shard_map.assign_shard(device.id, shard_idx);
+        shard_idx += 1;
+    }
+
+    shard_map
 }

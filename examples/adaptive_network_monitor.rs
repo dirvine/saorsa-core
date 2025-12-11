@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Live monitoring tool for the adaptive network
 //! Run with: cargo run --example adaptive_network_monitor
 

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use four_word_networking::{FourWordAdaptiveEncoder, FourWordEncoder};
 use std::net::Ipv4Addr;
 

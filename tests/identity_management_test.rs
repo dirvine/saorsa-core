@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Comprehensive Identity Management Test Suite
 //!
 //! This test suite validates the complete identity system for the P2P network:
