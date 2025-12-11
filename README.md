@@ -20,7 +20,7 @@ Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-s
 - **S/Kademlia Witness Protocol**: Byzantine fault tolerance with geographically diverse witness attestations
 - **Placement System**: Intelligent shard placement with EigenTrust integration and Byzantine fault tolerance
 - **QUIC Transport**: High-performance networking with ant-quic
-- **Four-Word Endpoints**: Human‑readable network endpoints via `four-word-networking` (IPv4 encodes to 4 words; IPv6 word count decided by the crate); decode requires an explicit port (no defaults).
+- **Four-Word Endpoints**: Human‑readable network endpoints via `four-word-networking` (IPv4+port encodes to 4 words; decoding returns both IP and port; IPv6 word count decided by the crate).
 - **Post-Quantum Cryptography**: Future-ready cryptographic algorithms
 - **WebRTC over QUIC**: Advanced WebRTC-QUIC bridge for real-time media streaming with adaptive quality
 - **Media Processing**: Image and audio processing with blurhash and symphonia
@@ -127,7 +127,7 @@ let config = NetworkConfig::no_nat_traversal();
 ### Four-Word Endpoints
 
 - Endpoints are encoded/decoded using the `four-word-networking` crate's adaptive API.
-- IPv4 → 4 words; IPv6 → word count is crate‑defined; decoding requires a port (no implicit defaults).
+- IPv4+port → 4 words; decoding returns both IP and port. IPv6 → word count is crate‑defined.
 - Four‑words are reserved strictly for network endpoints; user identities in messaging are separate handles.
 
 ## Architecture

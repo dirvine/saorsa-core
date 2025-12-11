@@ -36,7 +36,7 @@ This repository is a Rust library crate that provides a modular, post‑quantum 
 
 ## Notes
 - Four‑word encoding/decoding is handled by the `four-word-networking` crate and is used only for network endpoints. Messaging uses a separate `UserHandle` to represent users.
-- Decode paths require explicit ports (no defaults). IPv4 encodes to 4 words; IPv6 word count is decided by the crate.
+- IPv4+port encodes to 4 words; decoding returns both IP and port. IPv6 word count is decided by the crate.
 
 ## Concurrency & Errors
 - Async with `tokio`; prefer `Send + Sync` types and bounded channels where applicable.

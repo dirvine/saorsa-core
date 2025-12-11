@@ -161,11 +161,11 @@ Advanced storage orchestration with EigenTrust integration:
 ## External Crate Dependencies
 
 ### Saorsa Ecosystem
-- `saorsa-rsps` (0.1.0): DHT optimization with provider summaries
-- `saorsa-fec`: Forward error correction
-- `saorsa-seal`: Encryption library
-- `four-word-networking` (2.3+): Human-readable addresses
-- `ant-quic` (0.8+): QUIC transport with NAT traversal
+- `saorsa-rsps` (0.2.0): DHT optimization with provider summaries
+- `saorsa-webrtc` (0.1.2): WebRTC with pluggable signaling
+- `saorsa-pqc` (0.3.12): Post-quantum cryptography
+- `four-word-networking` (2.6+): Human-readable addresses (IPv4+port encodes to 4 words)
+- `ant-quic` (0.10+): QUIC transport with NAT traversal and PQC
 
 ### Feature Flags
 ```toml
