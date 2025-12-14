@@ -95,6 +95,9 @@ lru = "0.12"
 # DHT dependencies
 saorsa-rsps = "0.2.0"
 
+# zkVM-compatible logic crate for attestation and verification
+saorsa-logic = { version = "0.1", features = ["std", "alloc"] }
+
 # Monitoring (optional to avoid build script issues on docs.rs)
 prometheus = { version = "0.14", optional = true, default-features = false }
 

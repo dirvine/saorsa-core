@@ -18,11 +18,22 @@
 //! ```text
 //! N_ID = BLAKE3(PK || binary_hash || nonce)
 //! ```
+//!
+//! ## zkVM Compatibility
+//!
+//! The core derivation logic is provided by `saorsa-logic`, which is
+//! `no_std` compatible and can run inside zkVMs (SP1, RISC Zero).
+//! This allows nodes to generate zero-knowledge proofs of correct
+//! identity derivation.
 
 use crate::identity::node_identity::NodeId;
 use crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+// Re-export constants from saorsa-logic for consistency and downstream use
+#[allow(unused_imports)]
+pub use saorsa_logic::attestation::{ENTANGLED_ID_SIZE, HASH_SIZE, ML_DSA_65_PUBLIC_KEY_SIZE};
 
 /// An Entangled Identity that binds a node's ID to its software.
 ///
@@ -58,30 +69,24 @@ impl EntangledId {
     /// # Returns
     ///
     /// A new `EntangledId` with the derived identity.
+    ///
+    /// # zkVM Compatibility
+    ///
+    /// This method uses `saorsa-logic` for the core derivation, which is
+    /// `no_std` compatible and can run inside zkVMs.
     #[must_use]
     pub fn derive(public_key: &MlDsaPublicKey, binary_hash: &[u8; 32], nonce: u64) -> Self {
-        let id = Self::compute_id(public_key, binary_hash, nonce);
+        // Delegate to saorsa-logic for zkVM-compatible derivation
+        let id = saorsa_logic::attestation::derive_entangled_id(
+            public_key.as_bytes(),
+            binary_hash,
+            nonce,
+        );
         Self {
             id,
             binary_hash: *binary_hash,
             nonce,
         }
-    }
-
-    /// Compute the entangled ID from components.
-    fn compute_id(public_key: &MlDsaPublicKey, binary_hash: &[u8; 32], nonce: u64) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
-
-        // Prepend public key bytes
-        hasher.update(public_key.as_bytes());
-
-        // Append binary hash
-        hasher.update(binary_hash);
-
-        // Append nonce as little-endian bytes
-        hasher.update(&nonce.to_le_bytes());
-
-        *hasher.finalize().as_bytes()
     }
 
     /// Verify that this entangled ID matches the given public key.
@@ -96,10 +101,20 @@ impl EntangledId {
     /// # Returns
     ///
     /// `true` if the ID was derived from this public key and the stored binary hash/nonce.
+    ///
+    /// # zkVM Compatibility
+    ///
+    /// This method uses `saorsa-logic` for verification, enabling the same
+    /// logic to be proven inside a zkVM.
     #[must_use]
     pub fn verify(&self, public_key: &MlDsaPublicKey) -> bool {
-        let expected = Self::compute_id(public_key, &self.binary_hash, self.nonce);
-        self.id == expected
+        // Delegate to saorsa-logic for zkVM-compatible verification
+        saorsa_logic::attestation::verify_entangled_id(
+            &self.id,
+            public_key.as_bytes(),
+            &self.binary_hash,
+            self.nonce,
+        )
     }
 
     /// Verify that this entangled ID matches the given public key and binary hash.
@@ -154,13 +169,14 @@ impl EntangledId {
     /// Calculate XOR distance to another entangled ID.
     ///
     /// This is used for Kademlia routing.
+    ///
+    /// # zkVM Compatibility
+    ///
+    /// This method uses `saorsa-logic` for the calculation, enabling
+    /// consistent distance computation across native and zkVM contexts.
     #[must_use]
     pub fn xor_distance(&self, other: &EntangledId) -> [u8; 32] {
-        let mut distance = [0u8; 32];
-        for (i, out) in distance.iter_mut().enumerate() {
-            *out = self.id[i] ^ other.id[i];
-        }
-        distance
+        saorsa_logic::attestation::xor_distance(&self.id, &other.id)
     }
 
     /// Create from raw bytes (for deserialization/testing).

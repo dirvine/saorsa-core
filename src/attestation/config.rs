@@ -8,6 +8,11 @@
 // For commercial licensing, contact: david@saorsalabs.com
 
 //! Attestation configuration types.
+//!
+//! ## zkVM Compatibility
+//!
+//! Binary allowlist verification can use `saorsa-logic` for zkVM-compatible
+//! checking via `verify_binary_allowlist_zkvm()`.
 
 use serde::{Deserialize, Serialize};
 
@@ -84,6 +89,26 @@ impl AttestationConfig {
             return true;
         }
         self.allowed_binary_hashes.contains(binary_hash)
+    }
+
+    /// Check if a binary hash is allowed using zkVM-compatible verification.
+    ///
+    /// This method uses `saorsa-logic` for verification, which can be proven
+    /// inside a zkVM. Returns a Result for detailed error information.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the binary is allowed (or allowlist is empty)
+    /// - `Err(LogicError::BinaryNotAllowed)` if the binary is not in the allowlist
+    pub fn verify_binary_allowlist_zkvm(
+        &self,
+        binary_hash: &[u8; 32],
+    ) -> Result<(), saorsa_logic::error::LogicError> {
+        // Empty list = allow all (permissive mode)
+        if self.allowed_binary_hashes.is_empty() {
+            return Ok(());
+        }
+        saorsa_logic::attestation::verify_binary_allowlist(binary_hash, &self.allowed_binary_hashes)
     }
 
     /// Add a binary hash to the allowed list.
@@ -188,5 +213,32 @@ mod tests {
         assert!(config.is_hard_enforcement());
         assert!(config.is_binary_allowed(&hash));
         assert!(!config.is_binary_allowed(&[0x43u8; 32]));
+    }
+
+    #[test]
+    fn test_verify_binary_allowlist_zkvm() {
+        let hash1 = [0x42u8; 32];
+        let hash2 = [0x43u8; 32];
+        let config = AttestationConfig::production(vec![hash1]);
+
+        // Allowed hash should succeed
+        assert!(config.verify_binary_allowlist_zkvm(&hash1).is_ok());
+
+        // Disallowed hash should fail with specific error
+        let result = config.verify_binary_allowlist_zkvm(&hash2);
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(saorsa_logic::error::LogicError::BinaryNotAllowed)
+        ));
+    }
+
+    #[test]
+    fn test_verify_binary_allowlist_zkvm_empty() {
+        let config = AttestationConfig::default();
+        let any_hash = [0x99u8; 32];
+
+        // Empty allowlist should permit any hash
+        assert!(config.verify_binary_allowlist_zkvm(&any_hash).is_ok());
     }
 }

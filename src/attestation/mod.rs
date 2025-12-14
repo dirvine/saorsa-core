@@ -25,9 +25,12 @@
 //!
 //! ## Phases
 //!
-//! - **Phase 1**: Entangled Identity (this module)
-//! - **Phase 2**: Core Logic Extraction (saorsa-logic no_std crate)
-//! - **Phase 3**: zkVM Integration (SP1 proofs)
+//! - **Phase 1**: Entangled Identity (this module) ✅
+//! - **Phase 2**: Core Logic Extraction (saorsa-logic) ✅
+//!   - Pure derivation logic in `saorsa-logic` crate (no_std, zkVM-compatible)
+//!   - Integration via `derive_entangled_id`, `verify_entangled_id`, `xor_distance`
+//!   - zkVM proof structures defined in [`zkvm`] module
+//! - **Phase 3**: zkVM Integration (SP1/RISC Zero proofs)
 //! - **Phase 4**: VDF Heartbeats (Wesolowski VDFs)
 //!
 //! ## NodeId vs EntangledId Transition Plan
@@ -91,8 +94,13 @@ mod config;
 mod entangled_id;
 mod sunset;
 mod types;
+mod zkvm;
 
 pub use config::{AttestationConfig, EnforcementMode};
 pub use entangled_id::EntangledId;
 pub use sunset::SunsetTimestamp;
 pub use types::{AttestationError, AttestationResult};
+pub use zkvm::{AttestationProofPublicInputs, AttestationProofResult, AttestationProofWitness};
+
+// Re-export saorsa-logic constants for downstream use
+pub use entangled_id::{ENTANGLED_ID_SIZE, HASH_SIZE, ML_DSA_65_PUBLIC_KEY_SIZE};
