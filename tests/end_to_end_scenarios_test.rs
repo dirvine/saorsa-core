@@ -40,7 +40,7 @@ impl TestUser {
     async fn new(username: String) -> Result<Self> {
         // Bind to an ephemeral port to avoid CI flakiness from port collisions.
         let listen_addr = "127.0.0.1:0";
-        let mut config = NodeConfig::with_listen_addr(&listen_addr)?;
+        let mut config = NodeConfig::with_listen_addr(listen_addr)?;
         config.bootstrap_peers.clear();
         config.bootstrap_peers_str.clear();
 
