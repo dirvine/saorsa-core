@@ -38,7 +38,13 @@
 //!   - Uses STARKs for post-quantum security (Groth16 available via feature flag)
 //!   - Mock prover for testing, real SP1 prover with `zkvm-prover` feature
 //!   - Groth16 verification with `zkvm-verifier-groth16` feature (NOT post-quantum)
-//! - **Phase 4**: VDF Heartbeats (Wesolowski VDFs)
+//! - **Phase 4**: VDF Heartbeats (Wesolowski VDFs) ✅
+//!   - [`vdf`] module: VDF heartbeat generation and verification
+//!   - [`HeartbeatChallenge`]: Challenge structure binding to identity
+//!   - [`HeartbeatProof`]: VDF proof structure
+//!   - [`VdfHeartbeat`]: Unified VDF manager (mock or real via `vdf` feature)
+//!   - Uses Class Groups of Imaginary Quadratic Fields (no trusted setup)
+//!   - 2048-bit discriminants for mainnet security
 //!
 //! ## NodeId vs EntangledId Transition Plan
 //!
@@ -112,6 +118,7 @@ pub mod proof_cache;
 pub mod prover;
 mod sunset;
 mod types;
+pub mod vdf;
 pub mod verifier;
 mod zkvm;
 
@@ -125,6 +132,10 @@ pub use proof_cache::ProofCache;
 pub use prover::{AttestationProof, AttestationProver, MockAttestationProver, ProofType};
 pub use sunset::SunsetTimestamp;
 pub use types::{AttestationError, AttestationResult};
+pub use vdf::{
+    HeartbeatChallenge, HeartbeatNodeStatus, HeartbeatProof, HeartbeatVerificationResult,
+    NodeHeartbeatStatus, VdfConfig, VdfHeartbeat, VdfProofType,
+};
 pub use verifier::{AttestationVerifier, AttestationVerifierConfig};
 pub use zkvm::{AttestationProofPublicInputs, AttestationProofResult, AttestationProofWitness};
 

@@ -36,6 +36,9 @@ zkvm-prover = ["dep:sp1-sdk"]
 # Enable SP1 Groth16/PLONK verification (lightweight, NOT post-quantum secure)
 # Use for on-chain verification compatibility only
 zkvm-verifier-groth16 = ["dep:sp1-verifier"]
+# Enable real Wesolowski VDF (requires GMP system library)
+# Without this feature, mock VDF is used for testing
+vdf = ["dep:vdf"]
 
 [dependencies]
 # Core async and serialization
@@ -111,6 +114,10 @@ sp1-sdk = { version = "4.0", optional = true }
 # SP1 Verifier for Groth16/PLONK verification (lightweight, NOT post-quantum secure)
 # Enable with zkvm-verifier-groth16 feature for on-chain compatible verification
 sp1-verifier = { version = "4.0", optional = true, default-features = false }
+
+# Wesolowski VDF using Class Groups (requires GMP system library)
+# Enable with vdf feature for real VDF heartbeat computation
+vdf = { version = "0.1", optional = true }
 
 # Monitoring (optional to avoid build script issues on docs.rs)
 prometheus = { version = "0.14", optional = true, default-features = false }

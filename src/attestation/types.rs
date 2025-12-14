@@ -57,6 +57,10 @@ pub enum AttestationError {
     /// Invalid or malformed proof.
     #[error("Invalid proof: {0}")]
     InvalidProof(String),
+
+    /// VDF computation or verification error.
+    #[error("VDF error: {0}")]
+    VdfError(String),
 }
 
 /// Result type for attestation operations.
