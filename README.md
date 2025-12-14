@@ -255,6 +255,7 @@ let config = NetworkConfig {
 - `mocks` - Test/dummy helpers for development (off by default)
 - `h2_greedy` - Hyperbolic greedy routing helpers in API
 - `test-utils` - Test utilities including mock DHT for integration tests
+- `attestation` - Entangled Attestation system for software integrity verification
 
 Note: DHT, ant-quic QUIC transport, and post-quantum cryptography are always enabled. Four-word networking is a core feature.
 
@@ -307,6 +308,32 @@ Saorsa Core implements defense-in-depth security designed for adversarial decent
 | **Geographic Diversity** | Minimum 3 regions for witness quorum |
 | **Byzantine Tolerance** | f=2 in 3f+1 model (5 of 7 witnesses required) |
 | **Data Verification** | Nonce-based attestation: BLAKE3(nonce || data) |
+| **Entangled Attestation** | Software integrity via EntangledId (Phase 1: soft enforcement) |
+
+### Entangled Attestation (Phase 1)
+
+The Entangled Attestation system ensures nodes are running authorized software without relying on centralized authorities or proprietary hardware. A node's identity becomes mathematically "entangled" with its software:
+
+```
+EntangledId = BLAKE3(public_key || binary_hash || nonce)
+```
+
+**Key Properties:**
+- **Software Binding**: Any modification to the binary forces a change in identity
+- **Reputation Loss**: Attackers cannot maintain reputation while running malicious code
+- **No Hardware Trust**: Pure cryptographic verification without TPM/SGX requirements
+- **Graceful Migration**: Phase 1 uses soft enforcement (warnings only) for network adoption
+
+**Enforcement Modes:**
+- `Off`: Attestation disabled (development/testing)
+- `Soft`: Invalid attestations logged but connections allowed (Phase 1)
+- `Hard`: Invalid attestations rejected (future phases)
+
+**Roadmap:**
+- Phase 1: Entangled Identity ✓ (current)
+- Phase 2: Core Logic Extraction (saorsa-logic no_std crate)
+- Phase 3: zkVM Integration (SP1 proofs)
+- Phase 4: VDF Heartbeats (continuous execution proofs)
 
 ### Anti-Centralization
 

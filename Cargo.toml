@@ -27,6 +27,9 @@ mocks = []
 h2_greedy = []
 # Test utilities including mock DHT for integration tests
 test-utils = []
+# Entangled Attestation system (Phase 1: Entangled Identity)
+# Enables EntangledId derivation and verification for software attestation
+attestation = []
 
 [dependencies]
 # Core async and serialization

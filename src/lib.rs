@@ -94,6 +94,9 @@ pub mod telemetry;
 /// Security and cryptography
 pub mod security;
 
+/// Entangled Attestation system for software integrity verification
+pub mod attestation;
+
 /// BGP-based GeoIP provider using open-source routing data
 pub mod bgp_geo_provider;
 
@@ -418,6 +421,12 @@ pub type Multiaddr = NetworkAddress;
 
 /// Saorsa Core version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Attestation system exports
+pub use attestation::{
+    AttestationConfig, AttestationError, AttestationResult, EnforcementMode, EntangledId,
+    SunsetTimestamp,
+};
 
 // Upgrade system exports
 pub use upgrade::{

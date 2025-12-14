@@ -259,6 +259,84 @@ impl NodeIdentity {
     }
 }
 
+// =============================================================================
+// Entangled Attestation Integration
+// =============================================================================
+
+impl NodeIdentity {
+    /// Create an entangled identity from this node identity.
+    ///
+    /// An entangled identity binds this node's cryptographic identity to
+    /// the hash of the executing binary and a unique nonce. This ensures
+    /// that any modification to the software forces a change in identity,
+    /// preventing attackers from maintaining reputation while running
+    /// malicious code.
+    ///
+    /// # Arguments
+    ///
+    /// * `binary_hash` - BLAKE3 hash of the executing binary
+    /// * `nonce` - Unique nonce (e.g., timestamp or random value)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let identity = NodeIdentity::generate()?;
+    /// let binary_hash = compute_binary_hash(); // BLAKE3 hash of executable
+    /// let nonce = std::time::SystemTime::now()
+    ///     .duration_since(std::time::UNIX_EPOCH)
+    ///     .unwrap()
+    ///     .as_secs();
+    /// let entangled_id = identity.to_entangled_id(&binary_hash, nonce);
+    /// ```
+    #[must_use]
+    pub fn to_entangled_id(
+        &self,
+        binary_hash: &[u8; 32],
+        nonce: u64,
+    ) -> crate::attestation::EntangledId {
+        crate::attestation::EntangledId::derive(&self.public_key, binary_hash, nonce)
+    }
+
+    /// Verify that an entangled ID was derived from this identity.
+    ///
+    /// This re-derives the entangled ID using this node's public key
+    /// and the stored binary hash/nonce from the provided EntangledId,
+    /// then compares with the stored ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `entangled_id` - The entangled ID to verify
+    ///
+    /// # Returns
+    ///
+    /// `true` if the entangled ID was derived from this identity.
+    #[must_use]
+    pub fn verify_entangled_id(&self, entangled_id: &crate::attestation::EntangledId) -> bool {
+        entangled_id.verify(&self.public_key)
+    }
+
+    /// Verify that an entangled ID was derived from this identity with a specific binary.
+    ///
+    /// This is a stricter verification that also checks the binary hash matches.
+    ///
+    /// # Arguments
+    ///
+    /// * `entangled_id` - The entangled ID to verify
+    /// * `binary_hash` - The expected binary hash
+    ///
+    /// # Returns
+    ///
+    /// `true` if the entangled ID was derived from this identity with the given binary hash.
+    #[must_use]
+    pub fn verify_entangled_id_with_binary(
+        &self,
+        entangled_id: &crate::attestation::EntangledId,
+        binary_hash: &[u8; 32],
+    ) -> bool {
+        entangled_id.verify_with_binary(&self.public_key, binary_hash)
+    }
+}
+
 impl NodeIdentity {
     /// Save identity to a JSON file (async)
     pub async fn save_to_file(&self, path: &std::path::Path) -> Result<()> {
@@ -440,5 +518,99 @@ mod tests {
         let message = b"Test message";
         let signature = imported.sign(message);
         assert!(identity.verify(message, &signature.unwrap()).unwrap());
+    }
+
+    // =========================================================================
+    // Entangled Attestation Integration Tests
+    // =========================================================================
+
+    #[test]
+    fn test_entangled_id_creation() {
+        let identity = NodeIdentity::generate().expect("Identity generation should succeed");
+        let binary_hash = [0x42u8; 32];
+        let nonce = 12345u64;
+
+        let entangled_id = identity.to_entangled_id(&binary_hash, nonce);
+
+        // The entangled ID should be different from the node ID
+        assert_ne!(
+            entangled_id.id(),
+            identity.node_id().to_bytes(),
+            "Entangled ID should differ from plain NodeId"
+        );
+
+        // Should be deterministic
+        let entangled_id2 = identity.to_entangled_id(&binary_hash, nonce);
+        assert_eq!(entangled_id.id(), entangled_id2.id());
+    }
+
+    #[test]
+    fn test_entangled_id_verification() {
+        let identity = NodeIdentity::generate().expect("Identity generation should succeed");
+        let binary_hash = [0x42u8; 32];
+        let nonce = 12345u64;
+
+        let entangled_id = identity.to_entangled_id(&binary_hash, nonce);
+
+        // Should verify against the same identity
+        assert!(
+            identity.verify_entangled_id(&entangled_id),
+            "Entangled ID should verify against its creating identity"
+        );
+    }
+
+    #[test]
+    fn test_entangled_id_rejects_different_identity() {
+        let identity1 = NodeIdentity::generate().expect("Identity generation should succeed");
+        let identity2 = NodeIdentity::generate().expect("Identity generation should succeed");
+        let binary_hash = [0x42u8; 32];
+        let nonce = 12345u64;
+
+        let entangled_id = identity1.to_entangled_id(&binary_hash, nonce);
+
+        // Should NOT verify against a different identity
+        assert!(
+            !identity2.verify_entangled_id(&entangled_id),
+            "Entangled ID should NOT verify against a different identity"
+        );
+    }
+
+    #[test]
+    fn test_entangled_id_with_binary_verification() {
+        let identity = NodeIdentity::generate().expect("Identity generation should succeed");
+        let binary_hash = [0x42u8; 32];
+        let wrong_binary_hash = [0x43u8; 32];
+        let nonce = 12345u64;
+
+        let entangled_id = identity.to_entangled_id(&binary_hash, nonce);
+
+        // Should verify with correct binary hash
+        assert!(
+            identity.verify_entangled_id_with_binary(&entangled_id, &binary_hash),
+            "Should verify with correct binary hash"
+        );
+
+        // Should NOT verify with wrong binary hash
+        assert!(
+            !identity.verify_entangled_id_with_binary(&entangled_id, &wrong_binary_hash),
+            "Should NOT verify with wrong binary hash"
+        );
+    }
+
+    #[test]
+    fn test_entangled_id_to_node_id_consistency() {
+        let identity = NodeIdentity::generate().expect("Identity generation should succeed");
+        let binary_hash = [0x42u8; 32];
+        let nonce = 12345u64;
+
+        let entangled_id = identity.to_entangled_id(&binary_hash, nonce);
+        let derived_node_id = entangled_id.to_node_id();
+
+        // The derived NodeId should have the same bytes as the entangled ID
+        assert_eq!(
+            derived_node_id.to_bytes(),
+            entangled_id.id(),
+            "NodeId derived from EntangledId should have same bytes"
+        );
     }
 }

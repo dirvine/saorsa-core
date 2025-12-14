@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
@@ -27,7 +28,8 @@ impl NetworkTestFramework {
 
         for i in 0..node_count {
             let mut config = Config::default();
-            config.network.listen_address = format!("127.0.0.1:{}", 9000 + i);
+            // Use an ephemeral port to avoid collisions across parallel test binaries.
+            config.network.listen_address = "127.0.0.1:0".to_string();
             config.network.max_connections = 100;
 
             let node_cfg = saorsa_core::network::NodeConfig::from_config(&config)?;
@@ -44,6 +46,28 @@ impl NetworkTestFramework {
             configs,
             test_data: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    async fn node_peer_addr(&self, node_index: usize) -> Result<String> {
+        let listen_addrs = self.nodes[node_index].listen_addrs().await;
+        let addr: SocketAddr = listen_addrs
+            .iter()
+            .copied()
+            .find(|a| a.ip().is_ipv4())
+            .or_else(|| listen_addrs.first().copied())
+            .with_context(|| format!("Node {} has no listen addresses", node_index))?;
+
+        let normalized = match addr.ip() {
+            IpAddr::V4(ip) if ip.is_unspecified() => {
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), addr.port())
+            }
+            IpAddr::V6(ip) if ip.is_unspecified() => {
+                SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), addr.port())
+            }
+            _ => addr,
+        };
+
+        Ok(normalized.to_string())
     }
 
     async fn start_all_nodes(&self) -> Result<()> {
@@ -63,7 +87,7 @@ impl NetworkTestFramework {
 
     async fn connect_nodes_in_chain(&self) -> Result<()> {
         for i in 1..self.nodes.len() {
-            let peer_addr = format!("/ip4/127.0.0.1/tcp/{}", 9000 + (i - 1));
+            let peer_addr = self.node_peer_addr(i - 1).await?;
             self.nodes[i]
                 .connect_peer(&peer_addr)
                 .await
@@ -78,7 +102,7 @@ impl NetworkTestFramework {
     async fn connect_nodes_fully_meshed(&self) -> Result<()> {
         for i in 0..self.nodes.len() {
             for j in (i + 1)..self.nodes.len() {
-                let peer_addr = format!("/ip4/127.0.0.1/tcp/{}", 9000 + j);
+                let peer_addr = self.node_peer_addr(j).await?;
                 self.nodes[i]
                     .connect_peer(&peer_addr)
                     .await
@@ -237,7 +261,7 @@ async fn test_peer_discovery_under_load() -> Result<()> {
 
     // Connect nodes in a star topology (all to node 0)
     for i in 1..framework.nodes.len() {
-        let peer_addr = "/ip4/127.0.0.1/tcp/9000".to_string();
+        let peer_addr = framework.node_peer_addr(0).await?;
         framework.nodes[i].connect_peer(&peer_addr).await?;
     }
 
@@ -285,8 +309,26 @@ async fn test_connection_failure_recovery() -> Result<()> {
     // Simulate node failure (shutdown node 1)
     framework.nodes[1].shutdown().await?;
 
-    // Wait for failure detection
-    sleep(Duration::from_secs(5)).await;
+    // Wait for failure detection.
+    //
+    // ant-quic uses an idle timeout (and this crate uses a keepalive task), so peer removal is not
+    // guaranteed to be instantaneous. Poll for convergence instead of assuming a fixed delay.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+    loop {
+        let node2_peer_count = framework.nodes[2].connected_peers().await.len();
+        if node2_peer_count < 2 {
+            break;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "Node 2 did not detect failure within timeout (peer_count={})",
+                node2_peer_count
+            );
+        }
+
+        sleep(Duration::from_millis(250)).await;
+    }
 
     // Verify network adapted to failure
     let mut failure_stats = Vec::new();
@@ -305,10 +347,9 @@ async fn test_connection_failure_recovery() -> Result<()> {
         "Total connections should decrease after node failure"
     );
 
-    // Remaining nodes should detect the failure
+    // Remaining nodes should detect the failure (best-effort, via peer_count reduction).
     for (node_id, peer_count) in &failure_stats {
         if *node_id == 0 || *node_id == 2 {
-            // Nodes adjacent to failed node should have fewer connections
             assert!(
                 peer_count < &2,
                 "Node {} should have detected failure",

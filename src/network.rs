@@ -92,6 +92,13 @@ pub struct NodeConfig {
     /// When set, this configuration is used by bootstrap peer discovery and
     /// other diversity-enforcing subsystems. If `None`, defaults are used.
     pub diversity_config: Option<crate::security::IPDiversityConfig>,
+
+    /// Attestation configuration for software integrity verification.
+    ///
+    /// Controls how nodes verify each other's software attestation during handshake.
+    /// In Phase 1, this is used for "soft enforcement" (logging only).
+    #[serde(default)]
+    pub attestation_config: crate::attestation::AttestationConfig,
 }
 
 /// DHT-specific configuration
@@ -183,7 +190,7 @@ impl NodeConfig {
             production_config: None,
             bootstrap_cache_config: None,
             diversity_config: None,
-            // identity_config: None,
+            attestation_config: config.attestation.clone(),
         })
     }
 }
@@ -227,7 +234,7 @@ impl Default for NodeConfig {
             production_config: None, // Use default production config if enabled
             bootstrap_cache_config: None,
             diversity_config: None,
-            // identity_config: None, // Use default identity config if enabled
+            attestation_config: config.attestation.clone(),
         }
     }
 }
@@ -284,10 +291,7 @@ impl NodeConfig {
             }),
             bootstrap_cache_config: None,
             diversity_config: None,
-            // identity_config: Some(IdentityManagerConfig {
-            //     cache_ttl: Duration::from_secs(3600),
-            //     challenge_timeout: Duration::from_secs(30),
-            // }),
+            attestation_config: config.attestation.clone(),
         };
 
         // Add IPv6 listen address if enabled
@@ -526,6 +530,14 @@ pub struct P2PNode {
     /// GeoIP provider for connection validation
     #[allow(dead_code)]
     geo_provider: Arc<BgpGeoProvider>,
+
+    /// This node's entangled identity (derived from public key + binary hash + nonce).
+    /// Used for software attestation verification during peer handshake.
+    entangled_id: Option<crate::attestation::EntangledId>,
+
+    /// BLAKE3 hash of the running binary for attestation.
+    /// In production, this is computed at startup from the executable.
+    binary_hash: [u8; 32],
 }
 
 /// Normalize wildcard bind addresses to localhost loopback addresses
@@ -620,6 +632,9 @@ impl P2PNode {
             shutdown: Arc::new(AtomicBool::new(false)),
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
+            // Attestation fields - use dummy values for tests
+            entangled_id: None,
+            binary_hash: [0u8; 32],
         })
     }
     /// Create a new P2P node with the given configuration
@@ -829,6 +844,10 @@ impl P2PNode {
             Arc::new(RwLock::new(Some(handle)))
         };
 
+        // Compute binary hash for attestation (in production, this would be the actual binary)
+        // For now, we use a placeholder that will be replaced during node initialization
+        let binary_hash = Self::compute_binary_hash();
+
         let node = Self {
             config,
             peer_id,
@@ -848,6 +867,9 @@ impl P2PNode {
             keepalive_handle,
             shutdown,
             geo_provider,
+            // Attestation - EntangledId will be derived later when NodeIdentity is available
+            entangled_id: None,
+            binary_hash,
         };
         info!("Created P2P node with peer ID: {}", node.peer_id);
 
@@ -1311,12 +1333,19 @@ impl P2PNode {
 
     /// Get connected peers
     pub async fn connected_peers(&self) -> Vec<PeerId> {
-        self.peers.read().await.keys().cloned().collect()
+        // "Connected" is defined as currently active at the transport layer.
+        // The peers map may contain historical peers with Disconnected/Failed status.
+        self.active_connections
+            .read()
+            .await
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// Get peer count
     pub async fn peer_count(&self) -> usize {
-        self.peers.read().await.len()
+        self.active_connections.read().await.len()
     }
 
     /// Get peer info
@@ -1362,11 +1391,18 @@ impl P2PNode {
     /// A vector of tuples containing (PeerId, Vec<String>) where the Vec<String>
     /// contains all known addresses for that peer.
     pub async fn list_active_connections(&self) -> Vec<(PeerId, Vec<String>)> {
+        let active = self.active_connections.read().await;
         let peers = self.peers.read().await;
 
-        peers
+        active
             .iter()
-            .map(|(peer_id, peer_info)| (peer_id.clone(), peer_info.addresses.clone()))
+            .map(|peer_id| {
+                let addresses = peers
+                    .get(peer_id)
+                    .map(|info| info.addresses.clone())
+                    .unwrap_or_default();
+                (peer_id.clone(), addresses)
+            })
             .collect()
     }
 
@@ -1448,22 +1484,19 @@ impl P2PNode {
             }
             Ok(Err(e)) => {
                 warn!("Failed to connect to peer at {}: {}", address, e);
-                let sanitized_address = address.replace(['/', ':'], "_");
-                let demo_peer_id = format!("peer_from_{}", sanitized_address);
-                warn!(
-                    "Using demo peer ID: {} (transport connection failed)",
-                    demo_peer_id
-                );
-                demo_peer_id
+                return Err(P2PError::Transport(
+                    crate::error::TransportError::ConnectionFailed {
+                        addr: normalized_addr,
+                        reason: e.to_string().into(),
+                    },
+                ));
             }
             Err(_) => {
                 warn!(
                     "Timed out connecting to peer at {} after {:?}",
                     address, self.config.connection_timeout
                 );
-                let sanitized_address = address.replace(['/', ':'], "_");
-                let demo_peer_id = format!("peer_from_{}", sanitized_address);
-                demo_peer_id
+                return Err(P2PError::Timeout(self.config.connection_timeout));
             }
         };
 
@@ -1673,6 +1706,128 @@ impl P2PNode {
     /// Get node uptime
     pub fn uptime(&self) -> Duration {
         self.start_time.elapsed()
+    }
+
+    // =========================================================================
+    // Attestation Methods (Phase 1: Soft Enforcement)
+    // =========================================================================
+
+    /// Compute the BLAKE3 hash of the running binary.
+    ///
+    /// In production, this reads the actual executable file and hashes it.
+    /// Returns a placeholder hash if the binary cannot be read.
+    fn compute_binary_hash() -> [u8; 32] {
+        // Try to get the path to the current executable and hash it
+        if let Some(hash) = std::env::current_exe()
+            .ok()
+            .and_then(|exe_path| std::fs::read(&exe_path).ok())
+            .map(|binary_data| blake3::hash(&binary_data))
+        {
+            return *hash.as_bytes();
+        }
+        // Fallback: return a deterministic placeholder based on compile-time info
+        // This allows tests and development to work without actual binary hashing
+        let placeholder = format!(
+            "saorsa-core-v{}-{}",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::ARCH
+        );
+        let hash = blake3::hash(placeholder.as_bytes());
+        *hash.as_bytes()
+    }
+
+    /// Get this node's binary hash used for attestation.
+    #[must_use]
+    pub fn binary_hash(&self) -> &[u8; 32] {
+        &self.binary_hash
+    }
+
+    /// Get this node's entangled identity, if set.
+    #[must_use]
+    pub fn entangled_id(&self) -> Option<&crate::attestation::EntangledId> {
+        self.entangled_id.as_ref()
+    }
+
+    /// Set the entangled identity for this node.
+    ///
+    /// This should be called after the node's cryptographic identity is established,
+    /// typically by deriving from the NodeIdentity's public key.
+    pub fn set_entangled_id(&mut self, entangled_id: crate::attestation::EntangledId) {
+        self.entangled_id = Some(entangled_id);
+    }
+
+    /// Verify a peer's entangled ID (soft enforcement - logging only).
+    ///
+    /// In Phase 1, this logs warnings for invalid attestations but does not
+    /// reject connections. This allows gradual rollout and debugging.
+    ///
+    /// # Arguments
+    /// * `peer_id` - The peer's identifier for logging
+    /// * `peer_entangled_id` - The peer's claimed entangled ID
+    /// * `peer_public_key` - The peer's ML-DSA public key
+    ///
+    /// # Returns
+    /// `true` if attestation is valid, `false` otherwise (always allows connection in Phase 1)
+    pub fn verify_peer_attestation(
+        &self,
+        peer_id: &str,
+        peer_entangled_id: &crate::attestation::EntangledId,
+        peer_public_key: &crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey,
+    ) -> bool {
+        use crate::attestation::EnforcementMode;
+
+        let config = &self.config.attestation_config;
+
+        // Skip verification if attestation is disabled
+        if !config.enabled {
+            return true;
+        }
+
+        // Verify the entangled ID
+        let id_valid = peer_entangled_id.verify(peer_public_key);
+
+        // Check binary hash allowlist (if configured)
+        let binary_allowed = config.is_binary_allowed(peer_entangled_id.binary_hash());
+
+        let attestation_valid = id_valid && binary_allowed;
+
+        // Log based on enforcement mode
+        match config.enforcement_mode {
+            EnforcementMode::Off => {
+                // No logging when off
+            }
+            EnforcementMode::Soft => {
+                // Soft enforcement: log warnings but don't reject
+                if !id_valid {
+                    warn!(
+                        peer = %peer_id,
+                        binary_hash = %hex::encode(&peer_entangled_id.binary_hash()[..8]),
+                        "Peer attestation verification failed: Invalid entangled ID"
+                    );
+                }
+                if !binary_allowed {
+                    warn!(
+                        peer = %peer_id,
+                        binary_hash = %hex::encode(peer_entangled_id.binary_hash()),
+                        "Peer attestation verification failed: Binary not in allowlist"
+                    );
+                }
+            }
+            EnforcementMode::Hard => {
+                // Hard enforcement would reject here, but in Phase 1 we still just log
+                // Phase 2+ will implement actual rejection
+                if !attestation_valid {
+                    warn!(
+                        peer = %peer_id,
+                        id_valid = %id_valid,
+                        binary_allowed = %binary_allowed,
+                        "Peer attestation FAILED (hard enforcement mode) - would reject in Phase 2+"
+                    );
+                }
+            }
+        }
+
+        attestation_valid
     }
 
     // MCP removed: all MCP tool/service methods removed
@@ -2234,10 +2389,9 @@ impl P2PNode {
             if !used_cache {
                 warn!("Failed to connect to any bootstrap peers");
             }
-            return Err(P2PError::Network(NetworkError::ConnectionFailed {
-                addr: std::net::SocketAddr::from(([0, 0, 0, 0], 0)), // Placeholder for bootstrap ensemble
-                reason: "Failed to connect to any bootstrap peers".into(),
-            }));
+            // Starting a node should not be gated on immediate bootstrap connectivity.
+            // Keep running and allow background discovery / retries to populate peers later.
+            return Ok(());
         }
         info!(
             "Successfully connected to {} bootstrap peers",
@@ -2691,7 +2845,7 @@ mod tests {
             bootstrap_peers_str: vec![],
             enable_ipv6: true,
 
-            connection_timeout: Duration::from_millis(300),
+            connection_timeout: Duration::from_secs(2),
             keep_alive_interval: Duration::from_secs(30),
             max_connections: 100,
             max_incoming_connections: 50,
@@ -2700,7 +2854,7 @@ mod tests {
             production_config: None,
             bootstrap_cache_config: None,
             diversity_config: None,
-            // identity_config: None,
+            attestation_config: crate::attestation::AttestationConfig::default(),
         }
     }
 
@@ -2828,25 +2982,40 @@ mod tests {
 
     #[tokio::test]
     async fn test_peer_connection() -> Result<()> {
-        let config = create_test_node_config();
-        let node = P2PNode::new(config).await?;
+        let config1 = create_test_node_config();
+        let mut config2 = create_test_node_config();
+        config2.peer_id = Some("test_peer_456".to_string());
 
-        let peer_addr = "127.0.0.1:0";
+        let node1 = P2PNode::new(config1).await?;
+        let node2 = P2PNode::new(config2).await?;
 
-        // Connect to a peer
-        let peer_id = node.connect_peer(peer_addr).await?;
-        assert!(peer_id.starts_with("peer_from_"));
+        node1.start().await?;
+        node2.start().await?;
+
+        let node2_addr = node2
+            .listen_addrs()
+            .await
+            .into_iter()
+            .find(|a| a.ip().is_ipv4())
+            .ok_or_else(|| {
+                P2PError::Network(crate::error::NetworkError::InvalidAddress(
+                    "Node 2 did not expose an IPv4 listen address".into(),
+                ))
+            })?;
+
+        // Connect to a real peer
+        let peer_id = node1.connect_peer(&node2_addr.to_string()).await?;
 
         // Check peer count
-        assert_eq!(node.peer_count().await, 1);
+        assert_eq!(node1.peer_count().await, 1);
 
         // Check connected peers
-        let connected_peers = node.connected_peers().await;
+        let connected_peers = node1.connected_peers().await;
         assert_eq!(connected_peers.len(), 1);
         assert_eq!(connected_peers[0], peer_id);
 
         // Get peer info
-        let peer_info = node.peer_info(&peer_id).await;
+        let peer_info = node1.peer_info(&peer_id).await;
         assert!(peer_info.is_some());
         let info = peer_info.expect("Peer info should exist after adding peer");
         assert_eq!(info.peer_id, peer_id);
@@ -2854,25 +3023,44 @@ mod tests {
         assert!(info.protocols.contains(&"p2p-foundation/1.0".to_string()));
 
         // Disconnect from peer
-        node.disconnect_peer(&peer_id).await?;
-        assert_eq!(node.peer_count().await, 0);
+        node1.disconnect_peer(&peer_id).await?;
+        assert_eq!(node1.peer_count().await, 0);
+
+        node1.stop().await?;
+        node2.stop().await?;
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_event_subscription() -> Result<()> {
-        let config = create_test_node_config();
-        let node = P2PNode::new(config).await?;
+        let config1 = create_test_node_config();
+        let mut config2 = create_test_node_config();
+        config2.peer_id = Some("test_peer_456".to_string());
 
-        let mut events = node.subscribe_events();
-        let peer_addr = "127.0.0.1:0";
+        let node1 = P2PNode::new(config1).await?;
+        let node2 = P2PNode::new(config2).await?;
+
+        node1.start().await?;
+        node2.start().await?;
+
+        let mut events = node1.subscribe_events();
+        let node2_addr = node2
+            .listen_addrs()
+            .await
+            .into_iter()
+            .find(|a| a.ip().is_ipv4())
+            .ok_or_else(|| {
+                P2PError::Network(crate::error::NetworkError::InvalidAddress(
+                    "Node 2 did not expose an IPv4 listen address".into(),
+                ))
+            })?;
 
         // Connect to a peer (this should emit an event)
-        let peer_id = node.connect_peer(peer_addr).await?;
+        let peer_id = node1.connect_peer(&node2_addr.to_string()).await?;
 
         // Check for PeerConnected event
-        let event = timeout(Duration::from_millis(100), events.recv()).await;
+        let event = timeout(Duration::from_secs(2), events.recv()).await;
         assert!(event.is_ok());
 
         let event_result = event
@@ -2886,10 +3074,10 @@ mod tests {
         }
 
         // Disconnect from peer (this should emit another event)
-        node.disconnect_peer(&peer_id).await?;
+        node1.disconnect_peer(&peer_id).await?;
 
         // Check for PeerDisconnected event
-        let event = timeout(Duration::from_millis(100), events.recv()).await;
+        let event = timeout(Duration::from_secs(2), events.recv()).await;
         assert!(event.is_ok());
 
         let event_result = event
@@ -2901,6 +3089,9 @@ mod tests {
             }
             _ => panic!("Expected PeerDisconnected event"),
         }
+
+        node1.stop().await?;
+        node2.stop().await?;
 
         Ok(())
     }
@@ -3339,6 +3530,16 @@ mod tests {
             .write()
             .await
             .insert(peer2_id.clone(), peer2_info);
+
+        // Also add to active_connections (list_active_connections iterates over this)
+        node.active_connections
+            .write()
+            .await
+            .insert(peer1_id.clone());
+        node.active_connections
+            .write()
+            .await
+            .insert(peer2_id.clone());
 
         // Test: List all active connections
         let connections = node.list_active_connections().await;
