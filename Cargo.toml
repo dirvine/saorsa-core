@@ -30,6 +30,9 @@ test-utils = []
 # Entangled Attestation system (Phase 1: Entangled Identity)
 # Enables EntangledId derivation and verification for software attestation
 attestation = []
+# Enable real SP1 zkVM proof generation (requires SP1 SDK and toolchain)
+# Without this feature, a mock prover is used for testing
+zkvm-prover = ["dep:sp1-sdk"]
 
 [dependencies]
 # Core async and serialization
@@ -97,6 +100,10 @@ saorsa-rsps = "0.2.0"
 
 # zkVM-compatible logic crate for attestation and verification
 saorsa-logic = { version = "0.1", features = ["std", "alloc"] }
+
+# SP1 SDK for zkVM proof generation (optional, heavy dependency)
+# Enable with zkvm-prover feature for real proof generation
+sp1-sdk = { version = "4.0", optional = true }
 
 # Monitoring (optional to avoid build script issues on docs.rs)
 prometheus = { version = "0.14", optional = true, default-features = false }

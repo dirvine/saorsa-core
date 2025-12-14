@@ -53,6 +53,10 @@ pub enum AttestationError {
     /// Serialization/deserialization error.
     #[error("Serialization error: {0}")]
     SerializationError(String),
+
+    /// Invalid or malformed proof.
+    #[error("Invalid proof: {0}")]
+    InvalidProof(String),
 }
 
 /// Result type for attestation operations.

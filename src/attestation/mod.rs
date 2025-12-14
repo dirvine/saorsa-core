@@ -30,7 +30,11 @@
 //!   - Pure derivation logic in `saorsa-logic` crate (no_std, zkVM-compatible)
 //!   - Integration via `derive_entangled_id`, `verify_entangled_id`, `xor_distance`
 //!   - zkVM proof structures defined in [`zkvm`] module
-//! - **Phase 3**: zkVM Integration (SP1/RISC Zero proofs)
+//! - **Phase 3**: zkVM Integration (SP1 proofs) ✅
+//!   - [`prover`] module: Proof generation with `AttestationProver`
+//!   - [`verifier`] module: Proof verification with `AttestationVerifier`
+//!   - Uses STARKs for post-quantum security (no elliptic curves)
+//!   - Mock prover for testing, real SP1 prover with `zkvm-prover` feature
 //! - **Phase 4**: VDF Heartbeats (Wesolowski VDFs)
 //!
 //! ## NodeId vs EntangledId Transition Plan
@@ -92,14 +96,20 @@
 
 mod config;
 mod entangled_id;
+pub mod proof_cache;
+pub mod prover;
 mod sunset;
 mod types;
+pub mod verifier;
 mod zkvm;
 
 pub use config::{AttestationConfig, EnforcementMode};
 pub use entangled_id::EntangledId;
+pub use proof_cache::ProofCache;
+pub use prover::{AttestationProof, AttestationProver, MockAttestationProver, ProofType};
 pub use sunset::SunsetTimestamp;
 pub use types::{AttestationError, AttestationResult};
+pub use verifier::{AttestationVerifier, AttestationVerifierConfig};
 pub use zkvm::{AttestationProofPublicInputs, AttestationProofResult, AttestationProofWitness};
 
 // Re-export saorsa-logic constants for downstream use
