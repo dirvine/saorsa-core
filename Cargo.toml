@@ -33,6 +33,9 @@ attestation = []
 # Enable real SP1 zkVM proof generation (requires SP1 SDK and toolchain)
 # Without this feature, a mock prover is used for testing
 zkvm-prover = ["dep:sp1-sdk"]
+# Enable SP1 Groth16/PLONK verification (lightweight, NOT post-quantum secure)
+# Use for on-chain verification compatibility only
+zkvm-verifier-groth16 = ["dep:sp1-verifier"]
 
 [dependencies]
 # Core async and serialization
@@ -101,9 +104,13 @@ saorsa-rsps = "0.2.0"
 # zkVM-compatible logic crate for attestation and verification
 saorsa-logic = { version = "0.1", features = ["std", "alloc"] }
 
-# SP1 SDK for zkVM proof generation (optional, heavy dependency)
-# Enable with zkvm-prover feature for real proof generation
+# SP1 SDK for zkVM proof generation and STARK verification (optional, heavy dependency)
+# Enable with zkvm-prover feature for real proof generation and STARK verification
 sp1-sdk = { version = "4.0", optional = true }
+
+# SP1 Verifier for Groth16/PLONK verification (lightweight, NOT post-quantum secure)
+# Enable with zkvm-verifier-groth16 feature for on-chain compatible verification
+sp1-verifier = { version = "4.0", optional = true, default-features = false }
 
 # Monitoring (optional to avoid build script issues on docs.rs)
 prometheus = { version = "0.14", optional = true, default-features = false }

@@ -205,6 +205,20 @@ impl AttestationProofWitness {
 }
 
 impl AttestationProofPublicInputs {
+    /// Serialize public inputs to bytes for verification.
+    ///
+    /// This format is used by SP1 verifiers to check the proof.
+    /// Layout: entangled_id || binary_hash || public_key_hash || timestamp (big-endian)
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(32 + 32 + 32 + 8);
+        bytes.extend_from_slice(&self.entangled_id);
+        bytes.extend_from_slice(&self.binary_hash);
+        bytes.extend_from_slice(&self.public_key_hash);
+        bytes.extend_from_slice(&self.proof_timestamp.to_be_bytes());
+        bytes
+    }
+
     /// Verify that this proof output matches an expected EntangledId.
     ///
     /// This is used by verifiers who already know the EntangledId
