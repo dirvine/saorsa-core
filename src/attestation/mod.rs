@@ -33,8 +33,11 @@
 //! - **Phase 3**: zkVM Integration (SP1 proofs) ✅
 //!   - [`prover`] module: Proof generation with `AttestationProver`
 //!   - [`verifier`] module: Proof verification with `AttestationVerifier`
-//!   - Uses STARKs for post-quantum security (no elliptic curves)
+//!   - [`handshake`] module: Protocol for exchanging proofs during connection
+//!   - [`metrics`] module: Observability for verification timing and success rates
+//!   - Uses STARKs for post-quantum security (Groth16 available via feature flag)
 //!   - Mock prover for testing, real SP1 prover with `zkvm-prover` feature
+//!   - Groth16 verification with `zkvm-verifier-groth16` feature (NOT post-quantum)
 //! - **Phase 4**: VDF Heartbeats (Wesolowski VDFs)
 //!
 //! ## NodeId vs EntangledId Transition Plan
@@ -54,16 +57,23 @@
 //! - Verification failures are **logged only** (soft enforcement)
 //! - No connections are rejected based on attestation
 //!
-//! ### Future Phases (2+)
+//! ### Current Implementation (Phases 1-3 Complete)
 //!
-//! The transition to using EntangledId as the canonical routing address will occur
-//! incrementally:
+//! The attestation system now provides:
 //!
-//! 1. **Phase 2**: EntangledId becomes part of the handshake protocol
-//! 2. **Phase 3**: zkVM proofs validate that EntangledId was correctly derived
-//! 3. **Phase 4**: VDF heartbeats prove continuous execution of attested binary
+//! 1. **EntangledId derivation**: Cryptographic binding of identity to software
+//! 2. **Handshake protocol**: [`AttestationHello`] exchange during connection
+//! 3. **zkVM proofs**: Verify correct EntangledId derivation without revealing secrets
+//! 4. **Enforcement modes**: [`EnforcementMode::Soft`] (current) logs but doesn't reject
 //!
-//! Once these phases are complete, the network may transition to:
+//! ### Phase 4 (Future)
+//!
+//! VDF heartbeats will prove continuous execution of attested binary, preventing
+//! node impersonation after initial attestation.
+//!
+//! ### Full Migration (Future)
+//!
+//! Once Phase 4 is complete, the network may transition to:
 //! - **NodeId == EntangledId** for fully attested nodes
 //! - Legacy NodeId supported during migration with configurable enforcement
 //!
@@ -96,6 +106,8 @@
 
 mod config;
 mod entangled_id;
+pub mod handshake;
+pub mod metrics;
 pub mod proof_cache;
 pub mod prover;
 mod sunset;
@@ -105,6 +117,10 @@ mod zkvm;
 
 pub use config::{AttestationConfig, EnforcementMode};
 pub use entangled_id::EntangledId;
+pub use handshake::{
+    AttestationHandshake, AttestationHello, AttestationVerificationResult, PeerAttestationStatus,
+};
+pub use metrics::{AttestationMetrics, AttestationMetricsCollector, VerificationTimer};
 pub use proof_cache::ProofCache;
 pub use prover::{AttestationProof, AttestationProver, MockAttestationProver, ProofType};
 pub use sunset::SunsetTimestamp;
