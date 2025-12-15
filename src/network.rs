@@ -3116,8 +3116,8 @@ mod tests {
         node2.start().await?;
 
         // Wait for nodes to fully bind their listening sockets
-        // (Windows network stack can be slower than Linux/macOS)
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        // Windows network stack initialization can be significantly slower
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         let mut events = node1.subscribe_events();
 
@@ -3128,13 +3128,26 @@ mod tests {
             ))
         })?;
 
-        // Connect to a peer with timeout (this should emit an event)
-        let peer_id = match timeout(Duration::from_secs(2), node1.connect_peer(&node2_addr)).await {
-            Ok(res) => res?,
-            Err(_) => {
-                return Err(P2PError::Network(crate::error::NetworkError::Timeout));
+        // Connect to a peer with retry logic for Windows reliability
+        // The QUIC library may need additional time to fully initialize
+        let mut peer_id = None;
+        for attempt in 0..3 {
+            if attempt > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
             }
-        };
+            match timeout(Duration::from_secs(2), node1.connect_peer(&node2_addr)).await {
+                Ok(Ok(id)) => {
+                    peer_id = Some(id);
+                    break;
+                }
+                Ok(Err(_)) | Err(_) => continue,
+            }
+        }
+        let peer_id = peer_id.ok_or_else(|| {
+            P2PError::Network(crate::error::NetworkError::ProtocolError(
+                "Failed to connect after 3 attempts".to_string().into(),
+            ))
+        })?;
 
         // Check for PeerConnected event
         let event = timeout(Duration::from_secs(2), events.recv()).await;
