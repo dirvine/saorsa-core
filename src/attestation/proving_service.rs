@@ -274,13 +274,17 @@ impl RateLimiter {
     /// Check if a request is allowed and record it if so.
     fn check_and_record(&mut self, key_hash: &[u8; 32]) -> Result<(), u64> {
         let now = Instant::now();
-        let cutoff = now - self.window;
+        // Use checked_sub to handle potential overflow on Windows where Instant
+        // represents time since boot and may overflow if window is large
+        let cutoff = now.checked_sub(self.window);
 
         // Get or create entry for this key
         let timestamps = self.requests.entry(*key_hash).or_default();
 
-        // Remove old timestamps
-        timestamps.retain(|t| *t > cutoff);
+        // Remove old timestamps (if cutoff overflowed, keep all timestamps as they're all "recent")
+        if let Some(cutoff_time) = cutoff {
+            timestamps.retain(|t| *t > cutoff_time);
+        }
 
         // Check if under limit
         if timestamps.len() >= self.max_requests {
