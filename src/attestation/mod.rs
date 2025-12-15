@@ -126,6 +126,8 @@ pub mod heartbeat_manager;
 pub mod metrics;
 pub mod proof_cache;
 pub mod prover;
+pub mod signed_heartbeat;
+pub mod signed_heartbeat_manager;
 mod sunset;
 pub mod trust_integration;
 mod types;
@@ -155,6 +157,14 @@ pub use heartbeat_manager::{
 pub use trust_integration::{HeartbeatTrustConfig, HeartbeatTrustIntegration};
 pub use verifier::{AttestationVerifier, AttestationVerifierConfig};
 pub use zkvm::{AttestationProofPublicInputs, AttestationProofResult, AttestationProofWitness};
+pub use signed_heartbeat::{
+    HeartbeatConfig as SignedHeartbeatConfig, HeartbeatSigner, HeartbeatVerifyResult,
+    SignedHeartbeat,
+};
+pub use signed_heartbeat_manager::{
+    SignedHeartbeatHello, SignedHeartbeatManager, SignedHeartbeatMessage, SignedHeartbeatStats,
+    SignedPeerHeartbeatState, SignedPeerStatus, SIGNED_HEARTBEAT_GOSSIP_TOPIC,
+};
 
 // Re-export saorsa-logic constants for downstream use
 pub use entangled_id::{ENTANGLED_ID_SIZE, HASH_SIZE, ML_DSA_65_PUBLIC_KEY_SIZE};
