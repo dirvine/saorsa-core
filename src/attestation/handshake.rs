@@ -77,20 +77,20 @@ pub struct AttestationHello {
 
 /// Heartbeat extension for AttestationHello (Phase 5).
 ///
-/// Contains VDF heartbeat information exchanged during handshake.
+/// Contains signed heartbeat information exchanged during handshake.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatExtension {
     /// Current epoch number.
     pub current_epoch: u64,
 
-    /// Latest heartbeat proof (if available).
-    pub latest_proof: Option<super::HeartbeatAnnouncement>,
+    /// Latest signed heartbeat (if available).
+    pub latest_heartbeat: Option<super::SignedHeartbeatMessage>,
 
     /// Number of consecutive successful heartbeats (streak).
     pub streak: u32,
 
     /// Peer's heartbeat status.
-    pub status: super::PeerHeartbeatStatus,
+    pub status: super::SignedPeerStatus,
 }
 
 /// Result of verifying a peer's attestation.
@@ -163,7 +163,7 @@ pub struct PeerAttestationStatus {
     // --- Phase 5: Heartbeat tracking ---
 
     /// Peer's heartbeat status (Phase 5).
-    pub heartbeat_status: super::PeerHeartbeatStatus,
+    pub heartbeat_status: super::SignedPeerStatus,
 
     /// Last heartbeat epoch verified.
     pub last_heartbeat_epoch: u64,
@@ -187,7 +187,7 @@ impl PeerAttestationStatus {
             verification_attempts: 1,
             last_failure_reason: None,
             // Phase 5: Heartbeat fields default to unknown
-            heartbeat_status: super::PeerHeartbeatStatus::Unknown,
+            heartbeat_status: super::SignedPeerStatus::Unknown,
             last_heartbeat_epoch: 0,
             heartbeat_streak: 0,
             protocol_version: 1,
@@ -227,7 +227,7 @@ impl PeerAttestationStatus {
             verification_attempts: 1,
             last_failure_reason: Some(reason),
             // Phase 5: Heartbeat fields default to unknown
-            heartbeat_status: super::PeerHeartbeatStatus::Unknown,
+            heartbeat_status: super::SignedPeerStatus::Unknown,
             last_heartbeat_epoch: 0,
             heartbeat_streak: 0,
             protocol_version: 0,
@@ -306,11 +306,11 @@ impl AttestationHandshake {
 
     /// Create our attestation hello message with heartbeat extension (v2).
     ///
-    /// Use this when you have a HeartbeatManager to provide liveness proofs.
+    /// Use this when you have a SignedHeartbeatManager to provide liveness proofs.
     #[must_use]
     pub fn create_hello_with_heartbeat(
         &self,
-        heartbeat_hello: super::HeartbeatHello,
+        heartbeat_hello: super::SignedHeartbeatHello,
     ) -> AttestationHello {
         AttestationHello {
             entangled_id: *self.local_entangled_id.id(),
@@ -318,9 +318,9 @@ impl AttestationHandshake {
             protocol_version: 2,
             heartbeat: Some(HeartbeatExtension {
                 current_epoch: heartbeat_hello.current_epoch,
-                latest_proof: heartbeat_hello.latest_proof,
+                latest_heartbeat: heartbeat_hello.latest_heartbeat,
                 streak: heartbeat_hello.streak,
-                status: super::PeerHeartbeatStatus::Healthy,
+                status: super::SignedPeerStatus::Healthy,
             }),
         }
     }
@@ -478,7 +478,7 @@ fn current_timestamp() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attestation::{AttestationProofPublicInputs, PeerHeartbeatStatus, ProofType};
+    use crate::attestation::{AttestationProofPublicInputs, SignedPeerStatus, ProofType};
     use crate::quantum_crypto::generate_ml_dsa_keypair;
 
     fn create_test_proof(entangled_id: [u8; 32], binary_hash: [u8; 32]) -> AttestationProof {
@@ -595,9 +595,9 @@ mod tests {
             protocol_version: 2,
             heartbeat: Some(HeartbeatExtension {
                 current_epoch: 100,
-                latest_proof: None,
+                latest_heartbeat: None,
                 streak: 5,
-                status: PeerHeartbeatStatus::Healthy,
+                status: SignedPeerStatus::Healthy,
             }),
         };
 
@@ -609,7 +609,7 @@ mod tests {
         assert_eq!(status.protocol_version, 2);
         assert_eq!(status.last_heartbeat_epoch, 100);
         assert_eq!(status.heartbeat_streak, 5);
-        assert_eq!(status.heartbeat_status, PeerHeartbeatStatus::Healthy);
+        assert_eq!(status.heartbeat_status, SignedPeerStatus::Healthy);
     }
 
     #[test]

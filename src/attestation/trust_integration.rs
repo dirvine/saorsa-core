@@ -7,7 +7,7 @@
 // For AGPL-3.0 license, see LICENSE-AGPL-3.0
 // For commercial licensing, contact: david@saorsalabs.com
 
-//! Trust system integration for VDF heartbeats.
+//! Trust system integration for signed heartbeats.
 //!
 //! This module provides the bridge between the heartbeat system and EigenTrust,
 //! adjusting trust scores based on heartbeat compliance.
@@ -21,17 +21,14 @@
 //! ## Integration
 //!
 //! ```rust,ignore
-//! use saorsa_core::attestation::{HeartbeatManager, HeartbeatTrustIntegration};
+//! use saorsa_core::attestation::{SignedHeartbeatManager, HeartbeatTrustIntegration, SignedPeerStatus};
 //! use saorsa_core::adaptive::EigenTrustEngine;
 //!
 //! let trust_engine = Arc::new(EigenTrustEngine::new(HashSet::new()));
-//! let trust_callback = HeartbeatTrustIntegration::new(trust_engine);
-//!
-//! // When checking heartbeats, use the callback:
-//! manager.check_missed_heartbeats_with_callback(Some(&trust_callback)).await;
+//! let trust_callback = HeartbeatTrustIntegration::new(trust_engine, local_id);
 //! ```
 
-use super::heartbeat_manager::{HeartbeatTrustCallback, PeerHeartbeatStatus};
+use super::signed_heartbeat_manager::{SignedHeartbeatTrustCallback, SignedPeerStatus};
 use crate::adaptive::{EigenTrustEngine, NodeStatisticsUpdate};
 use crate::peer_record::UserId;
 use std::sync::Arc;
@@ -112,19 +109,19 @@ impl HeartbeatTrustIntegration {
 }
 
 #[async_trait::async_trait]
-impl HeartbeatTrustCallback for HeartbeatTrustIntegration {
+impl SignedHeartbeatTrustCallback for HeartbeatTrustIntegration {
     async fn on_status_change(
         &self,
         entangled_id: &[u8; 32],
-        old_status: PeerHeartbeatStatus,
-        new_status: PeerHeartbeatStatus,
+        old_status: SignedPeerStatus,
+        new_status: SignedPeerStatus,
     ) {
         let peer_id = Self::to_node_id(entangled_id);
         let local_id = Self::to_node_id(&self.local_entangled_id);
 
         match (old_status, new_status) {
             // Going from healthy/unknown to suspect
-            (PeerHeartbeatStatus::Healthy | PeerHeartbeatStatus::Unknown, PeerHeartbeatStatus::Suspect) => {
+            (SignedPeerStatus::Healthy | SignedPeerStatus::Unknown, SignedPeerStatus::Suspect) => {
                 tracing::info!(
                     peer = %hex::encode(&entangled_id[..8]),
                     "Peer became suspect, applying trust penalty"
@@ -134,7 +131,7 @@ impl HeartbeatTrustCallback for HeartbeatTrustIntegration {
             }
 
             // Going from healthy/unknown/suspect to unresponsive
-            (_, PeerHeartbeatStatus::Unresponsive) => {
+            (_, SignedPeerStatus::Unresponsive) => {
                 tracing::warn!(
                     peer = %hex::encode(&entangled_id[..8]),
                     "Peer became unresponsive, applying severe trust penalty"
@@ -146,7 +143,7 @@ impl HeartbeatTrustCallback for HeartbeatTrustIntegration {
             }
 
             // Recovery: going from suspect/unresponsive to healthy
-            (PeerHeartbeatStatus::Suspect | PeerHeartbeatStatus::Unresponsive, PeerHeartbeatStatus::Healthy) => {
+            (SignedPeerStatus::Suspect | SignedPeerStatus::Unresponsive, SignedPeerStatus::Healthy) => {
                 tracing::info!(
                     peer = %hex::encode(&entangled_id[..8]),
                     "Peer recovered to healthy, applying trust recovery"
@@ -156,7 +153,7 @@ impl HeartbeatTrustCallback for HeartbeatTrustIntegration {
             }
 
             // Going from unknown to healthy
-            (PeerHeartbeatStatus::Unknown, PeerHeartbeatStatus::Healthy) => {
+            (SignedPeerStatus::Unknown, SignedPeerStatus::Healthy) => {
                 tracing::debug!(
                     peer = %hex::encode(&entangled_id[..8]),
                     "Peer became healthy (first heartbeat)"
@@ -268,7 +265,7 @@ mod tests {
 
         // Then mark as suspect
         integration
-            .on_status_change(&peer_id, PeerHeartbeatStatus::Healthy, PeerHeartbeatStatus::Suspect)
+            .on_status_change(&peer_id, SignedPeerStatus::Healthy, SignedPeerStatus::Suspect)
             .await;
 
         // Trust should be lower (or we at least recorded a failed interaction)
@@ -292,7 +289,7 @@ mod tests {
 
         // Mark as unresponsive directly
         integration
-            .on_status_change(&peer_id, PeerHeartbeatStatus::Healthy, PeerHeartbeatStatus::Unresponsive)
+            .on_status_change(&peer_id, SignedPeerStatus::Healthy, SignedPeerStatus::Unresponsive)
             .await;
 
         // Should have recorded multiple failed interactions (3x penalty)
@@ -312,12 +309,12 @@ mod tests {
 
         // First, mark as suspect
         integration
-            .on_status_change(&peer_id, PeerHeartbeatStatus::Healthy, PeerHeartbeatStatus::Suspect)
+            .on_status_change(&peer_id, SignedPeerStatus::Healthy, SignedPeerStatus::Suspect)
             .await;
 
         // Then recover to healthy
         integration
-            .on_status_change(&peer_id, PeerHeartbeatStatus::Suspect, PeerHeartbeatStatus::Healthy)
+            .on_status_change(&peer_id, SignedPeerStatus::Suspect, SignedPeerStatus::Healthy)
             .await;
 
         // Should have positive interaction recorded for recovery

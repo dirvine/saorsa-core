@@ -38,22 +38,21 @@
 //!   - Uses STARKs for post-quantum security (Groth16 available via feature flag)
 //!   - Mock prover for testing, real SP1 prover with `zkvm-prover` feature
 //!   - Groth16 verification with `zkvm-verifier-groth16` feature (NOT post-quantum)
-//! - **Phase 4**: VDF Heartbeats (SP1-based) ✅
-//!   - [`vdf`] module: VDF heartbeat generation and verification
-//!   - [`HeartbeatChallenge`]: Challenge structure binding to identity
-//!   - [`HeartbeatProof`]: VDF proof structure
-//!   - [`VdfHeartbeat`]: Unified VDF manager (mock or real via `vdf` feature)
-//!   - Uses SP1 zkVM with iterated BLAKE3 (no trusted setup, pure Rust)
-//!   - Configurable iterations for different security/performance tradeoffs
+//! - **Phase 4**: Lightweight Signed Heartbeats ✅
+//!   - [`signed_heartbeat`] module: ML-DSA signed heartbeat proofs
+//!   - [`SignedHeartbeat`]: Lightweight liveness proof (microseconds vs VDF seconds)
+//!   - [`HeartbeatSigner`]: Generates signed heartbeats
+//!   - No expensive VDF computation - suitable for resource-constrained devices
+//!   - Multi-node-per-device deployment support
 //! - **Phase 5**: Heartbeat Protocol Integration ✅
-//!   - [`heartbeat_manager`] module: Coordination of heartbeat lifecycle
-//!   - [`HeartbeatManager`]: Generates, verifies, and tracks heartbeats
-//!   - [`HeartbeatAnnouncement`]: Gossip message for heartbeat propagation
-//!   - [`HeartbeatHello`]: Handshake extension for heartbeat exchange
+//!   - [`signed_heartbeat_manager`] module: Coordination of heartbeat lifecycle
+//!   - [`SignedHeartbeatManager`]: Generates, verifies, and tracks heartbeats
+//!   - [`network_resilience`] module: Intelligent network disruption handling
 //!   - [`trust_integration`] module: EigenTrust integration for heartbeat compliance
 //!   - Epoch-based scheduling with configurable intervals
 //!   - Peer status tracking (Healthy → Suspect → Unresponsive)
 //!   - Trust score adjustments based on heartbeat compliance
+//!   - Network resilience: startup grace, partition detection, quiescence handling
 //!
 //! ## NodeId vs EntangledId Transition Plan
 //!
@@ -81,10 +80,10 @@
 //! 3. **zkVM proofs**: Verify correct EntangledId derivation without revealing secrets
 //! 4. **Enforcement modes**: [`EnforcementMode::Soft`] (current) logs but doesn't reject
 //!
-//! ### Phase 4 (Future)
+//! ### Phase 4-5 (Complete)
 //!
-//! VDF heartbeats will prove continuous execution of attested binary, preventing
-//! node impersonation after initial attestation.
+//! Signed heartbeats prove continuous liveness using ML-DSA signatures.
+//! Network resilience handles partitions, quiescence, and graceful recovery.
 //!
 //! ### Full Migration (Future)
 //!
@@ -122,7 +121,6 @@
 mod config;
 mod entangled_id;
 pub mod handshake;
-pub mod heartbeat_manager;
 pub mod metrics;
 pub mod network_resilience;
 pub mod proof_cache;
@@ -133,7 +131,6 @@ pub mod signed_heartbeat_manager;
 mod sunset;
 pub mod trust_integration;
 mod types;
-pub mod vdf;
 pub mod verifier;
 mod zkvm;
 
@@ -147,15 +144,6 @@ pub use proof_cache::ProofCache;
 pub use prover::{AttestationProof, AttestationProver, MockAttestationProver, ProofType};
 pub use sunset::SunsetTimestamp;
 pub use types::{AttestationError, AttestationResult};
-pub use vdf::{
-    HeartbeatChallenge, HeartbeatNodeStatus, HeartbeatProof, HeartbeatVerificationResult,
-    NodeHeartbeatStatus, VdfConfig, VdfHeartbeat, VdfProofType,
-};
-pub use heartbeat_manager::{
-    HeartbeatAnnouncement, HeartbeatGossipPublisher, HeartbeatHello, HeartbeatManager,
-    HeartbeatStats, HeartbeatTrustCallback, PeerHeartbeatState, PeerHeartbeatStatus,
-    HEARTBEAT_GOSSIP_TOPIC,
-};
 pub use trust_integration::{HeartbeatTrustConfig, HeartbeatTrustIntegration};
 pub use verifier::{AttestationVerifier, AttestationVerifierConfig};
 pub use zkvm::{AttestationProofPublicInputs, AttestationProofResult, AttestationProofWitness};
@@ -165,7 +153,8 @@ pub use signed_heartbeat::{
 };
 pub use signed_heartbeat_manager::{
     SignedHeartbeatHello, SignedHeartbeatManager, SignedHeartbeatMessage, SignedHeartbeatStats,
-    SignedPeerHeartbeatState, SignedPeerStatus, SIGNED_HEARTBEAT_GOSSIP_TOPIC,
+    SignedHeartbeatTrustCallback, SignedPeerHeartbeatState, SignedPeerStatus,
+    SIGNED_HEARTBEAT_GOSSIP_TOPIC,
 };
 pub use signed_handshake::{
     HandshakeChallenge, HandshakeHelloData, HandshakeVerifyResult, SignedHandshake,

@@ -153,6 +153,33 @@ pub enum SignedPeerStatus {
     Unresponsive,
 }
 
+/// Callback trait for integrating heartbeats with trust systems.
+///
+/// Implement this trait to receive notifications about peer heartbeat
+/// status changes, which can be used to adjust EigenTrust scores.
+#[async_trait::async_trait]
+pub trait SignedHeartbeatTrustCallback: Send + Sync {
+    /// Called when a peer's heartbeat status changes.
+    ///
+    /// Use this to adjust EigenTrust scores based on heartbeat compliance.
+    async fn on_status_change(
+        &self,
+        entangled_id: &[u8; 32],
+        old_status: SignedPeerStatus,
+        new_status: SignedPeerStatus,
+    );
+
+    /// Called when a peer produces a successful heartbeat.
+    ///
+    /// Use this to give positive feedback to the trust system.
+    async fn on_heartbeat_success(&self, entangled_id: &[u8; 32], streak: u32);
+
+    /// Called when a peer misses a heartbeat.
+    ///
+    /// Use this to apply negative feedback to the trust system.
+    async fn on_heartbeat_miss(&self, entangled_id: &[u8; 32], missed_count: u32);
+}
+
 impl SignedPeerHeartbeatState {
     /// Create new state for a peer.
     #[must_use]
