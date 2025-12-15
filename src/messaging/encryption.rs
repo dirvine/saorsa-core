@@ -115,10 +115,20 @@ impl SecureMessaging {
     }
 
     /// Verify message signature
+    ///
+    /// Returns `false` if the message cannot be serialized or if the signature
+    /// does not match the expected hash of the message content.
     pub fn verify_message(&self, message: &RichMessage) -> bool {
-        // Hash message content
+        // Hash message content - return false if serialization fails
+        let serialized = match serde_json::to_vec(message) {
+            Ok(data) => data,
+            Err(e) => {
+                tracing::warn!("Failed to serialize message for verification: {e}");
+                return false;
+            }
+        };
         let mut hasher = Hasher::new();
-        hasher.update(&serde_json::to_vec(message).unwrap_or_default());
+        hasher.update(&serialized);
         let hash = hasher.finalize();
 
         // Verify with ML-DSA
