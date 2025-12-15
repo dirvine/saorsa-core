@@ -33,3 +33,4 @@ patches/
 # Tool state
 .serena/
 .claude/tasks/
+.cache/
