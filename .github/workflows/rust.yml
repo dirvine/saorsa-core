@@ -63,8 +63,10 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: brew install protobuf
 
+      # Note: Using specific features instead of --all-features to avoid sp1-sdk
+      # build issues (linker OOM on Linux, C++20 on Windows).
       - name: Build
-        run: cargo build --all-features
+        run: cargo build --features "default,mocks,h2_greedy,test-utils,attestation"
 
   security_audit:
     name: Security Audit
@@ -111,8 +113,10 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
 
+      # Note: Using specific features instead of --all-features to avoid sp1-sdk
+      # build issues (linker OOM on Linux, C++20 on Windows).
       - name: Run benchmarks
-        run: cargo bench --all-features
+        run: cargo bench --features "default,mocks,h2_greedy,test-utils,attestation"
 
   minimal-versions:
     name: Minimal versions
@@ -127,4 +131,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libssl-dev build-essential protobuf-compiler
       - run: cargo update -Z minimal-versions
-      - run: cargo check --all-features
+      # Note: Using specific features instead of --all-features to avoid sp1-sdk
+      # build issues (linker OOM on Linux, C++20 on Windows).
+      - run: cargo check --features "default,mocks,h2_greedy,test-utils,attestation"
