@@ -3101,6 +3101,10 @@ mod tests {
         node1.start().await?;
         node2.start().await?;
 
+        // Wait for nodes to fully bind their listening sockets
+        // (Windows network stack can be slower than Linux/macOS)
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
         let mut events = node1.subscribe_events();
         let node2_addr = node2
             .listen_addrs()
