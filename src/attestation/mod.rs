@@ -118,6 +118,8 @@
 //! assert!(entangled_id.verify(&public_key));
 //! ```
 
+pub mod batch_verifier;
+pub mod blacklist;
 mod config;
 mod entangled_id;
 pub mod handshake;
@@ -125,19 +127,27 @@ pub mod metrics;
 pub mod network_resilience;
 pub mod proof_cache;
 pub mod prover;
+pub mod proving_service;
+pub mod security;
 pub mod signed_handshake;
 pub mod signed_heartbeat;
 pub mod signed_heartbeat_manager;
 mod sunset;
 pub mod trust_integration;
 mod types;
+pub mod verification_cache;
 pub mod verifier;
 mod zkvm;
 
+pub use batch_verifier::{
+    BatchVerificationResult, BatchVerifier, BatchVerifierConfig, VerificationRequest,
+};
+pub use blacklist::{AttestationBlacklist, BlacklistConfig, BlacklistEntry, BlacklistStats};
 pub use config::{AttestationConfig, EnforcementMode};
 pub use entangled_id::EntangledId;
 pub use handshake::{
-    AttestationHandshake, AttestationHello, AttestationVerificationResult, PeerAttestationStatus,
+    AttestationHandshake, AttestationHello, AttestationRejection, AttestationRejectionReason,
+    AttestationVerificationResult, EnforcementDecision, PeerAttestationStatus,
 };
 pub use metrics::{AttestationMetrics, AttestationMetricsCollector, VerificationTimer};
 pub use network_resilience::{
@@ -147,6 +157,15 @@ pub use network_resilience::{
 };
 pub use proof_cache::ProofCache;
 pub use prover::{AttestationProof, AttestationProver, MockAttestationProver, ProofType};
+pub use proving_service::{
+    ProofRequest, ProofRequestError, ProofResponse, ProvingClient, ProvingClientConfig,
+    ProvingService, ProvingServiceConfig, ProvingServiceStats,
+};
+pub use security::{
+    NonceRegistry, NonceRegistryConfig, NonceRegistryStats, SecurityAuditLog, SecurityAuditSummary,
+    SecurityEvent, SecurityEventType, SecuritySeverity, ct_eq, ct_eq_16, ct_eq_32,
+    generate_ownership_challenge, verify_ownership,
+};
 pub use signed_handshake::{
     HandshakeChallenge, HandshakeHelloData, HandshakeVerifyResult, SignedHandshake,
     SignedHandshakeConfig, SignedHandshakeResponse, SignedHandshakeVerifier,
@@ -156,13 +175,16 @@ pub use signed_heartbeat::{
     SignedHeartbeat,
 };
 pub use signed_heartbeat_manager::{
-    SIGNED_HEARTBEAT_GOSSIP_TOPIC, SignedHeartbeatHello, SignedHeartbeatManager,
+    DisconnectReason, SIGNED_HEARTBEAT_GOSSIP_TOPIC, SignedHeartbeatHello, SignedHeartbeatManager,
     SignedHeartbeatMessage, SignedHeartbeatStats, SignedHeartbeatTrustCallback,
     SignedPeerHeartbeatState, SignedPeerStatus,
 };
 pub use sunset::SunsetTimestamp;
 pub use trust_integration::{HeartbeatTrustConfig, HeartbeatTrustIntegration};
 pub use types::{AttestationError, AttestationResult};
+pub use verification_cache::{
+    VerificationCache, VerificationCacheConfig, VerificationCacheMetrics,
+};
 pub use verifier::{AttestationVerifier, AttestationVerifierConfig};
 pub use zkvm::{AttestationProofPublicInputs, AttestationProofResult, AttestationProofWitness};
 

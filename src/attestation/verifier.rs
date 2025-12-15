@@ -143,17 +143,15 @@ impl AttestationVerifier {
             return crypto_result;
         }
 
-        // Step 2: Check vkey hash if configured
-        if self
-            .config
-            .expected_vkey_hash
-            .is_some_and(|expected_vkey| proof.vkey_hash != expected_vkey)
-        {
+        // Step 2: Check vkey hash if configured (constant-time comparison)
+        if self.config.expected_vkey_hash.is_some_and(|expected_vkey| {
+            !super::security::ct_eq_32(&proof.vkey_hash, &expected_vkey)
+        }) {
             return AttestationProofResult::InvalidProof;
         }
 
-        // Step 3: Check EntangledId matches
-        if &proof.public_inputs.entangled_id != expected_entangled_id {
+        // Step 3: Check EntangledId matches (constant-time comparison to prevent timing attacks)
+        if !super::security::ct_eq_32(&proof.public_inputs.entangled_id, expected_entangled_id) {
             return AttestationProofResult::IdMismatch;
         }
 
@@ -165,14 +163,15 @@ impl AttestationVerifier {
             return AttestationProofResult::Stale;
         }
 
-        // Step 5: Check binary allowlist
-        if !self.config.allowed_binaries.is_empty()
-            && !self
-                .config
-                .allowed_binaries
-                .contains(&proof.public_inputs.binary_hash)
-        {
-            return AttestationProofResult::BinaryNotAllowed;
+        // Step 5: Check binary allowlist (constant-time search)
+        if !self.config.allowed_binaries.is_empty() {
+            let binary_allowed = self.config.allowed_binaries.iter().any(|allowed| {
+                super::security::ct_eq_32(allowed, &proof.public_inputs.binary_hash)
+            });
+
+            if !binary_allowed {
+                return AttestationProofResult::BinaryNotAllowed;
+            }
         }
 
         AttestationProofResult::Valid
@@ -225,23 +224,43 @@ impl AttestationVerifier {
         // The sp1-verifier crate only supports Groth16/PLONK, not STARK proofs
         #[cfg(feature = "zkvm-prover")]
         {
-            // With zkvm-prover feature, we have access to sp1-sdk's verify method
-            // However, verification requires the SP1VerifyingKey, which we need
-            // to obtain or store. For now, we validate proof structure and
-            // trust the vkey_hash binding.
-            //
-            // Full verification would be:
-            // client.verify(&sp1_proof, &vk)?;
-            //
-            // This requires:
-            // 1. Storing/distributing the SP1VerifyingKey
-            // 2. Reconstructing SP1ProofWithPublicValues from our serialization
-            //
-            // For Phase 3.1, we accept structurally valid proofs.
-            // Phase 3.2 will add full cryptographic verification.
-            tracing::warn!(
-                "STARK verification stub: zkvm-prover feature enabled but full verification pending"
-            );
+            use sp1_sdk::{HashableKey, ProverClient, SP1ProofWithPublicValues, SP1PublicValues};
+
+            // 1. Reconstruct SP1ProofWithPublicValues
+            let mut public_values = SP1PublicValues::new();
+            public_values.write(&proof.public_inputs);
+
+            // SP1 SDK 5.x: proof and sp1_version are the main fields
+            // The proof_type is determined by the proof contents, not a separate field
+            let sp1_proof = SP1ProofWithPublicValues {
+                proof: sp1_sdk::SP1Proof::Compressed(proof.proof_bytes.clone().into_boxed_slice()),
+                sp1_version: sp1_sdk::SP1_CIRCUIT_VERSION.to_string(),
+                public_values,
+            };
+
+            // 2. Obtain Verifying Key (VK)
+            // We load the same guest ELF to derive the VK deterministically.
+            // This avoids needing to distribute the VK separately for now.
+            let client = ProverClient::from_env();
+            let elf = include_bytes!(env!("ATTESTATION_GUEST_ELF"));
+            let (_, vk) = client.setup(elf);
+
+            // 3. Verify vkey_hash matches (requires HashableKey trait)
+            if vk.hash_bytes() != proof.vkey_hash {
+                return AttestationProofResult::InvalidProof;
+            }
+
+            // 4. Verify cryptographic proof
+            return match client.verify(&sp1_proof, &vk) {
+                Ok(_) => {
+                    tracing::debug!("SP1 STARK proof verified successfully");
+                    AttestationProofResult::Valid
+                }
+                Err(e) => {
+                    tracing::warn!("SP1 STARK proof verification failed: {:?}", e);
+                    AttestationProofResult::InvalidProof
+                }
+            };
         }
 
         #[cfg(not(feature = "zkvm-prover"))]
@@ -251,11 +270,10 @@ impl AttestationVerifier {
             tracing::warn!(
                 "STARK verification DISABLED: enable zkvm-prover feature for real verification"
             );
+            // Phase 3.1: Accept proofs with valid structure
+            // Phase 3.2: Add full cryptographic verification
+            AttestationProofResult::Valid
         }
-
-        // Phase 3.1: Accept proofs with valid structure
-        // Phase 3.2: Add full cryptographic verification
-        AttestationProofResult::Valid
     }
 
     /// Verify an SP1 Groth16 proof.

@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::Instant;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1756,10 +1756,14 @@ impl P2PNode {
         self.entangled_id = Some(entangled_id);
     }
 
-    /// Verify a peer's entangled ID (soft enforcement - logging only).
+    /// Verify a peer's attestation and return the enforcement decision.
     ///
-    /// In Phase 1, this logs warnings for invalid attestations but does not
-    /// reject connections. This allows gradual rollout and debugging.
+    /// This function implements the Entangled Attestation verification protocol
+    /// (Phase 6: Hard Enforcement). Based on the configured enforcement mode:
+    ///
+    /// - **Off**: Skips verification entirely
+    /// - **Soft**: Logs warnings but allows connections
+    /// - **Hard**: Rejects connections with invalid attestations
     ///
     /// # Arguments
     /// * `peer_id` - The peer's identifier for logging
@@ -1767,67 +1771,120 @@ impl P2PNode {
     /// * `peer_public_key` - The peer's ML-DSA public key
     ///
     /// # Returns
-    /// `true` if attestation is valid, `false` otherwise (always allows connection in Phase 1)
+    /// An [`EnforcementDecision`] indicating whether to allow or reject the connection.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let decision = node.verify_peer_attestation(peer_id, &entangled_id, &public_key);
+    /// if decision.should_reject() {
+    ///     // Send rejection message and close connection
+    ///     if let Some(rejection) = decision.rejection() {
+    ///         send_rejection(peer_id, rejection);
+    ///     }
+    ///     disconnect(peer_id);
+    /// }
+    /// ```
     pub fn verify_peer_attestation(
         &self,
         peer_id: &str,
         peer_entangled_id: &crate::attestation::EntangledId,
         peer_public_key: &crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey,
-    ) -> bool {
-        use crate::attestation::EnforcementMode;
+    ) -> crate::attestation::EnforcementDecision {
+        use crate::attestation::{
+            AttestationRejection, AttestationRejectionReason, EnforcementDecision, EnforcementMode,
+        };
 
         let config = &self.config.attestation_config;
 
         // Skip verification if attestation is disabled
         if !config.enabled {
-            return true;
+            return EnforcementDecision::Skipped;
         }
 
-        // Verify the entangled ID
+        // Verify the entangled ID derivation
         let id_valid = peer_entangled_id.verify(peer_public_key);
 
         // Check binary hash allowlist (if configured)
-        let binary_allowed = config.is_binary_allowed(peer_entangled_id.binary_hash());
+        let binary_hash = *peer_entangled_id.binary_hash();
+        let binary_allowed = config.is_binary_allowed(&binary_hash);
 
-        let attestation_valid = id_valid && binary_allowed;
-
-        // Log based on enforcement mode
         match config.enforcement_mode {
-            EnforcementMode::Off => {
-                // No logging when off
-            }
+            EnforcementMode::Off => EnforcementDecision::Skipped,
+
             EnforcementMode::Soft => {
-                // Soft enforcement: log warnings but don't reject
+                // Soft enforcement: log warnings but allow connections
                 if !id_valid {
                     warn!(
                         peer = %peer_id,
-                        binary_hash = %hex::encode(&peer_entangled_id.binary_hash()[..8]),
-                        "Peer attestation verification failed: Invalid entangled ID"
+                        binary_hash = %hex::encode(&binary_hash[..8]),
+                        "Peer attestation verification failed: Invalid entangled ID (soft mode - allowing)"
                     );
+                    return EnforcementDecision::AllowWithWarning {
+                        reason: AttestationRejectionReason::IdentityMismatch,
+                    };
                 }
                 if !binary_allowed {
                     warn!(
                         peer = %peer_id,
-                        binary_hash = %hex::encode(peer_entangled_id.binary_hash()),
-                        "Peer attestation verification failed: Binary not in allowlist"
+                        binary_hash = %hex::encode(binary_hash),
+                        "Peer attestation verification failed: Binary not in allowlist (soft mode - allowing)"
                     );
+                    return EnforcementDecision::AllowWithWarning {
+                        reason: AttestationRejectionReason::BinaryNotAllowed { hash: binary_hash },
+                    };
                 }
+                EnforcementDecision::Allow
             }
+
             EnforcementMode::Hard => {
-                // Hard enforcement would reject here, but in Phase 1 we still just log
-                // Phase 2+ will implement actual rejection
-                if !attestation_valid {
-                    warn!(
+                // Hard enforcement: reject invalid attestations
+                if !id_valid {
+                    error!(
                         peer = %peer_id,
-                        id_valid = %id_valid,
-                        binary_allowed = %binary_allowed,
-                        "Peer attestation FAILED (hard enforcement mode) - would reject in Phase 2+"
+                        binary_hash = %hex::encode(&binary_hash[..8]),
+                        "REJECTING peer: Invalid entangled ID derivation"
                     );
+                    return EnforcementDecision::Reject {
+                        rejection: AttestationRejection::identity_mismatch(),
+                    };
                 }
+                if !binary_allowed {
+                    error!(
+                        peer = %peer_id,
+                        binary_hash = %hex::encode(binary_hash),
+                        "REJECTING peer: Binary not in allowlist"
+                    );
+                    return EnforcementDecision::Reject {
+                        rejection: AttestationRejection::binary_not_allowed(binary_hash),
+                    };
+                }
+
+                info!(
+                    peer = %peer_id,
+                    entangled_id = %hex::encode(&peer_entangled_id.id()[..8]),
+                    "Peer attestation verified successfully (hard mode)"
+                );
+                EnforcementDecision::Allow
             }
         }
+    }
 
-        attestation_valid
+    /// Verify a peer's attestation and return a simple boolean result.
+    ///
+    /// This is a convenience method that wraps [`verify_peer_attestation`] for cases
+    /// where only a pass/fail result is needed without the detailed decision.
+    ///
+    /// # Returns
+    /// `true` if the connection should be allowed, `false` if it should be rejected.
+    #[must_use]
+    pub fn verify_peer_attestation_simple(
+        &self,
+        peer_id: &str,
+        peer_entangled_id: &crate::attestation::EntangledId,
+        peer_public_key: &crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey,
+    ) -> bool {
+        self.verify_peer_attestation(peer_id, peer_entangled_id, peer_public_key)
+            .should_allow()
     }
 
     // MCP removed: all MCP tool/service methods removed

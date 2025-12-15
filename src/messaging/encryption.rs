@@ -103,15 +103,15 @@ impl SecureMessaging {
     }
 
     /// Sign a message for verification
-    pub fn sign_message(&self, message: &RichMessage) -> Vec<u8> {
+    pub fn sign_message(&self, message: &RichMessage) -> Result<Vec<u8>> {
         // Hash message content
         let mut hasher = Hasher::new();
-        hasher.update(&serde_json::to_vec(message).unwrap_or_default());
+        hasher.update(&serde_json::to_vec(message)?);
         let hash = hasher.finalize();
 
         // Sign with ML-DSA
         // In production, use actual ML-DSA signing
-        hash.as_bytes().to_vec()
+        Ok(hash.as_bytes().to_vec())
     }
 
     /// Verify message signature
@@ -369,7 +369,7 @@ mod tests {
             MessageContent::Text("Sign me".to_string()),
         );
 
-        let signature = secure.sign_message(&message);
+        let signature = secure.sign_message(&message).unwrap();
         assert!(!signature.is_empty());
         assert_eq!(signature.len(), 32); // Blake3 hash is 32 bytes
     }

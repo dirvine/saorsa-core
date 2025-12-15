@@ -155,6 +155,47 @@ pub enum SignedPeerStatus {
     Unresponsive,
 }
 
+/// Reason for disconnecting a peer (Phase 6: Hard Enforcement).
+///
+/// Used when recommending or executing peer disconnection due to
+/// heartbeat failures or other attestation issues.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DisconnectReason {
+    /// Peer missed too many heartbeat epochs.
+    HeartbeatTimeout {
+        /// Number of missed epochs.
+        missed_epochs: u32,
+    },
+
+    /// Peer's attestation proof became invalid.
+    AttestationInvalid {
+        /// Reason for invalidity.
+        reason: String,
+    },
+
+    /// Peer was manually evicted.
+    ManualEviction {
+        /// Reason for eviction.
+        reason: String,
+    },
+}
+
+impl std::fmt::Display for DisconnectReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HeartbeatTimeout { missed_epochs } => {
+                write!(f, "Heartbeat timeout ({} missed epochs)", missed_epochs)
+            }
+            Self::AttestationInvalid { reason } => {
+                write!(f, "Attestation invalid: {}", reason)
+            }
+            Self::ManualEviction { reason } => {
+                write!(f, "Manual eviction: {}", reason)
+            }
+        }
+    }
+}
+
 /// Callback trait for integrating heartbeats with trust systems.
 ///
 /// Implement this trait to receive notifications about peer heartbeat
@@ -749,6 +790,101 @@ impl SignedHeartbeatManager {
             suspect_peers: suspect,
             unresponsive_peers: unresponsive,
         }
+    }
+
+    /// Check if a specific peer should be disconnected (Phase 6: Hard Enforcement).
+    ///
+    /// In hard enforcement mode, peers that become unresponsive should be
+    /// disconnected from the network to maintain integrity.
+    ///
+    /// # Arguments
+    /// * `peer_id` - The peer's EntangledId
+    ///
+    /// # Returns
+    /// `Some(DisconnectReason)` if the peer should be disconnected, `None` otherwise.
+    pub async fn should_disconnect_peer(&self, peer_id: &[u8; 32]) -> Option<DisconnectReason> {
+        let states = self.peer_states.read().await;
+        let state = states.get(peer_id)?;
+
+        match state.status {
+            SignedPeerStatus::Unresponsive => Some(DisconnectReason::HeartbeatTimeout {
+                missed_epochs: state.missed_count,
+            }),
+            SignedPeerStatus::Suspect if state.missed_count >= self.config.eviction_threshold => {
+                Some(DisconnectReason::HeartbeatTimeout {
+                    missed_epochs: state.missed_count,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Get all peers that should be disconnected (Phase 6: Hard Enforcement).
+    ///
+    /// Returns a list of peer IDs and their disconnect reasons for all peers
+    /// that have become unresponsive and should be disconnected in hard mode.
+    ///
+    /// This method also considers network resilience - it won't recommend
+    /// mass disconnections during network partitions or other resilience events.
+    pub async fn get_peers_to_disconnect(&self) -> Vec<([u8; 32], DisconnectReason)> {
+        let states = self.peer_states.read().await;
+        let health_context = self.build_health_context(&states).await;
+
+        // Don't recommend disconnections during startup grace
+        if health_context.in_startup_grace {
+            tracing::debug!("Startup grace active - not recommending disconnections");
+            return Vec::new();
+        }
+
+        // Don't recommend disconnections if we might be the problem
+        if health_context.likely_self_problem() {
+            tracing::debug!("Possible self-connectivity issue - not recommending disconnections");
+            return Vec::new();
+        }
+
+        // Don't recommend mass disconnections during quiescence
+        if self.quiescence_detector.read().await.is_quiescent() {
+            tracing::debug!("Network quiescent - not recommending disconnections");
+            return Vec::new();
+        }
+
+        let mut to_disconnect = Vec::new();
+
+        for (peer_id, state) in states.iter() {
+            let reason = match state.status {
+                SignedPeerStatus::Unresponsive => Some(DisconnectReason::HeartbeatTimeout {
+                    missed_epochs: state.missed_count,
+                }),
+                SignedPeerStatus::Suspect
+                    if state.missed_count >= self.config.eviction_threshold =>
+                {
+                    Some(DisconnectReason::HeartbeatTimeout {
+                        missed_epochs: state.missed_count,
+                    })
+                }
+                _ => None,
+            };
+
+            if let Some(r) = reason {
+                to_disconnect.push((*peer_id, r));
+            }
+        }
+
+        // Safety check: don't recommend disconnecting more than 30% of peers at once
+        let total_peers = states.len();
+        let max_disconnects = (total_peers as f64 * 0.3).ceil() as usize;
+
+        if to_disconnect.len() > max_disconnects && total_peers > 5 {
+            tracing::warn!(
+                recommended = to_disconnect.len(),
+                max_allowed = max_disconnects,
+                total_peers = total_peers,
+                "Limiting disconnection recommendations to prevent mass eviction"
+            );
+            to_disconnect.truncate(max_disconnects);
+        }
+
+        to_disconnect
     }
 
     /// Create persisted state for graceful shutdown.

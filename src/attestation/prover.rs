@@ -293,6 +293,16 @@ pub enum AttestationProver {
     Sp1(Sp1AttestationProver),
 }
 
+impl std::fmt::Debug for AttestationProver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mock(m) => f.debug_tuple("Mock").field(m).finish(),
+            #[cfg(feature = "zkvm-prover")]
+            Self::Sp1(_) => f.debug_struct("Sp1").finish_non_exhaustive(),
+        }
+    }
+}
+
 impl AttestationProver {
     /// Create a new prover using the best available implementation.
     ///

@@ -112,6 +112,247 @@ pub enum AttestationVerificationResult {
     NoProof,
 }
 
+/// Detailed rejection reason for attestation failures (Phase 6: Hard Enforcement).
+///
+/// Provides specific information about why an attestation was rejected,
+/// enabling better debugging and user feedback.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AttestationRejectionReason {
+    /// zkVM proof cryptographic verification failed.
+    InvalidProof,
+
+    /// EntangledId doesn't match claimed identity.
+    IdentityMismatch,
+
+    /// Binary hash not in current allowlist.
+    BinaryNotAllowed {
+        /// The rejected binary hash.
+        hash: [u8; 32],
+    },
+
+    /// Proof timestamp too old (stale proof).
+    ProofStale {
+        /// Age of the proof in seconds.
+        age_secs: u64,
+    },
+
+    /// Challenge-response signature invalid.
+    SignatureFailed,
+
+    /// Protocol version not supported.
+    UnsupportedProtocol {
+        /// The unsupported version.
+        version: u8,
+    },
+
+    /// Node on temporary blacklist due to repeated failures.
+    Blacklisted {
+        /// Unix timestamp when blacklist expires.
+        until: u64,
+    },
+
+    /// Heartbeat verification failed.
+    HeartbeatFailure {
+        /// Number of missed heartbeats.
+        missed_epochs: u32,
+    },
+
+    /// No attestation proof provided.
+    NoProofProvided,
+}
+
+impl std::fmt::Display for AttestationRejectionReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidProof => write!(f, "Invalid cryptographic proof"),
+            Self::IdentityMismatch => write!(f, "EntangledId does not match public key"),
+            Self::BinaryNotAllowed { hash } => {
+                write!(f, "Binary not allowed: {}", hex::encode(&hash[..8]))
+            }
+            Self::ProofStale { age_secs } => write!(f, "Proof is stale ({age_secs}s old)"),
+            Self::SignatureFailed => write!(f, "Signature verification failed"),
+            Self::UnsupportedProtocol { version } => {
+                write!(f, "Unsupported protocol version: {version}")
+            }
+            Self::Blacklisted { until } => write!(f, "Blacklisted until timestamp {until}"),
+            Self::HeartbeatFailure { missed_epochs } => {
+                write!(f, "Missed {missed_epochs} heartbeat epochs")
+            }
+            Self::NoProofProvided => write!(f, "No attestation proof provided"),
+        }
+    }
+}
+
+/// Connection rejection message sent before closing (Phase 6: Hard Enforcement).
+///
+/// When hard enforcement is enabled and a peer fails attestation,
+/// this message is sent before disconnecting to inform them of the reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttestationRejection {
+    /// The specific reason for rejection.
+    pub reason: AttestationRejectionReason,
+
+    /// Unix timestamp when rejection occurred.
+    pub timestamp: u64,
+
+    /// Minimum time in seconds before retry is allowed.
+    pub retry_after_secs: u64,
+}
+
+impl AttestationRejection {
+    /// Create a new rejection message.
+    #[must_use]
+    pub fn new(reason: AttestationRejectionReason, retry_after_secs: u64) -> Self {
+        Self {
+            reason,
+            timestamp: current_timestamp(),
+            retry_after_secs,
+        }
+    }
+
+    /// Create a rejection for an invalid proof.
+    #[must_use]
+    pub fn invalid_proof() -> Self {
+        Self::new(AttestationRejectionReason::InvalidProof, 60)
+    }
+
+    /// Create a rejection for identity mismatch.
+    #[must_use]
+    pub fn identity_mismatch() -> Self {
+        Self::new(AttestationRejectionReason::IdentityMismatch, 60)
+    }
+
+    /// Create a rejection for disallowed binary.
+    #[must_use]
+    pub fn binary_not_allowed(hash: [u8; 32]) -> Self {
+        Self::new(AttestationRejectionReason::BinaryNotAllowed { hash }, 300)
+    }
+
+    /// Create a rejection for stale proof.
+    #[must_use]
+    pub fn proof_stale(age_secs: u64) -> Self {
+        Self::new(AttestationRejectionReason::ProofStale { age_secs }, 0)
+    }
+
+    /// Create a rejection for blacklisted peer.
+    #[must_use]
+    pub fn blacklisted(until: u64) -> Self {
+        let now = current_timestamp();
+        let retry_after = until.saturating_sub(now);
+        Self::new(
+            AttestationRejectionReason::Blacklisted { until },
+            retry_after,
+        )
+    }
+}
+
+/// Result of peer attestation verification with enforcement decision.
+///
+/// This is the primary return type for attestation verification in hard enforcement mode.
+/// It provides both the verification outcome and the action to take.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnforcementDecision {
+    /// Attestation verified successfully - allow connection.
+    Allow,
+
+    /// Attestation skipped (enforcement off) - allow connection.
+    Skipped,
+
+    /// Attestation invalid but allowed (soft enforcement) - allow with warning.
+    AllowWithWarning {
+        /// The verification failure reason.
+        reason: AttestationRejectionReason,
+    },
+
+    /// Attestation invalid - reject connection (hard enforcement).
+    Reject {
+        /// The rejection details to send to peer.
+        rejection: AttestationRejection,
+    },
+}
+
+impl EnforcementDecision {
+    /// Check if the connection should be allowed.
+    #[must_use]
+    pub fn should_allow(&self) -> bool {
+        matches!(
+            self,
+            Self::Allow | Self::Skipped | Self::AllowWithWarning { .. }
+        )
+    }
+
+    /// Check if the connection should be rejected.
+    #[must_use]
+    pub fn should_reject(&self) -> bool {
+        matches!(self, Self::Reject { .. })
+    }
+
+    /// Get the rejection details if this is a rejection.
+    #[must_use]
+    pub fn rejection(&self) -> Option<&AttestationRejection> {
+        match self {
+            Self::Reject { rejection } => Some(rejection),
+            _ => None,
+        }
+    }
+
+    /// Convert verification result to enforcement decision based on mode.
+    #[must_use]
+    pub fn from_verification(
+        result: &AttestationVerificationResult,
+        enforcement: EnforcementMode,
+    ) -> Self {
+        match enforcement {
+            EnforcementMode::Off => Self::Skipped,
+            EnforcementMode::Soft => {
+                if result.is_valid() {
+                    Self::Allow
+                } else {
+                    let reason = match result {
+                        AttestationVerificationResult::Invalid(_) => {
+                            AttestationRejectionReason::InvalidProof
+                        }
+                        AttestationVerificationResult::Stale => {
+                            AttestationRejectionReason::ProofStale { age_secs: 0 }
+                        }
+                        AttestationVerificationResult::BinaryNotAllowed => {
+                            AttestationRejectionReason::BinaryNotAllowed { hash: [0u8; 32] }
+                        }
+                        AttestationVerificationResult::NoProof => {
+                            AttestationRejectionReason::NoProofProvided
+                        }
+                        AttestationVerificationResult::Valid => unreachable!(),
+                    };
+                    Self::AllowWithWarning { reason }
+                }
+            }
+            EnforcementMode::Hard => {
+                if result.is_valid() {
+                    Self::Allow
+                } else {
+                    let rejection = match result {
+                        AttestationVerificationResult::Invalid(_) => {
+                            AttestationRejection::invalid_proof()
+                        }
+                        AttestationVerificationResult::Stale => {
+                            AttestationRejection::proof_stale(0)
+                        }
+                        AttestationVerificationResult::BinaryNotAllowed => {
+                            AttestationRejection::binary_not_allowed([0u8; 32])
+                        }
+                        AttestationVerificationResult::NoProof => AttestationRejection::new(
+                            AttestationRejectionReason::NoProofProvided,
+                            60,
+                        ),
+                        AttestationVerificationResult::Valid => unreachable!(),
+                    };
+                    Self::Reject { rejection }
+                }
+            }
+        }
+    }
+}
+
 impl AttestationVerificationResult {
     /// Check if verification was successful.
     #[must_use]

@@ -73,6 +73,8 @@ rand_core = "0.6"
 rand_chacha = "0.3"
 # Memory protection
 zeroize = { version = "1.7", features = ["derive"] }
+# Constant-time operations for cryptographic security
+subtle = "2.5"
 # TODO: Remove once fully migrated to saorsa-pqc - keeping temporarily for compatibility
 blake3 = "1.5"
 hmac = "0.12"
