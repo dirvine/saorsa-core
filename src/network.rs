@@ -3091,13 +3091,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_subscription() -> Result<()> {
-        let mut config1 = create_test_node_config();
-        config1.listen_addr =
+        // Configure both nodes to use only IPv4 for reliable cross-platform testing
+        // This is important because:
+        // 1. local_addr() returns the first address from listen_addrs
+        // 2. The default config puts IPv6 first, which may not work on all Windows setups
+        let ipv4_localhost =
             std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0);
+
+        let mut config1 = create_test_node_config();
+        config1.listen_addr = ipv4_localhost;
+        config1.listen_addrs = vec![ipv4_localhost];
+        config1.enable_ipv6 = false;
+
         let mut config2 = create_test_node_config();
         config2.peer_id = Some("test_peer_456".to_string());
-        config2.listen_addr =
-            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0);
+        config2.listen_addr = ipv4_localhost;
+        config2.listen_addrs = vec![ipv4_localhost];
+        config2.enable_ipv6 = false;
 
         let node1 = P2PNode::new(config1).await?;
         let node2 = P2PNode::new(config2).await?;
