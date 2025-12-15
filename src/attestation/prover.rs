@@ -166,14 +166,14 @@ impl Default for Sp1ProverConfig {
 /// # Requirements
 ///
 /// - SP1 toolchain must be installed (`cargo prove install`)
-/// - The `saorsa-attestation-guest` ELF must be built
+/// - The `saorsa-attestation-guest` ELF must be built and `ATTESTATION_GUEST_ELF` env var set
 /// - For local proving: adequate CPU/GPU resources
 /// - For network proving: `SUCCINCT_API_KEY` environment variable
 #[cfg(feature = "zkvm-prover")]
 pub struct Sp1AttestationProver {
-    client: sp1_sdk::ProverClient,
-    pk: sp1_sdk::ProvingKey,
-    vk: sp1_sdk::VerifyingKey,
+    client: sp1_sdk::EnvProver,
+    pk: sp1_sdk::SP1ProvingKey,
+    vk: sp1_sdk::SP1VerifyingKey,
     config: Sp1ProverConfig,
 }
 
@@ -183,19 +183,30 @@ impl Sp1AttestationProver {
     ///
     /// This loads the guest program ELF and generates proving/verifying keys.
     ///
+    /// # Environment Variables
+    ///
+    /// - `ATTESTATION_GUEST_ELF`: Path to the compiled guest program ELF
+    ///
     /// # Errors
     ///
     /// Returns an error if:
+    /// - The `ATTESTATION_GUEST_ELF` environment variable is not set
     /// - The guest ELF cannot be loaded
     /// - Key generation fails
     pub fn new(config: Sp1ProverConfig) -> Result<Self, AttestationError> {
-        let client = sp1_sdk::ProverClient::new();
+        let client = sp1_sdk::ProverClient::from_env();
 
-        // Load the guest program ELF
-        // In production, this would be embedded at compile time
-        let elf = include_bytes!(env!("ATTESTATION_GUEST_ELF"));
+        // Load the guest program ELF from environment variable path
+        let elf_path = std::env::var("ATTESTATION_GUEST_ELF").map_err(|_| {
+            AttestationError::InvalidProof(
+                "ATTESTATION_GUEST_ELF environment variable not set".to_string(),
+            )
+        })?;
+        let elf = std::fs::read(&elf_path).map_err(|e| {
+            AttestationError::InvalidProof(format!("Failed to read guest ELF from {elf_path}: {e}"))
+        })?;
 
-        let (pk, vk) = client.setup(elf);
+        let (pk, vk) = client.setup(&elf);
 
         Ok(Self {
             client,
@@ -221,17 +232,39 @@ impl Sp1AttestationProver {
         &self,
         witness: &AttestationProofWitness,
     ) -> Result<AttestationProof, AttestationError> {
-        use sp1_sdk::SP1Stdin;
+        use sp1_sdk::{HashableKey, SP1Stdin};
 
         // Prepare input for zkVM
         let mut stdin = SP1Stdin::new();
         stdin.write(&witness);
 
         // Generate proof based on configured type
-        let proof_result = match self.config.proof_type {
-            ProofType::Sp1Core => self.client.prove(&self.pk, stdin).core().run(),
-            ProofType::Sp1Compressed => self.client.prove(&self.pk, stdin).compressed().run(),
-            ProofType::Sp1Groth16 => self.client.prove(&self.pk, stdin).groth16().run(),
+        let mut sp1_proof = match self.config.proof_type {
+            ProofType::Sp1Core => {
+                self.client
+                    .prove(&self.pk, &stdin)
+                    .core()
+                    .run()
+                    .map_err(|e| {
+                        AttestationError::InvalidProof(format!("SP1 core proof failed: {e}"))
+                    })?
+            }
+            ProofType::Sp1Compressed => self
+                .client
+                .prove(&self.pk, &stdin)
+                .compressed()
+                .run()
+                .map_err(|e| {
+                    AttestationError::InvalidProof(format!("SP1 compressed proof failed: {e}"))
+                })?,
+            ProofType::Sp1Groth16 => self
+                .client
+                .prove(&self.pk, &stdin)
+                .groth16()
+                .run()
+                .map_err(|e| {
+                    AttestationError::InvalidProof(format!("SP1 groth16 proof failed: {e}"))
+                })?,
             ProofType::Mock => {
                 return Err(AttestationError::InvalidProof(
                     "Mock proof type not supported by SP1 prover".to_string(),
@@ -239,15 +272,8 @@ impl Sp1AttestationProver {
             }
         };
 
-        let sp1_proof = proof_result.map_err(|e| {
-            AttestationError::InvalidProof(format!("SP1 proof generation failed: {e}"))
-        })?;
-
-        // Extract public values
-        let public_inputs: AttestationProofPublicInputs = sp1_proof
-            .public_values
-            .read()
-            .map_err(|e| AttestationError::InvalidProof(format!("Failed to read outputs: {e}")))?;
+        // Extract public values from the proof
+        let public_inputs: AttestationProofPublicInputs = sp1_proof.public_values.read();
 
         Ok(AttestationProof {
             proof_bytes: sp1_proof.bytes(),
@@ -260,12 +286,13 @@ impl Sp1AttestationProver {
     /// Get the verification key hash.
     #[must_use]
     pub fn vkey_hash(&self) -> [u8; 32] {
+        use sp1_sdk::HashableKey;
         self.vk.hash_bytes()
     }
 
     /// Get the verification key.
     #[must_use]
-    pub fn verifying_key(&self) -> &sp1_sdk::VerifyingKey {
+    pub fn verifying_key(&self) -> &sp1_sdk::SP1VerifyingKey {
         &self.vk
     }
 }
@@ -289,8 +316,9 @@ pub enum AttestationProver {
     /// Mock prover for testing.
     Mock(MockAttestationProver),
     /// Real SP1 prover (requires `zkvm-prover` feature).
+    /// Boxed to avoid large enum variant size difference.
     #[cfg(feature = "zkvm-prover")]
-    Sp1(Sp1AttestationProver),
+    Sp1(Box<Sp1AttestationProver>),
 }
 
 impl std::fmt::Debug for AttestationProver {
@@ -316,7 +344,7 @@ impl AttestationProver {
     pub fn new() -> Result<Self, AttestationError> {
         let config = Sp1ProverConfig::default();
         let prover = Sp1AttestationProver::new(config)?;
-        Ok(Self::Sp1(prover))
+        Ok(Self::Sp1(Box::new(prover)))
     }
 
     /// Create a new prover (mock implementation when zkvm-prover is disabled).
