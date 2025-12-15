@@ -126,6 +126,7 @@ pub mod heartbeat_manager;
 pub mod metrics;
 pub mod proof_cache;
 pub mod prover;
+pub mod signed_handshake;
 pub mod signed_heartbeat;
 pub mod signed_heartbeat_manager;
 mod sunset;
@@ -164,6 +165,10 @@ pub use signed_heartbeat::{
 pub use signed_heartbeat_manager::{
     SignedHeartbeatHello, SignedHeartbeatManager, SignedHeartbeatMessage, SignedHeartbeatStats,
     SignedPeerHeartbeatState, SignedPeerStatus, SIGNED_HEARTBEAT_GOSSIP_TOPIC,
+};
+pub use signed_handshake::{
+    HandshakeChallenge, HandshakeHelloData, HandshakeVerifyResult, SignedHandshake,
+    SignedHandshakeConfig, SignedHandshakeResponse, SignedHandshakeVerifier,
 };
 
 // Re-export saorsa-logic constants for downstream use
