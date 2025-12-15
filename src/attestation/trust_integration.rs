@@ -127,7 +127,9 @@ impl SignedHeartbeatTrustCallback for HeartbeatTrustIntegration {
                     "Peer became suspect, applying trust penalty"
                 );
                 // Record as failed interaction
-                self.trust_engine.update_local_trust(&local_id, &peer_id, false).await;
+                self.trust_engine
+                    .update_local_trust(&local_id, &peer_id, false)
+                    .await;
             }
 
             // Going from healthy/unknown/suspect to unresponsive
@@ -138,18 +140,25 @@ impl SignedHeartbeatTrustCallback for HeartbeatTrustIntegration {
                 );
                 // Record multiple failed interactions for unresponsive
                 for _ in 0..3 {
-                    self.trust_engine.update_local_trust(&local_id, &peer_id, false).await;
+                    self.trust_engine
+                        .update_local_trust(&local_id, &peer_id, false)
+                        .await;
                 }
             }
 
             // Recovery: going from suspect/unresponsive to healthy
-            (SignedPeerStatus::Suspect | SignedPeerStatus::Unresponsive, SignedPeerStatus::Healthy) => {
+            (
+                SignedPeerStatus::Suspect | SignedPeerStatus::Unresponsive,
+                SignedPeerStatus::Healthy,
+            ) => {
                 tracing::info!(
                     peer = %hex::encode(&entangled_id[..8]),
                     "Peer recovered to healthy, applying trust recovery"
                 );
                 // Record as successful interaction (recovery)
-                self.trust_engine.update_local_trust(&local_id, &peer_id, true).await;
+                self.trust_engine
+                    .update_local_trust(&local_id, &peer_id, true)
+                    .await;
             }
 
             // Going from unknown to healthy
@@ -159,7 +168,9 @@ impl SignedHeartbeatTrustCallback for HeartbeatTrustIntegration {
                     "Peer became healthy (first heartbeat)"
                 );
                 // Small positive for first successful heartbeat
-                self.trust_engine.update_local_trust(&local_id, &peer_id, true).await;
+                self.trust_engine
+                    .update_local_trust(&local_id, &peer_id, true)
+                    .await;
             }
 
             _ => {
@@ -173,7 +184,8 @@ impl SignedHeartbeatTrustCallback for HeartbeatTrustIntegration {
         let local_id = Self::to_node_id(&self.local_entangled_id);
 
         // Calculate streak multiplier (diminishing returns)
-        let streak_multiplier = (1.0 + (streak as f64).ln().max(0.0)).min(self.config.max_streak_multiplier);
+        let streak_multiplier =
+            (1.0 + (streak as f64).ln().max(0.0)).min(self.config.max_streak_multiplier);
 
         tracing::trace!(
             peer = %hex::encode(&entangled_id[..8]),
@@ -183,7 +195,9 @@ impl SignedHeartbeatTrustCallback for HeartbeatTrustIntegration {
         );
 
         // Record successful interaction
-        self.trust_engine.update_local_trust(&local_id, &peer_id, true).await;
+        self.trust_engine
+            .update_local_trust(&local_id, &peer_id, true)
+            .await;
 
         // Update node uptime statistics (approximation: heartbeat interval as uptime increment)
         // This contributes to the multi-factor trust calculation
@@ -208,7 +222,9 @@ impl SignedHeartbeatTrustCallback for HeartbeatTrustIntegration {
         );
 
         // Record as failed interaction
-        self.trust_engine.update_local_trust(&local_id, &peer_id, false).await;
+        self.trust_engine
+            .update_local_trust(&local_id, &peer_id, false)
+            .await;
 
         // Update node statistics with failed response
         self.trust_engine
@@ -265,7 +281,11 @@ mod tests {
 
         // Then mark as suspect
         integration
-            .on_status_change(&peer_id, SignedPeerStatus::Healthy, SignedPeerStatus::Suspect)
+            .on_status_change(
+                &peer_id,
+                SignedPeerStatus::Healthy,
+                SignedPeerStatus::Suspect,
+            )
             .await;
 
         // Trust should be lower (or we at least recorded a failed interaction)
@@ -289,7 +309,11 @@ mod tests {
 
         // Mark as unresponsive directly
         integration
-            .on_status_change(&peer_id, SignedPeerStatus::Healthy, SignedPeerStatus::Unresponsive)
+            .on_status_change(
+                &peer_id,
+                SignedPeerStatus::Healthy,
+                SignedPeerStatus::Unresponsive,
+            )
             .await;
 
         // Should have recorded multiple failed interactions (3x penalty)
@@ -309,12 +333,20 @@ mod tests {
 
         // First, mark as suspect
         integration
-            .on_status_change(&peer_id, SignedPeerStatus::Healthy, SignedPeerStatus::Suspect)
+            .on_status_change(
+                &peer_id,
+                SignedPeerStatus::Healthy,
+                SignedPeerStatus::Suspect,
+            )
             .await;
 
         // Then recover to healthy
         integration
-            .on_status_change(&peer_id, SignedPeerStatus::Suspect, SignedPeerStatus::Healthy)
+            .on_status_change(
+                &peer_id,
+                SignedPeerStatus::Suspect,
+                SignedPeerStatus::Healthy,
+            )
             .await;
 
         // Should have positive interaction recorded for recovery

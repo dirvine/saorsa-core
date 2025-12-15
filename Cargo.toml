@@ -1,6 +1,6 @@
 [package]
 name = "saorsa-core"
-version = "0.7.13"
+version = "0.8.0"
 edition = "2024"
 authors = ["Saorsa Labs Limited <david@saorsalabs.com>"]
 license = "AGPL-3.0"
@@ -36,11 +36,6 @@ zkvm-prover = ["dep:sp1-sdk"]
 # Enable SP1 Groth16/PLONK verification (lightweight, NOT post-quantum secure)
 # Use for on-chain verification compatibility only
 zkvm-verifier-groth16 = ["dep:sp1-verifier"]
-# Enable real SP1 VDF (requires SP1 SDK and toolchain)
-# Platform requirements: x86_64 or ARM64 with significant RAM (4GB+ recommended)
-# Not suitable for resource-constrained devices (Raspberry Pi, embedded)
-# Without this feature, a mock VDF provider is used
-vdf = ["dep:sp1-sdk", "dep:sp1-build"]
 
 [dependencies]
 # Core async and serialization
@@ -147,9 +142,8 @@ saorsa-webrtc = "0.1.2"
 clap = { version = "4.4", features = ["derive"] }
 sha2 = "0.10.9"
 
-# SP1 Build helper (only pulled in when vdf feature is enabled)
 [build-dependencies]
-sp1-build = { version = "5.2", optional = true }
+# No build dependencies currently required
 
 [dev-dependencies]
 tempfile = "3.10"

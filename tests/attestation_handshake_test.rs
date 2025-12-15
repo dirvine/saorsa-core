@@ -207,6 +207,7 @@ fn test_verification_fails_for_id_mismatch() {
         entangled_id: wrong_entangled_id,
         proof: fake_proof,
         protocol_version: 1,
+        heartbeat: None,
     };
 
     // Act
@@ -228,6 +229,7 @@ fn test_verification_fails_for_unsupported_protocol_version() {
         entangled_id: *id.id(),
         proof,
         protocol_version: 99, // Unsupported version
+        heartbeat: None,
     };
 
     // Act
@@ -391,6 +393,7 @@ fn test_peer_status_tracking_failed() {
         entangled_id: [0x99u8; 32],
         proof: create_mock_proof([0x11u8; 32], [0x42u8; 32]), // Mismatched ID
         protocol_version: 1,
+        heartbeat: None,
     };
 
     let (result, status) = handshake.verify_hello(&hello);

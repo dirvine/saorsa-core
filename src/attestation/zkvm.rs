@@ -123,7 +123,7 @@ pub struct AttestationProofPublicInputs {
 /// These values are known only to the prover and are NOT revealed
 /// in the proof. The zkVM proves correct computation over this
 /// data without exposing it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttestationProofWitness {
     /// Full ML-DSA-65 public key (1952 bytes).
     ///

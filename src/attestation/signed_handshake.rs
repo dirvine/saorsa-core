@@ -45,10 +45,10 @@
 //! - **Identity Binding**: Derivation check ensures EntangledId consistency
 //! - **Freshness**: Timestamp prevents stale response reuse
 
-use super::signed_heartbeat::SignedHeartbeat;
 use super::AttestationError;
+use super::signed_heartbeat::SignedHeartbeat;
 use crate::quantum_crypto::ant_quic_integration::{
-    ml_dsa_sign, ml_dsa_verify, MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
+    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature, ml_dsa_sign, ml_dsa_verify,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -74,9 +74,9 @@ pub struct SignedHandshakeConfig {
 impl Default for SignedHandshakeConfig {
     fn default() -> Self {
         Self {
-            max_hello_age_secs: 60,        // 1 minute
-            max_challenge_age_secs: 30,    // 30 seconds
-            allowed_binaries: Vec::new(),  // Allow all
+            max_hello_age_secs: 60,       // 1 minute
+            max_challenge_age_secs: 30,   // 30 seconds
+            allowed_binaries: Vec::new(), // Allow all
         }
     }
 }
@@ -189,11 +189,8 @@ impl HandshakeHelloData {
     /// Verify the EntangledId derivation is correct.
     #[must_use]
     pub fn verify_derivation(&self) -> bool {
-        let derived = derive_entangled_id(
-            &self.public_key,
-            &self.binary_hash,
-            self.derivation_nonce,
-        );
+        let derived =
+            derive_entangled_id(&self.public_key, &self.binary_hash, self.derivation_nonce);
         derived == self.entangled_id
     }
 }
@@ -324,7 +321,10 @@ impl SignedHandshakeVerifier {
 
         // 4. Binary allowlist check (if configured)
         if !self.config.allowed_binaries.is_empty()
-            && !self.config.allowed_binaries.contains(&response.hello.binary_hash)
+            && !self
+                .config
+                .allowed_binaries
+                .contains(&response.hello.binary_hash)
         {
             return HandshakeVerifyResult::BinaryNotAllowed;
         }
@@ -484,7 +484,8 @@ impl SignedHandshake {
         let challenge = HandshakeChallenge::new(self.local_entangled_id);
 
         // Store for later verification
-        self.pending_challenges.insert(peer_entangled_id, challenge.clone());
+        self.pending_challenges
+            .insert(peer_entangled_id, challenge.clone());
 
         challenge
     }
@@ -653,8 +654,12 @@ mod tests {
         let bob_challenge = bob.create_challenge(*alice.entangled_id());
 
         // Both respond
-        let alice_response = alice.respond_to_challenge(&bob_challenge).expect("alice respond");
-        let bob_response = bob.respond_to_challenge(&alice_challenge).expect("bob respond");
+        let alice_response = alice
+            .respond_to_challenge(&bob_challenge)
+            .expect("alice respond");
+        let bob_response = bob
+            .respond_to_challenge(&alice_challenge)
+            .expect("bob respond");
 
         // Both verify
         let alice_result = alice.verify_response(bob.entangled_id(), &bob_response);
@@ -698,7 +703,11 @@ mod tests {
         let result = alice.verify_response(bob.entangled_id(), &bob_response);
 
         assert!(
-            matches!(result, HandshakeVerifyResult::DerivationMismatch | HandshakeVerifyResult::InvalidSignature(_)),
+            matches!(
+                result,
+                HandshakeVerifyResult::DerivationMismatch
+                    | HandshakeVerifyResult::InvalidSignature(_)
+            ),
             "Expected DerivationMismatch or InvalidSignature, got {:?}",
             result
         );
@@ -799,7 +808,10 @@ mod tests {
 
         // Will fail as either stale OR signature mismatch (since we changed timestamp after signing)
         assert!(
-            matches!(result, HandshakeVerifyResult::HelloStale | HandshakeVerifyResult::InvalidSignature(_)),
+            matches!(
+                result,
+                HandshakeVerifyResult::HelloStale | HandshakeVerifyResult::InvalidSignature(_)
+            ),
             "Expected HelloStale or InvalidSignature, got {:?}",
             result
         );

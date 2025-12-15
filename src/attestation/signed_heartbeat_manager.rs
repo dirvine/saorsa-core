@@ -35,13 +35,15 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
+use super::AttestationError;
 use super::network_resilience::{
-    HeartbeatAction, HeartbeatDecisionEngine, HealthyRatioTracker, NetworkHealthContext,
+    HealthyRatioTracker, HeartbeatAction, HeartbeatDecisionEngine, NetworkHealthContext,
     PersistedNetworkState, PersistedPeerState, QuiescenceDetector, RecoveryHandler,
     ResilienceConfig,
 };
-use super::signed_heartbeat::{HeartbeatConfig, HeartbeatSigner, HeartbeatVerifyResult, SignedHeartbeat};
-use super::AttestationError;
+use super::signed_heartbeat::{
+    HeartbeatConfig, HeartbeatSigner, HeartbeatVerifyResult, SignedHeartbeat,
+};
 use crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -644,9 +646,9 @@ impl SignedHeartbeatManager {
             .filter(|s| s.status == SignedPeerStatus::Unknown)
             .count();
 
-        let mut context = self
-            .recovery_handler
-            .build_context(healthy, suspect, unresponsive, unknown);
+        let mut context =
+            self.recovery_handler
+                .build_context(healthy, suspect, unresponsive, unknown);
 
         // Add connectivity info
         context.external_connectivity = *self.external_connectivity.read().await;
@@ -701,7 +703,10 @@ impl SignedHeartbeatManager {
     }
 
     /// Get the status of a peer.
-    pub async fn get_peer_status(&self, entangled_id: &[u8; 32]) -> Option<SignedPeerHeartbeatState> {
+    pub async fn get_peer_status(
+        &self,
+        entangled_id: &[u8; 32],
+    ) -> Option<SignedPeerHeartbeatState> {
         let states = self.peer_states.read().await;
         states.get(entangled_id).cloned()
     }
@@ -986,7 +991,10 @@ mod tests {
         let bytes = SignedHeartbeatManager::serialize_message(&message).expect("serialize");
         let recovered = SignedHeartbeatManager::deserialize_message(&bytes).expect("deserialize");
 
-        assert_eq!(recovered.heartbeat.entangled_id, message.heartbeat.entangled_id);
+        assert_eq!(
+            recovered.heartbeat.entangled_id,
+            message.heartbeat.entangled_id
+        );
         assert_eq!(recovered.heartbeat.epoch, message.heartbeat.epoch);
         assert_eq!(recovered.public_key, message.public_key);
     }
@@ -1073,11 +1081,7 @@ mod tests {
 
         // Create manager from recovered state
         let signer_recovered = create_test_signer([1u8; 32]);
-        let manager2 = SignedHeartbeatManager::from_persisted(
-            signer_recovered,
-            config,
-            recovered,
-        );
+        let manager2 = SignedHeartbeatManager::from_persisted(signer_recovered, config, recovered);
 
         // Verify recovery - should start in grace period after restart
         assert!(manager2.in_grace_period());

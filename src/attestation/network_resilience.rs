@@ -72,7 +72,7 @@ pub struct ResilienceConfig {
 impl Default for ResilienceConfig {
     fn default() -> Self {
         Self {
-            startup_grace_secs: 300,              // 5 minutes
+            startup_grace_secs: 300, // 5 minutes
             min_peers_for_eviction: 3,
             sudden_drop_threshold: 0.3,           // 30% drop
             quiescence_threshold_secs: 600,       // 10 minutes
@@ -178,12 +178,7 @@ pub struct NetworkHealthContext {
 
 impl NetworkHealthContext {
     /// Create a new context with the given peer counts.
-    pub fn new(
-        healthy: usize,
-        suspect: usize,
-        unresponsive: usize,
-        unknown: usize,
-    ) -> Self {
+    pub fn new(healthy: usize, suspect: usize, unresponsive: usize, unknown: usize) -> Self {
         let total = healthy + suspect + unresponsive + unknown;
         let healthy_ratio = if total > 0 {
             healthy as f64 / total as f64
@@ -331,9 +326,7 @@ impl HeartbeatDecisionEngine {
         }
 
         // Priority 2: Recovery from downtime
-        if context.recovered_from_downtime
-            && context.uptime_secs < self.config.startup_grace_secs
-        {
+        if context.recovered_from_downtime && context.uptime_secs < self.config.startup_grace_secs {
             tracing::debug!(
                 uptime_secs = context.uptime_secs,
                 "Recovering from downtime, entering reconnect mode"
@@ -434,8 +427,7 @@ impl QuiescenceDetector {
         // 2. No successful heartbeat exchanges for a while
         // 3. But we still have external connectivity (so it's not us)
 
-        let low_activity = context.healthy_peers == 0
-            && context.recent_connection_successes == 0;
+        let low_activity = context.healthy_peers == 0 && context.recent_connection_successes == 0;
 
         let we_are_ok = context.external_connectivity;
 
@@ -516,7 +508,8 @@ impl PersistedNetworkState {
     #[must_use]
     pub fn downtime_secs(&self) -> u64 {
         let now = current_timestamp();
-        let last_active = self.shutdown_timestamp
+        let last_active = self
+            .shutdown_timestamp
             .unwrap_or(self.last_healthy_activity);
         now.saturating_sub(last_active)
     }
@@ -529,8 +522,7 @@ impl PersistedNetworkState {
 
     /// Serialize to bytes for storage.
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
-        serde_cbor::to_vec(self)
-            .map_err(|e| format!("Failed to serialize network state: {}", e))
+        serde_cbor::to_vec(self).map_err(|e| format!("Failed to serialize network state: {}", e))
     }
 
     /// Deserialize from bytes.
@@ -875,10 +867,7 @@ mod tests {
         let recovered = PersistedNetworkState::from_bytes(&bytes).expect("deserialize");
 
         assert_eq!(recovered.peer_states.len(), 1);
-        assert_eq!(
-            recovered.peer_states[&[1u8; 32]].streak,
-            10
-        );
+        assert_eq!(recovered.peer_states[&[1u8; 32]].streak, 10);
     }
 
     #[test]

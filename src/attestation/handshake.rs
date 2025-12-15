@@ -161,7 +161,6 @@ pub struct PeerAttestationStatus {
     pub last_failure_reason: Option<String>,
 
     // --- Phase 5: Heartbeat tracking ---
-
     /// Peer's heartbeat status (Phase 5).
     pub heartbeat_status: super::SignedPeerStatus,
 
@@ -478,7 +477,7 @@ fn current_timestamp() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attestation::{AttestationProofPublicInputs, SignedPeerStatus, ProofType};
+    use crate::attestation::{AttestationProofPublicInputs, ProofType, SignedPeerStatus};
     use crate::quantum_crypto::generate_ml_dsa_keypair;
 
     fn create_test_proof(entangled_id: [u8; 32], binary_hash: [u8; 32]) -> AttestationProof {

@@ -140,31 +140,31 @@ pub use handshake::{
     AttestationHandshake, AttestationHello, AttestationVerificationResult, PeerAttestationStatus,
 };
 pub use metrics::{AttestationMetrics, AttestationMetricsCollector, VerificationTimer};
+pub use network_resilience::{
+    HealthyRatioTracker, HeartbeatAction, HeartbeatDecisionEngine, NetworkHealthContext,
+    PersistedNetworkState, PersistedPeerState, QuiescenceDetector, RecoveryHandler,
+    ResilienceConfig,
+};
 pub use proof_cache::ProofCache;
 pub use prover::{AttestationProof, AttestationProver, MockAttestationProver, ProofType};
-pub use sunset::SunsetTimestamp;
-pub use types::{AttestationError, AttestationResult};
-pub use trust_integration::{HeartbeatTrustConfig, HeartbeatTrustIntegration};
-pub use verifier::{AttestationVerifier, AttestationVerifierConfig};
-pub use zkvm::{AttestationProofPublicInputs, AttestationProofResult, AttestationProofWitness};
+pub use signed_handshake::{
+    HandshakeChallenge, HandshakeHelloData, HandshakeVerifyResult, SignedHandshake,
+    SignedHandshakeConfig, SignedHandshakeResponse, SignedHandshakeVerifier,
+};
 pub use signed_heartbeat::{
     HeartbeatConfig as SignedHeartbeatConfig, HeartbeatSigner, HeartbeatVerifyResult,
     SignedHeartbeat,
 };
 pub use signed_heartbeat_manager::{
-    SignedHeartbeatHello, SignedHeartbeatManager, SignedHeartbeatMessage, SignedHeartbeatStats,
-    SignedHeartbeatTrustCallback, SignedPeerHeartbeatState, SignedPeerStatus,
-    SIGNED_HEARTBEAT_GOSSIP_TOPIC,
+    SIGNED_HEARTBEAT_GOSSIP_TOPIC, SignedHeartbeatHello, SignedHeartbeatManager,
+    SignedHeartbeatMessage, SignedHeartbeatStats, SignedHeartbeatTrustCallback,
+    SignedPeerHeartbeatState, SignedPeerStatus,
 };
-pub use signed_handshake::{
-    HandshakeChallenge, HandshakeHelloData, HandshakeVerifyResult, SignedHandshake,
-    SignedHandshakeConfig, SignedHandshakeResponse, SignedHandshakeVerifier,
-};
-pub use network_resilience::{
-    HeartbeatAction, HeartbeatDecisionEngine, HealthyRatioTracker, NetworkHealthContext,
-    PersistedNetworkState, PersistedPeerState, QuiescenceDetector, RecoveryHandler,
-    ResilienceConfig,
-};
+pub use sunset::SunsetTimestamp;
+pub use trust_integration::{HeartbeatTrustConfig, HeartbeatTrustIntegration};
+pub use types::{AttestationError, AttestationResult};
+pub use verifier::{AttestationVerifier, AttestationVerifierConfig};
+pub use zkvm::{AttestationProofPublicInputs, AttestationProofResult, AttestationProofWitness};
 
 // Re-export saorsa-logic constants for downstream use
 pub use entangled_id::{ENTANGLED_ID_SIZE, HASH_SIZE, ML_DSA_65_PUBLIC_KEY_SIZE};

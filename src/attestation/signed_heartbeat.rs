@@ -51,10 +51,10 @@
 //! let is_valid = SignedHeartbeat::verify(&heartbeat, &peer_public_key)?;
 //! ```
 
-use crate::quantum_crypto::ant_quic_integration::{
-    ml_dsa_sign, ml_dsa_verify, MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature,
-};
 use super::AttestationError;
+use crate::quantum_crypto::ant_quic_integration::{
+    MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature, ml_dsa_sign, ml_dsa_verify,
+};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -91,10 +91,10 @@ impl HeartbeatConfig {
     #[must_use]
     pub fn standard() -> Self {
         Self {
-            interval_secs: 60,        // 1 minute heartbeats
-            max_age_secs: 120,        // 2 minute max age
-            suspect_threshold: 3,     // 3 missed = suspect
-            eviction_threshold: 5,    // 5 missed = evicted
+            interval_secs: 60,     // 1 minute heartbeats
+            max_age_secs: 120,     // 2 minute max age
+            suspect_threshold: 3,  // 3 missed = suspect
+            eviction_threshold: 5, // 5 missed = evicted
         }
     }
 
@@ -102,8 +102,8 @@ impl HeartbeatConfig {
     #[must_use]
     pub fn fast() -> Self {
         Self {
-            interval_secs: 5,         // 5 second heartbeats
-            max_age_secs: 15,         // 15 second max age
+            interval_secs: 5, // 5 second heartbeats
+            max_age_secs: 15, // 15 second max age
             suspect_threshold: 2,
             eviction_threshold: 3,
         }
@@ -113,8 +113,8 @@ impl HeartbeatConfig {
     #[must_use]
     pub fn relaxed() -> Self {
         Self {
-            interval_secs: 300,       // 5 minute heartbeats
-            max_age_secs: 600,        // 10 minute max age
+            interval_secs: 300, // 5 minute heartbeats
+            max_age_secs: 600,  // 10 minute max age
             suspect_threshold: 3,
             eviction_threshold: 6,
         }
@@ -306,12 +306,10 @@ impl HeartbeatSigner {
         public_key_bytes: &[u8],
         secret_key_bytes: &[u8],
     ) -> Result<Self, AttestationError> {
-        let public_key = MlDsaPublicKey::from_bytes(public_key_bytes).map_err(|e| {
-            AttestationError::CryptoError(format!("Invalid public key: {}", e))
-        })?;
-        let secret_key = MlDsaSecretKey::from_bytes(secret_key_bytes).map_err(|e| {
-            AttestationError::CryptoError(format!("Invalid secret key: {}", e))
-        })?;
+        let public_key = MlDsaPublicKey::from_bytes(public_key_bytes)
+            .map_err(|e| AttestationError::CryptoError(format!("Invalid public key: {}", e)))?;
+        let secret_key = MlDsaSecretKey::from_bytes(secret_key_bytes)
+            .map_err(|e| AttestationError::CryptoError(format!("Invalid secret key: {}", e)))?;
 
         Ok(Self {
             entangled_id,
@@ -445,7 +443,9 @@ mod tests {
         assert!(!heartbeat.signature.is_empty());
 
         // Verify signature
-        heartbeat.verify_signature(&pk).expect("signature should be valid");
+        heartbeat
+            .verify_signature(&pk)
+            .expect("signature should be valid");
     }
 
     #[test]
@@ -507,17 +507,17 @@ mod tests {
             signature: vec![],
         };
 
-        assert!(heartbeat.is_fresh(60));  // Should be fresh within 60 seconds
+        assert!(heartbeat.is_fresh(60)); // Should be fresh within 60 seconds
 
         let old_heartbeat = SignedHeartbeat {
             entangled_id: [0u8; 32],
             epoch: 0,
-            timestamp: current_timestamp().saturating_sub(120),  // 2 minutes ago
+            timestamp: current_timestamp().saturating_sub(120), // 2 minutes ago
             nonce: [0u8; 16],
             signature: vec![],
         };
 
-        assert!(!old_heartbeat.is_fresh(60));  // Should be stale
+        assert!(!old_heartbeat.is_fresh(60)); // Should be stale
     }
 
     #[test]
@@ -546,6 +546,6 @@ mod tests {
         let payload2 = heartbeat.payload();
 
         assert_eq!(payload1, payload2);
-        assert_eq!(payload1.len(), 64);  // 32 + 8 + 8 + 16
+        assert_eq!(payload1.len(), 64); // 32 + 8 + 8 + 16
     }
 }
