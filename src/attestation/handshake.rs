@@ -63,7 +63,34 @@ pub struct AttestationHello {
     pub proof: AttestationProof,
 
     /// Protocol version for future compatibility.
+    /// - v1: Original attestation proof only
+    /// - v2: Includes optional heartbeat extension (Phase 5)
     pub protocol_version: u8,
+
+    /// Optional heartbeat information (Phase 5).
+    ///
+    /// Present when protocol_version >= 2.
+    /// Contains the sender's latest VDF heartbeat proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat: Option<HeartbeatExtension>,
+}
+
+/// Heartbeat extension for AttestationHello (Phase 5).
+///
+/// Contains VDF heartbeat information exchanged during handshake.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatExtension {
+    /// Current epoch number.
+    pub current_epoch: u64,
+
+    /// Latest heartbeat proof (if available).
+    pub latest_proof: Option<super::HeartbeatAnnouncement>,
+
+    /// Number of consecutive successful heartbeats (streak).
+    pub streak: u32,
+
+    /// Peer's heartbeat status.
+    pub status: super::PeerHeartbeatStatus,
 }
 
 /// Result of verifying a peer's attestation.
@@ -132,6 +159,20 @@ pub struct PeerAttestationStatus {
 
     /// Last verification failure reason.
     pub last_failure_reason: Option<String>,
+
+    // --- Phase 5: Heartbeat tracking ---
+
+    /// Peer's heartbeat status (Phase 5).
+    pub heartbeat_status: super::PeerHeartbeatStatus,
+
+    /// Last heartbeat epoch verified.
+    pub last_heartbeat_epoch: u64,
+
+    /// Peer's heartbeat streak.
+    pub heartbeat_streak: u32,
+
+    /// Protocol version used by peer.
+    pub protocol_version: u8,
 }
 
 impl PeerAttestationStatus {
@@ -145,6 +186,33 @@ impl PeerAttestationStatus {
             binary_hash: Some(binary_hash),
             verification_attempts: 1,
             last_failure_reason: None,
+            // Phase 5: Heartbeat fields default to unknown
+            heartbeat_status: super::PeerHeartbeatStatus::Unknown,
+            last_heartbeat_epoch: 0,
+            heartbeat_streak: 0,
+            protocol_version: 1,
+        }
+    }
+
+    /// Create a new attestation status for a verified peer with heartbeat info (v2).
+    #[must_use]
+    pub fn verified_with_heartbeat(
+        entangled_id: [u8; 32],
+        binary_hash: [u8; 32],
+        heartbeat: &HeartbeatExtension,
+    ) -> Self {
+        Self {
+            entangled_id: Some(entangled_id),
+            proof_valid: true,
+            verified_at: Some(current_timestamp()),
+            binary_hash: Some(binary_hash),
+            verification_attempts: 1,
+            last_failure_reason: None,
+            // Phase 5: Heartbeat fields from extension
+            heartbeat_status: heartbeat.status,
+            last_heartbeat_epoch: heartbeat.current_epoch,
+            heartbeat_streak: heartbeat.streak,
+            protocol_version: 2,
         }
     }
 
@@ -158,6 +226,11 @@ impl PeerAttestationStatus {
             binary_hash: None,
             verification_attempts: 1,
             last_failure_reason: Some(reason),
+            // Phase 5: Heartbeat fields default to unknown
+            heartbeat_status: super::PeerHeartbeatStatus::Unknown,
+            last_heartbeat_epoch: 0,
+            heartbeat_streak: 0,
+            protocol_version: 0,
         }
     }
 
@@ -220,13 +293,35 @@ impl AttestationHandshake {
         }
     }
 
-    /// Create our attestation hello message.
+    /// Create our attestation hello message (v1, no heartbeat).
     #[must_use]
     pub fn create_hello(&self) -> AttestationHello {
         AttestationHello {
             entangled_id: *self.local_entangled_id.id(),
             proof: self.local_proof.clone(),
             protocol_version: 1,
+            heartbeat: None,
+        }
+    }
+
+    /// Create our attestation hello message with heartbeat extension (v2).
+    ///
+    /// Use this when you have a HeartbeatManager to provide liveness proofs.
+    #[must_use]
+    pub fn create_hello_with_heartbeat(
+        &self,
+        heartbeat_hello: super::HeartbeatHello,
+    ) -> AttestationHello {
+        AttestationHello {
+            entangled_id: *self.local_entangled_id.id(),
+            proof: self.local_proof.clone(),
+            protocol_version: 2,
+            heartbeat: Some(HeartbeatExtension {
+                current_epoch: heartbeat_hello.current_epoch,
+                latest_proof: heartbeat_hello.latest_proof,
+                streak: heartbeat_hello.streak,
+                status: super::PeerHeartbeatStatus::Healthy,
+            }),
         }
     }
 
@@ -239,14 +334,19 @@ impl AttestationHandshake {
     /// # Returns
     ///
     /// Verification result and peer attestation status.
+    ///
+    /// # Protocol Versions
+    ///
+    /// - v1: Attestation proof only
+    /// - v2: Attestation proof + heartbeat extension
     pub fn verify_hello(
         &self,
         hello: &AttestationHello,
     ) -> (AttestationVerificationResult, PeerAttestationStatus) {
         let current_time = current_timestamp();
 
-        // Check protocol version
-        if hello.protocol_version != 1 {
+        // Check protocol version (accept v1 and v2)
+        if hello.protocol_version == 0 || hello.protocol_version > 2 {
             let reason = format!("Unsupported protocol version: {}", hello.protocol_version);
             tracing::warn!("{}", reason);
             return (
@@ -265,15 +365,34 @@ impl AttestationHandshake {
                 tracing::debug!(
                     entangled_id = hex::encode(&hello.entangled_id[..8]),
                     binary_hash = hex::encode(&hello.proof.public_inputs.binary_hash[..8]),
+                    protocol_version = hello.protocol_version,
+                    has_heartbeat = hello.heartbeat.is_some(),
                     "Peer attestation verified successfully"
                 );
-                (
-                    AttestationVerificationResult::Valid,
+
+                // Build status based on protocol version
+                let status = if let Some(heartbeat) = &hello.heartbeat {
+                    // v2: Include heartbeat information
+                    tracing::debug!(
+                        epoch = heartbeat.current_epoch,
+                        streak = heartbeat.streak,
+                        heartbeat_status = ?heartbeat.status,
+                        "Peer heartbeat info received"
+                    );
+                    PeerAttestationStatus::verified_with_heartbeat(
+                        hello.entangled_id,
+                        hello.proof.public_inputs.binary_hash,
+                        heartbeat,
+                    )
+                } else {
+                    // v1: Attestation only
                     PeerAttestationStatus::verified(
                         hello.entangled_id,
                         hello.proof.public_inputs.binary_hash,
-                    ),
-                )
+                    )
+                };
+
+                (AttestationVerificationResult::Valid, status)
             }
             AttestationProofResult::Stale => {
                 let reason = "Proof is stale (too old)".to_string();
@@ -359,7 +478,7 @@ fn current_timestamp() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attestation::{AttestationProofPublicInputs, ProofType};
+    use crate::attestation::{AttestationProofPublicInputs, PeerHeartbeatStatus, ProofType};
     use crate::quantum_crypto::generate_ml_dsa_keypair;
 
     fn create_test_proof(entangled_id: [u8; 32], binary_hash: [u8; 32]) -> AttestationProof {
@@ -405,6 +524,7 @@ mod tests {
             entangled_id: *entangled_id.id(),
             proof: proof.clone(),
             protocol_version: 1,
+            heartbeat: None,
         };
 
         let (result, status) = handshake.verify_hello(&hello);
@@ -429,6 +549,7 @@ mod tests {
             entangled_id: wrong_id,
             proof: proof.clone(),
             protocol_version: 1,
+            heartbeat: None,
         };
 
         let (result, status) = handshake.verify_hello(&hello);
@@ -455,5 +576,70 @@ mod tests {
         assert!(result.should_proceed(EnforcementMode::Off));
         assert!(result.should_proceed(EnforcementMode::Soft));
         assert!(result.should_proceed(EnforcementMode::Hard));
+    }
+
+    #[test]
+    fn test_verify_hello_v2_with_heartbeat() {
+        let (pk, _) = generate_ml_dsa_keypair().expect("keygen");
+        let binary_hash = [0x42u8; 32];
+        let entangled_id = EntangledId::derive(&pk, &binary_hash, 12345);
+        let proof = create_test_proof(*entangled_id.id(), binary_hash);
+
+        let config = AttestationConfig::development();
+        let handshake = AttestationHandshake::new(entangled_id.clone(), proof.clone(), config);
+
+        // Create v2 hello with heartbeat extension
+        let hello = AttestationHello {
+            entangled_id: *entangled_id.id(),
+            proof: proof.clone(),
+            protocol_version: 2,
+            heartbeat: Some(HeartbeatExtension {
+                current_epoch: 100,
+                latest_proof: None,
+                streak: 5,
+                status: PeerHeartbeatStatus::Healthy,
+            }),
+        };
+
+        let (result, status) = handshake.verify_hello(&hello);
+        assert!(result.is_valid());
+        assert!(status.proof_valid);
+        assert_eq!(status.entangled_id, Some(*entangled_id.id()));
+        // Check heartbeat fields from extension
+        assert_eq!(status.protocol_version, 2);
+        assert_eq!(status.last_heartbeat_epoch, 100);
+        assert_eq!(status.heartbeat_streak, 5);
+        assert_eq!(status.heartbeat_status, PeerHeartbeatStatus::Healthy);
+    }
+
+    #[test]
+    fn test_reject_unsupported_protocol_version() {
+        let (pk, _) = generate_ml_dsa_keypair().expect("keygen");
+        let binary_hash = [0x42u8; 32];
+        let entangled_id = EntangledId::derive(&pk, &binary_hash, 12345);
+        let proof = create_test_proof(*entangled_id.id(), binary_hash);
+
+        let config = AttestationConfig::development();
+        let handshake = AttestationHandshake::new(entangled_id.clone(), proof.clone(), config);
+
+        // Protocol version 0 should be rejected
+        let hello_v0 = AttestationHello {
+            entangled_id: *entangled_id.id(),
+            proof: proof.clone(),
+            protocol_version: 0,
+            heartbeat: None,
+        };
+        let (result, _) = handshake.verify_hello(&hello_v0);
+        assert!(!result.is_valid());
+
+        // Protocol version 3+ should be rejected
+        let hello_v3 = AttestationHello {
+            entangled_id: *entangled_id.id(),
+            proof: proof.clone(),
+            protocol_version: 3,
+            heartbeat: None,
+        };
+        let (result, _) = handshake.verify_hello(&hello_v3);
+        assert!(!result.is_valid());
     }
 }
