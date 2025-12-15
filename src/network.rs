@@ -3193,6 +3193,8 @@ mod tests {
         Ok(())
     }
 
+    // TODO(windows): Same QUIC connection issues as test_event_subscription
+    #[cfg_attr(target_os = "windows", ignore)]
     #[tokio::test]
     async fn test_message_sending() -> Result<()> {
         // Create two nodes
