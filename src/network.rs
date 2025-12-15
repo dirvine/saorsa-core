@@ -3091,9 +3091,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_subscription() -> Result<()> {
-        let config1 = create_test_node_config();
+        let mut config1 = create_test_node_config();
+        config1.listen_addr =
+            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0);
         let mut config2 = create_test_node_config();
         config2.peer_id = Some("test_peer_456".to_string());
+        config2.listen_addr =
+            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0);
 
         let node1 = P2PNode::new(config1).await?;
         let node2 = P2PNode::new(config2).await?;
@@ -3103,22 +3107,24 @@ mod tests {
 
         // Wait for nodes to fully bind their listening sockets
         // (Windows network stack can be slower than Linux/macOS)
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         let mut events = node1.subscribe_events();
-        let node2_addr = node2
-            .listen_addrs()
-            .await
-            .into_iter()
-            .find(|a| a.ip().is_ipv4())
-            .ok_or_else(|| {
-                P2PError::Network(crate::error::NetworkError::InvalidAddress(
-                    "Node 2 did not expose an IPv4 listen address".into(),
-                ))
-            })?;
 
-        // Connect to a peer (this should emit an event)
-        let peer_id = node1.connect_peer(&node2_addr.to_string()).await?;
+        // Get the actual listening address using local_addr() for reliability
+        let node2_addr = node2.local_addr().ok_or_else(|| {
+            P2PError::Network(crate::error::NetworkError::ProtocolError(
+                "No listening address".to_string().into(),
+            ))
+        })?;
+
+        // Connect to a peer with timeout (this should emit an event)
+        let peer_id = match timeout(Duration::from_secs(2), node1.connect_peer(&node2_addr)).await {
+            Ok(res) => res?,
+            Err(_) => {
+                return Err(P2PError::Network(crate::error::NetworkError::Timeout));
+            }
+        };
 
         // Check for PeerConnected event
         let event = timeout(Duration::from_secs(2), events.recv()).await;
