@@ -124,6 +124,7 @@ mod entangled_id;
 pub mod handshake;
 pub mod heartbeat_manager;
 pub mod metrics;
+pub mod network_resilience;
 pub mod proof_cache;
 pub mod prover;
 pub mod signed_handshake;
@@ -169,6 +170,11 @@ pub use signed_heartbeat_manager::{
 pub use signed_handshake::{
     HandshakeChallenge, HandshakeHelloData, HandshakeVerifyResult, SignedHandshake,
     SignedHandshakeConfig, SignedHandshakeResponse, SignedHandshakeVerifier,
+};
+pub use network_resilience::{
+    HeartbeatAction, HeartbeatDecisionEngine, HealthyRatioTracker, NetworkHealthContext,
+    PersistedNetworkState, PersistedPeerState, QuiescenceDetector, RecoveryHandler,
+    ResilienceConfig,
 };
 
 // Re-export saorsa-logic constants for downstream use

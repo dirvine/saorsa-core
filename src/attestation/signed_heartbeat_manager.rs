@@ -35,13 +35,18 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
+use super::network_resilience::{
+    HeartbeatAction, HeartbeatDecisionEngine, HealthyRatioTracker, NetworkHealthContext,
+    PersistedNetworkState, PersistedPeerState, QuiescenceDetector, RecoveryHandler,
+    ResilienceConfig,
+};
 use super::signed_heartbeat::{HeartbeatConfig, HeartbeatSigner, HeartbeatVerifyResult, SignedHeartbeat};
 use super::AttestationError;
 use crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 /// Gossip topic for signed heartbeats.
@@ -201,6 +206,14 @@ impl SignedPeerHeartbeatState {
 ///
 /// This is a lightweight alternative to VDF-based heartbeats, suitable for
 /// resource-constrained devices and multi-node deployments.
+///
+/// ## Network Resilience
+///
+/// The manager includes built-in network resilience to handle:
+/// - Startup grace periods (don't penalize peers on our startup)
+/// - Network partitions (detect sudden drops, freeze status)
+/// - Our own connectivity issues (don't blame peers when we're offline)
+/// - Network quiescence (preserve state when entire network is silent)
 pub struct SignedHeartbeatManager {
     /// Heartbeat signer for generating signed heartbeats.
     signer: HeartbeatSigner,
@@ -219,11 +232,45 @@ pub struct SignedHeartbeatManager {
 
     /// Total heartbeats generated.
     total_generated: Arc<RwLock<u64>>,
+
+    // === Network Resilience ===
+    /// Decision engine for handling network disruptions.
+    decision_engine: HeartbeatDecisionEngine,
+
+    /// Quiescence detector.
+    quiescence_detector: Arc<RwLock<QuiescenceDetector>>,
+
+    /// Recovery handler for startup/restart.
+    recovery_handler: RecoveryHandler,
+
+    /// Healthy ratio tracker for trend detection.
+    ratio_tracker: Arc<RwLock<HealthyRatioTracker>>,
+
+    /// External connectivity status (set externally).
+    external_connectivity: Arc<RwLock<bool>>,
+
+    /// Bootstrap nodes reachable (set externally).
+    bootstrap_nodes_reachable: Arc<RwLock<usize>>,
+
+    /// Gossip mesh size (set externally).
+    gossip_mesh_size: Arc<RwLock<usize>>,
+
+    /// When we entered disruption mode (if at all).
+    disruption_started: Arc<RwLock<Option<Instant>>>,
 }
 
 impl SignedHeartbeatManager {
     /// Create a new signed heartbeat manager.
     pub fn new(signer: HeartbeatSigner, config: HeartbeatConfig) -> Self {
+        Self::with_resilience(signer, config, ResilienceConfig::default())
+    }
+
+    /// Create a new manager with custom resilience configuration.
+    pub fn with_resilience(
+        signer: HeartbeatSigner,
+        config: HeartbeatConfig,
+        resilience_config: ResilienceConfig,
+    ) -> Self {
         Self {
             signer,
             config,
@@ -231,6 +278,73 @@ impl SignedHeartbeatManager {
             peer_states: Arc::new(RwLock::new(HashMap::new())),
             streak: Arc::new(RwLock::new(0)),
             total_generated: Arc::new(RwLock::new(0)),
+            decision_engine: HeartbeatDecisionEngine::new(resilience_config.clone()),
+            quiescence_detector: Arc::new(RwLock::new(QuiescenceDetector::new(
+                resilience_config.clone(),
+            ))),
+            recovery_handler: RecoveryHandler::new(resilience_config),
+            ratio_tracker: Arc::new(RwLock::new(HealthyRatioTracker::new(10))),
+            external_connectivity: Arc::new(RwLock::new(true)),
+            bootstrap_nodes_reachable: Arc::new(RwLock::new(0)),
+            gossip_mesh_size: Arc::new(RwLock::new(0)),
+            disruption_started: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Create from persisted state (for recovery after restart).
+    pub fn from_persisted(
+        signer: HeartbeatSigner,
+        config: HeartbeatConfig,
+        mut persisted: PersistedNetworkState,
+    ) -> Self {
+        let resilience_config = ResilienceConfig::default();
+
+        // Get values before consuming peer_states
+        let downtime = persisted.downtime_secs();
+        let peer_count = persisted.peer_states.len();
+
+        // Take peer states out of persisted (so persisted can be moved to recovery_handler)
+        let persisted_peer_states = std::mem::take(&mut persisted.peer_states);
+
+        // Restore peer states from persisted data
+        let mut peer_states = HashMap::new();
+        for (id, state) in persisted_peer_states {
+            peer_states.insert(
+                id,
+                SignedPeerHeartbeatState {
+                    entangled_id: Some(state.entangled_id),
+                    public_key: Some(state.public_key),
+                    last_verified_epoch: state.last_heartbeat_epoch,
+                    streak: state.streak,
+                    status: state.last_known_status,
+                    ..Default::default()
+                },
+            );
+        }
+
+        tracing::info!(
+            peers = peer_count,
+            downtime_secs = downtime,
+            "Restoring SignedHeartbeatManager from persisted state"
+        );
+
+        Self {
+            signer,
+            config,
+            latest_heartbeat: Arc::new(RwLock::new(None)),
+            peer_states: Arc::new(RwLock::new(peer_states)),
+            streak: Arc::new(RwLock::new(0)),
+            total_generated: Arc::new(RwLock::new(0)),
+            decision_engine: HeartbeatDecisionEngine::new(resilience_config.clone()),
+            quiescence_detector: Arc::new(RwLock::new(QuiescenceDetector::new(
+                resilience_config.clone(),
+            ))),
+            recovery_handler: RecoveryHandler::from_persisted(persisted, resilience_config),
+            ratio_tracker: Arc::new(RwLock::new(HealthyRatioTracker::new(10))),
+            external_connectivity: Arc::new(RwLock::new(true)),
+            bootstrap_nodes_reachable: Arc::new(RwLock::new(0)),
+            gossip_mesh_size: Arc::new(RwLock::new(0)),
+            disruption_started: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -388,33 +502,175 @@ impl SignedHeartbeatManager {
             .or_insert_with(|| SignedPeerHeartbeatState::new(entangled_id, public_key));
     }
 
-    /// Check all peers for missed heartbeats.
+    /// Check all peers for missed heartbeats with network resilience.
     ///
-    /// Call this periodically (e.g., every epoch).
-    pub async fn check_missed_heartbeats(&self) {
+    /// Call this periodically (e.g., every epoch). The method uses the decision
+    /// engine to determine the appropriate action based on network health context.
+    ///
+    /// Returns the action that was taken.
+    pub async fn check_missed_heartbeats(&self) -> HeartbeatAction {
         let current = self.current_epoch();
         let mut states = self.peer_states.write().await;
 
-        for (peer_id, state) in states.iter_mut() {
-            // If peer hasn't submitted a heartbeat for this epoch
-            if state.last_verified_epoch < current.saturating_sub(1) {
-                state.record_miss(&self.config);
+        // Build health context
+        let context = self.build_health_context(&states).await;
 
-                if state.status == SignedPeerStatus::Suspect {
-                    tracing::warn!(
-                        peer = %hex::encode(&peer_id[..8]),
-                        missed = state.missed_count,
-                        "Peer marked as suspect"
-                    );
-                } else if state.status == SignedPeerStatus::Unresponsive {
-                    tracing::warn!(
-                        peer = %hex::encode(&peer_id[..8]),
-                        missed = state.missed_count,
-                        "Peer marked as unresponsive"
-                    );
+        // Update ratio tracker
+        {
+            let mut tracker = self.ratio_tracker.write().await;
+            tracker.record(context.healthy_ratio_now);
+        }
+
+        // Decide action
+        let action = self.decision_engine.decide(&context);
+
+        // Update disruption tracking
+        match action {
+            HeartbeatAction::Freeze => {
+                let mut started = self.disruption_started.write().await;
+                if started.is_none() {
+                    *started = Some(Instant::now());
+                }
+            }
+            HeartbeatAction::Normal => {
+                let mut started = self.disruption_started.write().await;
+                *started = None;
+            }
+            _ => {}
+        }
+
+        // Check quiescence
+        {
+            let mut detector = self.quiescence_detector.write().await;
+            if detector.check_quiescence(&context) {
+                tracing::info!("Network is quiescent, preserving peer state");
+                return HeartbeatAction::Freeze;
+            }
+        }
+
+        // Apply action
+        match action {
+            HeartbeatAction::Normal => {
+                // Normal processing - check for missed heartbeats
+                for (peer_id, state) in states.iter_mut() {
+                    if state.last_verified_epoch < current.saturating_sub(1) {
+                        state.record_miss(&self.config);
+
+                        if state.status == SignedPeerStatus::Suspect {
+                            tracing::warn!(
+                                peer = %hex::encode(&peer_id[..8]),
+                                missed = state.missed_count,
+                                "Peer marked as suspect"
+                            );
+                        } else if state.status == SignedPeerStatus::Unresponsive {
+                            tracing::warn!(
+                                peer = %hex::encode(&peer_id[..8]),
+                                missed = state.missed_count,
+                                "Peer marked as unresponsive"
+                            );
+                        }
+                    }
+                }
+            }
+            HeartbeatAction::Grace => {
+                tracing::debug!("Grace mode - not penalizing missed heartbeats");
+                // Don't penalize, just log
+            }
+            HeartbeatAction::Freeze => {
+                tracing::info!("Freeze mode - network disruption detected, preserving state");
+                // Don't change anything
+            }
+            HeartbeatAction::Reconnect => {
+                tracing::info!("Reconnect mode - recovering from downtime");
+                // Reset all peers to Unknown to allow fresh start
+                for state in states.values_mut() {
+                    if state.status != SignedPeerStatus::Healthy {
+                        state.status = SignedPeerStatus::Unknown;
+                        state.missed_count = 0;
+                    }
                 }
             }
         }
+
+        action
+    }
+
+    /// Build network health context from current state.
+    async fn build_health_context(
+        &self,
+        states: &HashMap<[u8; 32], SignedPeerHeartbeatState>,
+    ) -> NetworkHealthContext {
+        let healthy = states
+            .values()
+            .filter(|s| s.status == SignedPeerStatus::Healthy)
+            .count();
+        let suspect = states
+            .values()
+            .filter(|s| s.status == SignedPeerStatus::Suspect)
+            .count();
+        let unresponsive = states
+            .values()
+            .filter(|s| s.status == SignedPeerStatus::Unresponsive)
+            .count();
+        let unknown = states
+            .values()
+            .filter(|s| s.status == SignedPeerStatus::Unknown)
+            .count();
+
+        let mut context = self
+            .recovery_handler
+            .build_context(healthy, suspect, unresponsive, unknown);
+
+        // Add connectivity info
+        context.external_connectivity = *self.external_connectivity.read().await;
+        context.bootstrap_nodes_reachable = *self.bootstrap_nodes_reachable.read().await;
+        context.gossip_mesh_size = *self.gossip_mesh_size.read().await;
+        context.disruption_started = *self.disruption_started.read().await;
+
+        // Add ratio history
+        {
+            let tracker = self.ratio_tracker.read().await;
+            tracker.populate_context(&mut context);
+        }
+
+        context
+    }
+
+    // === Connectivity setters (called by network layer) ===
+
+    /// Update external connectivity status.
+    pub async fn set_external_connectivity(&self, connected: bool) {
+        let mut conn = self.external_connectivity.write().await;
+        *conn = connected;
+    }
+
+    /// Update bootstrap nodes reachable count.
+    pub async fn set_bootstrap_nodes_reachable(&self, count: usize) {
+        let mut nodes = self.bootstrap_nodes_reachable.write().await;
+        *nodes = count;
+    }
+
+    /// Update gossip mesh size.
+    pub async fn set_gossip_mesh_size(&self, size: usize) {
+        let mut mesh = self.gossip_mesh_size.write().await;
+        *mesh = size;
+
+        // Record activity when mesh is healthy
+        if size > 0 {
+            let mut detector = self.quiescence_detector.write().await;
+            detector.record_activity();
+        }
+    }
+
+    /// Check if we're in startup grace period.
+    #[must_use]
+    pub fn in_grace_period(&self) -> bool {
+        self.recovery_handler.in_grace_period()
+    }
+
+    /// Check if network appears quiescent.
+    pub async fn is_quiescent(&self) -> bool {
+        self.quiescence_detector.read().await.is_quiescent()
     }
 
     /// Get the status of a peer.
@@ -461,6 +717,46 @@ impl SignedHeartbeatManager {
             suspect_peers: suspect,
             unresponsive_peers: unresponsive,
         }
+    }
+
+    /// Create persisted state for graceful shutdown.
+    ///
+    /// Call this before shutdown to preserve peer state across restarts.
+    pub async fn create_persisted_state(&self) -> PersistedNetworkState {
+        let states = self.peer_states.read().await;
+
+        let mut persisted_peers = std::collections::HashMap::new();
+        for (id, state) in states.iter() {
+            if let (Some(entangled_id), Some(public_key)) =
+                (state.entangled_id, state.public_key.clone())
+            {
+                persisted_peers.insert(
+                    *id,
+                    PersistedPeerState {
+                        entangled_id,
+                        public_key,
+                        last_heartbeat_epoch: state.last_verified_epoch,
+                        streak: state.streak,
+                        last_known_status: state.status,
+                    },
+                );
+            }
+        }
+
+        let mut persisted = PersistedNetworkState {
+            peer_states: persisted_peers,
+            ..Default::default()
+        };
+
+        // Mark as graceful shutdown
+        persisted.prepare_shutdown();
+
+        tracing::info!(
+            peers = persisted.peer_states.len(),
+            "Created persisted network state for shutdown"
+        );
+
+        persisted
     }
 
     /// Serialize a heartbeat message for gossip.
@@ -682,5 +978,105 @@ mod tests {
 
         assert_eq!(stats.local_streak, 2);
         assert_eq!(stats.local_total_generated, 2);
+    }
+
+    // === Network Resilience Tests ===
+
+    #[tokio::test]
+    async fn test_grace_period_on_startup() {
+        let signer = create_test_signer([1u8; 32]);
+        let config = HeartbeatConfig::fast();
+        let resilience_config = ResilienceConfig {
+            startup_grace_secs: 300, // 5 minutes
+            ..ResilienceConfig::fast()
+        };
+        let manager = SignedHeartbeatManager::with_resilience(signer, config, resilience_config);
+
+        // Should be in grace period on startup
+        assert!(manager.in_grace_period());
+
+        // Checking missed heartbeats should return Grace action
+        let action = manager.check_missed_heartbeats().await;
+        assert_eq!(action, HeartbeatAction::Grace);
+    }
+
+    #[tokio::test]
+    async fn test_connectivity_tracking() {
+        let signer = create_test_signer([1u8; 32]);
+        let config = HeartbeatConfig::fast();
+        let resilience_config = ResilienceConfig {
+            startup_grace_secs: 0, // No startup grace for this test
+            ..ResilienceConfig::fast()
+        };
+        let manager = SignedHeartbeatManager::with_resilience(signer, config, resilience_config);
+
+        // Initially connected
+        manager.set_external_connectivity(true).await;
+        manager.set_gossip_mesh_size(5).await;
+
+        // Register some peers to reach min_peers_for_eviction
+        for i in 0..5 {
+            manager.register_peer([i; 32], vec![i; 100]).await;
+        }
+
+        // Should not be quiescent with active mesh
+        assert!(!manager.is_quiescent().await);
+    }
+
+    #[tokio::test]
+    async fn test_persistence_roundtrip() {
+        let signer1 = create_test_signer([1u8; 32]);
+        let config = HeartbeatConfig::fast();
+
+        let mut manager1 = SignedHeartbeatManager::new(signer1, config.clone());
+
+        // Generate heartbeat and receive from peer
+        let _message = manager1.generate_heartbeat().await.expect("generate");
+        manager1.register_peer([3u8; 32], vec![3u8; 100]).await;
+
+        // Create persisted state
+        let persisted = manager1.create_persisted_state().await;
+
+        // Verify persistence data
+        assert!(persisted.graceful_shutdown);
+
+        // Serialize and deserialize
+        let bytes = persisted.to_bytes().expect("serialize");
+        let recovered = PersistedNetworkState::from_bytes(&bytes).expect("deserialize");
+
+        // Create manager from recovered state
+        let signer_recovered = create_test_signer([1u8; 32]);
+        let manager2 = SignedHeartbeatManager::from_persisted(
+            signer_recovered,
+            config,
+            recovered,
+        );
+
+        // Verify recovery - should start in grace period after restart
+        assert!(manager2.in_grace_period());
+    }
+
+    #[tokio::test]
+    async fn test_freeze_on_connectivity_loss() {
+        let signer = create_test_signer([1u8; 32]);
+        let config = HeartbeatConfig::fast();
+        let resilience_config = ResilienceConfig {
+            startup_grace_secs: 0,
+            min_peers_for_eviction: 1,
+            ..ResilienceConfig::fast()
+        };
+        let manager = SignedHeartbeatManager::with_resilience(signer, config, resilience_config);
+
+        // Register peers
+        manager.register_peer([2u8; 32], vec![2u8; 100]).await;
+
+        // Simulate connectivity loss
+        manager.set_external_connectivity(false).await;
+        manager.set_bootstrap_nodes_reachable(0).await;
+        manager.set_gossip_mesh_size(0).await;
+
+        // Should freeze when we appear to be offline
+        let action = manager.check_missed_heartbeats().await;
+        assert_eq!(action, HeartbeatAction::Freeze);
     }
 }
