@@ -202,6 +202,13 @@ impl P2PNetworkNode {
         // Register the peer
         self.add_peer(peer_id, peer_addr).await;
 
+        // Broadcast connection established event for lifecycle monitoring
+        // This is critical for network.rs to track active connections
+        let _ = self.event_tx.send(ConnectionEvent::Established {
+            peer_id,
+            remote_address: peer_addr,
+        });
+
         tracing::info!("Connected to peer {} at {}", peer_id, peer_addr);
         Ok(peer_id)
     }
@@ -216,6 +223,13 @@ impl P2PNetworkNode {
 
         // Register the peer
         self.add_peer(peer_id, addr).await;
+
+        // Broadcast connection established event for lifecycle monitoring
+        // This is critical for network.rs to track active connections
+        let _ = self.event_tx.send(ConnectionEvent::Established {
+            peer_id,
+            remote_address: addr,
+        });
 
         tracing::info!("Accepted connection from peer {} at {}", peer_id, addr);
         Ok((peer_id, addr))
@@ -288,6 +302,21 @@ impl P2PNetworkNode {
     /// Get our peer ID
     pub fn our_peer_id(&self) -> PeerId {
         self.node.peer_id()
+    }
+
+    /// Get our observed external address as reported by peers via QUIC OBSERVED_ADDRESS frames
+    ///
+    /// This is the public IP:port that remote peers see when we connect to them.
+    /// Essential for NAT traversal - allows nodes behind NAT to discover their
+    /// public-facing address for advertising to other peers.
+    ///
+    /// Returns `None` if no observed address has been received yet (e.g., no connections established)
+    /// or if all connections are on private networks.
+    pub fn get_observed_external_address(&self) -> Option<SocketAddr> {
+        self.node
+            .get_observed_external_address()
+            .ok()
+            .flatten()
     }
 
     /// Get all connected peers
@@ -830,6 +859,30 @@ impl DualStackNetworkNode {
         }
 
         rx
+    }
+
+    /// Get our observed external address as reported by peers via QUIC OBSERVED_ADDRESS frames
+    ///
+    /// This is the public IP:port that remote peers see when we connect to them.
+    /// Essential for NAT traversal - allows nodes behind NAT to discover their
+    /// public-facing address for advertising to other peers.
+    ///
+    /// Checks IPv4 first (more common), then IPv6 if IPv4 has no observed address.
+    /// Returns `None` if no observed address has been received yet.
+    pub fn get_observed_external_address(&self) -> Option<SocketAddr> {
+        // Check IPv4 first (most common scenario)
+        if let Some(v4) = &self.v4 {
+            if let Some(addr) = v4.get_observed_external_address() {
+                return Some(addr);
+            }
+        }
+        // Fall back to IPv6
+        if let Some(v6) = &self.v6 {
+            if let Some(addr) = v6.get_observed_external_address() {
+                return Some(addr);
+            }
+        }
+        None
     }
 }
 
