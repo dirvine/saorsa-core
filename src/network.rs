@@ -1485,6 +1485,22 @@ impl P2PNode {
                 let connected_peer_id =
                     crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer);
                 info!("Successfully connected to peer: {}", connected_peer_id);
+
+                // Prevent self-connections by checking if remote peer_id matches our own
+                if connected_peer_id == self.peer_id {
+                    warn!(
+                        "Detected self-connection to own address {} (peer_id: {}), rejecting",
+                        address, connected_peer_id
+                    );
+                    // Don't add this connection to our peer list - the underlying QUIC connection
+                    // will eventually timeout, but we won't track it as a valid peer
+                    return Err(P2PError::Network(
+                        crate::error::NetworkError::InvalidAddress(
+                            format!("Cannot connect to self ({})", address).into(),
+                        ),
+                    ));
+                }
+
                 connected_peer_id
             }
             Ok(Err(e)) => {
