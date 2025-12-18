@@ -807,6 +807,10 @@ impl P2PNode {
         let peers = Arc::new(RwLock::new(HashMap::new()));
 
         // Start connection lifecycle monitor
+        // CRITICAL: Subscribe to connection events BEFORE spawning the task
+        // to avoid race condition where early connections are missed
+        let connection_event_rx = dual_node.subscribe_connection_events();
+
         let connection_monitor_handle = {
             let active_conns = Arc::clone(&active_connections);
             let peers_map = Arc::clone(&peers);
@@ -816,8 +820,9 @@ impl P2PNode {
             let peer_id_clone = peer_id.clone();
 
             let handle = tokio::spawn(async move {
-                Self::connection_lifecycle_monitor(
+                Self::connection_lifecycle_monitor_with_rx(
                     dual_node_clone,
+                    connection_event_rx,
                     active_conns,
                     peers_map,
                     event_tx_clone,
@@ -1909,7 +1914,143 @@ impl P2PNode {
     }
 
     /// Connection lifecycle monitor task - processes ant-quic connection events
+    /// and updates active_connections HashSet and peers map.
+    ///
+    /// This version accepts a pre-subscribed receiver to avoid the race condition
+    /// where early connections could be missed if subscription happens after the task starts.
+    #[allow(clippy::too_many_arguments)]
+    async fn connection_lifecycle_monitor_with_rx(
+        _dual_node: Arc<DualStackNetworkNode>,
+        mut event_rx: broadcast::Receiver<crate::transport::ant_quic_adapter::ConnectionEvent>,
+        active_connections: Arc<RwLock<HashSet<String>>>,
+        peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
+        event_tx: broadcast::Sender<P2PEvent>,
+        geo_provider: Arc<BgpGeoProvider>,
+        _local_peer_id: String,
+    ) {
+        use crate::transport::ant_quic_adapter::ConnectionEvent;
+
+        info!("Connection lifecycle monitor started (pre-subscribed receiver)");
+
+        loop {
+            match event_rx.recv().await {
+                Ok(event) => {
+                    match event {
+                        ConnectionEvent::Established {
+                            peer_id,
+                            remote_address,
+                        } => {
+                            let peer_id_str =
+                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            debug!(
+                                "Connection established: peer={}, addr={}",
+                                peer_id_str, remote_address
+                            );
+
+                            // **GeoIP Validation**
+                            let ip = remote_address.ip();
+                            let is_rejected = match ip {
+                                std::net::IpAddr::V4(v4) => {
+                                    if let Some(asn) = geo_provider.lookup_ipv4_asn(v4) {
+                                        geo_provider.is_hosting_asn(asn)
+                                            || geo_provider.is_vpn_asn(asn)
+                                    } else {
+                                        false
+                                    }
+                                }
+                                std::net::IpAddr::V6(v6) => {
+                                    let info = geo_provider.lookup(v6);
+                                    info.is_hosting_provider || info.is_vpn_provider
+                                }
+                            };
+
+                            if is_rejected {
+                                info!(
+                                    "Rejecting connection from {} ({}) due to GeoIP policy",
+                                    peer_id_str, remote_address
+                                );
+                                continue;
+                            }
+
+                            // Add to active connections
+                            active_connections.write().await.insert(peer_id_str.clone());
+
+                            // Update peer info or insert new
+                            let mut peers_lock = peers.write().await;
+                            if let Some(peer_info) = peers_lock.get_mut(&peer_id_str) {
+                                peer_info.status = ConnectionStatus::Connected;
+                                peer_info.connected_at = Instant::now();
+                            } else {
+                                debug!("Registering new incoming peer: {}", peer_id_str);
+                                peers_lock.insert(
+                                    peer_id_str.clone(),
+                                    PeerInfo {
+                                        peer_id: peer_id_str.clone(),
+                                        addresses: vec![remote_address.to_string()],
+                                        status: ConnectionStatus::Connected,
+                                        last_seen: Instant::now(),
+                                        connected_at: Instant::now(),
+                                        protocols: Vec::new(),
+                                        heartbeat_count: 0,
+                                    },
+                                );
+                            }
+
+                            // Broadcast connection event
+                            let _ = event_tx.send(P2PEvent::PeerConnected(peer_id_str));
+                        }
+                        ConnectionEvent::Lost { peer_id, reason } => {
+                            let peer_id_str =
+                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            debug!("Connection lost: peer={}, reason={}", peer_id_str, reason);
+
+                            // Remove from active connections
+                            active_connections.write().await.remove(&peer_id_str);
+
+                            // Update peer info status
+                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
+                                peer_info.status = ConnectionStatus::Disconnected;
+                                peer_info.last_seen = Instant::now();
+                            }
+
+                            // Broadcast disconnection event
+                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
+                        }
+                        ConnectionEvent::Failed { peer_id, reason } => {
+                            let peer_id_str =
+                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            debug!("Connection failed: peer={}, reason={}", peer_id_str, reason);
+
+                            // Remove from active connections
+                            active_connections.write().await.remove(&peer_id_str);
+
+                            // Update peer info status
+                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
+                                peer_info.status = ConnectionStatus::Disconnected;
+                                peer_info.last_seen = Instant::now();
+                            }
+
+                            // Broadcast disconnection event
+                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
+                        }
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    warn!("Connection event receiver lagged, skipped {} events", skipped);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    info!("Connection event channel closed, stopping lifecycle monitor");
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Connection lifecycle monitor task - processes ant-quic connection events
     /// and updates active_connections HashSet and peers map
+    ///
+    /// DEPRECATED: Use `connection_lifecycle_monitor_with_rx` instead to avoid race conditions
+    #[allow(dead_code)]
     async fn connection_lifecycle_monitor(
         dual_node: Arc<DualStackNetworkNode>,
         active_connections: Arc<RwLock<HashSet<String>>>,
