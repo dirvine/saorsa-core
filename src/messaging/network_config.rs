@@ -265,6 +265,7 @@ impl NetworkConfig {
                 enable_symmetric_nat: *enable_symmetric_nat,
                 enable_relay_fallback: *enable_relay_fallback,
                 prefer_rfc_nat_traversal: *prefer_rfc_nat_traversal,
+                relay_nodes: vec![],
             },
         })
     }
