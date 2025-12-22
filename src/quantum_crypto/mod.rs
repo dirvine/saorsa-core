@@ -16,7 +16,6 @@
 //! This module provides post-quantum cryptographic primitives including:
 //! - ML-KEM (Module-Lattice Key Encapsulation Mechanism) for key exchange
 //! - ML-DSA (Module-Lattice Digital Signature Algorithm) for signatures
-//! - Hybrid modes for gradual migration from classical algorithms
 
 pub mod ant_quic_integration;
 pub mod types;
@@ -33,20 +32,12 @@ pub use self::types::{
 pub use self::ant_quic_integration::{
     // Configuration functions
     create_default_pqc_config,
-    // Performance optimization
     create_pqc_memory_pool,
     create_pqc_only_config,
-    // Hybrid functions
-    generate_hybrid_kem_keypair,
-    generate_hybrid_signature_keypair,
     // ML-DSA functions
     generate_ml_dsa_keypair,
     // ML-KEM functions
     generate_ml_kem_keypair,
-    hybrid_kem_decapsulate,
-    hybrid_kem_encapsulate,
-    hybrid_sign,
-    hybrid_verify,
     ml_dsa_sign,
     ml_dsa_verify,
     ml_kem_decapsulate,
@@ -62,32 +53,22 @@ pub use saorsa_pqc::{
     ChaCha20Poly1305Cipher,
     // Encrypted message types
     EncryptedMessage,
-    // Hybrid APIs (optional)
-    HybridKem,
-    HybridPublicKeyEncryption,
-    MlDsa65,
-
-    MlDsaOperations,
-
     // Algorithm implementations
+    MlDsa65,
+    MlDsaOperations,
     MlKem768,
     // Core traits for operations
     MlKemOperations,
     SymmetricEncryptedMessage,
-
     // Errors
     SymmetricError,
-
     SymmetricKey,
-
     // Library initialization
     init as saorsa_pqc_init,
     // Types and results
     pqc::types::{
-        HybridKemCiphertext, HybridKemPublicKey, HybridKemSecretKey, HybridSignaturePublicKey,
-        HybridSignatureSecretKey, HybridSignatureValue, MlDsaPublicKey, MlDsaSecretKey,
-        MlDsaSignature, MlKemCiphertext, MlKemPublicKey, MlKemSecretKey, PqcError,
-        PqcResult as SaorsaPqcResult, SharedSecret,
+        MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature, MlKemCiphertext, MlKemPublicKey,
+        MlKemSecretKey, PqcError, PqcResult as SaorsaPqcResult, SharedSecret,
     },
 };
 
@@ -128,7 +109,6 @@ pub struct CryptoCapabilities {
     pub supports_ml_kem: bool,
     pub supports_ml_dsa: bool,
     pub supports_frost: bool,
-    pub supports_hybrid: bool,
     pub threshold_capable: bool,
     pub supported_versions: Vec<ProtocolVersion>,
 }
@@ -139,7 +119,6 @@ impl Default for CryptoCapabilities {
             supports_ml_kem: true,
             supports_ml_dsa: true,
             supports_frost: true,
-            supports_hybrid: true,
             threshold_capable: true,
             supported_versions: vec![ProtocolVersion::V1, ProtocolVersion::V2],
         }
@@ -155,8 +134,6 @@ pub enum ProtocolVersion {
     V2,
 }
 
-// PQC-only; hybrid and classical paths removed
-
 /// Algorithm negotiation for establishing connections
 pub fn negotiate_algorithms(
     local_caps: &CryptoCapabilities,
@@ -165,7 +142,6 @@ pub fn negotiate_algorithms(
     // Find common supported algorithms
     let use_ml_kem = local_caps.supports_ml_kem && remote_caps.supports_ml_kem;
     let use_ml_dsa = local_caps.supports_ml_dsa && remote_caps.supports_ml_dsa;
-    let use_hybrid = local_caps.supports_hybrid && remote_caps.supports_hybrid;
 
     // Find common protocol version
     let version = local_caps
@@ -197,7 +173,6 @@ pub fn negotiate_algorithms(
     Ok(NegotiatedAlgorithms {
         kem_algorithm,
         signature_algorithm,
-        hybrid_mode: use_hybrid,
         protocol_version: version,
     })
 }
@@ -207,7 +182,6 @@ pub fn negotiate_algorithms(
 pub struct NegotiatedAlgorithms {
     pub kem_algorithm: KemAlgorithm,
     pub signature_algorithm: SignatureAlgorithm,
-    pub hybrid_mode: bool,
     pub protocol_version: ProtocolVersion,
 }
 
@@ -232,9 +206,6 @@ mod tests {
         // Test that saorsa-pqc types are available and can be instantiated
         let _ml_kem = MlKem768;
         let _ml_dsa = MlDsa65;
-        let _hybrid_kem = HybridKem::default();
-        // HybridSignatureValue doesn't implement Default - skip
-        let _hybrid_pke = HybridPublicKeyEncryption::default();
 
         println!("✅ saorsa-pqc 0.3.0 types are available");
         println!("✅ Confirmed we are using saorsa-pqc effectively");
@@ -248,7 +219,6 @@ mod tests {
             supports_ml_kem: true,
             supports_ml_dsa: true,
             supports_frost: false,
-            supports_hybrid: true,
             threshold_capable: false,
             supported_versions: vec![ProtocolVersion::V1],
         };

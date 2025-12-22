@@ -169,8 +169,6 @@ impl fmt::Debug for Ed25519PrivateKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrostSignature(pub Vec<u8>);
 
-// Hybrid signature is available via ant-quic integration if needed
-
 // NOTE: MlKemCiphertext removed - use ant-quic::crypto::pqc::types::MlKemCiphertext
 
 // NOTE: SharedSecret removed - use ant-quic::crypto::pqc::types::SharedSecret
@@ -218,7 +216,6 @@ pub enum SessionState {
 pub struct HandshakeParameters {
     pub kem_algorithm: crate::quantum_crypto::KemAlgorithm,
     pub signature_algorithm: crate::quantum_crypto::SignatureAlgorithm,
-    pub hybrid_mode: bool,
     pub protocol_version: crate::quantum_crypto::ProtocolVersion,
 }
 

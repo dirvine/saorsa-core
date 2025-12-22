@@ -88,7 +88,7 @@ flate2 = "1.0"
 once_cell = "1.19"
 
 # Networking
-ant-quic = { version = "0.10.5", features = ["pqc"] }
+ant-quic = { version = "0.14.0" }
 four-word-networking = { version = "2.6" }
 
 # Core-specific dependencies

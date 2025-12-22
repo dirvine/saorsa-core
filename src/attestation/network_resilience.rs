@@ -739,12 +739,13 @@ mod tests {
 
     #[test]
     fn test_likely_self_problem() {
-        let mut context = NetworkHealthContext::default();
-
         // All indicators good
-        context.external_connectivity = true;
-        context.bootstrap_nodes_reachable = 2;
-        context.gossip_mesh_size = 5;
+        let mut context = NetworkHealthContext {
+            external_connectivity: true,
+            bootstrap_nodes_reachable: 2,
+            gossip_mesh_size: 5,
+            ..Default::default()
+        };
         assert!(!context.likely_self_problem());
 
         // All indicators bad - we're the problem
@@ -926,9 +927,11 @@ mod tests {
             ..Default::default()
         };
 
-        let mut context = NetworkHealthContext::default();
-        context.disruption_started = Some(Instant::now());
-        context.healthy_ratio_now = 0.3;
+        let mut context = NetworkHealthContext {
+            disruption_started: Some(Instant::now()),
+            healthy_ratio_now: 0.3,
+            ..Default::default()
+        };
 
         // Should exit due to max duration exceeded
         std::thread::sleep(std::time::Duration::from_millis(10));

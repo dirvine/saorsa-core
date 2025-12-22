@@ -10,8 +10,8 @@
 
 use serde::{Deserialize, Serialize};
 
-// Import ant-quic NAT traversal types
-use ant_quic::nat_traversal_api::{EndpointRole, NatTraversalConfig as AntNatConfig};
+// Import ant-quic NAT config type (unified config in 0.14+)
+use ant_quic::NatConfig;
 
 /// Configuration for network port binding
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +120,27 @@ pub enum NatTraversalMode {
         /// Maximum concurrent path validation attempts
         concurrency_limit: u32,
     },
+
+    /// Advanced NAT traversal configuration with explicit control over all options
+    ///
+    /// This variant allows fine-grained control over NAT traversal behavior,
+    /// including candidate limits, symmetric NAT prediction, relay fallback, etc.
+    Advanced {
+        /// Maximum concurrent path validation attempts
+        concurrency_limit: u32,
+
+        /// Maximum number of address candidates to track (default: 10)
+        max_candidates: usize,
+
+        /// Enable symmetric NAT prediction algorithms (default: true)
+        enable_symmetric_nat: bool,
+
+        /// Enable automatic relay fallback when direct connection fails (default: true)
+        enable_relay_fallback: bool,
+
+        /// Prefer RFC-compliant NAT traversal frame format (default: true)
+        prefer_rfc_nat_traversal: bool,
+    },
 }
 
 impl Default for NetworkConfig {
@@ -200,22 +221,51 @@ impl NetworkConfig {
         }
     }
 
-    /// Convert to ant-quic NAT configuration
-    pub fn to_ant_config(&self) -> Option<AntNatConfig> {
-        self.nat_traversal.as_ref().map(|mode| {
-            let role = match mode {
-                NatTraversalMode::ClientOnly => EndpointRole::Client,
-                NatTraversalMode::P2PNode {
-                    concurrency_limit: _,
-                } => EndpointRole::Server {
-                    can_coordinate: true,
-                },
-            };
+    /// Create configuration with advanced NAT traversal options
+    pub fn advanced_nat(
+        concurrency_limit: u32,
+        max_candidates: usize,
+        enable_symmetric_nat: bool,
+        enable_relay_fallback: bool,
+        prefer_rfc_nat_traversal: bool,
+    ) -> Self {
+        Self {
+            nat_traversal: Some(NatTraversalMode::Advanced {
+                concurrency_limit,
+                max_candidates,
+                enable_symmetric_nat,
+                enable_relay_fallback,
+                prefer_rfc_nat_traversal,
+            }),
+            ..Default::default()
+        }
+    }
 
-            AntNatConfig {
-                role,
+    /// Convert to ant-quic NAT configuration
+    /// Note: ant-quic 0.14+ uses unified NatConfig from unified_config module
+    pub fn to_ant_config(&self) -> Option<NatConfig> {
+        self.nat_traversal.as_ref().map(|mode| match mode {
+            NatTraversalMode::ClientOnly => NatConfig {
+                max_concurrent_attempts: 1,
                 ..Default::default()
-            }
+            },
+            NatTraversalMode::P2PNode { concurrency_limit } => NatConfig {
+                max_concurrent_attempts: *concurrency_limit as usize,
+                ..Default::default()
+            },
+            NatTraversalMode::Advanced {
+                concurrency_limit,
+                max_candidates,
+                enable_symmetric_nat,
+                enable_relay_fallback,
+                prefer_rfc_nat_traversal,
+            } => NatConfig {
+                max_concurrent_attempts: *concurrency_limit as usize,
+                max_candidates: *max_candidates,
+                enable_symmetric_nat: *enable_symmetric_nat,
+                enable_relay_fallback: *enable_relay_fallback,
+                prefer_rfc_nat_traversal: *prefer_rfc_nat_traversal,
+            },
         })
     }
 }
@@ -335,5 +385,109 @@ mod tests {
         let config = NetworkConfig::no_nat_traversal();
         let ant_config = config.to_ant_config();
         assert!(ant_config.is_none());
+    }
+
+    // TDD Phase 3: Tests for expanded NatConfig mapping
+    // Note: These tests verify that fields are mapped, but don't enforce
+    // specific values yet since we're using ..Default::default() which
+    // provides sensible defaults for most fields.
+
+    /// Test TDD: verify max_candidates is properly mapped
+    #[test]
+    fn test_to_ant_config_max_candidates() {
+        let config = NetworkConfig::p2p_node(15);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        // Currently uses default (10)
+        assert_eq!(ant_config.max_candidates, 10);
+    }
+
+    /// Test TDD: verify enable_symmetric_nat is properly mapped
+    #[test]
+    fn test_to_ant_config_enable_symmetric_nat() {
+        let config = NetworkConfig::p2p_node(15);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        // Currently uses default (true)
+        assert!(ant_config.enable_symmetric_nat);
+    }
+
+    /// Test TDD: verify enable_relay_fallback is properly mapped
+    #[test]
+    fn test_to_ant_config_enable_relay_fallback() {
+        let config = NetworkConfig::p2p_node(15);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        // Currently uses default (true)
+        assert!(ant_config.enable_relay_fallback);
+    }
+
+    /// Test TDD: verify prefer_rfc_nat_traversal is properly mapped
+    #[test]
+    fn test_to_ant_config_prefer_rfc_nat_traversal() {
+        let config = NetworkConfig::p2p_node(15);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        // Currently uses default (true)
+        assert!(ant_config.prefer_rfc_nat_traversal);
+    }
+
+    /// Test TDD: verify max_concurrent_attempts is properly mapped
+    #[test]
+    fn test_to_ant_config_max_concurrent_attempts() {
+        let config = NetworkConfig::p2p_node(15);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        // This should be mapped from the concurrency_limit
+        assert_eq!(ant_config.max_concurrent_attempts, 15);
+    }
+
+    // TDD Phase 3: Tests for Advanced NAT configuration
+
+    /// Test TDD: Advanced NAT with custom max_candidates
+    #[test]
+    fn test_to_ant_config_advanced_max_candidates() {
+        let config = NetworkConfig::advanced_nat(20, 15, false, false, true);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        assert_eq!(ant_config.max_concurrent_attempts, 20);
+        assert_eq!(ant_config.max_candidates, 15);
+        assert!(!ant_config.enable_symmetric_nat);
+        assert!(!ant_config.enable_relay_fallback);
+        assert!(ant_config.prefer_rfc_nat_traversal);
+    }
+
+    /// Test TDD: Advanced NAT with symmetric NAT disabled
+    #[test]
+    fn test_to_ant_config_advanced_no_symmetric_nat() {
+        let config = NetworkConfig::advanced_nat(10, 20, false, true, true);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        assert_eq!(ant_config.max_candidates, 20);
+        assert!(!ant_config.enable_symmetric_nat);
+        assert!(ant_config.enable_relay_fallback);
+    }
+
+    /// Test TDD: Advanced NAT with relay fallback disabled
+    #[test]
+    fn test_to_ant_config_advanced_no_relay_fallback() {
+        let config = NetworkConfig::advanced_nat(10, 20, true, false, true);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        assert!(ant_config.enable_symmetric_nat);
+        assert!(!ant_config.enable_relay_fallback);
+    }
+
+    /// Test TDD: Advanced NAT with all custom options
+    #[test]
+    fn test_to_ant_config_advanced_all_options() {
+        let config = NetworkConfig::advanced_nat(25, 30, false, false, false);
+        let ant_config = config.to_ant_config().expect("Should have NatConfig");
+
+        assert_eq!(ant_config.max_concurrent_attempts, 25);
+        assert_eq!(ant_config.max_candidates, 30);
+        assert!(!ant_config.enable_symmetric_nat);
+        assert!(!ant_config.enable_relay_fallback);
+        assert!(!ant_config.prefer_rfc_nat_traversal);
     }
 }

@@ -2052,7 +2052,10 @@ impl P2PNode {
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    warn!("Connection event receiver lagged, skipped {} events", skipped);
+                    warn!(
+                        "Connection event receiver lagged, skipped {} events",
+                        skipped
+                    );
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     info!("Connection event channel closed, stopping lifecycle monitor");
@@ -2509,10 +2512,11 @@ impl P2PNode {
         }
 
         // Supplement with cached bootstrap peers (after CLI peers)
+        // Use QUIC-specific peer selection since we're using ant-quic transport
         if let Some(ref bootstrap_manager) = self.bootstrap_manager {
             let manager = bootstrap_manager.read().await;
-            match manager.get_bootstrap_peers(20).await {
-                // Try to get top 20 quality peers
+            match manager.get_quic_bootstrap_peers(20).await {
+                // Try to get top 20 quality QUIC-enabled peers
                 Ok(contacts) => {
                     if !contacts.is_empty() {
                         let mut added_from_cache = 0;

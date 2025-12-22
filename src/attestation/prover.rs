@@ -402,6 +402,24 @@ impl Default for AttestationProver {
     }
 }
 
+// Helper for tests
+#[cfg(test)]
+impl ProofType {
+    fn into_proof(self) -> AttestationProof {
+        AttestationProof {
+            proof_bytes: vec![],
+            public_inputs: AttestationProofPublicInputs {
+                entangled_id: [0; 32],
+                binary_hash: [0; 32],
+                public_key_hash: [0; 32],
+                proof_timestamp: 0,
+            },
+            vkey_hash: [0; 32],
+            proof_type: self,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,23 +483,5 @@ mod tests {
     fn test_proof_post_quantum_security() {
         assert!(!ProofType::Mock.into_proof().is_post_quantum_secure());
         // Sp1Core and Sp1Compressed are PQ-secure (tested via AttestationProof)
-    }
-}
-
-// Helper for tests
-#[cfg(test)]
-impl ProofType {
-    fn into_proof(self) -> AttestationProof {
-        AttestationProof {
-            proof_bytes: vec![],
-            public_inputs: AttestationProofPublicInputs {
-                entangled_id: [0; 32],
-                binary_hash: [0; 32],
-                public_key_hash: [0; 32],
-                proof_timestamp: 0,
-            },
-            vkey_hash: [0; 32],
-            proof_type: self,
-        }
     }
 }

@@ -241,6 +241,15 @@ impl BootstrapManager {
         self.cache.get_bootstrap_peers(count).await
     }
 
+    /// Get bootstrap peers that support QUIC networking
+    ///
+    /// This method filters for contacts with QUIC information and sorts by
+    /// combined quality score (regular quality + QUIC quality * 0.3).
+    /// Use this when the network uses QUIC transport (e.g., ant-quic).
+    pub async fn get_quic_bootstrap_peers(&self, count: usize) -> Result<Vec<ContactEntry>> {
+        self.cache.get_quic_bootstrap_peers(count).await
+    }
+
     /// Add a discovered peer to the cache
     ///
     /// This method enforces both rate limiting and IP diversity checks to prevent

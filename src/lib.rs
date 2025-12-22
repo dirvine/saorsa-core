@@ -318,33 +318,19 @@ pub use quantum_crypto::{
     negotiate_algorithms,
 };
 
-// Saorsa-PQC exports (primary and only post-quantum crypto types)
+// Saorsa-PQC exports (primary post-quantum crypto types)
 pub use quantum_crypto::{
     // Symmetric encryption (quantum-resistant)
     ChaCha20Poly1305Cipher,
     // Encrypted message types
     EncryptedMessage,
-    // Hybrid modes (classical + post-quantum)
-    HybridKem,
-    HybridKemCiphertext,
-    HybridKemPublicKey,
-    HybridKemSecretKey,
-    HybridPublicKeyEncryption,
-
-    // HybridSignature,
-    HybridSignaturePublicKey,
-    HybridSignatureSecretKey,
-    HybridSignatureValue,
-
+    // Algorithm implementations
     MlDsa65,
-
     MlDsaOperations,
-
     // Use ant-quic types for better trait implementations
     MlDsaPublicKey as AntMlDsaPublicKey,
     MlDsaSecretKey as AntMlDsaSecretKey,
     MlDsaSignature as AntMlDsaSignature,
-    // Algorithm implementations
     MlKem768,
     MlKemCiphertext,
     // Core traits for operations
@@ -355,36 +341,28 @@ pub use quantum_crypto::{
     // Errors and results
     PqcError,
     SaorsaPqcResult,
-
     SharedSecret,
     SymmetricEncryptedMessage,
-
     SymmetricError,
     SymmetricKey,
-
+    // Configuration functions
+    create_default_pqc_config,
+    create_pqc_only_config,
     // Library initialization
     saorsa_pqc_init,
 };
 
-// Legacy ant-quic integration (for backward compatibility only)
-pub use quantum_crypto::ant_quic_integration::{
-    // Configuration functions (deprecated - migrate to saorsa-pqc)
-    create_default_pqc_config,
-    create_pqc_only_config,
-};
-
-// Legacy types (deprecated - migrate to saorsa-pqc equivalents)
+// Session and identity types
 pub use quantum_crypto::types::{
+    // FROST threshold signatures
     FrostCommitment,
     FrostGroupPublicKey,
     FrostKeyShare,
-    // FROST threshold signatures (may need migration to saorsa-pqc later)
     FrostPublicKey,
     FrostSignature,
-    // Session and group management types (still needed)
+    // Session and group management types
     GroupId,
     HandshakeParameters,
-
     ParticipantId,
     PeerId as QuantumPeerId,
     QuantumPeerIdentity,

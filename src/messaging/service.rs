@@ -156,6 +156,17 @@ impl MessagingService {
             Some(super::NatTraversalMode::ClientOnly) => {
                 info!("Initializing MessagingService with client-only NAT traversal");
             }
+            Some(super::NatTraversalMode::Advanced {
+                concurrency_limit,
+                max_candidates,
+                enable_symmetric_nat,
+                ..
+            }) => {
+                info!(
+                    "Initializing MessagingService with advanced NAT traversal (concurrency: {}, max_candidates: {}, symmetric_nat: {})",
+                    concurrency_limit, max_candidates, enable_symmetric_nat
+                );
+            }
             None => {
                 warn!("Initializing MessagingService with NAT traversal disabled");
             }

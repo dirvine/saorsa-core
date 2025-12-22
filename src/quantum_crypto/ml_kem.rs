@@ -148,46 +148,6 @@ impl MlKemState {
     }
 }
 
-/// Hybrid key exchange combining ML-KEM with classical ECDH
-pub struct HybridKeyExchange {
-    pub ml_kem_state: MlKemState,
-    pub classical_shared: Option<[u8; 32]>,
-}
-
-impl HybridKeyExchange {
-    /// Create new hybrid key exchange
-    pub fn new(role: KeyExchangeRole) -> Self {
-        Self {
-            ml_kem_state: MlKemState::new(role),
-            classical_shared: None,
-        }
-    }
-
-    /// Combine ML-KEM and classical shared secrets
-    pub fn derive_hybrid_secret(&self) -> Result<[u8; 32]> {
-        let ml_kem_secret = self.ml_kem_state.shared_secret.as_ref().ok_or_else(|| {
-            QuantumCryptoError::InvalidKeyError("ML-KEM exchange not complete".to_string())
-        })?;
-
-        let classical_secret = self.classical_shared.as_ref().ok_or_else(|| {
-            QuantumCryptoError::InvalidKeyError("Classical exchange not complete".to_string())
-        })?;
-
-        // Combine using HKDF
-        use saorsa_pqc::{HkdfSha3_256, api::traits::Kdf};
-
-        let mut combined = Vec::new();
-        combined.extend_from_slice(ml_kem_secret.as_bytes());
-        combined.extend_from_slice(classical_secret);
-
-        let mut output = [0u8; 32];
-        HkdfSha3_256::derive(&combined, None, b"hybrid-key-exchange", &mut output)
-            .map_err(|e| QuantumCryptoError::MlKemError(format!("HKDF failed: {e}")))?;
-
-        Ok(output)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
