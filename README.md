@@ -6,12 +6,33 @@
 
 Core P2P networking library for Saorsa platform with DHT, QUIC transport, dual-stack endpoints (IPv6+IPv4), and four-word endpoint encoding.
 
-## Guides
+## Documentation
 
-- Contributor guide: see [AGENTS.md](AGENTS.md)
+- **API Reference**: see [docs/API.md](docs/API.md) - Comprehensive API documentation with examples
+- **Architecture Decision Records**: see [docs/adr/](docs/adr/) - Design decisions and rationale
+- **Security Model**: see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) - Network security and anti-Sybil protections
+- **Auto-Upgrade System**: see [docs/AUTO_UPGRADE.md](docs/AUTO_UPGRADE.md) - Cross-platform binary updates
 - Architecture overview: see [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Security Model**: see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) - Comprehensive network security, anti-Sybil protections, and Byzantine fault tolerance
-- **Auto-Upgrade System**: see [docs/AUTO_UPGRADE.md](docs/AUTO_UPGRADE.md) - Cross-platform binary updates with ML-DSA-65 signatures
+- Contributor guide: see [AGENTS.md](AGENTS.md)
+
+## Architecture Decision Records (ADRs)
+
+Key design decisions are documented in [docs/adr/](docs/adr/):
+
+| ADR | Title | Description |
+|-----|-------|-------------|
+| [ADR-001](docs/adr/ADR-001-multi-layer-architecture.md) | Multi-Layer P2P Architecture | Layered design separating transport, DHT, identity, and application concerns |
+| [ADR-002](docs/adr/ADR-002-delegated-transport.md) | Delegated Transport | Using ant-quic for QUIC transport, NAT traversal, and bootstrap cache |
+| [ADR-003](docs/adr/ADR-003-pure-post-quantum-crypto.md) | Pure Post-Quantum Cryptography | ML-DSA-65 and ML-KEM-768 without classical fallbacks |
+| [ADR-004](docs/adr/ADR-004-four-word-addresses.md) | Four-Word Addresses | Human-readable addressing via word encoding |
+| [ADR-005](docs/adr/ADR-005-skademlia-witness-protocol.md) | S/Kademlia Witness Protocol | Byzantine fault-tolerant DHT operations |
+| [ADR-006](docs/adr/ADR-006-eigentrust-reputation.md) | EigenTrust Reputation | Iterative trust computation for Sybil resistance |
+| [ADR-007](docs/adr/ADR-007-adaptive-networking.md) | Adaptive Networking | Machine learning for dynamic routing optimization |
+| [ADR-008](docs/adr/ADR-008-bootstrap-delegation.md) | Bootstrap Cache Delegation | Delegating bootstrap to ant-quic with Sybil protection |
+| [ADR-009](docs/adr/ADR-009-sybil-protection.md) | Sybil Protection | Multi-layered defense against identity attacks |
+| [ADR-010](docs/adr/ADR-010-entangled-attestation.md) | Entangled Attestation | Software integrity verification via attestation chains |
+| [ADR-011](docs/adr/ADR-011-geographic-placement.md) | Geographic Placement | Region-aware storage for regulatory compliance |
+| [ADR-012](docs/adr/ADR-012-identity-without-pow.md) | Identity without PoW | Pure cryptographic identity using ML-DSA |
 
 ## Features
 

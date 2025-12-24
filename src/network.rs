@@ -2397,7 +2397,7 @@ impl P2PNode {
     /// Add a discovered peer to the bootstrap cache
     pub async fn add_discovered_peer(&self, peer_id: PeerId, addresses: Vec<String>) -> Result<()> {
         if let Some(ref bootstrap_manager) = self.bootstrap_manager {
-            let mut manager = bootstrap_manager.write().await;
+            let manager = bootstrap_manager.write().await;
             let socket_addresses: Vec<std::net::SocketAddr> = addresses
                 .iter()
                 .filter_map(|addr| addr.parse().ok())
@@ -2421,7 +2421,7 @@ impl P2PNode {
         _error: Option<String>,
     ) -> Result<()> {
         if let Some(ref bootstrap_manager) = self.bootstrap_manager {
-            let mut manager = bootstrap_manager.write().await;
+            let manager = bootstrap_manager.write().await;
 
             // Create quality metrics based on the connection result
             let metrics = QualityMetrics {
@@ -2570,7 +2570,7 @@ impl P2PNode {
 
                         // Update bootstrap cache with successful connection
                         if let Some(ref bootstrap_manager) = self.bootstrap_manager {
-                            let mut manager = bootstrap_manager.write().await;
+                            let manager = bootstrap_manager.write().await;
                             let mut updated_contact = contact.clone();
                             updated_contact.peer_id = peer_id.clone();
                             updated_contact.update_connection_result(true, Some(100), None); // Assume 100ms latency for now
@@ -2586,7 +2586,7 @@ impl P2PNode {
 
                         // Update bootstrap cache with failed connection
                         if used_cache && let Some(ref bootstrap_manager) = self.bootstrap_manager {
-                            let mut manager = bootstrap_manager.write().await;
+                            let manager = bootstrap_manager.write().await;
                             let mut updated_contact = contact.clone();
                             updated_contact.update_connection_result(
                                 false,
@@ -2798,23 +2798,21 @@ mod diversity_tests {
 
     async fn build_bootstrap_manager_like_prod(config: &NodeConfig) -> BootstrapManager {
         let diversity_config = config.diversity_config.clone().unwrap_or_default();
-        if let Some(ref cache_config) = config.bootstrap_cache_config {
-            BootstrapManager::with_full_config(
-                cache_config.clone(),
-                crate::rate_limit::JoinRateLimiterConfig::default(),
-                diversity_config,
-            )
-            .await
-            .expect("bootstrap manager")
-        } else {
-            BootstrapManager::with_full_config(
-                crate::bootstrap::CacheConfig::default(),
-                crate::rate_limit::JoinRateLimiterConfig::default(),
-                diversity_config,
-            )
-            .await
-            .expect("bootstrap manager")
-        }
+        // Use a temp dir to avoid conflicts with cached files from old format
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let mut cache_config = config
+            .bootstrap_cache_config
+            .clone()
+            .unwrap_or_else(crate::bootstrap::CacheConfig::default);
+        cache_config.cache_dir = temp_dir.path().to_path_buf();
+
+        BootstrapManager::with_full_config(
+            cache_config,
+            crate::rate_limit::JoinRateLimiterConfig::default(),
+            diversity_config,
+        )
+        .await
+        .expect("bootstrap manager")
     }
 
     #[tokio::test]
