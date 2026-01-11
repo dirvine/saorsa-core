@@ -125,9 +125,6 @@ pub enum AdaptiveNetworkError {
     #[error("Network error: {0}")]
     Network(#[from] std::io::Error),
 
-    #[error("IO error: {0}")]
-    Io(std::io::Error),
-
     #[error("Serialization error: {0}")]
     Serialization(#[from] bincode::Error),
 
@@ -137,7 +134,7 @@ pub enum AdaptiveNetworkError {
 
 impl From<anyhow::Error> for AdaptiveNetworkError {
     fn from(e: anyhow::Error) -> Self {
-        AdaptiveNetworkError::Io(std::io::Error::other(e.to_string()))
+        AdaptiveNetworkError::Network(std::io::Error::other(e.to_string()))
     }
 }
 
@@ -281,23 +278,24 @@ pub trait RoutingStrategy: Send + Sync {
 }
 
 /// Trust provider trait for reputation queries
+///
+/// Provides a unified interface for trust scoring and management.
+/// Implementations should maintain a global trust vector that can be
+/// queried for individual nodes or in aggregate.
 pub trait TrustProvider: Send + Sync {
-    /// Get trust score for a node
+    /// Get trust score for a node (0.0 = untrusted, 1.0 = fully trusted)
     fn get_trust(&self, node: &NodeId) -> f64;
 
-    /// Update trust based on interaction
+    /// Update trust based on interaction outcome
     fn update_trust(&self, from: &NodeId, to: &NodeId, success: bool);
 
-    /// Get global trust vector
+    /// Get global trust vector for all known nodes
     fn get_global_trust(&self) -> std::collections::HashMap<NodeId, f64>;
 
     /// Remove a node from the trust system
     fn remove_node(&self, node: &NodeId);
 
-    /// Get trust score (alias for get_trust)
-    fn get_trust_score(&self, node: &NodeId) -> f64 {
-        self.get_trust(node)
-    }
+    // Note: get_trust_score was removed as redundant alias for get_trust
 }
 
 /// Learning system trait for adaptive behavior

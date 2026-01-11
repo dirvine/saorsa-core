@@ -141,6 +141,32 @@ pub enum TrustLevel {
     Full,
 }
 
+// ============================================================================
+// Address Construction Helpers
+// ============================================================================
+
+/// Build listen addresses based on port and IPv6 preference
+///
+/// This helper consolidates the duplicated address construction logic.
+#[inline]
+fn build_listen_addrs(port: u16, ipv6_enabled: bool) -> Vec<std::net::SocketAddr> {
+    let mut addrs = Vec::with_capacity(if ipv6_enabled { 2 } else { 1 });
+
+    if ipv6_enabled {
+        addrs.push(std::net::SocketAddr::new(
+            std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            port,
+        ));
+    }
+
+    addrs.push(std::net::SocketAddr::new(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        port,
+    ));
+
+    addrs
+}
+
 impl NodeConfig {
     /// Create a new NodeConfig with default values
     ///
@@ -148,39 +174,16 @@ impl NodeConfig {
     ///
     /// Returns an error if default addresses cannot be parsed
     pub fn new() -> Result<Self> {
-        // Load config and use its defaults
         let config = Config::default();
-
-        // Parse the default listen address
         let listen_addr = config.listen_socket_addr()?;
-
-        // Create listen addresses based on config
-        let mut listen_addrs = vec![];
-
-        // Add IPv6 address if enabled
-        if config.network.ipv6_enabled {
-            let ipv6_addr = std::net::SocketAddr::new(
-                std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
-                listen_addr.port(),
-            );
-            listen_addrs.push(ipv6_addr);
-        }
-
-        // Always add IPv4
-        let ipv4_addr = std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-            listen_addr.port(),
-        );
-        listen_addrs.push(ipv4_addr);
 
         Ok(Self {
             peer_id: None,
-            listen_addrs,
+            listen_addrs: build_listen_addrs(listen_addr.port(), config.network.ipv6_enabled),
             listen_addr,
             bootstrap_peers: Vec::new(),
             bootstrap_peers_str: config.network.bootstrap_nodes.clone(),
             enable_ipv6: config.network.ipv6_enabled,
-
             connection_timeout: Duration::from_secs(config.network.connection_timeout),
             keep_alive_interval: Duration::from_secs(config.network.keepalive_interval),
             max_connections: config.network.max_connections,
@@ -193,45 +196,159 @@ impl NodeConfig {
             attestation_config: config.attestation.clone(),
         })
     }
+
+    /// Create a builder for customized NodeConfig construction
+    pub fn builder() -> NodeConfigBuilder {
+        NodeConfigBuilder::default()
+    }
+}
+
+// ============================================================================
+// NodeConfig Builder Pattern
+// ============================================================================
+
+/// Builder for constructing NodeConfig with fluent API
+#[derive(Debug, Clone, Default)]
+pub struct NodeConfigBuilder {
+    peer_id: Option<PeerId>,
+    listen_port: Option<u16>,
+    enable_ipv6: Option<bool>,
+    bootstrap_peers: Vec<std::net::SocketAddr>,
+    max_connections: Option<usize>,
+    connection_timeout: Option<Duration>,
+    keep_alive_interval: Option<Duration>,
+    dht_config: Option<DHTConfig>,
+    security_config: Option<SecurityConfig>,
+    production_config: Option<ProductionConfig>,
+}
+
+impl NodeConfigBuilder {
+    /// Set the peer ID
+    pub fn peer_id(mut self, peer_id: PeerId) -> Self {
+        self.peer_id = Some(peer_id);
+        self
+    }
+
+    /// Set the listen port
+    pub fn listen_port(mut self, port: u16) -> Self {
+        self.listen_port = Some(port);
+        self
+    }
+
+    /// Enable or disable IPv6
+    pub fn ipv6(mut self, enabled: bool) -> Self {
+        self.enable_ipv6 = Some(enabled);
+        self
+    }
+
+    /// Add a bootstrap peer
+    pub fn bootstrap_peer(mut self, addr: std::net::SocketAddr) -> Self {
+        self.bootstrap_peers.push(addr);
+        self
+    }
+
+    /// Set maximum connections
+    pub fn max_connections(mut self, max: usize) -> Self {
+        self.max_connections = Some(max);
+        self
+    }
+
+    /// Set connection timeout
+    pub fn connection_timeout(mut self, timeout: Duration) -> Self {
+        self.connection_timeout = Some(timeout);
+        self
+    }
+
+    /// Set keep-alive interval
+    pub fn keep_alive_interval(mut self, interval: Duration) -> Self {
+        self.keep_alive_interval = Some(interval);
+        self
+    }
+
+    /// Set DHT configuration
+    pub fn dht_config(mut self, config: DHTConfig) -> Self {
+        self.dht_config = Some(config);
+        self
+    }
+
+    /// Set security configuration
+    pub fn security_config(mut self, config: SecurityConfig) -> Self {
+        self.security_config = Some(config);
+        self
+    }
+
+    /// Set production configuration
+    pub fn production_config(mut self, config: ProductionConfig) -> Self {
+        self.production_config = Some(config);
+        self
+    }
+
+    /// Build the NodeConfig
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if address construction fails
+    pub fn build(self) -> Result<NodeConfig> {
+        let base_config = Config::default();
+        let default_port = base_config
+            .listen_socket_addr()
+            .map(|addr| addr.port())
+            .unwrap_or(9000);
+        let port = self.listen_port.unwrap_or(default_port);
+        let ipv6_enabled = self.enable_ipv6.unwrap_or(base_config.network.ipv6_enabled);
+
+        let listen_addr = std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            port,
+        );
+
+        Ok(NodeConfig {
+            peer_id: self.peer_id,
+            listen_addrs: build_listen_addrs(port, ipv6_enabled),
+            listen_addr,
+            bootstrap_peers: self.bootstrap_peers.clone(),
+            bootstrap_peers_str: self.bootstrap_peers.iter().map(|a| a.to_string()).collect(),
+            enable_ipv6: ipv6_enabled,
+            connection_timeout: self.connection_timeout
+                .unwrap_or(Duration::from_secs(base_config.network.connection_timeout)),
+            keep_alive_interval: self.keep_alive_interval
+                .unwrap_or(Duration::from_secs(base_config.network.keepalive_interval)),
+            max_connections: self.max_connections.unwrap_or(base_config.network.max_connections),
+            max_incoming_connections: base_config.security.connection_limit as usize,
+            dht_config: self.dht_config.unwrap_or_default(),
+            security_config: self.security_config.unwrap_or_default(),
+            production_config: self.production_config,
+            bootstrap_cache_config: None,
+            diversity_config: None,
+            attestation_config: base_config.attestation.clone(),
+        })
+    }
 }
 
 impl Default for NodeConfig {
     fn default() -> Self {
-        // Use config defaults for network settings
         let config = Config::default();
-
-        // Parse the default listen address - use safe fallback if parsing fails
         let listen_addr = config.listen_socket_addr().unwrap_or_else(|_| {
             std::net::SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
                 9000,
             )
         });
 
         Self {
             peer_id: None,
-            listen_addrs: vec![
-                std::net::SocketAddr::new(
-                    std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
-                    listen_addr.port(),
-                ),
-                std::net::SocketAddr::new(
-                    std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                    listen_addr.port(),
-                ),
-            ],
+            listen_addrs: build_listen_addrs(listen_addr.port(), config.network.ipv6_enabled),
             listen_addr,
             bootstrap_peers: Vec::new(),
             bootstrap_peers_str: Vec::new(),
             enable_ipv6: config.network.ipv6_enabled,
-
             connection_timeout: Duration::from_secs(config.network.connection_timeout),
             keep_alive_interval: Duration::from_secs(config.network.keepalive_interval),
             max_connections: config.network.max_connections,
             max_incoming_connections: config.security.connection_limit as usize,
             dht_config: DHTConfig::default(),
             security_config: SecurityConfig::default(),
-            production_config: None, // Use default production config if enabled
+            production_config: None,
             bootstrap_cache_config: None,
             diversity_config: None,
             attestation_config: config.attestation.clone(),

@@ -23,6 +23,44 @@ use crate::placement::{
 };
 //use crate::placement::traits::NodePerformanceMetrics;
 
+// ============================================================================
+// Validation Helpers
+// ============================================================================
+
+/// Validate that a score is within [0.0, 1.0] range
+#[inline]
+fn validate_unit_score(
+    node_id: &NodeId,
+    value: f64,
+    name: &'static str,
+) -> PlacementResult<()> {
+    if !(0.0..=1.0).contains(&value) {
+        return Err(PlacementError::InvalidWeight {
+            node_id: node_id.clone(),
+            weight: value,
+            reason: format!("{} must be between 0.0 and 1.0", name),
+        });
+    }
+    Ok(())
+}
+
+/// Validate that a factor is non-negative
+#[inline]
+fn validate_non_negative(
+    node_id: &NodeId,
+    value: f64,
+    name: &'static str,
+) -> PlacementResult<()> {
+    if value < 0.0 {
+        return Err(PlacementError::InvalidWeight {
+            node_id: node_id.clone(),
+            weight: value,
+            reason: format!("{} must be non-negative", name),
+        });
+    }
+    Ok(())
+}
+
 /// Efraimidis-Spirakis weighted sampling algorithm implementation
 #[derive(Debug, Clone)]
 pub struct WeightedSampler {
@@ -75,38 +113,11 @@ impl WeightedSampler {
         beta: f64,
         gamma: f64,
     ) -> PlacementResult<f64> {
-        // Validate inputs
-        if !(0.0..=1.0).contains(&trust_score) {
-            return Err(PlacementError::InvalidWeight {
-                node_id: node_id.clone(),
-                weight: trust_score,
-                reason: "Trust score must be between 0.0 and 1.0".to_string(),
-            });
-        }
-
-        if !(0.0..=1.0).contains(&stability_score) {
-            return Err(PlacementError::InvalidWeight {
-                node_id: node_id.clone(),
-                weight: stability_score,
-                reason: "Stability score must be between 0.0 and 1.0".to_string(),
-            });
-        }
-
-        if capacity_factor < 0.0 {
-            return Err(PlacementError::InvalidWeight {
-                node_id: node_id.clone(),
-                weight: capacity_factor,
-                reason: "Capacity factor must be non-negative".to_string(),
-            });
-        }
-
-        if diversity_factor < 0.0 {
-            return Err(PlacementError::InvalidWeight {
-                node_id: node_id.clone(),
-                weight: diversity_factor,
-                reason: "Diversity factor must be non-negative".to_string(),
-            });
-        }
+        // Validate inputs using helper functions
+        validate_unit_score(node_id, trust_score, "Trust score")?;
+        validate_unit_score(node_id, stability_score, "Stability score")?;
+        validate_non_negative(node_id, capacity_factor, "Capacity factor")?;
+        validate_non_negative(node_id, diversity_factor, "Diversity factor")?;
 
         // Calculate composite weight with numerical stability
         let trust_component = if alpha == 0.0 {

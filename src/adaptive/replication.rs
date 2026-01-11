@@ -217,7 +217,7 @@ impl ReplicationManager {
         }
 
         // Trust score
-        let trust = self.trust_provider.get_trust_score(node);
+        let trust = self.trust_provider.get_trust(node);
         score += 0.3 * trust;
 
         // Hyperbolic proximity (if found by Hyperbolic routing)
@@ -428,7 +428,7 @@ impl ReplicationManager {
         // 4. Return success/failure
 
         // For now, simulate with trust-based success probability
-        let trust = self.trust_provider.get_trust_score(node);
+        let trust = self.trust_provider.get_trust(node);
         rand::random::<f64>() < trust
     }
 

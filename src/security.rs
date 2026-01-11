@@ -25,10 +25,176 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use std::sync::Arc;
+
+// ============================================================================
+// Generic IP Address Trait
+// ============================================================================
+
+/// Trait for IP addresses that can be used in node ID generation
+pub trait NodeIpAddress: Debug + Clone + Send + Sync + 'static {
+    /// Get the octets of this IP address for hashing
+    fn octets_vec(&self) -> Vec<u8>;
+}
+
+impl NodeIpAddress for Ipv6Addr {
+    fn octets_vec(&self) -> Vec<u8> {
+        self.octets().to_vec()
+    }
+}
+
+impl NodeIpAddress for Ipv4Addr {
+    fn octets_vec(&self) -> Vec<u8> {
+        self.octets().to_vec()
+    }
+}
+
+// ============================================================================
+// Generic IP-Based Node Identity
+// ============================================================================
+
+/// Generic IP-based node identity that binds node ID to network location
+///
+/// This struct provides a unified implementation for both IPv4 and IPv6
+/// node identities, reducing code duplication while maintaining type safety.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenericIpNodeID<A: NodeIpAddress> {
+    /// Derived node ID (SHA256 of ip_addr + public_key + salt + timestamp)
+    pub node_id: Vec<u8>,
+    /// IP address this node ID is bound to
+    pub ip_addr: A,
+    /// ML-DSA public key for signatures
+    pub public_key: Vec<u8>,
+    /// Signature proving ownership of the IP address and keys
+    pub signature: Vec<u8>,
+    /// Timestamp when this ID was generated (seconds since epoch)
+    pub timestamp_secs: u64,
+    /// Salt used in node ID generation (for freshness)
+    pub salt: Vec<u8>,
+}
+
+impl<A: NodeIpAddress> GenericIpNodeID<A> {
+    /// ML-DSA-65 signature length
+    const SIGNATURE_LENGTH: usize = 3309;
+
+    /// Generate a new IP-based node ID
+    pub fn generate(
+        ip_addr: A,
+        secret: &MlDsaSecretKey,
+        public: &MlDsaPublicKey,
+    ) -> Result<Self> {
+        let mut rng = rand::thread_rng();
+        let mut salt = vec![0u8; 16];
+        rand::RngCore::fill_bytes(&mut rng, &mut salt);
+
+        let timestamp = SystemTime::now();
+        let timestamp_secs = timestamp.duration_since(UNIX_EPOCH)?.as_secs();
+        let public_key = public.as_bytes().to_vec();
+        let ip_octets = ip_addr.octets_vec();
+
+        // Generate node ID: SHA256(ip_address || public_key || salt || timestamp)
+        let node_id = Self::compute_node_id(&ip_octets, &public_key, &salt, timestamp_secs);
+
+        // Create signature proving ownership
+        let message_to_sign = Self::build_message(&ip_octets, &public_key, &salt, timestamp_secs);
+        let sig = ml_dsa_sign(secret, &message_to_sign)
+            .map_err(|e| anyhow!("ML-DSA sign failed: {:?}", e))?;
+        let signature = sig.0.to_vec();
+
+        Ok(Self {
+            node_id,
+            ip_addr,
+            public_key,
+            signature,
+            timestamp_secs,
+            salt,
+        })
+    }
+
+    /// Verify that this node ID is valid and properly signed
+    pub fn verify(&self) -> Result<bool> {
+        let ip_octets = self.ip_addr.octets_vec();
+
+        // Reconstruct and verify node ID
+        let expected_node_id = Self::compute_node_id(
+            &ip_octets,
+            &self.public_key,
+            &self.salt,
+            self.timestamp_secs,
+        );
+
+        if expected_node_id != self.node_id {
+            return Ok(false);
+        }
+
+        // Verify signature
+        let public_key = MlDsaPublicKey::from_bytes(&self.public_key)
+            .map_err(|e| anyhow!("Invalid ML-DSA public key: {:?}", e))?;
+
+        if self.signature.len() != Self::SIGNATURE_LENGTH {
+            return Ok(false);
+        }
+
+        let mut sig_bytes = [0u8; 3309];
+        sig_bytes.copy_from_slice(&self.signature);
+        let signature = MlDsaSignature(Box::new(sig_bytes));
+
+        let message_to_verify = Self::build_message(
+            &ip_octets,
+            &self.public_key,
+            &self.salt,
+            self.timestamp_secs,
+        );
+
+        let ok = ml_dsa_verify(&public_key, &message_to_verify, &signature)
+            .map_err(|e| anyhow!("ML-DSA verify error: {:?}", e))?;
+        Ok(ok)
+    }
+
+    /// Get the age of this node ID in seconds
+    pub fn age_secs(&self) -> u64 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        now.saturating_sub(self.timestamp_secs)
+    }
+
+    /// Check if the node ID has expired (older than max_age)
+    pub fn is_expired(&self, max_age: Duration) -> bool {
+        self.age_secs() > max_age.as_secs()
+    }
+
+    // Internal helpers
+
+    #[inline]
+    fn compute_node_id(ip_octets: &[u8], public_key: &[u8], salt: &[u8], timestamp_secs: u64) -> Vec<u8> {
+        let mut hasher = Sha256::new();
+        hasher.update(ip_octets);
+        hasher.update(public_key);
+        hasher.update(salt);
+        hasher.update(timestamp_secs.to_le_bytes());
+        hasher.finalize().to_vec()
+    }
+
+    #[inline]
+    fn build_message(ip_octets: &[u8], public_key: &[u8], salt: &[u8], timestamp_secs: u64) -> Vec<u8> {
+        let mut message = Vec::with_capacity(ip_octets.len() + public_key.len() + salt.len() + 8);
+        message.extend_from_slice(ip_octets);
+        message.extend_from_slice(public_key);
+        message.extend_from_slice(salt);
+        message.extend_from_slice(&timestamp_secs.to_le_bytes());
+        message
+    }
+}
+
+// ============================================================================
+// Backward-Compatible Type Aliases and Wrappers
+// ============================================================================
 
 /// IPv6-based node identity that binds node ID to actual network location
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,90 +409,27 @@ impl IPDiversityConfig {
 
 impl IPv6NodeID {
     /// Generate a new IPv6-based node ID
+    ///
+    /// Delegates to `GenericIpNodeID` for the core generation logic.
     pub fn generate(
         ipv6_addr: Ipv6Addr,
         secret: &MlDsaSecretKey,
         public: &MlDsaPublicKey,
     ) -> Result<Self> {
-        let mut rng = rand::thread_rng();
-        let mut salt = vec![0u8; 16];
-        rand::RngCore::fill_bytes(&mut rng, &mut salt);
-
-        let timestamp = SystemTime::now();
-        let timestamp_secs = timestamp.duration_since(UNIX_EPOCH)?.as_secs();
-        let public_key = public.as_bytes().to_vec();
-
-        // Generate node ID: SHA256(ipv6_address || public_key || salt || timestamp)
-        let mut hasher = Sha256::new();
-        hasher.update(ipv6_addr.octets());
-        hasher.update(&public_key);
-        hasher.update(&salt);
-        hasher.update(timestamp_secs.to_le_bytes());
-        let node_id = hasher.finalize().to_vec();
-
-        // Create signature proving ownership
-        let mut message_to_sign = Vec::new();
-        message_to_sign.extend_from_slice(&ipv6_addr.octets());
-        message_to_sign.extend_from_slice(&public_key);
-        message_to_sign.extend_from_slice(&salt);
-        message_to_sign.extend_from_slice(&timestamp_secs.to_le_bytes());
-
-        let sig = ml_dsa_sign(secret, &message_to_sign)
-            .map_err(|e| anyhow!("ML-DSA sign failed: {:?}", e))?;
-        let signature = sig.0.to_vec();
-
-        Ok(IPv6NodeID {
-            node_id,
-            ipv6_addr,
-            public_key,
-            signature,
-            timestamp_secs,
-            salt,
-        })
+        let generic = GenericIpNodeID::generate(ipv6_addr, secret, public)?;
+        Ok(Self::from_generic(generic))
     }
 
     /// Verify that this node ID is valid and properly signed
     pub fn verify(&self) -> Result<bool> {
-        // Reconstruct the node ID
-        let mut hasher = Sha256::new();
-        hasher.update(self.ipv6_addr.octets());
-        hasher.update(&self.public_key);
-        hasher.update(&self.salt);
-        hasher.update(self.timestamp_secs.to_le_bytes());
-        let expected_node_id = hasher.finalize();
-
-        // Verify node ID matches
-        if expected_node_id.as_slice() != self.node_id {
-            return Ok(false);
-        }
-
-        let public_key = MlDsaPublicKey::from_bytes(&self.public_key)
-            .map_err(|e| anyhow!("Invalid ML-DSA public key: {:?}", e))?;
-
-        // Convert Vec<u8> to fixed-size array for MlDsaSignature
-        if self.signature.len() != 3309 {
-            return Ok(false); // Invalid signature length
-        }
-        let mut sig_bytes = [0u8; 3309];
-        sig_bytes.copy_from_slice(&self.signature);
-        let signature = MlDsaSignature(Box::new(sig_bytes));
-
-        let mut message_to_verify = Vec::new();
-        message_to_verify.extend_from_slice(&self.ipv6_addr.octets());
-        message_to_verify.extend_from_slice(&self.public_key);
-        message_to_verify.extend_from_slice(&self.salt);
-        message_to_verify.extend_from_slice(&self.timestamp_secs.to_le_bytes());
-
-        let ok = ml_dsa_verify(&public_key, &message_to_verify, &signature)
-            .map_err(|e| anyhow!("ML-DSA verify error: {:?}", e))?;
-        Ok(ok)
+        self.to_generic().verify()
     }
 
     /// Extract /64 subnet from IPv6 address
     pub fn extract_subnet_64(&self) -> Ipv6Addr {
         let octets = self.ipv6_addr.octets();
         let mut subnet = [0u8; 16];
-        subnet[..8].copy_from_slice(&octets[..8]); // Keep first 64 bits, zero the rest
+        subnet[..8].copy_from_slice(&octets[..8]);
         Ipv6Addr::from(subnet)
     }
 
@@ -334,7 +437,7 @@ impl IPv6NodeID {
     pub fn extract_subnet_48(&self) -> Ipv6Addr {
         let octets = self.ipv6_addr.octets();
         let mut subnet = [0u8; 16];
-        subnet[..6].copy_from_slice(&octets[..6]); // Keep first 48 bits, zero the rest
+        subnet[..6].copy_from_slice(&octets[..6]);
         Ipv6Addr::from(subnet)
     }
 
@@ -342,8 +445,32 @@ impl IPv6NodeID {
     pub fn extract_subnet_32(&self) -> Ipv6Addr {
         let octets = self.ipv6_addr.octets();
         let mut subnet = [0u8; 16];
-        subnet[..4].copy_from_slice(&octets[..4]); // Keep first 32 bits, zero the rest
+        subnet[..4].copy_from_slice(&octets[..4]);
         Ipv6Addr::from(subnet)
+    }
+
+    // Conversion helpers for delegation
+
+    fn from_generic(g: GenericIpNodeID<Ipv6Addr>) -> Self {
+        Self {
+            node_id: g.node_id,
+            ipv6_addr: g.ip_addr,
+            public_key: g.public_key,
+            signature: g.signature,
+            timestamp_secs: g.timestamp_secs,
+            salt: g.salt,
+        }
+    }
+
+    fn to_generic(&self) -> GenericIpNodeID<Ipv6Addr> {
+        GenericIpNodeID {
+            node_id: self.node_id.clone(),
+            ip_addr: self.ipv6_addr,
+            public_key: self.public_key.clone(),
+            signature: self.signature.clone(),
+            timestamp_secs: self.timestamp_secs,
+            salt: self.salt.clone(),
+        }
     }
 }
 
@@ -367,83 +494,20 @@ pub struct IPv4NodeID {
 
 impl IPv4NodeID {
     /// Generate a new IPv4-based node ID
+    ///
+    /// Delegates to `GenericIpNodeID` for the core generation logic.
     pub fn generate(
         ipv4_addr: Ipv4Addr,
         secret: &MlDsaSecretKey,
         public: &MlDsaPublicKey,
     ) -> Result<Self> {
-        let mut rng = rand::thread_rng();
-        let mut salt = vec![0u8; 16];
-        rand::RngCore::fill_bytes(&mut rng, &mut salt);
-
-        let timestamp = SystemTime::now();
-        let timestamp_secs = timestamp.duration_since(UNIX_EPOCH)?.as_secs();
-        let public_key = public.as_bytes().to_vec();
-
-        // Generate node ID: SHA256(ipv4_address || public_key || salt || timestamp)
-        let mut hasher = Sha256::new();
-        hasher.update(ipv4_addr.octets());
-        hasher.update(&public_key);
-        hasher.update(&salt);
-        hasher.update(timestamp_secs.to_le_bytes());
-        let node_id = hasher.finalize().to_vec();
-
-        // Create signature proving ownership
-        let mut message_to_sign = Vec::new();
-        message_to_sign.extend_from_slice(&ipv4_addr.octets());
-        message_to_sign.extend_from_slice(&public_key);
-        message_to_sign.extend_from_slice(&salt);
-        message_to_sign.extend_from_slice(&timestamp_secs.to_le_bytes());
-
-        let sig = ml_dsa_sign(secret, &message_to_sign)
-            .map_err(|e| anyhow!("ML-DSA sign failed: {:?}", e))?;
-        let signature = sig.0.to_vec();
-
-        Ok(IPv4NodeID {
-            node_id,
-            ipv4_addr,
-            public_key,
-            signature,
-            timestamp_secs,
-            salt,
-        })
+        let generic = GenericIpNodeID::generate(ipv4_addr, secret, public)?;
+        Ok(Self::from_generic(generic))
     }
 
     /// Verify that this node ID is valid and properly signed
     pub fn verify(&self) -> Result<bool> {
-        // Reconstruct the node ID
-        let mut hasher = Sha256::new();
-        hasher.update(self.ipv4_addr.octets());
-        hasher.update(&self.public_key);
-        hasher.update(&self.salt);
-        hasher.update(self.timestamp_secs.to_le_bytes());
-        let expected_node_id = hasher.finalize();
-
-        // Verify node ID matches
-        if expected_node_id.as_slice() != self.node_id {
-            return Ok(false);
-        }
-
-        let public_key = MlDsaPublicKey::from_bytes(&self.public_key)
-            .map_err(|e| anyhow!("Invalid ML-DSA public key: {:?}", e))?;
-
-        // Convert Vec<u8> to fixed-size array for MlDsaSignature
-        if self.signature.len() != 3309 {
-            return Ok(false); // Invalid signature length
-        }
-        let mut sig_bytes = [0u8; 3309];
-        sig_bytes.copy_from_slice(&self.signature);
-        let signature = MlDsaSignature(Box::new(sig_bytes));
-
-        let mut message_to_verify = Vec::new();
-        message_to_verify.extend_from_slice(&self.ipv4_addr.octets());
-        message_to_verify.extend_from_slice(&self.public_key);
-        message_to_verify.extend_from_slice(&self.salt);
-        message_to_verify.extend_from_slice(&self.timestamp_secs.to_le_bytes());
-
-        let ok = ml_dsa_verify(&public_key, &message_to_verify, &signature)
-            .map_err(|e| anyhow!("ML-DSA verify error: {:?}", e))?;
-        Ok(ok)
+        self.to_generic().verify()
     }
 
     /// Extract /24 subnet from IPv4 address (Class C / most ISP allocations)
@@ -466,16 +530,36 @@ impl IPv4NodeID {
 
     /// Get the age of this node ID in seconds
     pub fn age_secs(&self) -> u64 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        now.saturating_sub(self.timestamp_secs)
+        self.to_generic().age_secs()
     }
 
     /// Check if the node ID has expired (older than max_age)
     pub fn is_expired(&self, max_age: Duration) -> bool {
-        self.age_secs() > max_age.as_secs()
+        self.to_generic().is_expired(max_age)
+    }
+
+    // Conversion helpers for delegation
+
+    fn from_generic(g: GenericIpNodeID<Ipv4Addr>) -> Self {
+        Self {
+            node_id: g.node_id,
+            ipv4_addr: g.ip_addr,
+            public_key: g.public_key,
+            signature: g.signature,
+            timestamp_secs: g.timestamp_secs,
+            salt: g.salt,
+        }
+    }
+
+    fn to_generic(&self) -> GenericIpNodeID<Ipv4Addr> {
+        GenericIpNodeID {
+            node_id: self.node_id.clone(),
+            ip_addr: self.ipv4_addr,
+            public_key: self.public_key.clone(),
+            signature: self.signature.clone(),
+            timestamp_secs: self.timestamp_secs,
+            salt: self.salt.clone(),
+        }
     }
 }
 

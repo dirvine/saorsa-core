@@ -751,7 +751,6 @@ impl From<crate::adaptive::AdaptiveNetworkError> for P2PError {
         use crate::adaptive::AdaptiveNetworkError;
         match err {
             AdaptiveNetworkError::Network(io_err) => P2PError::Io(io_err),
-            AdaptiveNetworkError::Io(io_err) => P2PError::Io(io_err),
             AdaptiveNetworkError::Serialization(ser_err) => {
                 P2PError::Serialization(ser_err.to_string().into())
             }

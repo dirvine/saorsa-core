@@ -23,9 +23,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 /// Update policy controlling when updates are applied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum UpdatePolicy {
     /// Automatically download and apply updates (DEFAULT).
+    #[default]
     Silent,
 
     /// Download updates but notify user before applying.
@@ -39,12 +40,6 @@ pub enum UpdatePolicy {
 
     /// Only force updates for critical security patches.
     CriticalOnly,
-}
-
-impl Default for UpdatePolicy {
-    fn default() -> Self {
-        Self::Silent
-    }
 }
 
 impl UpdatePolicy {
@@ -62,10 +57,11 @@ impl UpdatePolicy {
 }
 
 /// Release channel for updates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReleaseChannel {
     /// Stable releases - thoroughly tested.
+    #[default]
     Stable,
 
     /// Beta releases - feature complete but still testing.
@@ -73,12 +69,6 @@ pub enum ReleaseChannel {
 
     /// Nightly releases - latest development builds.
     Nightly,
-}
-
-impl Default for ReleaseChannel {
-    fn default() -> Self {
-        Self::Stable
-    }
 }
 
 impl ReleaseChannel {

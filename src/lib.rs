@@ -56,6 +56,11 @@
 /// Four-word identifier system
 pub mod fwid;
 
+/// Prelude module for convenient imports
+///
+/// Use `use saorsa_core::prelude::*;` to import commonly used types.
+pub mod prelude;
+
 /// Public API matching the spec
 pub mod api;
 
