@@ -161,53 +161,99 @@ pub struct NetworkCoordinator {
 }
 
 // Legacy accessor methods for backward compatibility
+// TODO: Remove these in v0.4.0 - use component groups directly instead
 impl NetworkCoordinator {
     /// Get the node identity
+    ///
+    /// **Deprecated**: Use `coordinator.network.identity` directly instead.
+    #[deprecated(since = "0.3.16", note = "Use `coordinator.network.identity` directly")]
     pub fn identity(&self) -> &Arc<NodeIdentity> {
         &self.network.identity
     }
 
     /// Get the transport manager
+    ///
+    /// **Deprecated**: Use `coordinator.network.transport` directly instead.
+    #[deprecated(
+        since = "0.3.16",
+        note = "Use `coordinator.network.transport` directly"
+    )]
     pub fn transport(&self) -> &Arc<TransportManager> {
         &self.network.transport
     }
 
     /// Get the DHT
+    ///
+    /// **Deprecated**: Use `coordinator.network.dht` directly instead.
+    #[deprecated(since = "0.3.16", note = "Use `coordinator.network.dht` directly")]
     pub fn dht(&self) -> &Arc<AdaptiveDHT> {
         &self.network.dht
     }
 
     /// Get the router
+    ///
+    /// **Deprecated**: Use `coordinator.network.router` directly instead.
+    #[deprecated(since = "0.3.16", note = "Use `coordinator.network.router` directly")]
     pub fn router(&self) -> &Arc<AdaptiveRouter> {
         &self.network.router
     }
 
     /// Get the trust engine
+    ///
+    /// **Deprecated**: Use `coordinator.routing.trust_engine` directly instead.
+    #[deprecated(
+        since = "0.3.16",
+        note = "Use `coordinator.routing.trust_engine` directly"
+    )]
     pub fn trust_engine(&self) -> &Arc<EigenTrustEngine> {
         &self.routing.trust_engine
     }
 
     /// Get the gossip system
+    ///
+    /// **Deprecated**: Use `coordinator.network.gossip` directly instead.
+    #[deprecated(since = "0.3.16", note = "Use `coordinator.network.gossip` directly")]
     pub fn gossip(&self) -> &Arc<AdaptiveGossipSub> {
         &self.network.gossip
     }
 
     /// Get the content store
+    ///
+    /// **Deprecated**: Use `coordinator.storage.storage` directly instead.
+    #[deprecated(since = "0.3.16", note = "Use `coordinator.storage.storage` directly")]
     pub fn content_store(&self) -> &Arc<ContentStore> {
         &self.storage.storage
     }
 
     /// Get the replication manager
+    ///
+    /// **Deprecated**: Use `coordinator.storage.replication` directly instead.
+    #[deprecated(
+        since = "0.3.16",
+        note = "Use `coordinator.storage.replication` directly"
+    )]
     pub fn replication(&self) -> &Arc<ReplicationManager> {
         &self.storage.replication
     }
 
     /// Get the monitoring system
+    ///
+    /// **Deprecated**: Use `coordinator.operations.monitoring` directly instead.
+    #[deprecated(
+        since = "0.3.16",
+        note = "Use `coordinator.operations.monitoring` directly"
+    )]
     pub fn monitoring(&self) -> &Arc<MonitoringSystem> {
         &self.operations.monitoring
     }
 
     /// Get the security manager
+    ///
+    /// **Deprecated**: Use `coordinator.operations.security` directly instead.
+    #[deprecated(
+        since = "0.3.16",
+        note = "Use `coordinator.operations.security` directly"
+    )]
     pub fn security(&self) -> &Arc<SecurityManager> {
         &self.operations.security
     }
@@ -584,13 +630,13 @@ impl NetworkCoordinator {
     pub async fn join_network(&self) -> Result<()> {
         info!(
             "Joining P2P network with identity: {:?}",
-            self.identity().node_id()
+            self.network.identity.node_id()
         );
 
         // Connect to bootstrap nodes
         for bootstrap in &self.config.bootstrap_nodes {
             match <TransportManager as TransportExtensions>::connect(
-                self.transport(),
+                &self.network.transport,
                 bootstrap,
             )
             .await
@@ -601,16 +647,16 @@ impl NetworkCoordinator {
         }
 
         // Initialize DHT routing table
-        self.dht().bootstrap().await?;
+        self.network.dht.bootstrap().await?;
 
         // Start trust computation
-        self.trust_engine().start_computation().await?;
+        self.routing.trust_engine.start_computation().await?;
 
         // Join gossip mesh
-        self.gossip().start().await?;
+        self.network.gossip.start().await?;
 
         // Start monitoring
-        self.monitoring().start_collection().await?;
+        self.operations.monitoring.start_collection().await?;
 
         // Update state
         let mut state = self.state.write().await;
@@ -623,8 +669,9 @@ impl NetworkCoordinator {
     /// Store data in the network
     pub async fn store(&self, data: Vec<u8>) -> Result<ContentHash> {
         // Security check
-        self.security()
-            .check_rate_limit(&self.identity().to_user_id(), None)
+        self.operations
+            .security
+            .check_rate_limit(&self.network.identity.to_user_id(), None)
             .await
             .map_err(|e| {
                 P2PError::Network(crate::error::NetworkError::ProtocolError(
@@ -635,7 +682,8 @@ impl NetworkCoordinator {
         // Store locally first
         let metadata = ContentMetadata::default();
         let hash = self
-            .content_store()
+            .storage
+            .storage
             .store(data.clone(), metadata)
             .await
             .map_err(|e| {
@@ -646,8 +694,9 @@ impl NetworkCoordinator {
         let _cache_decision = self.learning.q_learning_cache.decide_caching(&hash).await;
 
         // Replicate based on ML predictions
-        let replication_strategy = self.replication().determine_strategy(&hash).await?;
-        self.replication()
+        let replication_strategy = self.storage.replication.determine_strategy(&hash).await?;
+        self.storage
+            .replication
             .replicate(&hash, data, replication_strategy)
             .await?;
 
@@ -703,7 +752,7 @@ impl NetworkCoordinator {
         let msg = GossipMessage {
             topic: topic.to_string(),
             data: message,
-            from: NodeId::from_bytes(self.identity().node_id().0),
+            from: NodeId::from_bytes(self.network.identity.node_id().0),
             seqno: 0, // Will be set by gossip
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -712,7 +761,7 @@ impl NetworkCoordinator {
         };
 
         // Publish through gossip
-        self.gossip().publish(topic, msg).await?;
+        self.network.gossip.publish(topic, msg).await?;
 
         Ok(())
     }
@@ -726,10 +775,10 @@ impl NetworkCoordinator {
             connected_peers: state.connections,
             routing_success_rate: metrics.successful_ops as f64
                 / (metrics.successful_ops + metrics.failed_ops) as f64,
-            average_trust_score: self.trust_engine().get_average_trust().await,
+            average_trust_score: self.routing.trust_engine.get_average_trust().await,
             cache_hit_rate: metrics.cache_hit_rate,
             churn_rate: self.operations.churn_handler.get_stats().await.churn_rate,
-            total_storage: self.content_store().get_total_size().await,
+            total_storage: self.storage.storage.get_total_size().await,
             total_bandwidth: 0, // TODO: Implement bandwidth tracking
         }
     }
@@ -739,7 +788,7 @@ impl NetworkCoordinator {
         let mut handlers = self.routing_handlers.write().await;
 
         // DHT lookup handler
-        let dht = self.dht().clone();
+        let dht = self.network.dht.clone();
         handlers.insert(
             MessageType::DHTLookup,
             Box::new(move |_msg| {
@@ -762,13 +811,13 @@ impl NetworkCoordinator {
         self.operations.churn_handler.start_monitoring().await;
 
         // Start replication monitoring
-        let replication = self.replication().clone();
+        let replication = self.storage.replication.clone();
         tokio::spawn(async move {
             replication.start_monitoring().await;
         });
 
         // Start metrics collection
-        let _monitoring = self.monitoring().clone();
+        let _monitoring = self.operations.monitoring.clone();
         let _metrics = self.metrics.clone();
         tokio::spawn(async move {
             loop {
@@ -805,23 +854,33 @@ impl NetworkCoordinator {
         match reason {
             DegradationReason::HighChurn => {
                 // Increase replication factor
-                self.replication().increase_global_replication(1.5).await;
+                self.storage
+                    .replication
+                    .increase_global_replication(1.5)
+                    .await;
                 // Reduce gossip fanout
-                self.gossip().reduce_fanout(0.75).await;
+                self.network.gossip.reduce_fanout(0.75).await;
             }
             DegradationReason::LowConnectivity => {
                 // Enable aggressive caching
-                self.router().enable_aggressive_caching().await;
+                self.network.router.enable_aggressive_caching().await;
                 // Reduce security strictness temporarily
-                self.security()
+                self.operations
+                    .security
                     .set_temporary_relaxation(Duration::from_secs(300))
                     .await?;
             }
             DegradationReason::HighLoad => {
                 // Enable rate limiting
-                self.security().enable_strict_rate_limiting().await?;
+                self.operations
+                    .security
+                    .enable_strict_rate_limiting()
+                    .await?;
                 // Reduce monitoring frequency
-                self.monitoring().reduce_collection_frequency(0.5).await;
+                self.operations
+                    .monitoring
+                    .reduce_collection_frequency(0.5)
+                    .await;
             }
         }
 
@@ -843,10 +902,10 @@ impl NetworkCoordinator {
         }
 
         // Stop accepting new requests
-        self.transport().stop_accepting().await?;
+        self.network.transport.stop_accepting().await?;
 
         // Flush pending operations
-        self.content_store().flush().await.map_err(|e| {
+        self.storage.storage.flush().await.map_err(|e| {
             P2PError::Storage(crate::error::StorageError::Database(e.to_string().into()))
         })?;
 
@@ -856,7 +915,7 @@ impl NetworkCoordinator {
         // self.learning.q_learning_cache.save_model().await?;
 
         // Notify peers of departure
-        self.gossip().announce_departure().await?;
+        self.network.gossip.announce_departure().await?;
 
         // Wait for graceful termination
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -868,8 +927,8 @@ impl NetworkCoordinator {
     /// Public accessor for basic node information used by tests/examples
     pub async fn get_node_info(&self) -> Result<NodeDescriptor> {
         Ok(NodeDescriptor {
-            id: self.identity().to_user_id(),
-            public_key: self.identity().public_key().clone(),
+            id: self.network.identity.to_user_id(),
+            public_key: self.network.identity.public_key().clone(),
             addresses: vec![],
             hyperbolic: None,
             som_position: None,
@@ -937,9 +996,9 @@ impl NetworkCoordinator {
     /// Coordinate between routing layers
     pub async fn coordinate_routing(&self, target: &NodeId) -> Result<Vec<NodeId>> {
         // Get recommendations from each layer
-        let kademlia_path = self.router().get_kademlia_path(target).await?;
-        let hyperbolic_path = self.router().get_hyperbolic_path(target).await?;
-        let trust_path = self.router().get_trust_path(target).await?;
+        let kademlia_path = self.network.router.get_kademlia_path(target).await?;
+        let hyperbolic_path = self.network.router.get_hyperbolic_path(target).await?;
+        let trust_path = self.network.router.get_trust_path(target).await?;
 
         // Use MAB to select best path
         let paths = vec![
@@ -981,9 +1040,9 @@ impl NetworkCoordinator {
     /// Coordinate storage decisions
     pub async fn coordinate_storage(&self, hash: &ContentHash, data: &[u8]) -> Result<()> {
         // Get storage recommendations
-        let heat_score = self.content_store().get_heat_score(hash).await;
+        let heat_score = self.storage.storage.get_heat_score(hash).await;
         let churn_prediction = self.learning.churn_predictor.predict_network_churn().await;
-        let _trust_scores = self.trust_engine().get_storage_candidates(10).await;
+        let _trust_scores = self.routing.trust_engine.get_storage_candidates(10).await;
 
         // Determine optimal storage strategy
         let strategy = if heat_score > 0.8 {
@@ -995,7 +1054,10 @@ impl NetworkCoordinator {
         };
 
         // Execute storage with strategy
-        self.content_store().store_with_strategy(data, strategy).await?;
+        self.storage
+            .storage
+            .store_with_strategy(data, strategy)
+            .await?;
 
         Ok(())
     }
@@ -1086,7 +1148,7 @@ mod tests {
             Ok(Ok(coordinator)) => {
                 let message = NetworkMessage {
                     id: "test-123".to_string(),
-                    sender: NodeId::from_bytes(*coordinator.identity().node_id().to_bytes()),
+                    sender: NodeId::from_bytes(*coordinator.network.identity.node_id().to_bytes()),
                     content: vec![1, 2, 3],
                     msg_type: ContentType::DHTLookup,
                     timestamp: 0,

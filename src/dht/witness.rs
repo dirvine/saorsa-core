@@ -36,15 +36,29 @@ pub enum OperationType {
     Batch(Vec<OperationType>),
 }
 
-/// Node identifier
+/// Node identifier for witness system
+///
+/// TODO: Migrate to `crate::adaptive::NodeId` (UserId) when witness system
+/// is integrated with real cryptographic identities. Currently uses String
+/// for testing/placeholder purposes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NodeId(String);
+pub struct WitnessNodeId(String);
 
-impl NodeId {
+impl WitnessNodeId {
+    /// Create a new witness node identifier from a string
     pub fn new(id: &str) -> Self {
         Self(id.to_string())
     }
+
+    /// Get the inner string value
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
+
+// Type alias for backward compatibility within this module
+// TODO: Remove this alias after updating all usages
+pub type NodeId = WitnessNodeId;
 
 /// Operation metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]

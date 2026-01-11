@@ -66,6 +66,9 @@ pub use crate::peer_record::{EndpointId, NatType, PeerDHTRecord, PeerEndpoint, S
 
 /// Core PQC types from saorsa-pqc
 pub use crate::quantum_crypto::{
+    // Symmetric encryption
+    ChaCha20Poly1305Cipher,
+    EncryptedMessage,
     // ML-DSA (signatures)
     MlDsa65,
     MlDsaOperations,
@@ -78,17 +81,14 @@ pub use crate::quantum_crypto::{
     MlKemOperations,
     MlKemPublicKey,
     MlKemSecretKey,
-    // Symmetric encryption
-    ChaCha20Poly1305Cipher,
-    EncryptedMessage,
-    SharedSecret,
-    SymmetricEncryptedMessage,
-    SymmetricKey,
     // Errors
     PqcError,
     QuantumCryptoError,
     SaorsaPqcResult,
+    SharedSecret,
+    SymmetricEncryptedMessage,
     SymmetricError,
+    SymmetricKey,
     // Configuration
     create_default_pqc_config,
     create_pqc_only_config,
@@ -172,26 +172,26 @@ pub use crate::placement::{
 
 /// Adaptive network types (re-exported from adaptive module)
 pub use crate::adaptive::{
+    // Traits
+    AdaptiveNetworkNode,
     // Core types
     ContentHash,
+    // Learning context
+    ContentType,
     HyperbolicCoordinate,
+    LearningContext,
+    LearningMetrics,
+    LearningSystem,
+    NetworkConditions,
     NetworkMessage,
     NetworkStats,
     NodeCapabilities,
     NodeDescriptor,
     NodeId,
-    // Traits
-    AdaptiveNetworkNode,
-    LearningSystem,
-    RoutingStrategy,
-    TrustProvider,
-    // Learning context
-    ContentType,
-    LearningContext,
-    LearningMetrics,
-    NetworkConditions,
     Outcome,
+    RoutingStrategy,
     StrategyChoice,
+    TrustProvider,
 };
 
 // ============================================================================
@@ -212,4 +212,6 @@ pub use crate::health::{
 // ============================================================================
 
 /// Event system
-pub use crate::events::{Subscription, TopologyEvent, device_subscribe, dht_watch, subscribe_topology};
+pub use crate::events::{
+    Subscription, TopologyEvent, device_subscribe, dht_watch, subscribe_topology,
+};

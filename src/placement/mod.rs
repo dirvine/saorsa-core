@@ -229,26 +229,19 @@ impl PlacementEngine {
             return Err(PlacementError::InvalidReplicationFactor(replication_factor));
         }
 
-        // Apply placement timeout
-        let timeout_future = async {
-            tokio::time::sleep(self.config.placement_timeout).await;
-            Err(PlacementError::PlacementTimeout)
-        };
-
-        let placement_future = self.strategy.select_nodes(
-            available_nodes,
-            replication_factor,
-            trust_system,
-            performance_monitor,
-            node_metadata,
-        );
-
-        // Race placement against timeout
-        let result = tokio::select! {
-            result = placement_future => result?,
-            timeout_result = timeout_future => timeout_result?,
-        };
-        let mut decision = result;
+        // Execute placement with timeout using idiomatic tokio::time::timeout
+        let mut decision = tokio::time::timeout(
+            self.config.placement_timeout,
+            self.strategy.select_nodes(
+                available_nodes,
+                replication_factor,
+                trust_system,
+                performance_monitor,
+                node_metadata,
+            ),
+        )
+        .await
+        .map_err(|_| PlacementError::PlacementTimeout)??;
 
         // Update timing information
         decision.selection_time = start_time.elapsed();

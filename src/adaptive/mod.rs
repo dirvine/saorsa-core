@@ -31,6 +31,7 @@ pub mod beta_distribution;
 pub mod churn;
 pub mod churn_prediction;
 pub mod client;
+pub mod component_builders;
 pub mod coordinator;
 pub mod coordinator_extensions;
 pub mod dht_integration;

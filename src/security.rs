@@ -82,11 +82,7 @@ impl<A: NodeIpAddress> GenericIpNodeID<A> {
     const SIGNATURE_LENGTH: usize = 3309;
 
     /// Generate a new IP-based node ID
-    pub fn generate(
-        ip_addr: A,
-        secret: &MlDsaSecretKey,
-        public: &MlDsaPublicKey,
-    ) -> Result<Self> {
+    pub fn generate(ip_addr: A, secret: &MlDsaSecretKey, public: &MlDsaPublicKey) -> Result<Self> {
         let mut rng = rand::thread_rng();
         let mut salt = vec![0u8; 16];
         rand::RngCore::fill_bytes(&mut rng, &mut salt);
@@ -172,7 +168,12 @@ impl<A: NodeIpAddress> GenericIpNodeID<A> {
     // Internal helpers
 
     #[inline]
-    fn compute_node_id(ip_octets: &[u8], public_key: &[u8], salt: &[u8], timestamp_secs: u64) -> Vec<u8> {
+    fn compute_node_id(
+        ip_octets: &[u8],
+        public_key: &[u8],
+        salt: &[u8],
+        timestamp_secs: u64,
+    ) -> Vec<u8> {
         let mut hasher = Sha256::new();
         hasher.update(ip_octets);
         hasher.update(public_key);
@@ -182,7 +183,12 @@ impl<A: NodeIpAddress> GenericIpNodeID<A> {
     }
 
     #[inline]
-    fn build_message(ip_octets: &[u8], public_key: &[u8], salt: &[u8], timestamp_secs: u64) -> Vec<u8> {
+    fn build_message(
+        ip_octets: &[u8],
+        public_key: &[u8],
+        salt: &[u8],
+        timestamp_secs: u64,
+    ) -> Vec<u8> {
         let mut message = Vec::with_capacity(ip_octets.len() + public_key.len() + salt.len() + 8);
         message.extend_from_slice(ip_octets);
         message.extend_from_slice(public_key);

@@ -87,9 +87,9 @@ impl WordEncoder {
     }
 
     pub fn encode_multiaddr_string(&self, multiaddr: &str) -> Result<FourWordAddress> {
-        let socket_addr: std::net::SocketAddr = multiaddr.parse().map_err(|e| {
-            P2PError::Bootstrap(BootstrapError::InvalidData(format!("{e}").into()))
-        })?;
+        let socket_addr: std::net::SocketAddr = multiaddr
+            .parse()
+            .map_err(|e| P2PError::Bootstrap(BootstrapError::InvalidData(format!("{e}").into())))?;
         self.encode_socket_addr(&socket_addr)
     }
 
@@ -118,9 +118,9 @@ impl WordEncoder {
                 format!("Encoder init failed: {e}").into(),
             ))
         })?;
-        let encoded = encoder.encode(&addr.to_string()).map_err(|e| {
-            P2PError::Bootstrap(BootstrapError::InvalidData(format!("{e}").into()))
-        })?;
+        let encoded = encoder
+            .encode(&addr.to_string())
+            .map_err(|e| P2PError::Bootstrap(BootstrapError::InvalidData(format!("{e}").into())))?;
         Ok(FourWordAddress(encoded.replace(' ', "-")))
     }
 }

@@ -297,10 +297,8 @@ impl NodeConfigBuilder {
         let port = self.listen_port.unwrap_or(default_port);
         let ipv6_enabled = self.enable_ipv6.unwrap_or(base_config.network.ipv6_enabled);
 
-        let listen_addr = std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-            port,
-        );
+        let listen_addr =
+            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), port);
 
         Ok(NodeConfig {
             peer_id: self.peer_id,
@@ -309,11 +307,15 @@ impl NodeConfigBuilder {
             bootstrap_peers: self.bootstrap_peers.clone(),
             bootstrap_peers_str: self.bootstrap_peers.iter().map(|a| a.to_string()).collect(),
             enable_ipv6: ipv6_enabled,
-            connection_timeout: self.connection_timeout
+            connection_timeout: self
+                .connection_timeout
                 .unwrap_or(Duration::from_secs(base_config.network.connection_timeout)),
-            keep_alive_interval: self.keep_alive_interval
+            keep_alive_interval: self
+                .keep_alive_interval
                 .unwrap_or(Duration::from_secs(base_config.network.keepalive_interval)),
-            max_connections: self.max_connections.unwrap_or(base_config.network.max_connections),
+            max_connections: self
+                .max_connections
+                .unwrap_or(base_config.network.max_connections),
             max_incoming_connections: base_config.security.connection_limit as usize,
             dht_config: self.dht_config.unwrap_or_default(),
             security_config: self.security_config.unwrap_or_default(),
@@ -329,10 +331,7 @@ impl Default for NodeConfig {
     fn default() -> Self {
         let config = Config::default();
         let listen_addr = config.listen_socket_addr().unwrap_or_else(|_| {
-            std::net::SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                9000,
-            )
+            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 9000)
         });
 
         Self {

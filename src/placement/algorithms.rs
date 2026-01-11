@@ -27,38 +27,54 @@ use crate::placement::{
 // Validation Helpers
 // ============================================================================
 
+/// Validation macro for placement scores/weights
+///
+/// Supports two validation types:
+/// - `unit`: Validates value is in [0.0, 1.0] range
+/// - `non_negative`: Validates value is >= 0.0
+///
+/// # Examples
+/// ```ignore
+/// validate_score!(node_id, 0.5, "trust_score", unit)?;
+/// validate_score!(node_id, 1.5, "capacity", non_negative)?;
+/// ```
+macro_rules! validate_score {
+    ($node_id:expr, $value:expr, $name:expr, unit) => {{
+        let value: f64 = $value;
+        if !(0.0..=1.0).contains(&value) {
+            Err(PlacementError::InvalidWeight {
+                node_id: $node_id.clone(),
+                weight: value,
+                reason: format!("{} must be between 0.0 and 1.0", $name),
+            })
+        } else {
+            Ok(())
+        }
+    }};
+    ($node_id:expr, $value:expr, $name:expr, non_negative) => {{
+        let value: f64 = $value;
+        if value < 0.0 {
+            Err(PlacementError::InvalidWeight {
+                node_id: $node_id.clone(),
+                weight: value,
+                reason: format!("{} must be non-negative", $name),
+            })
+        } else {
+            Ok(())
+        }
+    }};
+}
+
 /// Validate that a score is within [0.0, 1.0] range
 #[inline]
-fn validate_unit_score(
-    node_id: &NodeId,
-    value: f64,
-    name: &'static str,
-) -> PlacementResult<()> {
-    if !(0.0..=1.0).contains(&value) {
-        return Err(PlacementError::InvalidWeight {
-            node_id: node_id.clone(),
-            weight: value,
-            reason: format!("{} must be between 0.0 and 1.0", name),
-        });
-    }
-    Ok(())
+fn validate_unit_score(node_id: &NodeId, value: f64, name: &'static str) -> PlacementResult<()> {
+    validate_score!(node_id, value, name, unit)
 }
 
 /// Validate that a factor is non-negative
 #[inline]
-fn validate_non_negative(
-    node_id: &NodeId,
-    value: f64,
-    name: &'static str,
-) -> PlacementResult<()> {
-    if value < 0.0 {
-        return Err(PlacementError::InvalidWeight {
-            node_id: node_id.clone(),
-            weight: value,
-            reason: format!("{} must be non-negative", name),
-        });
-    }
-    Ok(())
+fn validate_non_negative(node_id: &NodeId, value: f64, name: &'static str) -> PlacementResult<()> {
+    validate_score!(node_id, value, name, non_negative)
 }
 
 /// Efraimidis-Spirakis weighted sampling algorithm implementation

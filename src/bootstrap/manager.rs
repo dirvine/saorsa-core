@@ -730,9 +730,15 @@ mod tests {
         // Add first two peers from same /24 - should succeed
         for i in 0..2 {
             let peer_id = format!("peer-{}", i);
-            let addr: SocketAddr = format!("192.168.1.{}:{}", 10 + i, 9000 + i).parse().unwrap();
+            let addr: SocketAddr = format!("192.168.1.{}:{}", 10 + i, 9000 + i)
+                .parse()
+                .unwrap();
             let result = manager.add_peer(peer_id, vec![addr]).await;
-            assert!(result.is_ok(), "First 2 peers should be allowed: {:?}", result);
+            assert!(
+                result.is_ok(),
+                "First 2 peers should be allowed: {:?}",
+                result
+            );
         }
 
         // Third peer from same /24 subnet - should fail rate limiting
