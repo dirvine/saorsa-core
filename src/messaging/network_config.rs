@@ -266,6 +266,7 @@ impl NetworkConfig {
                 enable_relay_fallback: *enable_relay_fallback,
                 prefer_rfc_nat_traversal: *prefer_rfc_nat_traversal,
                 relay_nodes: vec![],
+                enable_relay_service: false,
             },
         })
     }
