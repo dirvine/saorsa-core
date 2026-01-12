@@ -73,6 +73,9 @@ use tokio::time::sleep;
 use ant_quic::nat_traversal_api::PeerId;
 use ant_quic::{LinkConn, LinkEvent, LinkTransport, P2pConfig, P2pLinkTransport, ProtocolId};
 
+// Import saorsa-transport types for SharedTransport integration
+use saorsa_transport::{SharedTransport, StreamType};
+
 /// Protocol identifier for saorsa DHT overlay
 ///
 /// This protocol identifier is used for multiplexing saorsa's DHT traffic
@@ -118,6 +121,8 @@ pub struct P2PNetworkNode<T: LinkTransport = P2pLinkTransport> {
     peer_regions: Arc<RwLock<HashMap<String, usize>>>,
     /// Peer quality scores from ant-quic Capabilities
     peer_quality: Arc<RwLock<HashMap<PeerId, f32>>>,
+    /// Shared transport for protocol multiplexing
+    shared_transport: Arc<SharedTransport<T>>,
 }
 
 impl P2PNetworkNode<P2pLinkTransport> {
@@ -253,6 +258,11 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
             }
         }));
 
+        // Create SharedTransport for protocol multiplexing
+        let shared_transport =
+            Arc::new(SharedTransport::from_arc_transport(Arc::clone(&transport)));
+        // Note: DHT handler registration happens lazily when a DhtCoreEngine is provided
+        // via register_dht_handler() method.
         Ok(Self {
             transport,
             local_addr: bind_addr,
@@ -263,7 +273,66 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
             geo_config: None,
             peer_regions: Arc::new(RwLock::new(HashMap::new())),
             peer_quality,
+            shared_transport,
         })
+    }
+
+    /// Register the DHT handler with the SharedTransport.
+    ///
+    /// This enables handling of DHT stream types (Query, Store, Witness, Replication)
+    /// via the SharedTransport multiplexer.
+    ///
+    /// # Arguments
+    ///
+    /// * `dht_engine` - The DHT engine to process requests
+    pub async fn register_dht_handler(
+        &self,
+        dht_engine: Arc<RwLock<crate::dht::core_engine::DhtCoreEngine>>,
+    ) -> Result<()> {
+        use crate::transport::dht_handler::DhtStreamHandler;
+        use saorsa_transport::ProtocolHandlerExt;
+
+        let handler = DhtStreamHandler::new(dht_engine);
+        self.shared_transport
+            .register_handler(handler.boxed())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to register DHT handler: {}", e))?;
+
+        tracing::info!("DHT handler registered with SharedTransport");
+        Ok(())
+    }
+
+    /// Get a reference to the SharedTransport.
+    ///
+    /// Useful for registering additional protocol handlers.
+    pub fn shared_transport(&self) -> Arc<SharedTransport<T>> {
+        Arc::clone(&self.shared_transport)
+    }
+
+    /// Start the SharedTransport.
+    ///
+    /// Must be called before sending/receiving via SharedTransport.
+    pub async fn start_shared_transport(&self) -> Result<()> {
+        self.shared_transport
+            .start()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to start SharedTransport: {}", e))
+    }
+
+    /// Send data via SharedTransport with stream type routing.
+    ///
+    /// The stream type byte is prepended automatically.
+    pub async fn send_typed(
+        &self,
+        peer_id: &PeerId,
+        stream_type: StreamType,
+        data: bytes::Bytes,
+    ) -> Result<()> {
+        self.shared_transport
+            .send(*peer_id, stream_type, data)
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow::anyhow!("Failed to send typed data: {}", e))
     }
 
     /// Connect to a peer by address

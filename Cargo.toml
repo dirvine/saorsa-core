@@ -88,7 +88,8 @@ flate2 = "1.0"
 once_cell = "1.19"
 
 # Networking
-ant-quic = { version = "0.15.2" }
+ant-quic = { path = "../ant-quic" }
+saorsa-transport = { path = "../saorsa-transport" }
 four-word-networking = { version = "2.6" }
 
 # Core-specific dependencies

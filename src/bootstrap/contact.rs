@@ -22,12 +22,6 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-// Temporary compatibility types for iroh removal
-#[allow(dead_code)]
-type NodeId = String; // Simplified placeholder
-#[allow(dead_code)]
-type RelayUrl = String; // Simplified placeholder
-
 /// QUIC-specific contact information for direct connectivity
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QuicContactInfo {
