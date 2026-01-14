@@ -57,9 +57,9 @@ async fn test_peer_to_peer_connection() {
     // Try to connect node2 to node1
     let connect_result = timeout(Duration::from_secs(5), node2.connect_to_peer(addr1)).await;
 
-    if connect_result.is_ok() {
+    if let Ok(inner_result) = connect_result {
         // Connection might succeed if ant-quic is fully functional
-        let peer_id = connect_result.unwrap().unwrap();
+        let peer_id = inner_result.unwrap();
         assert!(
             !format!("{:?}", peer_id).is_empty(),
             "Should have peer ID after connection"

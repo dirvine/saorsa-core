@@ -9,7 +9,7 @@
 
 //! DHT Protocol Handler for SharedTransport
 //!
-//! This module implements the `ProtocolHandler` trait from saorsa-transport
+//! This module implements the `ProtocolHandler` trait from ant-quic
 //! for routing DHT-related streams to the appropriate handlers.
 //!
 //! ## Stream Types Handled
@@ -21,9 +21,10 @@
 //! | DhtWitness | 0x12 | Witness requests for BFT |
 //! | DhtReplication | 0x13 | Background replication traffic |
 
+use ant_quic::link_transport::{LinkError, LinkResult, ProtocolHandler, StreamType};
+use ant_quic::nat_traversal_api::PeerId;
 use async_trait::async_trait;
 use bytes::Bytes;
-use saorsa_transport::{PeerId, ProtocolHandler, StreamType, TransportResult};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -77,95 +78,67 @@ impl DhtStreamHandler {
     }
 
     /// Handle a DHT query request.
-    async fn handle_query(&self, peer: PeerId, data: Bytes) -> TransportResult<Option<Bytes>> {
+    async fn handle_query(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT query");
 
-        let message: DhtMessage = bincode::deserialize(&data).map_err(|e| {
-            saorsa_transport::TransportError::StreamError(format!(
-                "Failed to deserialize query: {e}"
-            ))
-        })?;
+        let message: DhtMessage = bincode::deserialize(&data)
+            .map_err(|e| LinkError::Internal(format!("Failed to deserialize query: {e}")))?;
 
         let response = self.process_message(message).await?;
 
-        let response_bytes = bincode::serialize(&response).map_err(|e| {
-            saorsa_transport::TransportError::StreamError(format!(
-                "Failed to serialize response: {e}"
-            ))
-        })?;
+        let response_bytes = bincode::serialize(&response)
+            .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
 
         Ok(Some(Bytes::from(response_bytes)))
     }
 
     /// Handle a DHT store request.
-    async fn handle_store(&self, peer: PeerId, data: Bytes) -> TransportResult<Option<Bytes>> {
+    async fn handle_store(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT store");
 
-        let message: DhtMessage = bincode::deserialize(&data).map_err(|e| {
-            saorsa_transport::TransportError::StreamError(format!(
-                "Failed to deserialize store: {e}"
-            ))
-        })?;
+        let message: DhtMessage = bincode::deserialize(&data)
+            .map_err(|e| LinkError::Internal(format!("Failed to deserialize store: {e}")))?;
 
         let response = self.process_message(message).await?;
 
-        let response_bytes = bincode::serialize(&response).map_err(|e| {
-            saorsa_transport::TransportError::StreamError(format!(
-                "Failed to serialize response: {e}"
-            ))
-        })?;
+        let response_bytes = bincode::serialize(&response)
+            .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
 
         Ok(Some(Bytes::from(response_bytes)))
     }
 
     /// Handle a DHT witness request.
-    async fn handle_witness(&self, peer: PeerId, data: Bytes) -> TransportResult<Option<Bytes>> {
+    async fn handle_witness(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT witness");
 
-        let message: DhtMessage = bincode::deserialize(&data).map_err(|e| {
-            saorsa_transport::TransportError::StreamError(format!(
-                "Failed to deserialize witness: {e}"
-            ))
-        })?;
+        let message: DhtMessage = bincode::deserialize(&data)
+            .map_err(|e| LinkError::Internal(format!("Failed to deserialize witness: {e}")))?;
 
         let response = self.process_message(message).await?;
 
-        let response_bytes = bincode::serialize(&response).map_err(|e| {
-            saorsa_transport::TransportError::StreamError(format!(
-                "Failed to serialize response: {e}"
-            ))
-        })?;
+        let response_bytes = bincode::serialize(&response)
+            .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
 
         Ok(Some(Bytes::from(response_bytes)))
     }
 
     /// Handle a DHT replication request.
-    async fn handle_replication(
-        &self,
-        peer: PeerId,
-        data: Bytes,
-    ) -> TransportResult<Option<Bytes>> {
+    async fn handle_replication(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT replication");
 
-        let message: DhtMessage = bincode::deserialize(&data).map_err(|e| {
-            saorsa_transport::TransportError::StreamError(format!(
-                "Failed to deserialize replication: {e}"
-            ))
-        })?;
+        let message: DhtMessage = bincode::deserialize(&data)
+            .map_err(|e| LinkError::Internal(format!("Failed to deserialize replication: {e}")))?;
 
         let response = self.process_message(message).await?;
 
-        let response_bytes = bincode::serialize(&response).map_err(|e| {
-            saorsa_transport::TransportError::StreamError(format!(
-                "Failed to serialize response: {e}"
-            ))
-        })?;
+        let response_bytes = bincode::serialize(&response)
+            .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
 
         Ok(Some(Bytes::from(response_bytes)))
     }
 
     /// Process a DHT message and return the response.
-    async fn process_message(&self, message: DhtMessage) -> TransportResult<DhtResponse> {
+    async fn process_message(&self, message: DhtMessage) -> LinkResult<DhtResponse> {
         match message {
             DhtMessage::Store { key, value, .. } => {
                 let value_len = value.len();
@@ -371,7 +344,7 @@ impl ProtocolHandler for DhtStreamHandler {
         peer: PeerId,
         stream_type: StreamType,
         data: Bytes,
-    ) -> TransportResult<Option<Bytes>> {
+    ) -> LinkResult<Option<Bytes>> {
         match stream_type {
             StreamType::DhtQuery => self.handle_query(peer, data).await,
             StreamType::DhtStore => self.handle_store(peer, data).await,
@@ -382,9 +355,7 @@ impl ProtocolHandler for DhtStreamHandler {
                     stream_type = %stream_type,
                     "Unexpected stream type routed to DHT handler"
                 );
-                Err(saorsa_transport::TransportError::UnknownStreamType(
-                    stream_type,
-                ))
+                Err(LinkError::InvalidStreamType(stream_type.as_byte()))
             }
         }
     }
@@ -394,7 +365,7 @@ impl ProtocolHandler for DhtStreamHandler {
         peer: PeerId,
         stream_type: StreamType,
         data: Bytes,
-    ) -> TransportResult<()> {
+    ) -> LinkResult<()> {
         trace!(
             peer = ?peer,
             stream_type = %stream_type,
@@ -404,7 +375,7 @@ impl ProtocolHandler for DhtStreamHandler {
         Ok(())
     }
 
-    async fn shutdown(&self) -> TransportResult<()> {
+    async fn shutdown(&self) -> LinkResult<()> {
         debug!(handler = %self.name, "DHT handler shutting down");
         Ok(())
     }
@@ -437,7 +408,7 @@ pub enum DhtStreamType {
 }
 
 impl DhtStreamType {
-    /// Convert to the saorsa-transport StreamType.
+    /// Convert to the ant-quic StreamType.
     pub fn to_stream_type(self) -> StreamType {
         match self {
             Self::Query => StreamType::DhtQuery,

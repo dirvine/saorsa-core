@@ -223,7 +223,7 @@ pub use identity::FourWordAddress;
 pub use auth::{
     DelegatedWriteAuth, MlsWriteAuth, PubKey, Sig, SingleWriteAuth, ThresholdWriteAuth, WriteAuth,
 };
-pub use bootstrap::{BootstrapManager, CacheConfig, ContactEntry, QualityMetrics};
+pub use bootstrap::{BootstrapConfig, BootstrapManager, CacheConfig, ContactEntry, QualityMetrics};
 pub use dht::{Key, Record};
 pub use dht_network_manager::{
     BootstrapNode, DhtNetworkConfig, DhtNetworkEvent, DhtNetworkManager, DhtNetworkOperation,

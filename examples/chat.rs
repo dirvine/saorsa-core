@@ -15,7 +15,6 @@
 use anyhow::Result;
 use clap::Parser;
 use saorsa_core::Multiaddr;
-use saorsa_core::bootstrap::BootstrapDiscovery;
 use saorsa_core::network::{NodeConfig, P2PNode};
 use std::str::FromStr;
 use tokio::io::{self, AsyncBufReadExt};
@@ -33,10 +32,6 @@ struct Args {
     /// A peer to bootstrap from (multiaddr format)
     #[arg(long)]
     bootstrap: Vec<String>,
-
-    /// Bootstrap using three-word addresses (e.g., "global.fast.eagle")
-    #[arg(short = 'w', long)]
-    bootstrap_words: Vec<String>,
 
     /// Enable debug logging
     #[arg(short, long)]
@@ -56,7 +51,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    info!("🐜 P2P Foundation Chat");
+    info!("P2P Foundation Chat");
     info!("======================");
 
     // Create node configuration
@@ -71,65 +66,31 @@ async fn main() -> Result<()> {
     let node = P2PNode::new(config).await?;
 
     // Handle bootstrap peers
-    let discovery = BootstrapDiscovery::new();
-    let mut bootstrap_addrs = Vec::new();
-
-    // Resolve four-word addresses
-    for word_addr in &args.bootstrap_words {
-        match discovery.resolve_four_words(word_addr) {
-            Ok(multiaddr) => {
-                info!("✅ Resolved '{}' to {}", word_addr, multiaddr);
-                bootstrap_addrs.push(multiaddr);
-            }
-            Err(e) => {
-                warn!("❌ Failed to resolve '{}': {}", word_addr, e);
-            }
-        }
-    }
+    let mut bootstrap_addrs: Vec<Multiaddr> = Vec::new();
 
     // Add traditional multiaddrs
     for addr_str in &args.bootstrap {
         match Multiaddr::from_str(addr_str) {
-            Ok(addr) => bootstrap_addrs.push(addr.into()),
+            Ok(addr) => bootstrap_addrs.push(addr),
             Err(e) => warn!("Invalid multiaddr '{}': {}", addr_str, e),
         }
     }
 
-    // If no bootstrap peers specified, try auto-discovery
-    if bootstrap_addrs.is_empty() && args.bootstrap.is_empty() && args.bootstrap_words.is_empty() {
-        info!("🔍 Auto-discovering bootstrap nodes...");
-        match discovery.discover_bootstraps().await {
-            Ok(bootstraps) => {
-                info!("✅ Found {} bootstrap nodes", bootstraps.len());
-                bootstrap_addrs = bootstraps.into_iter().map(|a| a.into()).collect();
-            }
-            Err(e) => {
-                warn!("⚠️  Bootstrap discovery failed: {}", e);
-                info!("💡 You can specify bootstrap nodes with:");
-                info!("    --bootstrap /ip6/::1/udp/9000/quic");
-                info!("    --bootstrap-words global.fast.eagle");
-            }
-        }
-    }
-
     // Connect to bootstrap peers
-    for addr in bootstrap_addrs {
+    for addr in &bootstrap_addrs {
         match node.connect_peer(&addr.to_string()).await {
-            Ok(peer_id) => info!("🔗 Connected to bootstrap: {}", peer_id),
+            Ok(peer_id) => info!("Connected to bootstrap: {}", peer_id),
             Err(e) => warn!("Failed to connect to {}: {}", addr, e),
         }
     }
 
     // Get our listening address
     let listen_addrs = node.listen_addrs().await;
-    info!("📍 Listening on: {:?}", listen_addrs);
+    info!("Listening on: {:?}", listen_addrs);
 
-    // Try to determine our three-word address
-    // In a real implementation, this would be derived from our peer ID
-    info!("🎯 Your three-word address: ocean.swift.mountain");
     info!("");
-    info!("💬 Type messages to send to all connected peers");
-    info!("📝 Commands: /peers, /status, /quit");
+    info!("Type messages to send to all connected peers");
+    info!("Commands: /peers, /status, /quit");
     info!("");
 
     // Start reading from stdin
@@ -139,18 +100,18 @@ async fn main() -> Result<()> {
     while let Some(line) = reader.next_line().await? {
         match line.trim() {
             "/quit" => {
-                info!("👋 Goodbye!");
+                info!("Goodbye!");
                 break;
             }
             "/peers" => {
                 let peers = node.connected_peers().await;
-                info!("🔗 Connected peers: {}", peers.len());
+                info!("Connected peers: {}", peers.len());
                 for peer in peers {
-                    info!("   • {}", peer);
+                    info!("   - {}", peer);
                 }
             }
             "/status" => {
-                info!("📊 Network Status: MCP stats removed");
+                info!("Network Status: Active");
             }
             msg if !msg.is_empty() => {
                 // In a real chat app, we'd publish to a topic or send to specific peers

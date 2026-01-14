@@ -74,7 +74,8 @@ use ant_quic::nat_traversal_api::PeerId;
 use ant_quic::{LinkConn, LinkEvent, LinkTransport, P2pConfig, P2pLinkTransport, ProtocolId};
 
 // Import saorsa-transport types for SharedTransport integration
-use saorsa_transport::{SharedTransport, StreamType};
+use ant_quic::SharedTransport;
+use ant_quic::link_transport::StreamType;
 
 /// Protocol identifier for saorsa DHT overlay
 ///
@@ -259,8 +260,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         }));
 
         // Create SharedTransport for protocol multiplexing
-        let shared_transport =
-            Arc::new(SharedTransport::from_arc_transport(Arc::clone(&transport)));
+        let shared_transport = Arc::new(SharedTransport::from_arc(Arc::clone(&transport)));
         // Note: DHT handler registration happens lazily when a DhtCoreEngine is provided
         // via register_dht_handler() method.
         Ok(Self {
@@ -290,7 +290,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         dht_engine: Arc<RwLock<crate::dht::core_engine::DhtCoreEngine>>,
     ) -> Result<()> {
         use crate::transport::dht_handler::DhtStreamHandler;
-        use saorsa_transport::ProtocolHandlerExt;
+        use ant_quic::link_transport::ProtocolHandlerExt;
 
         let handler = DhtStreamHandler::new(dht_engine);
         self.shared_transport

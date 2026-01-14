@@ -1013,7 +1013,7 @@ mod tests {
         assert!(validator.detect_collusion_indicators(&suspicious_refs));
 
         // Responses with varied latencies (normal)
-        let normal_responses = vec![
+        let normal_responses = [
             create_response(true, 0.8, Some("us-east"), 50),
             create_response(true, 0.8, Some("eu-west"), 150),
             create_response(true, 0.8, Some("asia"), 280),

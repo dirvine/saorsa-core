@@ -2790,7 +2790,7 @@ mod diversity_tests {
         let mut cache_config = config
             .bootstrap_cache_config
             .clone()
-            .unwrap_or_else(crate::bootstrap::CacheConfig::default);
+            .unwrap_or_default();
         cache_config.cache_dir = temp_dir.path().to_path_buf();
 
         BootstrapManager::with_full_config(
