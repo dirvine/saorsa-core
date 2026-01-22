@@ -2787,10 +2787,7 @@ mod diversity_tests {
         let diversity_config = config.diversity_config.clone().unwrap_or_default();
         // Use a temp dir to avoid conflicts with cached files from old format
         let temp_dir = tempfile::TempDir::new().expect("temp dir");
-        let mut cache_config = config
-            .bootstrap_cache_config
-            .clone()
-            .unwrap_or_default();
+        let mut cache_config = config.bootstrap_cache_config.clone().unwrap_or_default();
         cache_config.cache_dir = temp_dir.path().to_path_buf();
 
         BootstrapManager::with_full_config(
