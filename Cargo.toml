@@ -182,7 +182,7 @@ path = "tests/gossipsub_integration_test.rs"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_System_Memory"] }
+winapi = { version = "0.3", features = ["memoryapi"] }
 
 # [[bench]]
 # name = "comprehensive_performance_test"
