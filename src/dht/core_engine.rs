@@ -311,6 +311,11 @@ impl DataStore {
         self.metadata.remove(key);
         self.data.remove(key)
     }
+
+    /// Check if a key exists without retrieving the value (O(1) lookup)
+    fn contains_key(&self, key: &DhtKey) -> bool {
+        self.data.contains_key(key)
+    }
 }
 
 /// Replication manager for maintaining data redundancy
@@ -1064,6 +1069,14 @@ impl DhtCoreEngine {
         // In a real implementation, would query these nodes
         // For now, return None if not found locally
         Ok(None)
+    }
+
+    /// Check if a key exists locally without retrieving the value
+    ///
+    /// This is an O(1) operation useful for deduplicating replication requests.
+    pub async fn has_key(&self, key: &DhtKey) -> bool {
+        let store = self.data_store.read().await;
+        store.contains_key(key)
     }
 
     /// Find nodes closest to a key

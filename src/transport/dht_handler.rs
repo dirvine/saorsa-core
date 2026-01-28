@@ -285,6 +285,35 @@ impl DhtStreamHandler {
                 value,
                 version,
             } => {
+                // Check if we already have this key (content-addressed = idempotent)
+                {
+                    let engine = self.dht_engine.read().await;
+                    if engine.has_key(&key).await {
+                        trace!(key = ?key, "Skipping duplicate replication - key already exists");
+                        return Ok(DhtResponse::StoreAck {
+                            receipt: Box::new(WitnessReceipt {
+                                operation_id: OperationId::new(),
+                                operation_type: crate::dht::witness::OperationType::Store,
+                                content_hash:
+                                    crate::dht::content_addressing::ContentAddress::from_bytes(
+                                        key.as_bytes(),
+                                    ),
+                                timestamp: chrono::Utc::now(),
+                                participating_nodes: vec![],
+                                operation_metadata: crate::dht::witness::OperationMetadata {
+                                    size_bytes: 0,
+                                    chunk_count: None,
+                                    redundancy_level: None,
+                                    custom: std::collections::HashMap::new(),
+                                },
+                                signature: crate::dht::witness::MlKemSignature::placeholder(),
+                                witness_proofs: vec![],
+                            }),
+                            replicas: vec![],
+                        });
+                    }
+                }
+
                 debug!(key = ?key, version = version, "DHT replication request");
                 let mut engine = self.dht_engine.write().await;
 
