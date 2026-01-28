@@ -42,8 +42,12 @@ pub const DEFAULT_REPLICATION_FACTOR: usize = 8;
 /// More frequent checks would waste bandwidth; less frequent risks data loss.
 const REPLICATION_INTERVAL_SECS: u64 = 3600;
 
-/// Maximum number of keys to repair per maintenance cycle (throttling)
-const MAX_REPAIRS_PER_CYCLE: usize = 100;
+/// Maximum number of keys to repair per maintenance cycle
+///
+/// Set to 20 to match Kademlia k parameter (replication factor in libp2p/IPFS).
+/// With K=8 replication, this means up to ~160 network messages per hour.
+/// Handles ~480 repairs/day which covers normal node churn.
+const MAX_REPAIRS_PER_CYCLE: usize = 20;
 
 // =============================================================================
 // Types
