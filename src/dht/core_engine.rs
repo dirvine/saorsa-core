@@ -35,11 +35,15 @@ use tokio::sync::RwLock;
 /// Default replication factor (K) - number of nodes that store each key
 pub const DEFAULT_REPLICATION_FACTOR: usize = 8;
 
-/// Maintenance task interval in seconds
-const MAINTENANCE_INTERVAL_SECS: u64 = 60;
+/// Replication maintenance interval in seconds (standard Kademlia: 1 hour)
+///
+/// This controls how often nodes check for under-replicated keys and repair them.
+/// The 1-hour interval follows the original Kademlia specification (tReplicate).
+/// More frequent checks would waste bandwidth; less frequent risks data loss.
+const REPLICATION_INTERVAL_SECS: u64 = 3600;
 
 /// Maximum number of keys to repair per maintenance cycle (throttling)
-const MAX_REPAIRS_PER_CYCLE: usize = 10;
+const MAX_REPAIRS_PER_CYCLE: usize = 100;
 
 // =============================================================================
 // Types
@@ -607,7 +611,7 @@ impl DhtCoreEngine {
 
         tokio::spawn(async move {
             let mut interval =
-                tokio::time::interval(Duration::from_secs(MAINTENANCE_INTERVAL_SECS));
+                tokio::time::interval(Duration::from_secs(REPLICATION_INTERVAL_SECS));
             loop {
                 interval.tick().await;
 
