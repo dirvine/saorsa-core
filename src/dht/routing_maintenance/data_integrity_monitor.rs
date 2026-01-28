@@ -577,6 +577,78 @@ impl DataIntegrityMonitor {
         self.pending_challenges.remove(key);
     }
 
+    /// Get the storage nodes for a specific key
+    ///
+    /// Returns the list of node IDs currently storing replicas for this key,
+    /// or None if the key is not being tracked.
+    pub fn get_storage_nodes(&self, key: &DhtKey) -> Option<Vec<DhtNodeId>> {
+        self.storage_map.get(key).cloned()
+    }
+
+    /// Remove a failed node from all storage tracking
+    ///
+    /// Updates the storage map to remove the failed node from all keys it was storing.
+    /// Returns the list of keys that were affected (now have fewer replicas).
+    pub fn remove_node_from_all(&mut self, node_id: &DhtNodeId) -> Vec<DhtKey> {
+        let mut affected_keys = Vec::new();
+
+        for (key, nodes) in self.storage_map.iter_mut() {
+            let original_len = nodes.len();
+            nodes.retain(|n| n != node_id);
+            if nodes.len() < original_len {
+                affected_keys.push(key.clone());
+
+                // Update health score for this key
+                if let Some(score) = self.health_scores.get_mut(key) {
+                    score.valid_replicas = nodes.len();
+                    score.status = DataHealthStatus::from_counts(
+                        score.valid_replicas,
+                        score.expected_replicas,
+                        self.config.min_healthy_replicas,
+                    );
+                    score.health_percentage = if score.expected_replicas > 0 {
+                        score.valid_replicas as f64 / score.expected_replicas as f64
+                    } else {
+                        0.0
+                    };
+                }
+            }
+        }
+
+        affected_keys
+    }
+
+    /// Add a storage node for a key
+    ///
+    /// Updates the storage map to record that a node now stores a replica for this key.
+    pub fn add_storage_node(&mut self, key: &DhtKey, node_id: DhtNodeId) {
+        if let Some(nodes) = self.storage_map.get_mut(key)
+            && !nodes.contains(&node_id)
+        {
+            nodes.push(node_id);
+
+            // Update health score
+            if let Some(score) = self.health_scores.get_mut(key) {
+                score.valid_replicas = nodes.len();
+                score.status = DataHealthStatus::from_counts(
+                    score.valid_replicas,
+                    score.expected_replicas,
+                    self.config.min_healthy_replicas,
+                );
+                score.health_percentage = if score.expected_replicas > 0 {
+                    score.valid_replicas as f64 / score.expected_replicas as f64
+                } else {
+                    0.0
+                };
+            }
+        }
+    }
+
+    /// Get all tracked keys
+    pub fn tracked_keys(&self) -> Vec<DhtKey> {
+        self.storage_map.keys().cloned().collect()
+    }
+
     /// Clean up stale pending challenges
     pub fn cleanup_stale_challenges(&mut self, timeout: Duration) {
         let now = Instant::now();
