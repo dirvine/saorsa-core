@@ -1,11 +1,12 @@
 //! Enhanced DHT Core Engine with Kademlia routing and intelligent data distribution
 //!
-//! Provides the main DHT functionality with k=8 replication, load balancing, and fault tolerance.
+//! Provides the main DHT functionality with K-replication, load balancing, and fault tolerance.
 
 use crate::dht::{
     content_addressing::ContentAddress,
     geographic_routing::GeographicRegion,
     metrics::SecurityMetricsCollector,
+    network_integration::DhtMessage,
     routing_maintenance::{
         BucketRefreshManager, EvictionManager, EvictionReason, MaintenanceConfig,
         close_group_validator::{
@@ -16,13 +17,33 @@ use crate::dht::{
     witness::{DhtOperation, OperationMetadata, OperationType, WitnessReceiptSystem},
 };
 use crate::security::{IPDiversityConfig, IPDiversityEnforcer};
-use anyhow::{Result, anyhow};
+use crate::transport::ant_quic_adapter::P2PNetworkNode;
+use ant_quic::link_transport::StreamType;
+use ant_quic::nat_traversal_api::PeerId;
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default replication factor (K) - number of nodes that store each key
+pub const DEFAULT_REPLICATION_FACTOR: usize = 8;
+
+/// Maintenance task interval in seconds
+const MAINTENANCE_INTERVAL_SECS: u64 = 60;
+
+/// Maximum number of keys to repair per maintenance cycle (throttling)
+const MAX_REPAIRS_PER_CYCLE: usize = 10;
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /// DHT key type (256-bit)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -293,33 +314,86 @@ impl DataStore {
 }
 
 /// Replication manager for maintaining data redundancy
-struct ReplicationManager {
-    _replication_factor: usize,
-    _consistency_level: ConsistencyLevel,
-    _pending_repairs: Vec<DhtKey>,
+pub struct ReplicationManager {
+    /// Target replication factor (K)
+    replication_factor: usize,
+    /// Consistency level for operations
+    consistency_level: ConsistencyLevel,
+    /// Keys pending repair (degraded replicas) - HashSet for O(1) lookups
+    pending_repairs: HashSet<DhtKey>,
 }
 
 impl ReplicationManager {
-    fn new(replication_factor: usize) -> Self {
+    /// Create a new replication manager with the given replication factor
+    pub fn new(replication_factor: usize) -> Self {
         Self {
-            _replication_factor: replication_factor,
-            _consistency_level: ConsistencyLevel::Quorum,
-            _pending_repairs: Vec::new(),
+            replication_factor,
+            consistency_level: ConsistencyLevel::Quorum,
+            pending_repairs: HashSet::new(),
         }
     }
 
-    fn _required_replicas(&self) -> usize {
-        match self._consistency_level {
+    /// Get the replication factor (K)
+    pub fn replication_factor(&self) -> usize {
+        self.replication_factor
+    }
+
+    /// Get the number of required replicas based on consistency level
+    pub fn required_replicas(&self) -> usize {
+        match self.consistency_level {
             ConsistencyLevel::One => 1,
-            ConsistencyLevel::Quorum => self._replication_factor.div_ceil(2),
-            ConsistencyLevel::All => self._replication_factor,
+            ConsistencyLevel::Quorum => self.replication_factor.div_ceil(2),
+            ConsistencyLevel::All => self.replication_factor,
         }
     }
 
-    fn _schedule_repair(&mut self, key: DhtKey) {
-        if !self._pending_repairs.contains(&key) {
-            self._pending_repairs.push(key);
+    /// Schedule a key for repair (replication to restore K replicas)
+    ///
+    /// Uses HashSet for O(1) deduplication.
+    pub fn schedule_repair(&mut self, key: DhtKey) {
+        if self.pending_repairs.insert(key.clone()) {
+            tracing::debug!(key = ?key, "Scheduled key for repair");
         }
+    }
+
+    /// Take up to `limit` pending repairs for processing
+    ///
+    /// Returns the keys to repair this cycle. Remaining keys stay pending.
+    pub fn take_pending_repairs_batch(&mut self, limit: usize) -> Vec<DhtKey> {
+        let batch: Vec<DhtKey> = self.pending_repairs.iter().take(limit).cloned().collect();
+        for key in &batch {
+            self.pending_repairs.remove(key);
+        }
+        batch
+    }
+
+    /// Take all pending repairs, clearing the internal set
+    ///
+    /// Returns the keys that were pending repair.
+    pub fn take_pending_repairs(&mut self) -> Vec<DhtKey> {
+        std::mem::take(&mut self.pending_repairs)
+            .into_iter()
+            .collect()
+    }
+
+    /// Get the number of keys pending repair
+    pub fn pending_count(&self) -> usize {
+        self.pending_repairs.len()
+    }
+
+    /// Check if a key is pending repair
+    pub fn is_pending(&self, key: &DhtKey) -> bool {
+        self.pending_repairs.contains(key)
+    }
+
+    /// Set the consistency level
+    pub fn set_consistency_level(&mut self, level: ConsistencyLevel) {
+        self.consistency_level = level;
+    }
+
+    /// Get the current consistency level
+    pub fn consistency_level(&self) -> ConsistencyLevel {
+        self.consistency_level
     }
 }
 
@@ -407,6 +481,9 @@ pub struct DhtCoreEngine {
     load_balancer: Arc<RwLock<LoadBalancer>>,
     witness_system: Arc<WitnessReceiptSystem>,
 
+    /// Transport for network replication (optional - None in tests/single-node mode)
+    transport: Option<Arc<P2PNetworkNode>>,
+
     // Security Components (using parking_lot RwLock as they are synchronous)
     security_metrics: Arc<SecurityMetricsCollector>,
     bucket_refresh_manager: Arc<parking_lot::RwLock<BucketRefreshManager>>,
@@ -418,8 +495,24 @@ pub struct DhtCoreEngine {
 }
 
 impl DhtCoreEngine {
-    /// Create new DHT engine with specified node ID
+    /// Create new DHT engine with specified node ID (no network transport)
+    ///
+    /// This constructor creates a DHT engine without network transport capability.
+    /// Use `new_with_transport()` for full K-replication across network nodes.
     pub fn new(node_id: NodeId) -> Result<Self> {
+        Self::new_internal(node_id, None)
+    }
+
+    /// Create new DHT engine with network transport for K-replication
+    ///
+    /// This constructor creates a DHT engine with network transport capability,
+    /// enabling K-way replication across remote nodes.
+    pub fn new_with_transport(node_id: NodeId, transport: Arc<P2PNetworkNode>) -> Result<Self> {
+        Self::new_internal(node_id, Some(transport))
+    }
+
+    /// Internal constructor shared by both public constructors
+    fn new_internal(node_id: NodeId, transport: Option<Arc<P2PNetworkNode>>) -> Result<Self> {
         // Initialize security components
         let security_metrics = Arc::new(SecurityMetricsCollector::new());
         let close_group_validator = Arc::new(parking_lot::RwLock::new(
@@ -453,11 +546,17 @@ impl DhtCoreEngine {
 
         Ok(Self {
             node_id: node_id.clone(),
-            routing_table: Arc::new(RwLock::new(KademliaRoutingTable::new(node_id, 8))),
+            routing_table: Arc::new(RwLock::new(KademliaRoutingTable::new(
+                node_id,
+                DEFAULT_REPLICATION_FACTOR,
+            ))),
             data_store: Arc::new(RwLock::new(DataStore::new())),
-            replication_manager: Arc::new(RwLock::new(ReplicationManager::new(8))),
+            replication_manager: Arc::new(RwLock::new(ReplicationManager::new(
+                DEFAULT_REPLICATION_FACTOR,
+            ))),
             load_balancer: Arc::new(RwLock::new(LoadBalancer::new())),
             witness_system: Arc::new(WitnessReceiptSystem::new()),
+            transport,
             security_metrics,
             bucket_refresh_manager,
             data_integrity_monitor,
@@ -468,6 +567,26 @@ impl DhtCoreEngine {
         })
     }
 
+    /// Get the node ID for this DHT engine
+    pub fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Check if transport is available for network replication
+    pub fn has_transport(&self) -> bool {
+        self.transport.is_some()
+    }
+
+    /// Get the replication manager for external access
+    pub fn replication_manager(&self) -> &Arc<RwLock<ReplicationManager>> {
+        &self.replication_manager
+    }
+
+    /// Get the data integrity monitor for external access
+    pub fn data_integrity_monitor(&self) -> &Arc<parking_lot::RwLock<DataIntegrityMonitor>> {
+        &self.data_integrity_monitor
+    }
+
     /// Start background maintenance tasks for security and health
     pub fn start_maintenance_tasks(&self) {
         let refresh_manager = self.bucket_refresh_manager.clone();
@@ -475,9 +594,15 @@ impl DhtCoreEngine {
         let eviction_manager = self.eviction_manager.clone();
         let close_group_validator = self.close_group_validator.clone();
         let security_metrics = self.security_metrics.clone();
+        let replication_manager = self.replication_manager.clone();
+        let data_store = self.data_store.clone();
+        let routing_table = self.routing_table.clone();
+        let transport = self.transport.clone();
+        let node_id = self.node_id.clone();
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval =
+                tokio::time::interval(Duration::from_secs(MAINTENANCE_INTERVAL_SECS));
             loop {
                 interval.tick().await;
 
@@ -606,11 +731,188 @@ impl DhtCoreEngine {
                     }
                 }
 
-                // 4. Update Metrics
+                // 4. Background Replication Repair
+                // Process pending repairs and repair recommendations
+                if transport.is_some() {
+                    // Take pending repairs from ReplicationManager (throttled batch)
+                    let pending_keys = {
+                        let mut mgr = replication_manager.write().await;
+                        mgr.take_pending_repairs_batch(MAX_REPAIRS_PER_CYCLE)
+                    };
+
+                    // Also get repair recommendations from DataIntegrityMonitor
+                    let recommendations = {
+                        let monitor = integrity_monitor.read();
+                        monitor.get_repair_recommendations()
+                    };
+
+                    // Combine unique keys needing repair (use HashSet for dedup)
+                    let mut keys_set: HashSet<DhtKey> = pending_keys.into_iter().collect();
+                    for rec in recommendations {
+                        if keys_set.len() >= MAX_REPAIRS_PER_CYCLE {
+                            break; // Throttle total repairs per cycle
+                        }
+                        keys_set.insert(rec.key);
+                    }
+                    let keys_to_repair: Vec<DhtKey> = keys_set.into_iter().collect();
+
+                    if !keys_to_repair.is_empty() {
+                        tracing::info!(
+                            count = keys_to_repair.len(),
+                            max = MAX_REPAIRS_PER_CYCLE,
+                            "Starting background replication repair (throttled)"
+                        );
+
+                        let mut repaired = 0usize;
+                        let mut failed = 0usize;
+
+                        for key in keys_to_repair {
+                            match Self::repair_key_static(
+                                &key,
+                                &node_id,
+                                &routing_table,
+                                &data_store,
+                                &integrity_monitor,
+                                transport.as_ref(),
+                            )
+                            .await
+                            {
+                                Ok(new_replicas) => {
+                                    if new_replicas > 0 {
+                                        repaired += 1;
+                                        tracing::debug!(
+                                            key = ?key,
+                                            new_replicas = new_replicas,
+                                            "Successfully repaired key"
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    failed += 1;
+                                    tracing::warn!(
+                                        key = ?key,
+                                        error = %e,
+                                        "Failed to repair key"
+                                    );
+                                    // Re-schedule for next cycle
+                                    let mut mgr = replication_manager.write().await;
+                                    mgr.schedule_repair(key);
+                                }
+                            }
+                        }
+
+                        if repaired > 0 || failed > 0 {
+                            tracing::info!(
+                                repaired = repaired,
+                                failed = failed,
+                                "Background replication repair cycle completed"
+                            );
+                        }
+                    }
+                }
+
+                // 5. Update Metrics
                 // (Example: update churn rate)
                 // metrics.update_churn(...)
             }
         });
+    }
+
+    /// Static helper to repair a single key (for use in background task)
+    async fn repair_key_static(
+        key: &DhtKey,
+        our_node_id: &NodeId,
+        routing_table: &Arc<RwLock<KademliaRoutingTable>>,
+        data_store: &Arc<RwLock<DataStore>>,
+        integrity_monitor: &Arc<parking_lot::RwLock<DataIntegrityMonitor>>,
+        transport: Option<&Arc<P2PNetworkNode>>,
+    ) -> Result<usize> {
+        let transport = transport.ok_or_else(|| anyhow!("No transport available for repair"))?;
+
+        // Get the value from local store
+        let value = {
+            let mut store = data_store.write().await;
+            store
+                .get(key)
+                .ok_or_else(|| anyhow!("Key not found in local store"))?
+        };
+
+        // Find K closest nodes
+        let target_nodes = {
+            let routing = routing_table.read().await;
+            routing.find_closest_nodes(key, DEFAULT_REPLICATION_FACTOR)
+        };
+
+        // Get current storage nodes
+        let current_holders = {
+            let monitor = integrity_monitor.read();
+            monitor.get_storage_nodes(key).unwrap_or_default()
+        };
+
+        // Find nodes that should have data but don't
+        let missing_nodes: Vec<&NodeInfo> = target_nodes
+            .iter()
+            .filter(|node| node.id != *our_node_id && !current_holders.contains(&node.id))
+            .collect();
+
+        if missing_nodes.is_empty() {
+            return Ok(0); // Already fully replicated
+        }
+
+        // Create replication message
+        let replication_message = DhtMessage::Replicate {
+            key: key.clone(),
+            value,
+            version: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+
+        let message_bytes = bincode::serialize(&replication_message)
+            .context("Failed to serialize replication message")?;
+
+        let mut successful_repairs = 0;
+
+        // Send to missing nodes
+        for node_info in missing_nodes {
+            let peer_id = PeerId(*node_info.id.as_bytes());
+
+            match transport
+                .send_typed(
+                    &peer_id,
+                    StreamType::DhtReplication,
+                    message_bytes.clone().into(),
+                )
+                .await
+            {
+                Ok(()) => {
+                    successful_repairs += 1;
+
+                    // Update integrity monitor
+                    {
+                        let mut monitor = integrity_monitor.write();
+                        monitor.add_storage_node(key, node_info.id.clone());
+                    }
+
+                    tracing::debug!(
+                        key = ?key,
+                        peer = ?peer_id,
+                        "Repair: replicated to node"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        key = ?key,
+                        peer = ?peer_id,
+                        error = %e,
+                        "Repair: failed to replicate to node"
+                    );
+                }
+            }
+        }
+
+        Ok(successful_repairs)
     }
 
     /// Get the security metrics collector
@@ -618,42 +920,120 @@ impl DhtCoreEngine {
         self.security_metrics.clone()
     }
 
-    /// Store data in the DHT
+    /// Store data in the DHT with K-replication
+    ///
+    /// Stores data locally and replicates to K-1 remote nodes for redundancy.
+    /// Partial replication is accepted - the background repair task will complete it.
     pub async fn store(&mut self, key: &DhtKey, value: Vec<u8>) -> Result<StoreReceipt> {
-        // Find nodes to store at
+        // Find K closest nodes to store at
         let routing = self.routing_table.read().await;
-        // ... (find_closest_nodes)
-        let target_nodes = routing.find_closest_nodes(key, 8);
+        let target_nodes = routing.find_closest_nodes(key, DEFAULT_REPLICATION_FACTOR);
         drop(routing);
 
         // Select nodes based on load
         let load_balancer = self.load_balancer.read().await;
         let selected_nodes = load_balancer.select_least_loaded(&target_nodes, 8);
+        drop(load_balancer);
 
-        // Hook: Track content in DataIntegrityMonitor
-        {
-            let mut monitor = self.data_integrity_monitor.write();
-            monitor.track_content(key.clone(), selected_nodes.to_vec());
-        }
+        // Track which nodes successfully stored the data
+        let mut stored_at_nodes: Vec<NodeId> = Vec::new();
 
         // Store locally if we're one of the selected nodes or if no nodes are available (test/single-node mode)
-        if selected_nodes.contains(&self.node_id) || selected_nodes.is_empty() {
+        let store_locally = selected_nodes.contains(&self.node_id) || selected_nodes.is_empty();
+        if store_locally {
             let mut store = self.data_store.write().await;
             store.put(key.clone(), value.clone());
+            stored_at_nodes.push(self.node_id.clone());
+            tracing::debug!(key = ?key, "Stored data locally");
+        }
+
+        // Replicate to remote nodes if transport is available
+        if let Some(ref transport) = self.transport {
+            let replication_message = DhtMessage::Replicate {
+                key: key.clone(),
+                value: value.clone(),
+                version: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            };
+
+            // Serialize the replication message
+            let message_bytes = bincode::serialize(&replication_message)
+                .context("Failed to serialize replication message")?;
+
+            // Send to each remote node (excluding ourselves)
+            for node_id in &selected_nodes {
+                if *node_id == self.node_id {
+                    continue; // Skip self - already stored locally
+                }
+
+                // Convert NodeId to PeerId (both are 32 bytes)
+                let peer_id = PeerId(*node_id.as_bytes());
+
+                match transport
+                    .send_typed(
+                        &peer_id,
+                        StreamType::DhtReplication,
+                        message_bytes.clone().into(),
+                    )
+                    .await
+                {
+                    Ok(()) => {
+                        stored_at_nodes.push(node_id.clone());
+                        tracing::debug!(
+                            key = ?key,
+                            peer = ?peer_id,
+                            "Successfully replicated to remote node"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            key = ?key,
+                            peer = ?peer_id,
+                            error = %e,
+                            "Failed to replicate to remote node"
+                        );
+                        // Continue with other nodes - partial replication is OK
+                    }
+                }
+            }
+        }
+
+        // Track content in DataIntegrityMonitor with actual stored nodes
+        {
+            let mut monitor = self.data_integrity_monitor.write();
+            monitor.track_content(key.clone(), stored_at_nodes.clone());
+        }
+
+        // Log if we didn't achieve full replication
+        if stored_at_nodes.len() < selected_nodes.len() && !selected_nodes.is_empty() {
+            tracing::info!(
+                key = ?key,
+                stored = stored_at_nodes.len(),
+                target = selected_nodes.len(),
+                "Partial replication - background repair will complete"
+            );
+
+            // Schedule repair for keys that didn't achieve full replication
+            let mut mgr = self.replication_manager.write().await;
+            mgr.schedule_repair(key.clone());
         }
 
         // Create witness receipt
         let operation = DhtOperation {
             operation_type: OperationType::Store,
             content_hash: ContentAddress::from_bytes(&key.0),
-            nodes: selected_nodes
+            nodes: stored_at_nodes
                 .iter()
                 .map(|id| crate::dht::witness::NodeId::new(&format!("{:?}", id)))
                 .collect(),
             metadata: OperationMetadata {
                 size_bytes: value.len(),
                 chunk_count: Some(1),
-                redundancy_level: Some(0.5),
+                redundancy_level: Some(
+                    stored_at_nodes.len() as f64 / DEFAULT_REPLICATION_FACTOR as f64,
+                ),
                 custom: HashMap::new(),
             },
         };
@@ -662,7 +1042,7 @@ impl DhtCoreEngine {
 
         Ok(StoreReceipt {
             key: key.clone(),
-            stored_at: selected_nodes,
+            stored_at: stored_at_nodes,
             timestamp: SystemTime::now(),
             success: true,
         })
@@ -679,7 +1059,7 @@ impl DhtCoreEngine {
 
         // Find nodes that might have the data
         let routing = self.routing_table.read().await;
-        let _closest_nodes = routing.find_closest_nodes(key, 8);
+        let _closest_nodes = routing.find_closest_nodes(key, DEFAULT_REPLICATION_FACTOR);
 
         // In a real implementation, would query these nodes
         // For now, return None if not found locally
@@ -715,15 +1095,42 @@ impl DhtCoreEngine {
         Ok(())
     }
 
-    /// Handle node failure
+    /// Handle node failure by removing from routing and scheduling data repairs
+    ///
+    /// When a node fails:
+    /// 1. Removes the node from the routing table
+    /// 2. Finds all keys that were stored on the failed node
+    /// 3. Removes the failed node from storage tracking
+    /// 4. Schedules repairs for all affected keys
     pub async fn handle_node_failure(&mut self, failed_node: NodeId) -> Result<()> {
-        // Remove from routing table
-        let mut routing = self.routing_table.write().await;
-        routing.remove_node(&failed_node);
+        tracing::info!(node = %failed_node, "Handling node failure");
 
-        // Schedule repairs for affected data
-        let _replication = self.replication_manager.write().await;
-        // In real implementation, would identify affected keys and schedule repairs
+        // 1. Remove from routing table
+        {
+            let mut routing = self.routing_table.write().await;
+            routing.remove_node(&failed_node);
+        }
+
+        // 2. Find affected keys and remove failed node from storage tracking
+        let affected_keys = {
+            let mut monitor = self.data_integrity_monitor.write();
+            monitor.remove_node_from_all(&failed_node)
+        };
+
+        // 3. Schedule repairs for all affected keys
+        if !affected_keys.is_empty() {
+            let mut replication_mgr = self.replication_manager.write().await;
+            for key in &affected_keys {
+                replication_mgr.schedule_repair(key.clone());
+            }
+
+            tracing::info!(
+                node = %failed_node,
+                affected_keys = affected_keys.len(),
+                pending_repairs = replication_mgr.pending_count(),
+                "Scheduled repairs for data affected by node failure"
+            );
+        }
 
         Ok(())
     }
@@ -903,6 +1310,7 @@ impl std::fmt::Debug for DhtCoreEngine {
             .field("replication_manager", &"Arc<RwLock<ReplicationManager>>")
             .field("load_balancer", &"Arc<RwLock<LoadBalancer>>")
             .field("witness_system", &"Arc<WitnessReceiptSystem>")
+            .field("transport", &self.transport.is_some())
             .field("security_metrics", &"Arc<SecurityMetricsCollector>")
             .field(
                 "bucket_refresh_manager",
@@ -958,5 +1366,57 @@ mod tests {
 
         let distance = key1.distance(&key2);
         assert_eq!(distance, [255u8; 32]);
+    }
+
+    #[test]
+    fn test_replication_manager_schedule_repair_deduplication() {
+        let mut mgr = ReplicationManager::new(DEFAULT_REPLICATION_FACTOR);
+        let key = DhtKey::new(b"test_key");
+
+        mgr.schedule_repair(key.clone());
+        assert_eq!(mgr.pending_count(), 1);
+
+        // Duplicate should not increase count
+        mgr.schedule_repair(key.clone());
+        assert_eq!(mgr.pending_count(), 1);
+    }
+
+    #[test]
+    fn test_replication_manager_take_pending_repairs() {
+        let mut mgr = ReplicationManager::new(DEFAULT_REPLICATION_FACTOR);
+        let key1 = DhtKey::new(b"key1");
+        let key2 = DhtKey::new(b"key2");
+
+        mgr.schedule_repair(key1.clone());
+        mgr.schedule_repair(key2.clone());
+        assert_eq!(mgr.pending_count(), 2);
+
+        let repairs = mgr.take_pending_repairs();
+        assert_eq!(repairs.len(), 2);
+        assert_eq!(mgr.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_replication_manager_required_replicas() {
+        let mut mgr = ReplicationManager::new(DEFAULT_REPLICATION_FACTOR);
+
+        // Default is Quorum
+        assert_eq!(mgr.required_replicas(), 4); // ceil(8/2) = 4
+
+        mgr.set_consistency_level(ConsistencyLevel::One);
+        assert_eq!(mgr.required_replicas(), 1);
+
+        mgr.set_consistency_level(ConsistencyLevel::All);
+        assert_eq!(mgr.required_replicas(), 8);
+    }
+
+    #[test]
+    fn test_replication_manager_is_pending() {
+        let mut mgr = ReplicationManager::new(DEFAULT_REPLICATION_FACTOR);
+        let key = DhtKey::new(b"test_key");
+
+        assert!(!mgr.is_pending(&key));
+        mgr.schedule_repair(key.clone());
+        assert!(mgr.is_pending(&key));
     }
 }
