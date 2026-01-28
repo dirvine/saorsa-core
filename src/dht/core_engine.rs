@@ -1087,6 +1087,33 @@ impl DhtCoreEngine {
         store.contains_key(key)
     }
 
+    /// Store data locally only without triggering further replication.
+    ///
+    /// This is used when receiving a `DhtMessage::Replicate` to avoid cascading
+    /// replication. The original store operation already determined the K nodes;
+    /// we just need to persist locally.
+    pub async fn store_local_only(&mut self, key: &DhtKey, value: Vec<u8>) -> Result<StoreReceipt> {
+        // Store locally
+        {
+            let mut store = self.data_store.write().await;
+            store.put(key.clone(), value.clone());
+        }
+        tracing::debug!(key = ?key, "Stored data locally (replication target)");
+
+        // Track in DataIntegrityMonitor
+        {
+            let mut monitor = self.data_integrity_monitor.write();
+            monitor.add_storage_node(key, self.node_id.clone());
+        }
+
+        Ok(StoreReceipt {
+            key: key.clone(),
+            stored_at: vec![self.node_id.clone()],
+            timestamp: SystemTime::now(),
+            success: true,
+        })
+    }
+
     /// Find nodes closest to a key
     pub async fn find_nodes(&self, key: &DhtKey, count: usize) -> Result<Vec<NodeInfo>> {
         let routing = self.routing_table.read().await;

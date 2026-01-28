@@ -317,7 +317,9 @@ impl DhtStreamHandler {
                 debug!(key = ?key, version = version, "DHT replication request");
                 let mut engine = self.dht_engine.write().await;
 
-                match engine.store(&key, value).await {
+                // Use store_local_only to avoid cascading replication.
+                // The originator already determined the K nodes; we just persist locally.
+                match engine.store_local_only(&key, value).await {
                     Ok(receipt) => Ok(DhtResponse::StoreAck {
                         receipt: Box::new(WitnessReceipt {
                             operation_id: OperationId::new(),
