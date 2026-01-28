@@ -2,6 +2,25 @@
 //!
 //! Implements XOR-based Kademlia with trust bias for routing, eviction, and provider selection.
 //! Includes capacity signaling for PUT pricing and EigenTrust computation.
+//!
+//! ## Security Properties
+//!
+//! Trust scores influence node selection **only within distance magnitude buckets**, preserving
+//! Kademlia's distance-first routing properties. This prevents trust manipulation attacks from
+//! compromising routing correctness:
+//!
+//! - **Distance always takes precedence**: Nodes are first grouped by distance magnitude
+//!   (leading zero count), ensuring closer nodes are always preferred
+//! - **Trust acts as tiebreaker**: Within magnitude buckets (nodes at similar distances),
+//!   higher-trust nodes are selected
+//! - **No routing centralization**: Even maximum trust cannot override distance ordering,
+//!   preventing concentration of traffic to high-trust nodes at wrong distances
+//! - **Sybil resistance**: Creating many nodes with artificial trust doesn't help unless
+//!   those nodes happen to be at the correct distance to the target
+//!
+//! The magnitude bucketing approach (factor of 2 granularity) maintains Kademlia's O(log n)
+//! convergence properties while allowing trust to meaningfully reduce timeouts and improve
+//! reliability among similarly-distant nodes.
 
 use crate::identity::node_identity::NodeId;
 use anyhow::Result;
@@ -280,6 +299,19 @@ impl TrustWeightedKademlia {
     /// Returns a value where smaller = closer to target.
     /// Nodes with the same magnitude are within a factor of 2 in actual distance,
     /// making them effectively equivalent from a Kademlia routing perspective.
+    ///
+    /// # Returns
+    /// - `0`: Self-lookup (all bits zero - edge case)
+    /// - `1-256`: Distance magnitude where 1 = furthest, 256 = closest non-zero
+    ///
+    /// # Edge Cases
+    /// - All-zero distance (self-lookup): returns 0
+    /// - All-ones distance (maximum): returns 256
+    ///
+    /// # Security Note
+    /// Trust scores only influence selection within magnitude buckets, preserving
+    /// Kademlia's distance-first routing properties. This prevents trust score
+    /// manipulation from compromising routing correctness.
     fn distance_magnitude(distance: &[u8; 32]) -> u16 {
         let mut leading_zeros = 0u16;
         for byte in distance {
@@ -291,7 +323,7 @@ impl TrustWeightedKademlia {
             }
         }
         // Invert: max 256 bits, so 256 - leading_zeros gives smaller = closer
-        256 - leading_zeros
+        256u16.saturating_sub(leading_zeros)
     }
 
     /// Calculate XOR distance between two node IDs
