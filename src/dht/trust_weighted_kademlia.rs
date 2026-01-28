@@ -226,38 +226,72 @@ impl TrustWeightedKademlia {
     }
 
     /// Find k closest nodes to target with trust bias
+    ///
+    /// Uses distance bucketing: nodes are grouped by "distance magnitude" (number of
+    /// leading zero bits in XOR distance). Within each magnitude group, nodes are
+    /// sorted by trust (descending) then RTT (ascending).
+    ///
+    /// This preserves Kademlia's convergence properties while preferring trusted nodes
+    /// among those at similar distances. Since distance magnitude groups nodes by
+    /// powers of 2, nodes within the same bucket are "close enough" from a routing
+    /// perspective, allowing trust to meaningfully influence selection.
     async fn find_closest_nodes(&self, target: &NodeId, k: usize) -> Vec<Contact> {
         let routing_table = self.routing_table.read().await;
         let eigen_trust_scores = self.eigen_trust_scores.read().await;
 
         let mut candidates = Vec::new();
 
-        // Collect candidates from appropriate buckets
+        // Collect candidates from all buckets
         for bucket in &*routing_table {
             for contact in &bucket.contacts {
                 candidates.push(contact.clone());
             }
         }
 
-        // Sort by (XOR distance, -trust_score, RTT)
+        // Sort by (distance_magnitude ASC, trust DESC, RTT ASC)
         candidates.sort_by(|a, b| {
             let a_distance = self.xor_distance(&a.peer, target);
             let b_distance = self.xor_distance(&b.peer, target);
 
+            // Use distance magnitude (inverted leading zeros) for coarse grouping
+            // Nodes within same magnitude are at similar distances (within factor of 2)
+            let a_magnitude = Self::distance_magnitude(&a_distance);
+            let b_magnitude = Self::distance_magnitude(&b_distance);
+
             let a_trust = eigen_trust_scores.get(&a.peer).copied().unwrap_or(0.5);
             let b_trust = eigen_trust_scores.get(&b.peer).copied().unwrap_or(0.5);
 
-            a_distance
-                .cmp(&b_distance)
+            // Sort: closer first (smaller magnitude), then higher trust, then lower RTT
+            a_magnitude
+                .cmp(&b_magnitude)
                 .then_with(|| {
-                    (-a_trust)
-                        .partial_cmp(&(-b_trust))
+                    b_trust
+                        .partial_cmp(&a_trust)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .then_with(|| a.rtt_est.cmp(&b.rtt_est))
         });
 
         candidates.into_iter().take(k).collect()
+    }
+
+    /// Calculate distance magnitude as inverted leading zeros count
+    ///
+    /// Returns a value where smaller = closer to target.
+    /// Nodes with the same magnitude are within a factor of 2 in actual distance,
+    /// making them effectively equivalent from a Kademlia routing perspective.
+    fn distance_magnitude(distance: &[u8; 32]) -> u16 {
+        let mut leading_zeros = 0u16;
+        for byte in distance {
+            if *byte == 0 {
+                leading_zeros += 8;
+            } else {
+                leading_zeros += byte.leading_zeros() as u16;
+                break;
+            }
+        }
+        // Invert: max 256 bits, so 256 - leading_zeros gives smaller = closer
+        256 - leading_zeros
     }
 
     /// Calculate XOR distance between two node IDs
