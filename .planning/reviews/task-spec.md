@@ -1,8 +1,9 @@
 # Task Specification Validation
 
-**Date**: 2026-01-29T16:50:00Z
+**Date**: 2026-01-29T17:10:00Z
 **Task**: Task 3 - Update Encryption Module (decrypt_message)
 **Phase**: Phase 5: Binary Encoding Migration
+**Commit**: c710cbc (feat(phase-5): task 3 - update decrypt_message to use bincode)
 
 ---
 
@@ -19,133 +20,176 @@
   - **Evidence**: Correctly uses `decode::<RichMessage>(&plaintext)?`
 
 - [✓] **Update decrypt_message function**
-  - **Status**: PASS (lines 87-103 vs spec line ~339)
-  - **Evidence**: Function properly updated with bincode deserialization
+  - **Status**: PASS (lines 87-103)
+  - **Evidence**: Function properly updated with bincode deserialization at line 100
+  - **Code**: `let message: RichMessage = crate::messaging::encoding::decode(&plaintext)?;`
 
 - [✓] **Preserve all other functionality**
   - **Status**: PASS
-  - **Evidence**: Session key retrieval (lines 88-89), encryption/decryption (lines 91-97) all intact
-
-- [✗] **Zero clippy warnings**
-  - **Status**: FAIL (BLOCKING)
-  - **Evidence**: Compilation error in encoding.rs
-
-- [✗] **No test failures**
-  - **Status**: FAIL (BLOCKED by compilation error)
-
-- [✗] **cargo check passes**
-  - **Status**: FAIL (BLOCKING ERROR)
   - **Evidence**:
-  ```
-  error[E0433]: failed to resolve: use of unresolved module or unlinked crate `config`
-     --> src/messaging/encoding.rs:127:5
-  ```
+    - Session key retrieval (lines 88-89)
+    - Decryption logic (lines 91-97)
+    - Error handling preserved
+    - Return statement correct (line 102)
+
+- [✓] **Zero clippy warnings**
+  - **Status**: PASS
+  - **Evidence**: `cargo clippy --lib` completes successfully
+
+- [✓] **No test failures**
+  - **Status**: PASS
+  - **Evidence**: 5/5 encryption tests passed
+    - test_message_encryption: OK
+    - test_message_signing: OK
+    - test_key_ratchet: OK
+    - test_key_ratchet_deterministic: OK
+    - test_message_signing_consistency: OK
+
+- [✓] **cargo check passes**
+  - **Status**: PASS
+  - **Evidence**: `cargo check --lib` completes successfully with no errors
 
 ---
 
-## Compliance: FAIL (BLOCKED)
+## Compliance: PASS
 
-### Task 3 Implementation in encryption.rs: ✅ CORRECT
-The actual Task 3 requirement to update `decrypt_message` in encryption.rs is correctly implemented:
-- Line 100: `let message: RichMessage = crate::messaging::encoding::decode(&plaintext)?;`
-- Function preserves all original functionality
-- Proper error handling with `?` operator
-- Integration with session key management intact
+### Task 3 Implementation in encryption.rs: ✅ FULLY CORRECT
 
-### Blocking Issue: ❌ ENCODING MODULE COMPILATION ERROR
-The encoding.rs file has a critical compilation error at lines 127-130:
-- Uses undefined `config` module
-- Attempts to use deprecated bincode API
-- Prevents entire crate from compiling
-- Blocks all quality gate validation
+The Task 3 requirement to update `decrypt_message` in encryption.rs is correctly and completely implemented:
 
-**Current Error**:
-```
-error[E0433]: failed to resolve: use of unresolved module or unlinked crate `config`
-   --> src/messaging/encoding.rs:127:5
-    |
-127 |     config::standard()
-    |     ^^^^^^ use of unresolved module or unlinked crate `config`
-```
+**Implementation Details**:
+- **File**: `/Users/davidirvine/Desktop/Devel/projects/saorsa-core/src/messaging/encryption.rs`
+- **Function**: `decrypt_message` (lines 87-103)
+- **Key Change**: Line 100 uses `crate::messaging::encoding::decode(&plaintext)?`
+- **Original Code**: `serde_json::from_slice::<RichMessage>(&plaintext)?`
+- **New Code**: `crate::messaging::encoding::decode(&plaintext)?`
 
-**Broken Implementation** (lines 116-131):
+**Code Review**:
 ```rust
-pub fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
-    const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
-    if bytes.len() > MAX_MESSAGE_SIZE {
-        return Err(anyhow::anyhow!(...));
-    }
-    config::standard()                    // ← UNDEFINED
-        .with_limit(MAX_MESSAGE_SIZE)     // ← WRONG API
-        .deserialize::<T>(bytes)
-        .with_context(|| format!(...))
+pub async fn decrypt_message(&self, encrypted: EncryptedMessage) -> Result<RichMessage> {
+    // Get session key for sender
+    let session_key = self.get_or_create_session_key(&encrypted.sender).await?;
+
+    // Decrypt with ChaCha20Poly1305
+    let cipher = ChaCha20Poly1305::new_from_slice(&session_key.key)?;
+    let nonce = Nonce::from_slice(&encrypted.nonce);
+
+    let plaintext = cipher
+        .decrypt(nonce, encrypted.ciphertext.as_ref())
+        .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
+
+    // Deserialize message with bincode ← UPDATED TO USE BINCODE
+    let message: RichMessage = crate::messaging::encoding::decode(&plaintext)?;
+
+    Ok(message)
 }
 ```
 
----
+### Supporting Infrastructure: ✅ WORKING
 
-## Quality Gates Status
+The encoding module (Task 1) provides correct support for Task 3:
 
-| Gate | Status | Details |
-|------|--------|---------|
-| **Compilation** | ❌ FAIL | error[E0433] in encoding.rs:127 |
-| **Clippy** | ⚠️ BLOCKED | Cannot lint due to compilation error |
-| **Formatting** | ⚠️ BLOCKED | Cannot check due to compilation error |
-| **Tests** | ❌ FAIL | Cannot run - compilation error |
-| **Task 3 Logic** | ✅ PASS | Correctly implemented in encryption.rs |
-
----
-
-## Root Cause
-
-The encoding module's `decode` function contains invalid code that attempts to:
-1. Add size limit validation (good idea)
-2. Use deprecated bincode config API (bad implementation)
-3. Reference undefined `config` module (compilation error)
-
-This is NOT part of Task 3 specification but is a critical blocking dependency.
+**Encoding Module Status**:
+- **File**: `/Users/davidirvine/Desktop/Devel/projects/saorsa-core/src/messaging/encoding.rs`
+- **decode function** (lines 116-129): Properly implemented
+- **Size validation**: 10MB limit enforced
+- **Error handling**: Comprehensive with context wrapping
+- **Tests**: 8/8 passing
+  - test_encode_decode_roundtrip: OK
+  - test_encode_empty_message: OK
+  - test_decode_invalid_data: OK
+  - test_bincode_size_comparison: OK
+  - test_encode_large_message: OK
+  - test_decode_empty_bytes: OK
+  - test_decode_truncated_message: OK
+  - test_maximum_message_size_enforced: OK
 
 ---
 
-## Previous Validation Discrepancy
+## Quality Gates - ALL PASS
 
-A previous validation (2026-01-29T15:50:00Z) claimed:
-- Grade: A
-- Verdict: TASK COMPLETE
-- All tests pass (3/3)
-- Zero warnings
-
-**This is INCORRECT** - the code does not compile. The encoding module error was not detected or addressed.
-
----
-
-## Verification Results
-
-**Task 3 Specification Match**: ✅ **PASS**
-- decrypt_message correctly implements spec
-- Uses encoding::decode as required
-- Line 100 updated correctly
-- Functionality preserved
-
-**Build Quality**: ❌ **FAIL**
-- cargo check: COMPILATION ERROR
-- cargo clippy: BLOCKED
-- cargo test: BLOCKED
-- Root cause: Invalid code in encoding.rs decode function
-
-**Compliance**: ❌ **FAIL - BLOCKED**
+| Gate | Status | Evidence |
+|------|--------|----------|
+| **Compilation** | ✅ PASS | `cargo check --lib` - SUCCESS |
+| **Linting** | ✅ PASS | `cargo clippy --lib` - SUCCESS |
+| **Formatting** | ✅ PASS | `cargo fmt --check` - SUCCESS |
+| **Tests** | ✅ PASS | 5/5 encryption tests + 8/8 encoding tests |
+| **Task 3 Logic** | ✅ PASS | Correctly implements specification |
 
 ---
 
-## Grade: F (BLOCKED)
+## Test Results Summary
 
-**Reason**: While Task 3's logic is correctly implemented in encryption.rs, the codebase cannot compile due to a critical error in the encoding module. This is a blocking issue that prevents any quality gate validation.
+### Encryption Module Tests (5/5 PASS)
+```
+test messaging::encryption::tests::test_message_encryption ... ok
+test messaging::encryption::tests::test_message_signing ... ok
+test messaging::encryption::tests::test_key_ratchet ... ok
+test messaging::encryption::tests::test_key_ratchet_deterministic ... ok
+test messaging::encryption::tests::test_message_signing_consistency ... ok
+```
 
-**Required Action**:
-Fix the `decode` function in encoding.rs to use valid bincode API before Task 3 can pass validation.
+### Encoding Module Tests (8/8 PASS)
+```
+test messaging::encoding::tests::test_encode_decode_roundtrip ... ok
+test messaging::encoding::tests::test_encode_empty_message ... ok
+test messaging::encoding::tests::test_decode_invalid_data ... ok
+test messaging::encoding::tests::test_bincode_size_comparison ... ok
+test messaging::encoding::tests::test_encode_large_message ... ok
+test messaging::encoding::tests::test_decode_empty_bytes ... ok
+test messaging::encoding::tests::test_decode_truncated_message ... ok
+test messaging::encoding::tests::test_maximum_message_size_enforced ... ok
+```
 
 ---
 
-**Validated**: 2026-01-29 16:50 UTC
+## Verification Details
+
+### What Changed
+- **Location**: Line 100 in `src/messaging/encryption.rs`
+- **Before**: `let message: RichMessage = serde_json::from_slice::<RichMessage>(&plaintext)?;`
+- **After**: `let message: RichMessage = crate::messaging::encoding::decode(&plaintext)?;`
+
+### Functionality Preserved
+- ✓ Decryption logic unchanged
+- ✓ Session key management unchanged
+- ✓ Error handling maintained (using `?` operator)
+- ✓ Message type preservation
+- ✓ All calling code compatible
+
+### Integration with Task 1 & 2
+- **Task 1** (encode/decode module): Provides the `decode` function
+- **Task 2** (encrypt_message): Uses `encode` for messages
+- **Task 3** (decrypt_message): Uses `decode` for messages (this task)
+- **Result**: Consistent bincode serialization across all message operations
+
+---
+
+## Grade: A (PASS)
+
+**Compliance**: 100% - All requirements met
+**Quality**: 100% - All quality gates pass
+**Testing**: 100% - All tests passing (13/13 total)
+**Build Quality**: 0 errors, 0 warnings, 0 formatting issues
+
+---
+
+## Conclusion
+
+**Task 3 Status**: ✅ **COMPLETE AND VERIFIED**
+
+Task 3 has been successfully implemented and validated:
+1. The `decrypt_message` function correctly uses the encoding module's `decode` function
+2. All existing functionality is preserved
+3. The implementation follows the specification exactly
+4. All quality gates pass (compilation, linting, formatting, tests)
+5. Integration with Tasks 1 & 2 is complete and functional
+
+The binary encoding migration for message deserialization is complete and working correctly.
+
+---
+
+**Validated**: 2026-01-29 17:10 UTC
 **Validator**: Claude Code - Task Specification Validator
-**Status**: BLOCKED - Awaiting encoding module fix
+**Status**: ✅ COMPLETE - ALL GATES PASS
+**Confidence**: 100%
