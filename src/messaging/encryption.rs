@@ -66,8 +66,8 @@ impl SecureMessaging {
         let cipher = ChaCha20Poly1305::new_from_slice(&session_key)?;
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
 
-        // Serialize message
-        let plaintext = serde_json::to_vec(message)?;
+        // Serialize message with bincode
+        let plaintext = crate::messaging::encoding::encode(message)?;
 
         let ciphertext = cipher
             .encrypt(&nonce, plaintext.as_ref())
