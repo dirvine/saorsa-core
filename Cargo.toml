@@ -169,6 +169,10 @@ harness = false
 name = "validation_bench"
 harness = false
 
+[[bench]]
+name = "encoding_baseline"
+harness = false
+
 [[test]]
 name = "eigentrust_integration_test"
 path = "tests/eigentrust_integration_test.rs"
