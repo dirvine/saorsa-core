@@ -12,6 +12,8 @@ on:
 
 jobs:
   claude:
+    # Comment-based triggers (issue_comment, pull_request_review, etc.) run in base repo context
+    # and have access to secrets, so they work fine for forked PRs
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
