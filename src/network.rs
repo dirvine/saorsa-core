@@ -99,6 +99,16 @@ pub struct NodeConfig {
     /// In Phase 1, this is used for "soft enforcement" (logging only).
     #[serde(default)]
     pub attestation_config: crate::attestation::AttestationConfig,
+
+    /// Stale peer threshold - peers with no activity for this duration are considered stale.
+    /// Defaults to 60 seconds. Can be reduced for testing purposes.
+    #[serde(default = "default_stale_peer_threshold")]
+    pub stale_peer_threshold: Duration,
+}
+
+/// Default stale peer threshold (60 seconds)
+fn default_stale_peer_threshold() -> Duration {
+    Duration::from_secs(60)
 }
 
 /// DHT-specific configuration
@@ -194,6 +204,7 @@ impl NodeConfig {
             bootstrap_cache_config: None,
             diversity_config: None,
             attestation_config: config.attestation.clone(),
+            stale_peer_threshold: default_stale_peer_threshold(),
         })
     }
 
@@ -323,6 +334,7 @@ impl NodeConfigBuilder {
             bootstrap_cache_config: None,
             diversity_config: None,
             attestation_config: base_config.attestation.clone(),
+            stale_peer_threshold: default_stale_peer_threshold(),
         })
     }
 }
@@ -351,6 +363,7 @@ impl Default for NodeConfig {
             bootstrap_cache_config: None,
             diversity_config: None,
             attestation_config: config.attestation.clone(),
+            stale_peer_threshold: default_stale_peer_threshold(),
         }
     }
 }
@@ -408,6 +421,7 @@ impl NodeConfig {
             bootstrap_cache_config: None,
             diversity_config: None,
             attestation_config: config.attestation.clone(),
+            stale_peer_threshold: default_stale_peer_threshold(),
         };
 
         // Add IPv6 listen address if enabled
@@ -639,6 +653,10 @@ pub struct P2PNode {
     #[allow(dead_code)]
     keepalive_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
+    /// Periodic maintenance task handle
+    #[allow(dead_code)]
+    periodic_tasks_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+
     /// Shutdown flag for background tasks
     #[allow(dead_code)]
     shutdown: Arc<AtomicBool>,
@@ -745,6 +763,7 @@ impl P2PNode {
             active_connections: Arc::new(RwLock::new(HashSet::new())),
             connection_monitor_handle: Arc::new(RwLock::new(None)),
             keepalive_handle: Arc::new(RwLock::new(None)),
+            periodic_tasks_handle: Arc::new(RwLock::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
@@ -965,6 +984,28 @@ impl P2PNode {
             Arc::new(RwLock::new(Some(handle)))
         };
 
+        // Spawn periodic maintenance task for stale peer detection
+        let periodic_tasks_handle = {
+            let peers_clone = Arc::clone(&peers);
+            let active_conns_clone = Arc::clone(&active_connections);
+            let event_tx_clone = event_tx.clone();
+            let stale_threshold = config.stale_peer_threshold;
+            let shutdown_clone = Arc::clone(&shutdown);
+
+            let handle = tokio::spawn(async move {
+                Self::periodic_maintenance_task(
+                    peers_clone,
+                    active_conns_clone,
+                    event_tx_clone,
+                    stale_threshold,
+                    shutdown_clone,
+                )
+                .await;
+            });
+
+            Arc::new(RwLock::new(Some(handle)))
+        };
+
         // Compute binary hash for attestation (in production, this would be the actual binary)
         // For now, we use a placeholder that will be replaced during node initialization
         let binary_hash = Self::compute_binary_hash();
@@ -986,6 +1027,7 @@ impl P2PNode {
             security_dashboard,
             connection_monitor_handle,
             keepalive_handle,
+            periodic_tasks_handle,
             shutdown,
             geo_provider,
             // Attestation - EntangledId will be derived later when NodeIdentity is available
@@ -999,6 +1041,10 @@ impl P2PNode {
 
         // Update the connection monitor with actual peers reference
         node.start_connection_monitor().await;
+
+        // Start message receiving system so messages work immediately after node creation
+        // This is critical for basic P2P messaging to work
+        node.start_message_receiving_system().await?;
 
         Ok(node)
     }
@@ -1177,32 +1223,78 @@ impl P2PNode {
         let event_tx = self.event_tx.clone();
 
         tokio::spawn(async move {
+            info!("Message receive loop started");
             loop {
                 match dual.receive_any().await {
-                    Ok((_peer_id, bytes)) => {
+                    Ok((peer_id, bytes)) => {
+                        info!("Received {} bytes from peer {}", bytes.len(), peer_id);
+
+                        // Skip keepalive and other protocol control messages
+                        if bytes == b"keepalive" {
+                            trace!("Received keepalive from {}", peer_id);
+                            continue;
+                        }
+
                         // Expect the JSON message wrapper from create_protocol_message
-                        #[allow(clippy::collapsible_if)]
-                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            if let (Some(protocol), Some(data), Some(from)) = (
-                                value.get("protocol").and_then(|v| v.as_str()),
-                                value.get("data").and_then(|v| v.as_array()),
-                                value.get("from").and_then(|v| v.as_str()),
-                            ) {
-                                let payload: Vec<u8> = data
-                                    .iter()
-                                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                                    .collect();
-                                let _ = event_tx.send(P2PEvent::Message {
-                                    topic: protocol.to_string(),
-                                    source: from.to_string(),
-                                    data: payload,
-                                });
+                        match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                            Ok(value) => {
+                                if let (Some(protocol), Some(data), Some(from)) = (
+                                    value.get("protocol").and_then(|v| v.as_str()),
+                                    value.get("data").and_then(|v| v.as_array()),
+                                    value.get("from").and_then(|v| v.as_str()),
+                                ) {
+                                    let payload: Vec<u8> = data
+                                        .iter()
+                                        .filter_map(|v| v.as_u64().map(|n| n as u8))
+                                        .collect();
+                                    debug!(
+                                        "Emitting P2PEvent::Message - topic: {}, from: {}, payload_len: {}",
+                                        protocol,
+                                        from,
+                                        payload.len()
+                                    );
+                                    let _ = event_tx.send(P2PEvent::Message {
+                                        topic: protocol.to_string(),
+                                        source: from.to_string(),
+                                        data: payload,
+                                    });
+                                } else {
+                                    debug!(
+                                        "Message missing required fields. protocol={:?}, data={:?}, from={:?}",
+                                        value.get("protocol"),
+                                        value.get("data").is_some(),
+                                        value.get("from")
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                // Log first 100 bytes to help debug
+                                let preview: Vec<u8> = bytes.iter().take(100).copied().collect();
+                                warn!(
+                                    "Failed to parse message JSON: {} (received {} bytes): {:?}",
+                                    e,
+                                    bytes.len(),
+                                    preview
+                                );
                             }
                         }
                     }
                     Err(e) => {
-                        warn!("Receive error: {}", e);
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        let err_str = e.to_string();
+                        // "No connected peers" errors happen frequently when one stack
+                        // (e.g., IPv4) has no connections while the other (IPv6) does.
+                        // Don't sleep for these - retry immediately to avoid missing
+                        // messages on the connected stack.
+                        if err_str.contains("No connected peers") || err_str.contains("no peers") {
+                            // Very short yield to avoid busy-looping, but allow quick retry
+                            tokio::task::yield_now().await;
+                        } else if err_str.contains("no data") || err_str.contains("timeout") {
+                            // Expected when no messages available - small sleep
+                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        } else {
+                            warn!("Receive error: {}", e);
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        }
                     }
                 }
             }
@@ -1623,11 +1715,23 @@ impl P2PNode {
         }
 
         // Create protocol message wrapper
+        let raw_data_len = data.len();
         let _message_data = self.create_protocol_message(protocol, data)?;
+        info!(
+            "Sending {} bytes to peer {} on protocol {} (raw data: {} bytes)",
+            _message_data.len(),
+            peer_id,
+            protocol,
+            raw_data_len
+        );
 
-        // Send via ant-quic dual-node
-        let send_fut = self.dual_node.send_to_peer_string(peer_id, &_message_data);
-        tokio::time::timeout(self.config.connection_timeout, send_fut)
+        // Send via ant-quic dual-node using the optimized send method
+        // This uses P2pEndpoint::send() which corresponds with recv() for proper
+        // bidirectional communication
+        let send_fut = self
+            .dual_node
+            .send_to_peer_string_optimized(peer_id, &_message_data);
+        let result = tokio::time::timeout(self.config.connection_timeout, send_fut)
             .await
             .map_err(|_| {
                 P2PError::Transport(crate::error::TransportError::StreamError(
@@ -1638,7 +1742,19 @@ impl P2PNode {
                 P2PError::Transport(crate::error::TransportError::StreamError(
                     e.to_string().into(),
                 ))
-            })
+            });
+
+        if result.is_ok() {
+            info!(
+                "Successfully sent {} bytes to peer {}",
+                _message_data.len(),
+                peer_id
+            );
+        } else {
+            warn!("Failed to send message to peer {}", peer_id);
+        }
+
+        result
     }
 
     /// Create a protocol message wrapper
@@ -2283,10 +2399,11 @@ impl P2PNode {
 
             debug!("Sending keepalive to {} active connections", peers.len());
 
-            // Send keepalive to each peer
+            // Send keepalive to each peer using optimized send method
+            // This uses P2pEndpoint::send() which corresponds with recv()
             for peer_id in peers {
                 match dual_node
-                    .send_to_peer_string(&peer_id, KEEPALIVE_PAYLOAD)
+                    .send_to_peer_string_optimized(&peer_id, KEEPALIVE_PAYLOAD)
                     .await
                 {
                     Ok(_) => {
@@ -2304,6 +2421,115 @@ impl P2PNode {
         }
 
         info!("Keepalive task stopped");
+    }
+
+    /// Periodic maintenance task - detects stale peers and removes them
+    ///
+    /// This task runs every 100ms and:
+    /// 1. Detects peers that haven't been seen for longer than stale_threshold
+    /// 2. Marks them as disconnected and emits PeerDisconnected events
+    /// 3. Removes fully disconnected peers after cleanup_threshold (2x stale_threshold)
+    async fn periodic_maintenance_task(
+        peers: Arc<RwLock<HashMap<PeerId, PeerInfo>>>,
+        active_connections: Arc<RwLock<HashSet<PeerId>>>,
+        event_tx: broadcast::Sender<P2PEvent>,
+        stale_threshold: Duration,
+        shutdown: Arc<AtomicBool>,
+    ) {
+        use tokio::time::interval;
+
+        let cleanup_threshold = stale_threshold * 2;
+        let mut interval = interval(Duration::from_millis(100));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        info!(
+            "Periodic maintenance task started (stale threshold: {:?})",
+            stale_threshold
+        );
+
+        loop {
+            interval.tick().await;
+
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+
+            let now = Instant::now();
+            let mut peers_to_remove: Vec<PeerId> = Vec::new();
+            let mut peers_to_mark_disconnected: Vec<PeerId> = Vec::new();
+
+            // Phase 1: Identify stale and disconnected peers
+            {
+                let peers_lock = peers.read().await;
+                for (peer_id, peer_info) in peers_lock.iter() {
+                    let elapsed = now.duration_since(peer_info.last_seen);
+
+                    match &peer_info.status {
+                        ConnectionStatus::Connected => {
+                            if elapsed > stale_threshold {
+                                debug!(
+                                    peer_id = %peer_id,
+                                    elapsed_secs = elapsed.as_secs(),
+                                    "Peer went stale - marking for disconnection"
+                                );
+                                peers_to_mark_disconnected.push(peer_id.clone());
+                            }
+                        }
+                        ConnectionStatus::Disconnected | ConnectionStatus::Failed(_) => {
+                            if elapsed > cleanup_threshold {
+                                trace!(
+                                    peer_id = %peer_id,
+                                    elapsed_secs = elapsed.as_secs(),
+                                    "Removing disconnected peer from tracking"
+                                );
+                                peers_to_remove.push(peer_id.clone());
+                            }
+                        }
+                        ConnectionStatus::Connecting | ConnectionStatus::Disconnecting => {
+                            if elapsed > stale_threshold {
+                                debug!(
+                                    peer_id = %peer_id,
+                                    status = ?peer_info.status,
+                                    "Connection timed out in transitional state"
+                                );
+                                peers_to_mark_disconnected.push(peer_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Phase 2: Mark stale peers as disconnected
+            // Note: We do NOT reset last_seen here. The cleanup timer uses the original
+            // last_seen timestamp, so disconnected peers are removed after cleanup_threshold
+            // from when they were last actually seen, not from when they were marked disconnected.
+            if !peers_to_mark_disconnected.is_empty() {
+                let mut peers_lock = peers.write().await;
+                for peer_id in &peers_to_mark_disconnected {
+                    if let Some(peer_info) = peers_lock.get_mut(peer_id) {
+                        peer_info.status = ConnectionStatus::Disconnected;
+                    }
+                }
+            }
+
+            // Phase 3: Remove from active_connections and emit events
+            for peer_id in &peers_to_mark_disconnected {
+                active_connections.write().await.remove(peer_id);
+                let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id.clone()));
+                info!(peer_id = %peer_id, "Stale peer disconnected");
+            }
+
+            // Phase 4: Remove fully cleaned up peers from tracking
+            if !peers_to_remove.is_empty() {
+                let mut peers_lock = peers.write().await;
+                for peer_id in &peers_to_remove {
+                    peers_lock.remove(peer_id);
+                    trace!(peer_id = %peer_id, "Peer removed from tracking");
+                }
+            }
+        }
+
+        info!("Periodic maintenance task stopped");
     }
 
     /// Check system health
@@ -2618,11 +2844,100 @@ impl P2PNode {
     }
 
     /// Perform periodic maintenance tasks
+    ///
+    /// This function is called periodically (every 100ms) to:
+    /// 1. Detect and remove stale peers (no activity for configured threshold)
+    /// 2. Clean up disconnected peers from tracking structures
+    /// 3. Emit PeerDisconnected events for removed peers
     async fn periodic_tasks(&self) -> Result<()> {
-        // Update peer last seen timestamps
-        // Remove stale connections
-        // Perform DHT maintenance
-        // This is a placeholder for now
+        // Stale peer threshold from config (default 60s, can be reduced for tests)
+        let stale_threshold = self.config.stale_peer_threshold;
+        // Cleanup threshold - disconnected peers are removed after 2x the stale threshold
+        let cleanup_threshold = stale_threshold * 2;
+
+        let now = Instant::now();
+        let mut peers_to_remove: Vec<PeerId> = Vec::new();
+        let mut peers_to_mark_disconnected: Vec<PeerId> = Vec::new();
+
+        // Phase 1: Identify stale and disconnected peers
+        {
+            let peers = self.peers.read().await;
+            for (peer_id, peer_info) in peers.iter() {
+                let elapsed = now.duration_since(peer_info.last_seen);
+
+                match &peer_info.status {
+                    ConnectionStatus::Connected => {
+                        // Check if connected peer has gone stale
+                        if elapsed > stale_threshold {
+                            debug!(
+                                peer_id = %peer_id,
+                                elapsed_secs = elapsed.as_secs(),
+                                "Peer went stale - marking for disconnection"
+                            );
+                            peers_to_mark_disconnected.push(peer_id.clone());
+                        }
+                    }
+                    ConnectionStatus::Disconnected | ConnectionStatus::Failed(_) => {
+                        // Remove disconnected/failed peers after cleanup threshold
+                        if elapsed > cleanup_threshold {
+                            trace!(
+                                peer_id = %peer_id,
+                                elapsed_secs = elapsed.as_secs(),
+                                "Removing disconnected peer from tracking"
+                            );
+                            peers_to_remove.push(peer_id.clone());
+                        }
+                    }
+                    ConnectionStatus::Connecting | ConnectionStatus::Disconnecting => {
+                        // Transitional states - check for timeout
+                        if elapsed > stale_threshold {
+                            debug!(
+                                peer_id = %peer_id,
+                                status = ?peer_info.status,
+                                "Connection timed out in transitional state"
+                            );
+                            peers_to_mark_disconnected.push(peer_id.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Phase 2: Mark stale peers as disconnected
+        if !peers_to_mark_disconnected.is_empty() {
+            let mut peers = self.peers.write().await;
+            for peer_id in &peers_to_mark_disconnected {
+                if let Some(peer_info) = peers.get_mut(peer_id) {
+                    peer_info.status = ConnectionStatus::Disconnected;
+                    peer_info.last_seen = now; // Reset for cleanup timer
+                }
+            }
+        }
+
+        // Phase 3: Remove from active_connections and emit events for disconnected peers
+        for peer_id in &peers_to_mark_disconnected {
+            // Remove from active connections set
+            self.active_connections.write().await.remove(peer_id);
+
+            // Broadcast disconnection event
+            let _ = self
+                .event_tx
+                .send(P2PEvent::PeerDisconnected(peer_id.clone()));
+
+            info!(
+                peer_id = %peer_id,
+                "Stale peer disconnected"
+            );
+        }
+
+        // Phase 4: Remove fully cleaned up peers from tracking
+        if !peers_to_remove.is_empty() {
+            let mut peers = self.peers.write().await;
+            for peer_id in &peers_to_remove {
+                peers.remove(peer_id);
+                trace!(peer_id = %peer_id, "Peer removed from tracking");
+            }
+        }
 
         Ok(())
     }
@@ -2868,6 +3183,7 @@ mod tests {
             bootstrap_cache_config: None,
             diversity_config: None,
             attestation_config: crate::attestation::AttestationConfig::default(),
+            stale_peer_threshold: default_stale_peer_threshold(),
         }
     }
 

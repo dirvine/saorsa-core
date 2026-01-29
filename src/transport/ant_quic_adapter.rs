@@ -182,6 +182,35 @@ impl P2PNetworkNode<P2pLinkTransport> {
 
         Self::new_with_config(bind_addr, config).await
     }
+
+    /// Receive data from any peer using P2pEndpoint's optimized recv method
+    ///
+    /// This method is specialized for P2pLinkTransport and uses the underlying
+    /// P2pEndpoint's recv() method which properly handles accepting streams
+    /// from all connected peers.
+    pub async fn receive_from_any_peer_optimized(&self) -> Result<(PeerId, Vec<u8>)> {
+        use std::time::Duration;
+
+        let timeout = Duration::from_secs(30);
+        self.transport
+            .endpoint()
+            .recv(timeout)
+            .await
+            .map_err(|e| anyhow::anyhow!("Receive failed: {e}"))
+    }
+
+    /// Send data to a peer using P2pEndpoint's send method
+    ///
+    /// This method is specialized for P2pLinkTransport and uses the underlying
+    /// P2pEndpoint's send() method which corresponds with recv() for proper
+    /// bidirectional communication.
+    pub async fn send_to_peer_optimized(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
+        self.transport
+            .endpoint()
+            .send(peer_id, data)
+            .await
+            .map_err(|e| anyhow::anyhow!("Send failed: {e}"))
+    }
 }
 
 impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
@@ -424,30 +453,111 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
     }
 
     /// Receive data from any peer (waits for the next message)
+    ///
+    /// This method accepts incoming unidirectional streams opened by peers via `open_uni()`.
+    /// It returns the peer ID and the data that was sent.
+    ///
+    /// The method iterates over all connected peers and attempts to accept incoming
+    /// unidirectional streams from each connection with a short timeout per peer.
     pub async fn receive_from_any_peer(&self) -> Result<(PeerId, Vec<u8>)> {
-        let mut incoming = self.transport.accept(SAORSA_DHT_PROTOCOL);
-
+        use ant_quic::link_transport::StreamFilter;
         use futures::StreamExt;
+        use std::time::Duration;
+        use tokio::time::timeout;
 
-        if let Some(conn_result) = incoming.next().await {
-            let conn = conn_result.map_err(|e| anyhow::anyhow!("Accept failed: {}", e))?;
-            let peer_id = conn.peer();
+        let overall_timeout = Duration::from_secs(30);
+        let start = std::time::Instant::now();
+        let mut logged_once = false;
 
-            // Accept a stream and read data
-            let (_, mut recv_stream) = conn
-                .open_bi()
-                .await
-                .map_err(|e| anyhow::anyhow!("Open bi failed: {}", e))?;
+        loop {
+            // Check overall timeout
+            if start.elapsed() >= overall_timeout {
+                return Err(anyhow::anyhow!("Receive timeout"));
+            }
 
-            // Use LinkRecvStream::read_to_end with a size limit (16MB max)
-            let data = recv_stream
-                .read_to_end(16 * 1024 * 1024)
-                .await
-                .map_err(|e| anyhow::anyhow!("Read failed: {}", e))?;
+            // Get all connected peers
+            let peers = self.get_connected_peers().await;
 
-            Ok((peer_id, data))
-        } else {
-            Err(anyhow::anyhow!("Accept stream closed"))
+            if peers.is_empty() {
+                // No peers connected, wait a bit and retry
+                if !logged_once {
+                    tracing::debug!("receive_from_any_peer: No peers connected, waiting...");
+                    logged_once = true;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+
+            if !logged_once {
+                tracing::info!(
+                    "receive_from_any_peer: Found {} connected peers",
+                    peers.len()
+                );
+                logged_once = true;
+            }
+
+            // Calculate per-peer timeout
+            let remaining = overall_timeout.saturating_sub(start.elapsed());
+            let per_peer_timeout = remaining
+                .checked_div(peers.len() as u32)
+                .unwrap_or(Duration::from_millis(50))
+                .max(Duration::from_millis(10));
+
+            // Try to accept a stream from each connected peer
+            for (peer_id, _addr) in &peers {
+                // Use dial() to get the existing connection for this peer
+                let conn_result = timeout(
+                    per_peer_timeout,
+                    self.transport.dial(*peer_id, SAORSA_DHT_PROTOCOL),
+                )
+                .await;
+
+                if let Ok(Ok(conn)) = conn_result {
+                    // Try to accept an incoming unidirectional stream with timeout
+                    // accept_uni_typed returns a Stream, so we need to call .next() on it
+                    let mut stream_iter = conn.accept_uni_typed(StreamFilter::new());
+                    let accept_result = timeout(per_peer_timeout, stream_iter.next()).await;
+
+                    match &accept_result {
+                        Ok(Some(Ok((_stream_type, _)))) => {
+                            tracing::info!("accept_uni_typed succeeded, reading data...");
+                        }
+                        Ok(Some(Err(e))) => {
+                            tracing::debug!("accept_uni_typed stream error: {e}");
+                        }
+                        Ok(None) => {
+                            // No stream available, normal
+                        }
+                        Err(_) => {
+                            // Timeout, normal
+                        }
+                    }
+
+                    if let Ok(Some(Ok((_stream_type, mut recv_stream)))) = accept_result {
+                        // Read the data from the stream
+                        let data_result = recv_stream.read_to_end(16 * 1024 * 1024).await;
+
+                        match &data_result {
+                            Ok(data) => {
+                                tracing::info!("read_to_end got {} bytes", data.len());
+                            }
+                            Err(e) => {
+                                tracing::warn!("read_to_end failed: {e}");
+                            }
+                        }
+
+                        if let Ok(data) = data_result
+                            && !data.is_empty()
+                        {
+                            tracing::info!("Received {} bytes from peer {}", data.len(), peer_id);
+                            return Ok((*peer_id, data));
+                        }
+                    }
+                }
+            }
+
+            // Short sleep between iterations
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
 
@@ -760,6 +870,76 @@ impl DualStackNetworkNode<P2pLinkTransport> {
         };
         Ok(Self { v6, v4 })
     }
+
+    /// Receive from any stack using P2pEndpoint's optimized recv method
+    ///
+    /// Uses P2pEndpoint::recv() which properly handles accepting streams from
+    /// all connected peers across both inbound and outbound connections.
+    /// This corresponds with send_to_peer_optimized() which uses P2pEndpoint::send().
+    ///
+    /// When dual-stack is enabled, races both stacks but handles "No connected peers"
+    /// errors gracefully by falling back to the other stack. This prevents race
+    /// conditions where one stack returns an error before the other has time to
+    /// return data.
+    pub async fn receive_any(&self) -> Result<(PeerId, Vec<u8>)> {
+        match (&self.v6, &self.v4) {
+            (Some(v6), Some(v4)) => {
+                // Race both stacks, but handle "no connected peers" gracefully
+                tokio::select! {
+                    res6 = v6.receive_from_any_peer_optimized() => {
+                        match &res6 {
+                            Ok(_) => res6,
+                            Err(e) if e.to_string().contains("No connected peers") => {
+                                // IPv6 has no peers, wait for IPv4
+                                v4.receive_from_any_peer_optimized().await
+                            }
+                            Err(_) => res6, // Other errors propagate
+                        }
+                    }
+                    res4 = v4.receive_from_any_peer_optimized() => {
+                        match &res4 {
+                            Ok(_) => res4,
+                            Err(e) if e.to_string().contains("No connected peers") => {
+                                // IPv4 has no peers, wait for IPv6
+                                v6.receive_from_any_peer_optimized().await
+                            }
+                            Err(_) => res4, // Other errors propagate
+                        }
+                    }
+                }
+            }
+            (Some(v6), None) => v6.receive_from_any_peer_optimized().await,
+            (None, Some(v4)) => v4.receive_from_any_peer_optimized().await,
+            (None, None) => Err(anyhow::anyhow!("no listening nodes available")),
+        }
+    }
+
+    /// Send to peer using P2pEndpoint's optimized send method
+    ///
+    /// Uses P2pEndpoint::send() which corresponds with recv() for proper
+    /// bidirectional communication. Tries IPv6 first, then IPv4.
+    pub async fn send_to_peer_optimized(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
+        if let Some(v6) = &self.v6
+            && v6.send_to_peer_optimized(peer_id, data).await.is_ok()
+        {
+            return Ok(());
+        }
+        if let Some(v4) = &self.v4
+            && v4.send_to_peer_optimized(peer_id, data).await.is_ok()
+        {
+            return Ok(());
+        }
+        Err(anyhow::anyhow!(
+            "send_to_peer_optimized failed on both stacks"
+        ))
+    }
+
+    /// Send to peer by string PeerId using optimized method
+    pub async fn send_to_peer_string_optimized(&self, peer_id: &str, data: &[u8]) -> Result<()> {
+        let ant_peer = string_to_ant_peer_id(peer_id)
+            .map_err(|e| anyhow::anyhow!("Invalid peer ID: {}", e))?;
+        self.send_to_peer_optimized(&ant_peer, data).await
+    }
 }
 
 impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
@@ -933,21 +1113,6 @@ impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
                 .await;
         }
         res
-    }
-
-    /// Receive from any stack (race IPv6/IPv4)
-    pub async fn receive_any(&self) -> Result<(PeerId, Vec<u8>)> {
-        match (&self.v6, &self.v4) {
-            (Some(v6), Some(v4)) => {
-                tokio::select! {
-                    res6 = v6.receive_from_any_peer() => res6,
-                    res4 = v4.receive_from_any_peer() => res4,
-                }
-            }
-            (Some(v6), None) => v6.receive_from_any_peer().await,
-            (None, Some(v4)) => v4.receive_from_any_peer().await,
-            (None, None) => Err(anyhow::anyhow!("no listening nodes available")),
-        }
     }
 
     /// Subscribe to connection lifecycle events from both stacks
