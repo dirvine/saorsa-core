@@ -66,9 +66,7 @@ use serde::{Deserialize, Serialize};
 /// # }
 /// ```
 pub fn encode<T: Serialize>(data: &T) -> Result<Vec<u8>> {
-    bincode::config::standard()
-        .serialize(data)
-        .context("Failed to encode data with bincode")
+    bincode::serialize(data).context("Failed to encode data with bincode")
 }
 
 /// Deserialize data from bincode binary encoding
@@ -126,9 +124,7 @@ pub fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
         ));
     }
 
-    bincode::config::standard()
-        .with_limit(MAX_MESSAGE_SIZE)
-        .deserialize::<T>(bytes)
+    bincode::deserialize::<T>(bytes)
         .with_context(|| format!("Failed to decode message ({} bytes)", bytes.len()))
 }
 
