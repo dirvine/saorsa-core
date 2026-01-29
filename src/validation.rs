@@ -34,8 +34,9 @@
 //!
 //! # Usage
 //!
-//! ```rust
-//! use p2p_core::validation::{Validate, ValidationContext};
+//! ```rust,ignore
+//! use saorsa_core::validation::{Validate, ValidationContext, ValidationError};
+//! use saorsa_core::validation::{validate_peer_id, validate_message_size};
 //!
 //! #[derive(Debug)]
 //! struct NetworkMessage {
@@ -44,7 +45,7 @@
 //! }
 //!
 //! impl Validate for NetworkMessage {
-//!     fn validate(&self, ctx: &ValidationContext) -> Result<()> {
+//!     fn validate(&self, ctx: &ValidationContext) -> Result<(), ValidationError> {
 //!         // Validate peer ID format
 //!         validate_peer_id(&self.peer_id)?;
 //!

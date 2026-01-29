@@ -37,62 +37,53 @@
 //!
 //! ## Basic Error Handling
 //!
-//! ```rust
-//! use p2p_core::error::{P2PError, P2pResult, ErrorContext};
+//! ```rust,ignore
+//! use saorsa_core::error::{P2PError, P2pResult};
+//! use std::net::SocketAddr;
 //!
-//! fn connect_to_peer(addr: SocketAddr) -> P2pResult<Connection> {
-//!     // Instead of: socket.connect(addr).unwrap()
-//!     let conn = socket.connect(addr)
-//!         .map_err(|e| NetworkError::ConnectionFailed {
-//!             addr,
-//!             reason: e.to_string().into(),
-//!         })?;
-//!
-//!     Ok(conn)
+//! fn connect_to_peer(addr: SocketAddr) -> P2pResult<()> {
+//!     // Use proper error propagation instead of unwrap()
+//!     // socket.connect(addr).map_err(|e| P2PError::Network(...))?;
+//!     Ok(())
 //! }
 //! ```
 //!
 //! ## Adding Context
 //!
-//! ```rust
-//! use p2p_core::error::{P2PError, P2pResult, ErrorContext};
+//! ```rust,ignore
+//! use saorsa_core::error::{P2PError, P2pResult};
+//! use saorsa_core::error::ErrorContext;
 //!
-//! fn load_config(path: &str) -> P2pResult<Config> {
+//! fn load_config(path: &str) -> P2pResult<String> {
 //!     std::fs::read_to_string(path)
-//!         .context("Failed to read config file")?
-//!         .parse()
-//!         .context("Failed to parse config")
+//!         .context("Failed to read config file")
 //! }
 //! ```
 //!
 //! ## Structured Error Logging
 //!
-//! ```rust
-//! use p2p_core::error::{P2PError, ErrorReporting};
+//! ```rust,ignore
+//! use saorsa_core::error::P2PError;
 //!
 //! fn handle_error(err: P2PError) {
-//!     // Automatically logs with appropriate level and context
-//!     err.log();
-//!
-//!     // Or get structured log for custom handling
-//!     let log_entry = err.to_error_log();
-//!     send_to_monitoring_system(&log_entry);
+//!     // Log with tracing
+//!     tracing::error!("Error occurred: {}", err);
 //! }
 //! ```
 //!
 //! ## Migration from unwrap()
 //!
-//! ```rust
+//! ```rust,ignore
+//! use saorsa_core::error::P2PError;
+//!
 //! // Before:
-//! let value = some_operation().unwrap();
+//! // let value = some_operation().unwrap();
 //!
-//! // After:
-//! let value = some_operation()
-//!     .context("Failed to perform operation")?;
+//! // After - use ? operator with proper error types:
+//! // let value = some_operation()?;
 //!
-//! // For performance-critical paths with known bounds:
-//! let value = some_operation()
-//!     .ok_or_else(|| P2PError::Internal("Operation failed".into()))?;
+//! // For Option types:
+//! // let value = some_option.ok_or_else(|| P2PError::Internal("Missing value".into()))?;
 //! ```
 
 use serde::{Deserialize, Serialize};

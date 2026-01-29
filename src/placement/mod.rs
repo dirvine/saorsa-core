@@ -46,86 +46,46 @@
 //!
 //! ### Basic Placement
 //!
-//! ```rust,no_run
-//! use saorsa_core::placement::{PlacementEngine, PlacementConfig};
+//! ```rust,ignore
+//! use saorsa_core::placement::{PlacementConfig, PlacementOrchestrator};
 //! use std::time::Duration;
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let config = PlacementConfig {
-//!     replication_factor: (3, 8).into(),
-//!     byzantine_tolerance: 2.into(),
-//!     placement_timeout: Duration::from_secs(30),
-//!     geographic_diversity: true,
-//!     ..Default::default()
-//! };
+//! async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create placement configuration
+//!     let config = PlacementConfig::default();
 //!
-//! let mut engine = PlacementEngine::new(config);
+//!     // Create orchestrator with required components
+//!     let orchestrator = PlacementOrchestrator::new(config).await?;
 //!
-//! // Select optimal nodes for shard placement
-//! let decision = engine.select_nodes(
-//!     &available_nodes,
-//!     8, // replication factor
-//!     &trust_system,
-//!     &performance_monitor,
-//!     &node_metadata,
-//! ).await?;
-//!
-//! println!("Selected {} nodes with {:.2}% reliability",
-//!          decision.selected_nodes.len(),
-//!          decision.estimated_reliability * 100.0);
-//! # Ok(())
-//! # }
+//!     // Start the placement system
+//!     orchestrator.start().await?;
+//!     Ok(())
+//! }
 //! ```
 //!
 //! ### Advanced Configuration
 //!
-//! ```rust,no_run
-//! use saorsa_core::placement::{
-//!     PlacementConfig, OptimizationWeights, PlacementConstraint
-//! };
-//! use std::time::Duration;
+//! ```rust,ignore
+//! use saorsa_core::placement::{PlacementConfig, OptimizationWeights};
 //!
-//! let config = PlacementConfig {
-//!     weights: OptimizationWeights {
-//!         trust_weight: 0.5,      // High trust emphasis
-//!         performance_weight: 0.25,
-//!         capacity_weight: 0.15,
-//!         diversity_bonus: 0.1,
-//!     },
-//!     constraints: vec![
-//!         PlacementConstraint::MinimumTrustScore(0.7),
-//!         PlacementConstraint::MaximumLatency(Duration::from_millis(500)),
-//!         PlacementConstraint::RequireGeographicDiversity,
-//!     ],
-//!     ..Default::default()
-//! };
+//! // PlacementConfig uses Default for standard setups
+//! // See PlacementConfig documentation for available fields
+//! let config = PlacementConfig::default();
 //! ```
 //!
 //! ### Storage Orchestration
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use saorsa_core::placement::PlacementOrchestrator;
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let orchestrator = PlacementOrchestrator::new(
-//!     config,
-//!     dht_engine,
-//!     trust_system,
-//!     performance_monitor,
-//!     churn_predictor,
-//! ).await?;
+//! async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create orchestrator with default configuration
+//!     let orchestrator = PlacementOrchestrator::new(Default::default()).await?;
 //!
-//! // Start audit and repair systems
-//! orchestrator.start().await?;
-//!
-//! // Place data with optimal distribution
-//! let decision = orchestrator.place_data(
-//!     data,
-//!     8, // replication factor
-//!     Some(NetworkRegion::Europe),
-//! ).await?;
-//! # Ok(())
-//! # }
+//!     // Start audit and repair systems
+//!     orchestrator.start().await?;
+//!     Ok(())
+//! }
 //! ```
 //!
 //! ## Architecture

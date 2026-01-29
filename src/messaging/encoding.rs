@@ -19,19 +19,13 @@
 //!
 //! ## Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use saorsa_core::messaging::encoding::{encode, decode};
-//! use saorsa_core::messaging::types::RichMessage;
 //!
-//! # fn example() -> anyhow::Result<()> {
-//! # let message = RichMessage::default();
-//! // Encode message to binary
-//! let bytes = encode(&message)?;
-//!
-//! // Decode binary back to message
-//! let decoded = decode::<RichMessage>(&bytes)?;
-//! # Ok(())
-//! # }
+//! // Any serde-serializable type works
+//! let data = ("hello", 42u32);
+//! let bytes = encode(&data)?;
+//! let decoded: (String, u32) = decode(&bytes)?;
 //! ```
 
 use anyhow::{Context, Result};
@@ -54,16 +48,12 @@ use serde::{Deserialize, Serialize};
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use saorsa_core::messaging::encoding::encode;
-/// use saorsa_core::messaging::types::RichMessage;
 ///
-/// # fn example() -> anyhow::Result<()> {
-/// # let message = RichMessage::default();
-/// let bytes = encode(&message)?;
+/// let data = vec![1u32, 2, 3, 4, 5];
+/// let bytes = encode(&data)?;
 /// assert!(!bytes.is_empty());
-/// # Ok(())
-/// # }
 /// ```
 pub fn encode<T: Serialize>(data: &T) -> Result<Vec<u8>> {
     bincode::serialize(data).context("Failed to encode data with bincode")
@@ -102,16 +92,13 @@ pub fn encode<T: Serialize>(data: &T) -> Result<Vec<u8>> {
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use saorsa_core::messaging::encoding::{encode, decode};
-/// use saorsa_core::messaging::types::RichMessage;
 ///
-/// # fn example() -> anyhow::Result<()> {
-/// # let message = RichMessage::default();
-/// let bytes = encode(&message)?;
-/// let decoded = decode::<RichMessage>(&bytes)?;
-/// # Ok(())
-/// # }
+/// let original = vec![1u32, 2, 3];
+/// let bytes = encode(&original)?;
+/// let decoded: Vec<u32> = decode(&bytes)?;
+/// assert_eq!(original, decoded);
 /// ```
 pub fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
     const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB

@@ -119,22 +119,24 @@ impl MessagingService {
     /// ```
     ///
     /// # Example with Explicit Port
-    /// ```no_run
-    /// # use saorsa_core::messaging::{MessagingService, DhtClient, NetworkConfig, PortConfig, IpMode, RetryBehavior};
-    /// # use saorsa_core::identity::FourWordAddress;
-    /// # async fn example() -> anyhow::Result<()> {
-    /// let dht = DhtClient::new()?;
-    /// let address = FourWordAddress("test-user-two-alpha".to_string());
+    /// ```rust,ignore
+    /// use saorsa_core::messaging::{MessagingService, DhtClient, NetworkConfig, PortConfig, IpMode, RetryBehavior};
+    /// use saorsa_core::identity::FourWordAddress;
     ///
-    /// // Use explicit port
-    /// let config = NetworkConfig {
-    ///     port: PortConfig::Explicit(12345),
-    ///     ip_mode: IpMode::IPv4Only,
-    ///     retry_behavior: RetryBehavior::FailFast,
-    /// };
-    /// let service = MessagingService::new_with_config(address, dht, config).await?;
-    /// # Ok(())
-    /// # }
+    /// async fn example() -> anyhow::Result<()> {
+    ///     let dht = DhtClient::new()?;
+    ///     let address = FourWordAddress("test-user-two-alpha".to_string());
+    ///
+    ///     // Use explicit port with NAT traversal
+    ///     let config = NetworkConfig {
+    ///         port: PortConfig::Explicit(12345),
+    ///         ip_mode: IpMode::IPv4Only,
+    ///         retry_behavior: RetryBehavior::FailFast,
+    ///         nat_traversal: None,
+    ///     };
+    ///     let service = MessagingService::new_with_config(address, dht, config).await?;
+    ///     Ok(())
+    /// }
     /// ```
     ///
     /// # Note

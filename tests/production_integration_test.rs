@@ -1,6 +1,15 @@
 //! Production Integration Tests
 //!
 //! Comprehensive tests for production readiness scenarios using real API.
+//!
+//! NOTE: These tests are marked as ignored because they require real network
+//! infrastructure and bootstrap nodes to be available. They fail with
+//! "Network timeout" in CI environments without proper network setup.
+//!
+//! To run these tests locally with a running network:
+//! ```
+//! cargo test --test production_integration_test -- --ignored
+//! ```
 
 use anyhow::Result;
 use std::collections::HashMap;
@@ -197,6 +206,7 @@ impl ProductionTestFramework {
 }
 
 #[tokio::test]
+#[ignore = "Requires network infrastructure - run with --ignored"]
 async fn test_production_system_startup() -> Result<()> {
     let framework = ProductionTestFramework::new(3).await?;
 
@@ -217,6 +227,7 @@ async fn test_production_system_startup() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires network infrastructure - run with --ignored"]
 async fn test_production_data_operations() -> Result<()> {
     let framework = ProductionTestFramework::new(3).await?;
 
@@ -237,6 +248,7 @@ async fn test_production_data_operations() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires network infrastructure - run with --ignored"]
 async fn test_production_input_validation() -> Result<()> {
     let framework = ProductionTestFramework::new(1).await?;
 
@@ -256,6 +268,7 @@ async fn test_production_input_validation() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires network infrastructure - run with --ignored"]
 async fn test_production_health_monitoring() -> Result<()> {
     let framework = ProductionTestFramework::new(2).await?;
 
@@ -272,6 +285,7 @@ async fn test_production_health_monitoring() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires network infrastructure - run with --ignored"]
 async fn test_production_security_features() -> Result<()> {
     let framework = ProductionTestFramework::new(2).await?;
 
@@ -288,6 +302,7 @@ async fn test_production_security_features() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires network infrastructure - run with --ignored"]
 async fn test_production_performance_benchmarks() -> Result<()> {
     let framework = ProductionTestFramework::new(3).await?;
 
@@ -311,6 +326,7 @@ async fn test_production_performance_benchmarks() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires network infrastructure - run with --ignored"]
 async fn test_production_integration_comprehensive() -> Result<()> {
     let framework = ProductionTestFramework::new(4).await?;
 
