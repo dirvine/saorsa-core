@@ -215,6 +215,9 @@ pub mod upgrade;
 /// Unified message listener system
 pub mod listener;
 
+/// Unified message sender system
+pub mod sender;
+
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
 pub use address_book::{
@@ -441,4 +444,25 @@ pub use listener::{
     register_gossip,
     register_p2p,
     subscribe_all,
+};
+
+// Unified sender system exports
+pub use sender::{
+    DeliveryEvent,
+    DeliveryTracking,
+    EncodedPayload,
+    EncodingType,
+    MessageDestination,
+    MessageEncoder,
+    MessageId as SendMessageId,
+    RetryPolicy,
+    SenderBuilder,
+    UnifiedSender,
+    // Global sender functions
+    broadcast_message,
+    global_sender,
+    gossip_message,
+    send_message,
+    sender_register_gossip,
+    sender_register_p2p,
 };
