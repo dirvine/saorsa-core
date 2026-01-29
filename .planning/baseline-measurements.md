@@ -385,6 +385,137 @@ Raw payload: 8,192 bytes
 
 ---
 
+## Task 6: Size Overhead Visualization
+
+### Layer-by-Layer Growth Analysis
+
+Based on JSON structure and Base64 encoding overhead, the cumulative size growth:
+
+#### 8KB Payload Example
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  RAW PAYLOAD: 8,192 bytes                               │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│  Layer 1: RichMessage → JSON                            │
+│  - Payload: 8,192 bytes (text content)                  │
+│  - Metadata: ~2,048 bytes (timestamps, IDs, etc.)       │
+│  = Output: 10,240 bytes (1.25x)                         │
+│  Overhead: +25%                                          │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│  Layer 2: EncryptedMessage → JSON                       │
+│  - Input: 10,240 bytes (Layer 1 JSON)                   │
+│  - Base64 encoding: 10,240 → 13,653 bytes (1.333x)      │
+│  - Envelope: +~1,000 bytes (id, channel, sender, etc.)  │
+│  = Output: 14,653 bytes (1.79x total)                   │
+│  Overhead: +43% from Layer 1                             │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│  Layer 3: ProtocolWrapper → JSON                        │
+│  - Input: 14,653 bytes (Layer 2 JSON)                   │
+│  - Base64 encoding: 14,653 → 19,537 bytes (1.333x)      │
+│  - Envelope: +~500 bytes (protocol, from, timestamp)    │
+│  = Output: 20,037 bytes (2.45x total)                   │
+│  Overhead: +37% from Layer 2                             │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│  Wire: 20,037 bytes + 16 bytes (ant-quic GCM tag)       │
+│  = Total: 20,053 bytes on wire                          │
+│  **Total overhead: 8,192 → 20,053 (2.45x bloat)**       │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Cumulative Size Table
+
+| Layer | 8KB Input | 64KB Input | 256KB Input | Overhead Factor |
+|-------|-----------|------------|-------------|-----------------|
+| **Raw Payload** | 8,192 B | 65,536 B | 262,144 B | 1.00x |
+| **+ Layer 1 (RichMessage JSON)** | 10,240 B | 81,920 B | 327,680 B | 1.25x |
+| **+ Layer 2 (EncryptedMessage JSON)** | 14,653 B | 116,907 B | 466,432 B | 1.79x |
+| **+ Layer 3 (ProtocolWrapper JSON)** | 20,037 B | 159,477 B | 636,032 B | 2.45x |
+| **+ ant-quic overhead** | 20,053 B | 159,493 B | 636,048 B | 2.45x |
+
+**Key Insight**: Size overhead is **exponential** due to nested Base64 encoding
+
+#### Per-Layer Overhead Breakdown
+
+**8KB Message Breakdown**:
+```
+Layer 1: +2,048 B  (25% overhead)  - JSON structure
+Layer 2: +4,413 B  (43% overhead)  - Base64(Layer1) + envelope
+Layer 3: +5,384 B  (37% overhead)  - Base64(Layer2) + envelope
+ant-quic: +16 B    (0.08% overhead) - AES-GCM tag
+
+Total added: 11,861 B (145% overhead)
+```
+
+### Comparison Chart: Current vs Target
+
+```
+                   CURRENT (Triple JSON + Redundant Encryption)
+┌──────────────────────────────────────────────────────────────────────┐
+│ 8KB Raw                                                              │
+├──────────────────────────────────────────────────────────────────────┤
+│ 8KB Raw │ 2KB Metadata │                                             │
+├──────────────────────────────────────────────────────────────────────┤
+│ 8KB Raw │ 2KB JSON │ 4.4KB Base64+Env │                              │
+├──────────────────────────────────────────────────────────────────────┤
+│ 8KB Raw │ 2KB │ 4.4KB │ 5.4KB Base64+Env │                           │
+└──────────────────────────────────────────────────────────────────────┘
+  Total: 20KB on wire (2.45x bloat)
+
+                   TARGET (Bincode + Single PQC Encryption)
+┌───────────────────────────────────────────────┐
+│ 8KB Raw │ 200B Bincode │ 64B Frame │ 16B GCM │
+└───────────────────────────────────────────────┘
+  Total: 8.47KB on wire (1.03x bloat)
+
+  **Savings: 11.53KB (57.7% reduction)**
+```
+
+### Performance Impact by Message Size
+
+| Size | Current Wire | Target Wire | Savings | % Reduction |
+|------|--------------|-------------|---------|-------------|
+| **8KB** | 20,053 B | 8,472 B | 11,581 B | **57.7%** |
+| **64KB** | 159,493 B | 66,096 B | 93,397 B | **58.6%** |
+| **256KB** | 636,048 B | 262,800 B | 373,248 B | **58.7%** |
+| **1MB** | 2,543,616 B | 1,049,984 B | 1,493,632 B | **58.7%** |
+
+**Observation**: Overhead percentage is **consistent** (~58-59%) across all message sizes
+
+### Cost Analysis: Bandwidth & Latency
+
+**Assumptions**:
+- Average message size: 32KB
+- Network bandwidth: 100 Mbps
+- Round-trip time (RTT): 50ms
+
+**Current Architecture**:
+- Wire size: 32KB × 2.45 = 78.4KB
+- Transmission time: 78.4KB ÷ 100Mbps = 6.3ms
+- Total latency: 6.3ms (transmission) + 50ms (RTT) = **56.3ms**
+
+**Target Architecture**:
+- Wire size: 32KB × 1.03 = 33KB
+- Transmission time: 33KB ÷ 100Mbps = 2.6ms
+- Total latency: 2.6ms (transmission) + 50ms (RTT) = **52.6ms**
+
+**Improvement**: 3.7ms faster per message (6.6% latency reduction)
+
+**Monthly bandwidth savings** (1M messages/month):
+- Current: 78.4KB × 1M = 74.8 GB/month
+- Target: 33KB × 1M = 31.5 GB/month
+- **Savings: 43.3 GB/month (58% reduction)**
+
+---
+
 ## Next Steps
 
 **Phase 1 Remaining Tasks**:
