@@ -3,6 +3,7 @@
 
 pub mod composer;
 pub mod database;
+pub mod encoding;
 pub mod encryption;
 pub mod key_exchange;
 pub mod media;
@@ -30,6 +31,7 @@ use serde::{Deserialize, Serialize};
 
 pub use composer::MessageComposer;
 pub use database::MessageStore;
+pub use encoding::{decode, encode};
 pub use encryption::SecureMessaging;
 pub use key_exchange::{KeyExchange, KeyExchangeMessage};
 pub use media::MediaProcessor;

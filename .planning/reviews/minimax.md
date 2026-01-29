@@ -1,13 +1,9 @@
-# Codex External Review
+# MiniMax External Review
 
 **Date**: 2026-01-29T15:40:00Z
 **Status**: SKIPPED (Task review - external reviewers not required)
 
 ## Note
 Task-level reviews focus on immediate code quality checks.
-External reviewers (Codex, Kimi, GLM, MiniMax) are reserved for:
-- Phase-level reviews
-- Pre-commit reviews
-- Security-critical changes
 
 ## Grade: N/A
