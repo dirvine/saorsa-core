@@ -307,10 +307,98 @@ fn bench_protocol_wrapper_encoding(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark bincode vs JSON for RichMessage (Task 7: serialization performance comparison)
+fn bench_bincode_vs_json(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bincode_vs_json");
+
+    for size_kb in [8, 64, 256] {
+        // JSON serialization
+        group.bench_with_input(
+            BenchmarkId::new("json_serialize", size_kb),
+            &size_kb,
+            |b, &size_kb| {
+                let message = create_rich_message(size_kb);
+
+                b.iter(|| {
+                    let json = serde_json::to_vec(&message);
+                    black_box(json)
+                });
+            },
+        );
+
+        // Bincode serialization
+        group.bench_with_input(
+            BenchmarkId::new("bincode_serialize", size_kb),
+            &size_kb,
+            |b, &size_kb| {
+                let message = create_rich_message(size_kb);
+
+                b.iter(|| {
+                    let bincode = bincode::serialize(&message);
+                    black_box(bincode)
+                });
+            },
+        );
+
+        // JSON deserialization
+        group.bench_with_input(
+            BenchmarkId::new("json_deserialize", size_kb),
+            &size_kb,
+            |b, &size_kb| {
+                let message = create_rich_message(size_kb);
+                let json = serde_json::to_vec(&message).expect("JSON serialization");
+
+                b.iter(|| {
+                    let deserialized: Result<RichMessage, _> =
+                        serde_json::from_slice(black_box(&json));
+                    black_box(deserialized)
+                });
+            },
+        );
+
+        // Bincode deserialization
+        group.bench_with_input(
+            BenchmarkId::new("bincode_deserialize", size_kb),
+            &size_kb,
+            |b, &size_kb| {
+                let message = create_rich_message(size_kb);
+                let bincode = bincode::serialize(&message).expect("bincode serialization");
+
+                b.iter(|| {
+                    let deserialized: Result<RichMessage, _> =
+                        bincode::deserialize(black_box(&bincode));
+                    black_box(deserialized)
+                });
+            },
+        );
+
+        // Size comparison
+        group.bench_with_input(
+            BenchmarkId::new("size_comparison", size_kb),
+            &size_kb,
+            |b, &size_kb| {
+                let message = create_rich_message(size_kb);
+
+                b.iter(|| {
+                    let json = serde_json::to_vec(&message).expect("JSON serialization");
+                    let bincode = bincode::serialize(&message).expect("bincode serialization");
+
+                    // Return size ratio: bincode / json (expect < 1.0, meaning bincode is smaller)
+                    let ratio = bincode.len() as f64 / json.len() as f64;
+                    black_box(ratio)
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_rich_message_encoding,
     bench_encrypted_message_encoding,
-    bench_protocol_wrapper_encoding
+    bench_protocol_wrapper_encoding,
+    bench_bincode_vs_json
 );
 criterion_main!(benches);
