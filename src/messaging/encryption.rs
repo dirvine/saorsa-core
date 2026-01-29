@@ -555,4 +555,38 @@ mod tests {
         );
         assert_eq!(key1_b, key2_b, "Ratcheting should be deterministic");
     }
+
+    #[tokio::test]
+    async fn test_establish_session_key() {
+        let identity = FourWordAddress::from("alice-bob-charlie-david");
+        let peer = FourWordAddress::from("david-charlie-bob-alice");
+        let dht = super::DhtClient::new().unwrap();
+        let secure = SecureMessaging::new(identity.clone(), dht).await.unwrap();
+
+        // Establish session with peer
+        let session_key = secure.establish_session(&peer).await.unwrap();
+
+        assert_eq!(session_key.peer, peer, "Session key should be associated with peer");
+        assert_eq!(session_key.key.len(), 32, "Session key should be 32 bytes");
+        assert!(
+            session_key.expires_at > chrono::Utc::now(),
+            "Session key should not be expired"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_device() {
+        let identity = FourWordAddress::from("alice-bob-charlie-david");
+        let dht = super::DhtClient::new().unwrap();
+        let secure = SecureMessaging::new(identity.clone(), dht).await.unwrap();
+
+        let device_id = DeviceId::new();
+
+        // Register device
+        let device_key = secure.register_device(device_id.clone()).await.unwrap();
+
+        assert_eq!(device_key.device_id, device_id, "Device ID should match");
+        assert_eq!(device_key.public_key.len(), 32, "Public key should be 32 bytes");
+        assert_eq!(device_key.private_key.len(), 32, "Private key should be 32 bytes");
+    }
 }
