@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-01-29
+
+### Changed
+- **Bootstrap Consolidation**: AdaptiveDHT now bootstraps through P2PNode (ant-quic) cache/selection
+- **Bootstrap Context**: Refactored bootstrap/connect logic into reusable `BootstrapContext`
+- **Adaptive Coordinator**: Create P2PNode in AdaptiveCoordinator and attach to AdaptiveDHT
+- **Listen Port**: Introduced `NetworkConfig.listen_port` with coordinator/builder plumbing
+- **Test Ports**: Updated adaptive tests/simulations to use OS-assigned listen ports
+
+### Added
+- **P2PNode::bootstrap()**: Returns DHT NodeInfo for AdaptiveDHT join
+- **Geo/IP Retry Path**: Control-handler retry for Geo/IP/ASN/subnet rejections with backoff + exclusion
+- **GeoIP Rejection Messages**: Sent from active connection monitor
+- **Bootstrap Retry Config**: Added retry config/state and hook control handler startup
+
+### Fixed
+- **Documentation**: Updated module docs to clarify placeholder crypto implementation status
+- **Serialization Consistency**: All encryption paths now use bincode consistently
+
+### Removed
+- **DhtNetworkManager**: Removed stub implementation
+- **DhtStreamHandler**: Removed stub implementation
+- **temp_auth_fix.rs**: Removed temporary authentication workaround
+- **Coordinator Bootstrap Dialing**: Removed via TransportManager; shutdown P2PNode on exit
+
+### Documentation
+- Updated ADRs for AdaptiveDHT API, S/Kademlia witness protocol, Sybil/geo defenses
+- Updated ARCHITECTURE.md and API.md for saorsa-node integration
+
 ## [0.6.1] - 2024-11-26
 
 ### Added
