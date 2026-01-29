@@ -6,14 +6,14 @@
     "status": "planning"
   },
   "current": {
-    "milestone": "milestone-1-analysis-benchmarking",
+    "milestone": "milestone-1-analysis-baseline",
     "phase": "phase-1-baseline-measurement",
     "task": null
   },
   "milestones": [
     {
-      "id": "milestone-1-analysis-benchmarking",
-      "name": "Analysis & Benchmarking",
+      "id": "milestone-1-analysis-baseline",
+      "name": "Analysis & Baseline",
       "status": "pending",
       "phases": [
         {
@@ -37,13 +37,13 @@
       ]
     },
     {
-      "id": "milestone-2-core-implementation",
-      "name": "Core Implementation",
+      "id": "milestone-2-implementation",
+      "name": "Implementation",
       "status": "pending",
       "phases": [
         {
-          "id": "phase-4-protocol-version-framework",
-          "name": "Protocol Version Framework",
+          "id": "phase-4-remove-redundant-encryption",
+          "name": "Remove Redundant Encryption",
           "status": "pending",
           "tasks": []
         },
@@ -54,16 +54,16 @@
           "tasks": []
         },
         {
-          "id": "phase-6-backward-compatibility",
-          "name": "Backward Compatibility Layer",
+          "id": "phase-6-integration-cleanup",
+          "name": "Integration & Cleanup",
           "status": "pending",
           "tasks": []
         }
       ]
     },
     {
-      "id": "milestone-3-testing-validation",
-      "name": "Testing & Validation",
+      "id": "milestone-3-validation",
+      "name": "Validation",
       "status": "pending",
       "phases": [
         {
@@ -87,24 +87,18 @@
       ]
     },
     {
-      "id": "milestone-4-documentation-migration",
-      "name": "Documentation & Migration",
+      "id": "milestone-4-documentation",
+      "name": "Documentation",
       "status": "pending",
       "phases": [
         {
-          "id": "phase-10-documentation",
-          "name": "Documentation",
+          "id": "phase-10-code-documentation",
+          "name": "Code Documentation",
           "status": "pending",
           "tasks": []
         },
         {
-          "id": "phase-11-migration-tooling",
-          "name": "Migration Tooling",
-          "status": "pending",
-          "tasks": []
-        },
-        {
-          "id": "phase-12-release-preparation",
+          "id": "phase-11-release-preparation",
           "name": "Release Preparation",
           "status": "pending",
           "tasks": []
@@ -118,8 +112,13 @@
   },
   "metadata": {
     "repository": "saorsa-labs/saorsa-core",
-    "branch": "main",
+    "branch": "feature/encoding-optimization",
     "created_by": "Claude Sonnet 4.5",
-    "last_updated": "2026-01-29T11:15:00Z"
+    "last_updated": "2026-01-29T11:30:00Z",
+    "constraints": {
+      "no_backward_compatibility": true,
+      "use_ant_quic_pqc": true,
+      "breaking_change_acceptable": true
+    }
   }
 }
