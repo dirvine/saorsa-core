@@ -84,6 +84,12 @@ impl DeviceId {
     }
 }
 
+impl Default for DeviceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Rich message with all modern messaging features
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RichMessage {
