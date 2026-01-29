@@ -2381,6 +2381,37 @@ impl P2PNode {
         }
     }
 
+    /// Find peers closest to a DHT key
+    ///
+    /// Uses Kademlia XOR-distance to find the `count` closest nodes
+    /// to the given key in the routing table.
+    ///
+    /// # Arguments
+    /// * `key` - The DHT key to find peers near
+    /// * `count` - Maximum number of peers to return
+    ///
+    /// # Returns
+    /// A vector of `NodeInfo` sorted by XOR distance to the key
+    pub async fn find_closest_peers(
+        &self,
+        key: crate::dht::Key,
+        count: usize,
+    ) -> Result<Vec<crate::dht::NodeInfo>> {
+        if let Some(ref dht) = self.dht {
+            let dht_instance = dht.read().await;
+            let dht_key = crate::dht::DhtKey::from_bytes(key);
+            dht_instance.find_nodes(&dht_key, count).await.map_err(|e| {
+                P2PError::Dht(crate::error::DhtError::RoutingError(
+                    format!("Failed to find closest peers: {e}").into(),
+                ))
+            })
+        } else {
+            Err(P2PError::Dht(crate::error::DhtError::RoutingError(
+                "DHT not enabled".to_string().into(),
+            )))
+        }
+    }
+
     /// Add a discovered peer to the bootstrap cache
     pub async fn add_discovered_peer(&self, peer_id: PeerId, addresses: Vec<String>) -> Result<()> {
         if let Some(ref bootstrap_manager) = self.bootstrap_manager {
