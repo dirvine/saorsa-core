@@ -212,6 +212,9 @@ pub mod placement;
 /// Auto-upgrade system for cross-platform binary updates
 pub mod upgrade;
 
+/// Unified message listener system
+pub mod listener;
+
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
 pub use address_book::{
@@ -418,4 +421,24 @@ pub use upgrade::{
     RollbackManager, SignatureVerifier, StagedUpdate, StagedUpdateManager, UpdateConfig,
     UpdateConfigBuilder, UpdateInfo, UpdateManager, UpdateManifest, UpdatePolicy, UpgradeError,
     UpgradeEvent, create_applier,
+};
+
+// Unified listener system exports
+pub use listener::{
+    ClosureProtocol,
+    IncomingMessage,
+    ListenerBuilder,
+    MessageInjector,
+    MessageSource,
+    Protocol,
+    ProtocolBuilder,
+    RawMessage,
+    UnifiedListener,
+    // Global listener functions
+    global_injector,
+    global_listener,
+    register_dht,
+    register_gossip,
+    register_p2p,
+    subscribe_all,
 };

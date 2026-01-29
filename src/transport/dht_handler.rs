@@ -27,12 +27,24 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, error, trace, warn};
 
 use crate::dht::core_engine::DhtCoreEngine;
 use crate::dht::network_integration::{DhtMessage, DhtResponse, ErrorCode};
 use crate::dht::witness::{OperationId, WitnessReceipt};
+
+/// Event emitted when a DHT stream message is received.
+/// This can be used by the unified listener to observe DHT traffic.
+#[derive(Debug, Clone)]
+pub struct DhtStreamEvent {
+    /// The peer that sent the message.
+    pub peer_id: PeerId,
+    /// The stream type (Query, Store, Witness, Replication).
+    pub stream_type: StreamType,
+    /// The raw message data.
+    pub data: Bytes,
+}
 
 /// DHT stream types handled by this handler.
 const DHT_STREAM_TYPES: &[StreamType] = &[
@@ -42,6 +54,9 @@ const DHT_STREAM_TYPES: &[StreamType] = &[
     StreamType::DhtReplication,
 ];
 
+/// Default broadcast channel capacity for DHT events
+const DEFAULT_DHT_EVENT_CAPACITY: usize = 10_000;
+
 /// DHT protocol handler for SharedTransport.
 ///
 /// Routes incoming DHT streams to the appropriate handlers based on stream type:
@@ -49,32 +64,98 @@ const DHT_STREAM_TYPES: &[StreamType] = &[
 /// - DhtStore: Handles PUT, STORE requests with data payloads
 /// - DhtWitness: Handles witness requests for Byzantine fault tolerance
 /// - DhtReplication: Handles background replication and repair traffic
+///
+/// All handlers automatically broadcast events to the global unified listener.
 pub struct DhtStreamHandler {
     /// Reference to the DHT engine for processing requests.
     dht_engine: Arc<RwLock<DhtCoreEngine>>,
     /// Handler name for logging.
     name: String,
+    /// Broadcast channel for observing incoming messages.
+    /// Used by the unified listener to aggregate DHT traffic.
+    event_tx: broadcast::Sender<DhtStreamEvent>,
 }
 
 impl DhtStreamHandler {
-    /// Create a new DHT stream handler.
+    /// Create a new DHT stream handler and register with the global listener.
     ///
     /// # Arguments
     ///
     /// * `dht_engine` - The DHT engine to process requests
     pub fn new(dht_engine: Arc<RwLock<DhtCoreEngine>>) -> Self {
-        Self {
-            dht_engine,
-            name: "DhtStreamHandler".to_string(),
-        }
+        Self::with_capacity(dht_engine, DEFAULT_DHT_EVENT_CAPACITY)
     }
 
     /// Create a new DHT stream handler with a custom name.
     pub fn with_name(dht_engine: Arc<RwLock<DhtCoreEngine>>, name: impl Into<String>) -> Self {
-        Self {
+        let (event_tx, _) = broadcast::channel(DEFAULT_DHT_EVENT_CAPACITY);
+        let handler = Self {
             dht_engine,
             name: name.into(),
-        }
+            event_tx,
+        };
+        // Auto-register with global listener
+        handler.register_global();
+        handler
+    }
+
+    /// Create a new DHT stream handler with specified event channel capacity.
+    pub fn with_capacity(dht_engine: Arc<RwLock<DhtCoreEngine>>, capacity: usize) -> Self {
+        let (event_tx, _) = broadcast::channel(capacity);
+        let handler = Self {
+            dht_engine,
+            name: "DhtStreamHandler".to_string(),
+            event_tx,
+        };
+        // Auto-register with global listener
+        handler.register_global();
+        handler
+    }
+
+    /// Create a new DHT stream handler with event broadcasting enabled.
+    ///
+    /// Events will be broadcast to all subscribers, allowing external
+    /// systems (like the unified listener) to observe DHT traffic.
+    ///
+    /// Deprecated: Use `new()` instead - all handlers now broadcast events.
+    #[deprecated(since = "0.11.0", note = "Use new() instead - all handlers now broadcast events")]
+    pub fn with_event_broadcast(
+        dht_engine: Arc<RwLock<DhtCoreEngine>>,
+        capacity: usize,
+    ) -> (Self, broadcast::Receiver<DhtStreamEvent>) {
+        let handler = Self::with_capacity(dht_engine, capacity);
+        let rx = handler.subscribe();
+        (handler, rx)
+    }
+
+    /// Register this handler with the global unified listener.
+    fn register_global(&self) {
+        let rx = self.subscribe();
+        crate::listener::global_listener().connect_dht_receiver(rx);
+    }
+
+    /// Subscribe to DHT stream events.
+    pub fn subscribe(&self) -> broadcast::Receiver<DhtStreamEvent> {
+        self.event_tx.subscribe()
+    }
+
+    /// Get the event sender for external use.
+    ///
+    /// This allows other components to subscribe without holding a reference
+    /// to the handler itself.
+    pub fn event_sender(&self) -> broadcast::Sender<DhtStreamEvent> {
+        self.event_tx.clone()
+    }
+
+    /// Publish an event to subscribers.
+    fn publish_event(&self, peer: PeerId, stream_type: StreamType, data: Bytes) {
+        let event = DhtStreamEvent {
+            peer_id: peer,
+            stream_type,
+            data,
+        };
+        // Ignore send errors (no subscribers)
+        let _ = self.event_tx.send(event);
     }
 
     /// Handle a DHT query request.
@@ -345,6 +426,9 @@ impl ProtocolHandler for DhtStreamHandler {
         stream_type: StreamType,
         data: Bytes,
     ) -> LinkResult<Option<Bytes>> {
+        // Publish event to subscribers before processing
+        self.publish_event(peer, stream_type, data.clone());
+
         match stream_type {
             StreamType::DhtQuery => self.handle_query(peer, data).await,
             StreamType::DhtStore => self.handle_store(peer, data).await,
@@ -372,6 +456,10 @@ impl ProtocolHandler for DhtStreamHandler {
             size = data.len(),
             "DHT datagram received (ignored)"
         );
+
+        // Still publish event to subscribers even though we don't process datagrams
+        self.publish_event(peer, stream_type, data);
+
         Ok(())
     }
 

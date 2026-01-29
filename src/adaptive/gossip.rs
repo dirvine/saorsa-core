@@ -90,6 +90,19 @@ pub struct GossipStats {
     pub messages_by_topic: HashMap<Topic, u64>,
 }
 
+/// Event emitted when a gossip message is received or published.
+/// This can be used by the unified listener to observe gossip traffic.
+#[derive(Debug, Clone)]
+pub struct GossipEvent {
+    /// The gossip message.
+    pub message: GossipMessage,
+    /// Whether this message was received (true) or published locally (false).
+    pub received: bool,
+}
+
+/// Broadcast sender type for gossip events
+pub type GossipEventSender = tokio::sync::broadcast::Sender<GossipEvent>;
+
 /// Adaptive GossipSub implementation
 pub struct AdaptiveGossipSub {
     /// Local node ID
@@ -136,6 +149,9 @@ pub struct AdaptiveGossipSub {
 
     /// Statistics
     stats: Arc<RwLock<GossipStats>>,
+
+    /// Event broadcast channel for external observers (unified listener)
+    event_tx: tokio::sync::broadcast::Sender<GossipEvent>,
 }
 
 /// Gossip message
@@ -368,10 +384,17 @@ impl ChurnDetector {
 }
 
 impl AdaptiveGossipSub {
-    /// Create a new adaptive gossipsub instance
+    /// Create a new adaptive gossipsub instance.
+    ///
+    /// The instance automatically registers with the global unified listener,
+    /// so all gossip messages will be available via `subscribe_all()`.
     pub fn new(local_id: NodeId, trust_provider: Arc<dyn TrustProvider>) -> Self {
         let (control_tx, _control_rx) = mpsc::channel(1000);
         let (_message_tx, message_rx) = mpsc::channel(1000);
+        let (event_tx, event_rx) = tokio::sync::broadcast::channel(10_000);
+
+        // Auto-register with global listener
+        crate::listener::global_listener().connect_gossip_receiver(event_rx);
 
         Self {
             _local_id: local_id,
@@ -389,7 +412,30 @@ impl AdaptiveGossipSub {
             control_tx: Arc::new(RwLock::new(Some(control_tx))),
             churn_detector: Arc::new(RwLock::new(ChurnDetector::new())),
             stats: Arc::new(RwLock::new(GossipStats::default())),
+            event_tx,
         }
+    }
+
+    /// Subscribe to gossip events for external observation.
+    ///
+    /// This is used by the unified listener to observe all gossip traffic.
+    pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<GossipEvent> {
+        self.event_tx.subscribe()
+    }
+
+    /// Get the event sender for external use.
+    ///
+    /// This allows other components to subscribe without holding a reference
+    /// to the gossip instance itself.
+    pub fn event_sender(&self) -> GossipEventSender {
+        self.event_tx.clone()
+    }
+
+    /// Publish an event to subscribers.
+    fn publish_event(&self, message: GossipMessage, received: bool) {
+        let event = GossipEvent { message, received };
+        // Ignore send errors (no subscribers)
+        let _ = self.event_tx.send(event);
     }
 
     /// Subscribe to a topic
@@ -432,6 +478,9 @@ impl AdaptiveGossipSub {
             let mut cache = self.message_cache.write().await;
             cache.insert(msg_id, message.clone());
         }
+
+        // Publish event for local message (received=false)
+        self.publish_event(message.clone(), false);
 
         // Send to mesh peers
         let mesh = self.mesh.read().await;
@@ -673,6 +722,51 @@ impl AdaptiveGossipSub {
     fn get_fanout_peers(&self, _topic: &str) -> Option<HashSet<NodeId>> {
         // In real implementation, select high-scoring peers
         None
+    }
+
+    /// Handle an incoming gossip message from a peer.
+    ///
+    /// This method processes incoming messages, checks if they've been seen,
+    /// validates them, caches them, and publishes an event for observers.
+    pub async fn handle_incoming_message(&self, message: GossipMessage) -> Result<bool> {
+        let msg_id = self.compute_message_id(&message);
+
+        // Check if we've already seen this message
+        {
+            let seen = self.seen_messages.read().await;
+            if seen.contains_key(&msg_id) {
+                return Ok(false); // Already processed
+            }
+        }
+
+        // Validate the message
+        if !self.validate_message(&message).await? {
+            return Ok(false);
+        }
+
+        // Mark as seen and cache
+        {
+            let mut seen = self.seen_messages.write().await;
+            seen.insert(msg_id, Instant::now());
+
+            let mut cache = self.message_cache.write().await;
+            cache.insert(msg_id, message.clone());
+        }
+
+        // Publish event for received message
+        self.publish_event(message.clone(), true);
+
+        // Update statistics
+        {
+            let mut stats = self.stats.write().await;
+            stats.messages_received += 1;
+            *stats
+                .messages_by_topic
+                .entry(message.topic.clone())
+                .or_insert(0) += 1;
+        }
+
+        Ok(true)
     }
 
     /// Handle incoming control message

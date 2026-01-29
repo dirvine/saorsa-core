@@ -2775,6 +2775,18 @@ impl NodeBuilder {
     pub async fn build(self) -> Result<P2PNode> {
         P2PNode::new(self.config).await
     }
+
+    /// Build the P2P node and register it with the global unified listener.
+    ///
+    /// This returns an `Arc<P2PNode>` that is automatically connected to the
+    /// global listener, so all messages will be available via `subscribe_all()`.
+    pub async fn build_registered(self) -> Result<Arc<P2PNode>> {
+        let node = Arc::new(P2PNode::new(self.config).await?);
+        crate::listener::register_p2p(node.clone())
+            .await
+            .map_err(|e| P2PError::Internal(e.to_string().into()))?;
+        Ok(node)
+    }
 }
 
 #[cfg(test)]

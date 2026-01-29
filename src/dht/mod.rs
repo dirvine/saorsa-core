@@ -5,6 +5,9 @@
 //! - Core DHT engine with replication and fault tolerance
 //! - Geographic routing and content addressing
 //! - Capacity signaling and telemetry
+//!
+//! Note: This is a pure routing layer. Storage operations are handled by the
+//! application layer (saorsa-node) via protocol messages.
 
 pub mod capacity_signaling;
 pub mod core_engine;
