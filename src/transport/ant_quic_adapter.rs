@@ -75,7 +75,7 @@ use ant_quic::{LinkConn, LinkEvent, LinkTransport, P2pConfig, P2pLinkTransport, 
 
 // Import saorsa-transport types for SharedTransport integration
 use ant_quic::SharedTransport;
-use ant_quic::link_transport::StreamType;
+use ant_quic::link_transport::{StreamFilter, StreamType};
 
 /// Protocol identifier for saorsa DHT overlay
 ///
@@ -393,11 +393,9 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
             .map_err(|e| anyhow::anyhow!("Dial failed: {}", e))?;
 
         let mut stream = conn
-            .open_uni()
+            .open_uni_typed(StreamType::DhtStore)
             .await
             .map_err(|e| anyhow::anyhow!("Stream open failed: {}", e))?;
-
-        // Use LinkSendStream trait methods directly
         stream
             .write_all(data)
             .await
@@ -433,13 +431,15 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
             let conn = conn_result.map_err(|e| anyhow::anyhow!("Accept failed: {}", e))?;
             let peer_id = conn.peer();
 
-            // Accept a stream and read data
-            let (_, mut recv_stream) = conn
-                .open_bi()
+            // Accept the incoming unidirectional stream
+            let mut uni_incoming = conn.accept_uni_typed(StreamFilter::new());
+            let (_stream_type, mut recv_stream) = uni_incoming
+                .next()
                 .await
-                .map_err(|e| anyhow::anyhow!("Open bi failed: {}", e))?;
+                .ok_or_else(|| anyhow::anyhow!("No incoming stream"))?
+                .map_err(|e| anyhow::anyhow!("Accept uni failed: {}", e))?;
 
-            // Use LinkRecvStream::read_to_end with a size limit (16MB max)
+            // Read data with a size limit (16MB max)
             let data = recv_stream
                 .read_to_end(16 * 1024 * 1024)
                 .await
