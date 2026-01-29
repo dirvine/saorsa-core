@@ -96,8 +96,8 @@ impl SecureMessaging {
             .decrypt(nonce, encrypted.ciphertext.as_ref())
             .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
 
-        // Deserialize message
-        let message: RichMessage = serde_json::from_slice(&plaintext)?;
+        // Deserialize message with bincode
+        let message: RichMessage = crate::messaging::encoding::decode(&plaintext)?;
 
         Ok(message)
     }
