@@ -9,7 +9,7 @@
 
 #![allow(clippy::expect_used)]
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use saorsa_core::identity::FourWordAddress;
 use saorsa_core::messaging::types::{
     ChannelId, EncryptedMessage, MessageContent, MessageId, RichMessage,
@@ -108,11 +108,14 @@ fn bench_rich_message_encoding(c: &mut Criterion) {
             BenchmarkId::new("round_trip", size_kb),
             &size_kb,
             |b, &size_kb| {
+                // Pre-build fixture outside measurement loop to isolate encoding-only work
+                let message = create_rich_message(size_kb);
                 b.iter(|| {
-                    let message = create_rich_message(size_kb);
-                    let json = serde_json::to_vec(&message).expect("serialization should succeed");
-                    let deserialized: RichMessage =
-                        serde_json::from_slice(&json).expect("deserialization should succeed");
+                    // Only measure serialization + deserialization, not message creation
+                    let json = serde_json::to_vec(black_box(&message))
+                        .expect("serialization should succeed");
+                    let deserialized: RichMessage = serde_json::from_slice(black_box(&json))
+                        .expect("deserialization should succeed");
                     black_box(deserialized)
                 });
             },
@@ -124,13 +127,23 @@ fn bench_rich_message_encoding(c: &mut Criterion) {
             &size_kb,
             |b, &size_kb| {
                 let message = create_rich_message(size_kb);
+                // Pre-compute size metrics once (not in loop) to capture actual values
+                let json = serde_json::to_vec(&message).expect("serialization should succeed");
+                let input_size = size_kb * 1024;
+                let output_size = json.len();
+                let overhead_ratio = output_size as f64 / input_size as f64;
+
+                // Log actual metrics for reporting
+                eprintln!(
+                    "Layer 1 - RichMessage {} KB: serialized={} bytes, overhead ratio={:.2}x",
+                    size_kb, output_size, overhead_ratio
+                );
 
                 b.iter(|| {
-                    let json = serde_json::to_vec(&message).expect("serialization should succeed");
-                    let input_size = size_kb * 1024;
-                    let output_size = json.len();
-                    let overhead_ratio = output_size as f64 / input_size as f64;
-                    black_box(overhead_ratio)
+                    // Just measure serialization performance with pre-built fixture
+                    let json = serde_json::to_vec(black_box(&message))
+                        .expect("serialization should succeed");
+                    black_box(json.len() as f64 / input_size as f64)
                 });
             },
         );
@@ -151,7 +164,8 @@ fn bench_encrypted_message_encoding(c: &mut Criterion) {
             |b, &size_kb| {
                 // Simulate encrypting a RichMessage JSON
                 let rich_message = create_rich_message(size_kb);
-                let rich_json = serde_json::to_vec(&rich_message).expect("RichMessage serialization");
+                let rich_json =
+                    serde_json::to_vec(&rich_message).expect("RichMessage serialization");
                 let encrypted = create_encrypted_message(rich_json, size_kb);
 
                 b.iter(|| {
@@ -167,7 +181,8 @@ fn bench_encrypted_message_encoding(c: &mut Criterion) {
             &size_kb,
             |b, &size_kb| {
                 let rich_message = create_rich_message(size_kb);
-                let rich_json = serde_json::to_vec(&rich_message).expect("RichMessage serialization");
+                let rich_json =
+                    serde_json::to_vec(&rich_message).expect("RichMessage serialization");
                 let encrypted = create_encrypted_message(rich_json, size_kb);
                 let json = serde_json::to_vec(&encrypted).expect("serialization should succeed");
 
@@ -184,13 +199,18 @@ fn bench_encrypted_message_encoding(c: &mut Criterion) {
             BenchmarkId::new("round_trip", size_kb),
             &size_kb,
             |b, &size_kb| {
+                // Pre-build fixture outside measurement loop
+                let rich_message = create_rich_message(size_kb);
+                let rich_json =
+                    serde_json::to_vec(&rich_message).expect("RichMessage serialization");
+                let encrypted = create_encrypted_message(rich_json, size_kb);
+
                 b.iter(|| {
-                    let rich_message = create_rich_message(size_kb);
-                    let rich_json = serde_json::to_vec(&rich_message).expect("RichMessage serialization");
-                    let encrypted = create_encrypted_message(rich_json, size_kb);
-                    let json = serde_json::to_vec(&encrypted).expect("serialization should succeed");
-                    let deserialized: EncryptedMessage =
-                        serde_json::from_slice(&json).expect("deserialization should succeed");
+                    // Only measure serialization + deserialization of EncryptedMessage
+                    let json = serde_json::to_vec(black_box(&encrypted))
+                        .expect("serialization should succeed");
+                    let deserialized: EncryptedMessage = serde_json::from_slice(black_box(&json))
+                        .expect("deserialization should succeed");
                     black_box(deserialized)
                 });
             },
@@ -202,15 +222,28 @@ fn bench_encrypted_message_encoding(c: &mut Criterion) {
             &size_kb,
             |b, &size_kb| {
                 let rich_message = create_rich_message(size_kb);
-                let rich_json = serde_json::to_vec(&rich_message).expect("RichMessage serialization");
+                let rich_json =
+                    serde_json::to_vec(&rich_message).expect("RichMessage serialization");
                 let encrypted = create_encrypted_message(rich_json, size_kb);
 
+                // Pre-compute size metrics once
+                let json = serde_json::to_vec(&encrypted).expect("serialization should succeed");
+                let input_size = size_kb * 1024;
+                let output_size = json.len();
+                let overhead_ratio = output_size as f64 / input_size as f64;
+
+                // Log actual metrics
+                eprintln!(
+                    "Layer 2 - EncryptedMessage {} KB: serialized={} bytes, overhead ratio={:.2}x",
+                    size_kb, output_size, overhead_ratio
+                );
+
                 b.iter(|| {
-                    let json = serde_json::to_vec(&encrypted).expect("serialization should succeed");
+                    let json = serde_json::to_vec(black_box(&encrypted))
+                        .expect("serialization should succeed");
                     let input_size = size_kb * 1024;
                     let output_size = json.len();
-                    let overhead_ratio = output_size as f64 / input_size as f64;
-                    black_box(overhead_ratio)
+                    black_box(output_size as f64 / input_size as f64)
                 });
             },
         );
@@ -231,9 +264,11 @@ fn bench_protocol_wrapper_encoding(c: &mut Criterion) {
             |b, &size_kb| {
                 // Simulate wrapping an EncryptedMessage JSON
                 let rich_message = create_rich_message(size_kb);
-                let rich_json = serde_json::to_vec(&rich_message).expect("RichMessage serialization");
+                let rich_json =
+                    serde_json::to_vec(&rich_message).expect("RichMessage serialization");
                 let encrypted = create_encrypted_message(rich_json, size_kb);
-                let encrypted_json = serde_json::to_vec(&encrypted).expect("EncryptedMessage serialization");
+                let encrypted_json =
+                    serde_json::to_vec(&encrypted).expect("EncryptedMessage serialization");
                 let wrapper = create_protocol_wrapper(encrypted_json);
 
                 b.iter(|| {
@@ -249,9 +284,11 @@ fn bench_protocol_wrapper_encoding(c: &mut Criterion) {
             &size_kb,
             |b, &size_kb| {
                 let rich_message = create_rich_message(size_kb);
-                let rich_json = serde_json::to_vec(&rich_message).expect("RichMessage serialization");
+                let rich_json =
+                    serde_json::to_vec(&rich_message).expect("RichMessage serialization");
                 let encrypted = create_encrypted_message(rich_json, size_kb);
-                let encrypted_json = serde_json::to_vec(&encrypted).expect("EncryptedMessage serialization");
+                let encrypted_json =
+                    serde_json::to_vec(&encrypted).expect("EncryptedMessage serialization");
                 let wrapper = create_protocol_wrapper(encrypted_json);
                 let json = serde_json::to_vec(&wrapper).expect("serialization should succeed");
 
@@ -268,15 +305,21 @@ fn bench_protocol_wrapper_encoding(c: &mut Criterion) {
             BenchmarkId::new("round_trip", size_kb),
             &size_kb,
             |b, &size_kb| {
+                // Pre-build fixture outside measurement loop
+                let rich_message = create_rich_message(size_kb);
+                let rich_json =
+                    serde_json::to_vec(&rich_message).expect("RichMessage serialization");
+                let encrypted = create_encrypted_message(rich_json, size_kb);
+                let encrypted_json =
+                    serde_json::to_vec(&encrypted).expect("EncryptedMessage serialization");
+                let wrapper = create_protocol_wrapper(encrypted_json);
+
                 b.iter(|| {
-                    let rich_message = create_rich_message(size_kb);
-                    let rich_json = serde_json::to_vec(&rich_message).expect("RichMessage serialization");
-                    let encrypted = create_encrypted_message(rich_json, size_kb);
-                    let encrypted_json = serde_json::to_vec(&encrypted).expect("EncryptedMessage serialization");
-                    let wrapper = create_protocol_wrapper(encrypted_json);
-                    let json = serde_json::to_vec(&wrapper).expect("serialization should succeed");
-                    let deserialized: ProtocolWrapper =
-                        serde_json::from_slice(&json).expect("deserialization should succeed");
+                    // Only measure serialization + deserialization of ProtocolWrapper
+                    let json = serde_json::to_vec(black_box(&wrapper))
+                        .expect("serialization should succeed");
+                    let deserialized: ProtocolWrapper = serde_json::from_slice(black_box(&json))
+                        .expect("deserialization should succeed");
                     black_box(deserialized)
                 });
             },
@@ -288,17 +331,31 @@ fn bench_protocol_wrapper_encoding(c: &mut Criterion) {
             &size_kb,
             |b, &size_kb| {
                 let rich_message = create_rich_message(size_kb);
-                let rich_json = serde_json::to_vec(&rich_message).expect("RichMessage serialization");
+                let rich_json =
+                    serde_json::to_vec(&rich_message).expect("RichMessage serialization");
                 let encrypted = create_encrypted_message(rich_json, size_kb);
-                let encrypted_json = serde_json::to_vec(&encrypted).expect("EncryptedMessage serialization");
+                let encrypted_json =
+                    serde_json::to_vec(&encrypted).expect("EncryptedMessage serialization");
                 let wrapper = create_protocol_wrapper(encrypted_json);
 
+                // Pre-compute size metrics once
+                let json = serde_json::to_vec(&wrapper).expect("serialization should succeed");
+                let input_size = size_kb * 1024;
+                let output_size = json.len();
+                let overhead_ratio = output_size as f64 / input_size as f64;
+
+                // Log actual metrics
+                eprintln!(
+                    "Layer 3 - ProtocolWrapper {} KB: serialized={} bytes, overhead ratio={:.2}x",
+                    size_kb, output_size, overhead_ratio
+                );
+
                 b.iter(|| {
-                    let json = serde_json::to_vec(&wrapper).expect("serialization should succeed");
+                    let json = serde_json::to_vec(black_box(&wrapper))
+                        .expect("serialization should succeed");
                     let input_size = size_kb * 1024;
                     let output_size = json.len();
-                    let overhead_ratio = output_size as f64 / input_size as f64;
-                    black_box(overhead_ratio)
+                    black_box(output_size as f64 / input_size as f64)
                 });
             },
         );
@@ -379,9 +436,25 @@ fn bench_bincode_vs_json(c: &mut Criterion) {
             |b, &size_kb| {
                 let message = create_rich_message(size_kb);
 
+                // Pre-compute size metrics once
+                let json = serde_json::to_vec(&message).expect("JSON serialization");
+                let bincode = bincode::serialize(&message).expect("bincode serialization");
+                let ratio = bincode.len() as f64 / json.len() as f64;
+
+                // Log actual metrics
+                eprintln!(
+                    "Bincode vs JSON - {} KB: JSON={} bytes, Bincode={} bytes, ratio={:.2}x",
+                    size_kb,
+                    json.len(),
+                    bincode.len(),
+                    ratio
+                );
+
                 b.iter(|| {
-                    let json = serde_json::to_vec(&message).expect("JSON serialization");
-                    let bincode = bincode::serialize(&message).expect("bincode serialization");
+                    // Measure serialization throughput on pre-built message
+                    let json = serde_json::to_vec(black_box(&message)).expect("JSON serialization");
+                    let bincode =
+                        bincode::serialize(black_box(&message)).expect("bincode serialization");
 
                     // Return size ratio: bincode / json (expect < 1.0, meaning bincode is smaller)
                     let ratio = bincode.len() as f64 / json.len() as f64;

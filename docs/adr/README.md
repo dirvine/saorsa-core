@@ -45,6 +45,12 @@ An Architecture Decision Record (ADR) is a document that captures an important a
 | [ADR-008](./ADR-008-bootstrap-delegation.md) | Bootstrap Cache Delegation | Accepted | Delegating bootstrap to ant-quic with Sybil protection |
 | [ADR-011](./ADR-011-geographic-placement.md) | Geographic-Aware Placement | Accepted | Region-aware storage for regulatory compliance |
 
+### Messaging
+
+| ADR | Title | Status | Summary |
+|-----|-------|--------|---------|
+| [ADR-013](./ADR-013-no-offline-delivery-v1.md) | No Offline Message Delivery (v1) | Accepted | 1-hour TTL limit without extended offline delivery (future reconsideration) |
+
 ## ADR Template
 
 When creating new ADRs, use this template:

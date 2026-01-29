@@ -66,7 +66,9 @@ use serde::{Deserialize, Serialize};
 /// # }
 /// ```
 pub fn encode<T: Serialize>(data: &T) -> Result<Vec<u8>> {
-    bincode::serialize(data).context("Failed to encode data with bincode")
+    bincode::config::standard()
+        .serialize(data)
+        .context("Failed to encode data with bincode")
 }
 
 /// Deserialize data from bincode binary encoding
@@ -92,6 +94,13 @@ pub fn encode<T: Serialize>(data: &T) -> Result<Vec<u8>> {
 /// Returns an error if:
 /// - The binary data is corrupt or invalid
 /// - The data doesn't match the expected type structure
+/// - The data exceeds the maximum message size (10MB)
+///
+/// # Security
+///
+/// This function enforces a 10MB size limit to prevent DoS attacks through
+/// unbounded memory allocation. Malicious peers cannot send arbitrarily large
+/// messages to exhaust memory.
 ///
 /// # Example
 ///
@@ -107,7 +116,20 @@ pub fn encode<T: Serialize>(data: &T) -> Result<Vec<u8>> {
 /// # }
 /// ```
 pub fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
-    bincode::deserialize::<T>(bytes).context("Failed to decode data with bincode")
+    const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB
+
+    if bytes.len() > MAX_MESSAGE_SIZE {
+        return Err(anyhow::anyhow!(
+            "Message size {} bytes exceeds maximum allowed size of {} bytes",
+            bytes.len(),
+            MAX_MESSAGE_SIZE
+        ));
+    }
+
+    bincode::config::standard()
+        .with_limit(MAX_MESSAGE_SIZE)
+        .deserialize::<T>(bytes)
+        .with_context(|| format!("Failed to decode message ({} bytes)", bytes.len()))
 }
 
 #[cfg(test)]
@@ -217,6 +239,52 @@ mod tests {
         assert_eq!(
             large_message, decoded,
             "large message roundtrip should work"
+        );
+    }
+
+    #[test]
+    fn test_decode_empty_bytes() {
+        let result = decode::<TestMessage>(&[]);
+        assert!(result.is_err(), "decoding empty bytes should return error");
+    }
+
+    #[test]
+    fn test_decode_truncated_message() {
+        let original = TestMessage {
+            id: 12345,
+            content: "Test".to_string(),
+            tags: vec!["tag".to_string()],
+        };
+
+        let bytes = encode(&original).expect("encoding should succeed");
+
+        // Truncate the message
+        if bytes.len() > 5 {
+            let truncated = &bytes[..(bytes.len() - 5)];
+            let result = decode::<TestMessage>(truncated);
+            assert!(
+                result.is_err(),
+                "decoding truncated message should return error"
+            );
+        }
+    }
+
+    #[test]
+    fn test_maximum_message_size_enforced() {
+        // Create a message larger than 10MB
+        const MAX_SIZE: usize = 10 * 1024 * 1024;
+        let oversized = vec![0u8; MAX_SIZE + 1];
+
+        let result: Result<TestMessage> = decode(&oversized);
+        assert!(
+            result.is_err(),
+            "decoding message larger than 10MB should return error"
+        );
+
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds maximum allowed size"),
+            "error message should mention size limit"
         );
     }
 }

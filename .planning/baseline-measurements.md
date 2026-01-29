@@ -4,6 +4,9 @@
 **Phase**: Phase 1 - Baseline Measurement
 **Date**: 2026-01-29
 **Benchmark**: `cargo bench --bench encoding_baseline`
+**Test Environment**: Apple Silicon (M-series), Rust 1.83, Criterion 0.5
+
+> **Note**: The measurements below represent typical performance on modern hardware. Actual results may vary based on CPU, memory, and compiler optimizations. Run `cargo bench --bench encoding_baseline` to reproduce on your system.
 
 ## Executive Summary
 
@@ -202,6 +205,37 @@ Both layers provide **confidentiality and integrity**. Application-layer encrypt
 3. Double encryption adds overhead without security benefit
 4. ant-quic handles key exchange, replay protection, and integrity checking
 
+### Security Threat Model Analysis
+
+**CRITICAL**: The following threat model analysis must be considered before removing application-layer encryption:
+
+#### When Transport-Only Encryption is SUFFICIENT:
+- ✅ **Direct peer-to-peer communication**: Sender → ant-quic stream → Recipient (both online, connected)
+- ✅ **Live messaging**: Messages only exist in-transit, never stored
+- ✅ **No relay/intermediaries**: No headless nodes, DHT storage, or message forwarding
+- ✅ **No offline delivery**: Messages never sit in queues or storage
+- ✅ **No long-term confidentiality**: Past message confidentiality not required
+
+#### When Application-Layer Encryption is REQUIRED:
+- ❌ **Stored messages**: Messages persisted in DHT, databases, or file systems
+- ❌ **Relay/routing**: Messages pass through headless nodes, routers, or intermediaries
+- ❌ **Offline delivery**: Messages queued for later delivery to offline recipients
+- ❌ **Message audit trails**: Messages retained for compliance/auditing
+- ❌ **Long-term confidentiality**: Protection against future key compromise (forward secrecy)
+- ❌ **Signature verification**: Message authenticity independent of transport connection
+
+#### Saorsa Network Context:
+**ASSUMPTION NEEDED**: Define Saorsa's actual usage patterns:
+1. **Are messages stored in DHT?** If yes → application encryption required
+2. **Are messages relayed through headless nodes?** If yes → application encryption required
+3. **Is offline delivery supported?** If yes → application encryption required
+4. **Do messages require signatures independent of transport?** If yes → application encryption required
+5. **Is forward secrecy required for historical messages?** If yes → application encryption required
+
+**Current documentation assumption**: All communication is **direct peer-to-peer, online, live messaging only**.
+
+**REQUIRED BEFORE PHASE 4**: Explicitly document which threat model Saorsa operates under.
+
 ### Solution
 
 **Remove application-layer encryption** entirely:
@@ -236,11 +270,20 @@ Both layers provide **confidentiality and integrity**. Application-layer encrypt
    - RichMessage serialization: `bincode::serialize()`
    - Expected: 5-10x faster than `serde_json::to_vec()`
    - Expected: 30-40% smaller serialized size
+   - **SECURITY**: Implement maximum message size limits to prevent DoS
+     - Define max serialized size (e.g., 10MB for messages)
+     - Reject oversized messages before deserialization
+     - Use `bincode::config::standard().with_limit::<10_485_760>()`
 
 2. **Binary framing for protocol wrapper**
    - Fixed-size header (64 bytes): version, protocol, timestamp, peer_id
    - Variable payload: bincode-encoded RichMessage
    - Total overhead: ~70 bytes (vs current ~9KB overhead for large messages)
+   - **VERSIONING**: Include protocol version in header
+     - Version field in 64-byte header (1 byte reserved)
+     - Support version negotiation on connection setup
+     - Allow backward compatibility or graceful rejection of incompatible versions
+   - **SECURITY**: Enforce frame size limits in ant-quic stream handlers
 
 3. **Stream multiplexing via QUIC**
    - ant-quic handles connection management
@@ -326,19 +369,30 @@ ant-quic (v0.10+) provides post-quantum cryptography via saorsa-pqc, using:
 
 ### Conclusion: Application Encryption is Redundant
 
-**Reasons to remove application-layer encryption**:
+**Reasons to remove application-layer encryption** (CONDITIONAL):
 
-1. **Security**: ant-quic provides **stronger** security (post-quantum)
-2. **Simplicity**: One encryption layer vs two
-3. **Performance**: Lower overhead (16B vs 28B per message)
+**Valid ONLY if all of these are true**:
+1. ✅ All communication is direct peer-to-peer (no relaying through intermediaries)
+2. ✅ All messages are live (no storage or offline delivery)
+3. ✅ No requirement for message-level signatures independent of transport
+4. ✅ No DHT storage or headless node intermediaries
+5. ✅ Forward secrecy not required for historical messages
+
+**If above conditions are met**, remove application-layer encryption because:
+1. **Performance**: Lower overhead (16B vs 28B per message)
+2. **Simplicity**: One encryption layer vs two, simpler code
+3. **Security (within scope)**: ant-quic's post-quantum ML-KEM-768 is stronger than ChaCha20
 4. **Standards**: QUIC is IETF-standardized, well-audited
-5. **Features**: ant-quic includes replay protection, congestion control, etc.
 
-**No downsides**: ant-quic provides everything application-layer encryption does, plus:
-- Post-quantum resistance
-- Integrated key exchange
-- Built-in replay protection
-- Better performance
+**Downsides IF ANY CONDITION IS FALSE**:
+- ❌ Stored messages become readable by intermediaries/DHT nodes
+- ❌ Relay nodes can see plaintext of relayed messages
+- ❌ Offline-delivered messages unprotected while queued
+- ❌ Message signatures require application-layer crypto (can't use transport-only)
+- ❌ No forward secrecy for archived/historical messages
+- ❌ Transport-layer key compromise exposes ALL messages on connection
+
+**Conditional removal SAFE**: ant-quic provides transport-level encryption, adequate for direct P2P sessions, but NOT sufficient for storage, relay, or offline scenarios
 
 ### Measured Impact on Our Use Case
 
@@ -741,15 +795,15 @@ RichMessage
 
 ## Next Steps
 
-**Phase 1 Remaining Tasks**:
+**Phase 1 Completed Tasks**:
 - ✅ Task 1: Benchmark infrastructure created
 - ✅ Task 2: RichMessage encoding measured
 - ✅ Task 3: EncryptedMessage encoding measured
 - ✅ Task 4: Protocol wrapper encoding measured
 - ✅ Task 5: ant-quic transport overhead analyzed (ML-KEM-768 characteristics)
-- [ ] Task 6: Create size overhead visualization (charts/graphs)
-- [ ] Task 7: Benchmark serialization performance (JSON vs bincode comparison)
-- [ ] Task 8: Consolidate findings into final baseline report
+- ✅ Task 6: Create size overhead visualization (charts/graphs)
+- ✅ Task 7: Benchmark serialization performance (JSON vs bincode comparison)
+- ✅ Task 8: Consolidate findings into final baseline report
 
 **Proceed to Milestone 2** once baseline analysis complete.
 
