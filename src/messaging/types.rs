@@ -77,6 +77,19 @@ impl std::fmt::Display for ChannelId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DeviceId(pub String);
 
+impl DeviceId {
+    /// Generate a new device ID
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+}
+
+impl Default for DeviceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Rich message with all modern messaging features
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RichMessage {
@@ -193,7 +206,7 @@ impl RichMessage {
 }
 
 /// Message content types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MessageContent {
     /// Plain text message
     Text(String),
@@ -227,7 +240,7 @@ pub enum MessageContent {
 }
 
 /// Markdown formatted content
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MarkdownContent {
     pub raw: String,
     pub formatted: String,
@@ -236,7 +249,7 @@ pub struct MarkdownContent {
 }
 
 /// Code block with syntax highlighting
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CodeBlock {
     pub language: String,
     pub code: String,
@@ -245,7 +258,7 @@ pub struct CodeBlock {
 }
 
 /// Voice message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VoiceMessage {
     pub duration_seconds: u32,
     pub waveform: Vec<u8>,
@@ -255,7 +268,7 @@ pub struct VoiceMessage {
 }
 
 /// Video message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VideoMessage {
     pub duration_seconds: u32,
     pub thumbnail: Vec<u8>,
@@ -266,7 +279,7 @@ pub struct VideoMessage {
 }
 
 /// Geographic location
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GeoLocation {
     pub latitude: f64,
     pub longitude: f64,
@@ -276,7 +289,7 @@ pub struct GeoLocation {
 }
 
 /// Poll message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PollMessage {
     pub question: String,
     pub options: Vec<PollOption>,
@@ -286,7 +299,7 @@ pub struct PollMessage {
 }
 
 /// Poll option
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PollOption {
     pub id: String,
     pub text: String,
@@ -294,7 +307,7 @@ pub struct PollOption {
 }
 
 /// System message types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SystemMessage {
     UserJoined(FourWordAddress),
     UserLeft(FourWordAddress),
@@ -307,7 +320,7 @@ pub enum SystemMessage {
 }
 
 /// Sticker message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Sticker {
     pub pack_id: String,
     pub sticker_id: String,
@@ -317,7 +330,7 @@ pub struct Sticker {
 }
 
 /// GIF message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GifMessage {
     pub url: String,
     pub thumbnail: Vec<u8>,
