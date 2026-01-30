@@ -199,10 +199,12 @@ impl P2PNetworkNode<P2pLinkTransport> {
     /// Spawn a background task that continuously receives messages from the
     /// QUIC endpoint and forwards them into the provided channel.
     ///
-    /// Uses `recv()` which is fully event-driven — no polling or timeout.
-    /// The task wakes instantly when data arrives on any connected peer's QUIC
-    /// stream. It exits when the shutdown signal is set, the channel is closed,
-    /// or the endpoint shuts down.
+    /// Uses ant-quic v0.20's channel-based `recv()` which is fully
+    /// event-driven — no polling or timeout parameter. Per-connection
+    /// reader tasks inside ant-quic feed a shared mpsc channel, so
+    /// `recv()` wakes instantly when data arrives on any peer's QUIC
+    /// stream. The task exits when the shutdown signal is set, the
+    /// channel is closed, or the endpoint shuts down.
     ///
     /// Returns the task handle for cleanup.
     pub fn spawn_recv_task(
@@ -212,24 +214,17 @@ impl P2PNetworkNode<P2pLinkTransport> {
     ) -> tokio::task::JoinHandle<()> {
         let transport = Arc::clone(&self.transport);
         tokio::spawn(async move {
-            while !shutdown.load(Ordering::Relaxed) {
-                match transport.endpoint().recv(Duration::from_secs(30)).await {
+            loop {
+                if shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
+                match transport.endpoint().recv().await {
                     Ok(msg) => {
                         if tx.send(msg).await.is_err() {
                             break; // channel closed
                         }
                     }
-                    Err(e) => {
-                        let err_str = format!("{e}");
-                        if err_str.contains("shutting down") {
-                            break;
-                        }
-                        // "No connected peers" or transient errors — brief
-                        // yield before retrying so we don't spin when idle
-                        // with no peers. Once peers connect, recv() blocks
-                        // on Notify-based accept_uni and wakes instantly.
-                        sleep(Duration::from_millis(100)).await;
-                    }
+                    Err(_) => break, // endpoint shutting down or channel closed
                 }
             }
         })
