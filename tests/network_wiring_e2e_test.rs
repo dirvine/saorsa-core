@@ -113,7 +113,9 @@ async fn test_two_node_message_exchange() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     // Subscribe to events on node2 BEFORE connecting
     let mut events2 = node2.subscribe_events();
@@ -217,7 +219,9 @@ async fn test_message_topic_preservation() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events2 = node2.subscribe_events();
 
@@ -282,7 +286,9 @@ async fn test_bidirectional_message_exchange() {
     let config2 = create_test_node_config();
 
     let node1 = Arc::new(P2PNode::new(config1).await.expect("Failed to create node1"));
+    node1.start().await.expect("Failed to start node1");
     let node2 = Arc::new(P2PNode::new(config2).await.expect("Failed to create node2"));
+    node2.start().await.expect("Failed to start node2");
 
     let mut events1 = node1.subscribe_events();
     let mut events2 = node2.subscribe_events();
@@ -369,7 +375,9 @@ async fn test_periodic_tasks_updates_last_seen() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     // Connect
     let addrs2 = node2.listen_addrs().await;
@@ -423,7 +431,9 @@ async fn test_stale_peer_removal() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events1 = node1.subscribe_events();
 
@@ -485,7 +495,9 @@ async fn test_heartbeat_keeps_connection_alive() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let addrs2 = node2.listen_addrs().await;
     let addr2 = addrs2.first().expect("Need address").to_string();
@@ -535,6 +547,7 @@ async fn test_dht_network_manager_integration() {
 
     let config = create_test_node_config();
     let _node = P2PNode::new(config).await.expect("Failed to create node");
+    _node.start().await.expect("Failed to start node");
 
     // Check if DHT network manager is accessible
     // This would require adding a method to P2PNode like:
@@ -575,12 +588,15 @@ async fn test_three_node_dht_routing() {
     let node_a = P2PNode::new(config_a)
         .await
         .expect("Failed to create node A");
+    node_a.start().await.expect("Failed to start node A");
     let node_b = P2PNode::new(config_b)
         .await
         .expect("Failed to create node B");
+    node_b.start().await.expect("Failed to start node B");
     let node_c = P2PNode::new(config_c)
         .await
         .expect("Failed to create node C");
+    node_c.start().await.expect("Failed to start node C");
 
     // Get addresses
     let addrs_a = node_a.listen_addrs().await;
@@ -655,7 +671,9 @@ async fn test_dht_message_routing() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events2 = node2.subscribe_events();
 
@@ -699,6 +717,7 @@ async fn test_dht_message_routing() {
 async fn test_node_creation_sanity() {
     let config = create_test_node_config();
     let node = P2PNode::new(config).await.expect("Failed to create node");
+    node.start().await.expect("Failed to start node");
 
     let addrs = node.listen_addrs().await;
     assert!(
@@ -716,7 +735,9 @@ async fn test_event_subscription_sanity() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events1 = node1.subscribe_events();
 
@@ -760,7 +781,9 @@ async fn test_simple_ping_pong() {
     let config2 = create_test_node_config();
 
     let node1 = Arc::new(P2PNode::new(config1).await.expect("Failed to create node1"));
+    node1.start().await.expect("Failed to start node1");
     let node2 = Arc::new(P2PNode::new(config2).await.expect("Failed to create node2"));
+    node2.start().await.expect("Failed to start node2");
 
     let mut events1 = node1.subscribe_events();
     let mut events2 = node2.subscribe_events();
@@ -841,7 +864,9 @@ async fn test_multiple_sequential_messages() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events2 = node2.subscribe_events();
 
@@ -923,7 +948,9 @@ async fn test_connection_stays_alive() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events2 = node2.subscribe_events();
 
@@ -981,7 +1008,9 @@ async fn test_reconnection_works() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let addrs2 = node2.listen_addrs().await;
     let addr2 = addrs2.first().expect("Need address").to_string();
@@ -1044,7 +1073,9 @@ async fn test_peer_events_sequence() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events1 = node1.subscribe_events();
 
@@ -1103,7 +1134,9 @@ async fn test_large_message_transfer() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events2 = node2.subscribe_events();
 
@@ -1168,7 +1201,9 @@ async fn test_multiple_protocols() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events2 = node2.subscribe_events();
 
@@ -1247,7 +1282,9 @@ async fn test_no_duplicate_disconnect_events() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events1 = node1.subscribe_events();
 
@@ -1315,7 +1352,9 @@ async fn test_peer_cleanup_timing() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let addrs2 = node2.listen_addrs().await;
     let addr2 = addrs2.first().expect("Need address").to_string();
@@ -1384,7 +1423,9 @@ async fn test_empty_message_handling() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events2 = node2.subscribe_events();
 
@@ -1465,7 +1506,9 @@ async fn test_rapid_reconnection_stress() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let addrs2 = node2.listen_addrs().await;
     let addr2 = addrs2.first().expect("Need address").to_string();
@@ -1515,7 +1558,9 @@ async fn test_concurrent_message_flood() {
     let config2 = create_test_node_config();
 
     let node1 = Arc::new(P2PNode::new(config1).await.expect("Failed to create node1"));
+    node1.start().await.expect("Failed to start node1");
     let node2 = Arc::new(P2PNode::new(config2).await.expect("Failed to create node2"));
+    node2.start().await.expect("Failed to start node2");
 
     let mut events1 = node1.subscribe_events();
     let mut events2 = node2.subscribe_events();
@@ -1639,7 +1684,9 @@ async fn test_send_to_disconnecting_peer() {
     let config2 = create_test_node_config();
 
     let node1 = Arc::new(P2PNode::new(config1).await.expect("Failed to create node1"));
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let addrs2 = node2.listen_addrs().await;
     let addr2 = addrs2.first().expect("Need address").to_string();
@@ -1679,6 +1726,7 @@ async fn test_send_to_disconnecting_peer() {
     // Verify node1 is still functional
     let config3 = create_test_node_config();
     let node3 = P2PNode::new(config3).await.expect("Failed to create node3");
+    node3.start().await.expect("Failed to start node3");
     let addrs3 = node3.listen_addrs().await;
     let addr3 = addrs3.first().expect("Need address").to_string();
 
@@ -1707,7 +1755,9 @@ async fn test_late_event_subscription() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     // Connect BEFORE subscribing
     let addrs2 = node2.listen_addrs().await;
@@ -1762,7 +1812,9 @@ async fn test_zero_stale_threshold() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let addrs2 = node2.listen_addrs().await;
     let addr2 = addrs2.first().expect("Need address").to_string();
@@ -1812,7 +1864,9 @@ async fn test_short_stale_threshold() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let mut events2 = node2.subscribe_events();
 
@@ -1858,6 +1912,7 @@ async fn test_many_peers_scaling() {
 
     let config1 = create_test_node_config();
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
 
     let peer_count = 10;
     let mut nodes: Vec<P2PNode> = Vec::with_capacity(peer_count);
@@ -1869,6 +1924,7 @@ async fn test_many_peers_scaling() {
         let node = P2PNode::new(config)
             .await
             .expect("Failed to create peer node");
+        node.start().await.expect("Failed to start peer node");
         let addrs = node.listen_addrs().await;
         let addr = addrs.first().expect("Need address").to_string();
 
@@ -1931,7 +1987,9 @@ async fn test_graceful_shutdown() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     let addrs2 = node2.listen_addrs().await;
     let addr2 = addrs2.first().expect("Need address").to_string();
@@ -1969,7 +2027,9 @@ async fn test_event_subscriber_cleanup() {
     let config2 = create_test_node_config();
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     // Create multiple subscribers
     let sub1 = node2.subscribe_events();

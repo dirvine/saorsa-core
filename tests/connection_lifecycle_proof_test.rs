@@ -37,6 +37,7 @@ async fn test_connection_lifecycle_infrastructure_exists() {
     };
 
     let node = P2PNode::new(config).await.expect("Failed to create node");
+    node.start().await.expect("Failed to start node");
 
     info!("Node created successfully");
 
@@ -112,6 +113,7 @@ async fn test_keepalive_task_initialized() {
     };
 
     let _node = P2PNode::new(config).await.expect("Failed to create node");
+    _node.start().await.expect("Failed to start node");
 
     // The keepalive task is spawned in P2PNode::new() and runs in the background
     // It sends keepalive messages every 15 seconds to prevent the 30-second ant-quic timeout

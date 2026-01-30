@@ -66,7 +66,9 @@ async fn test_connection_lifecycle_with_keepalive() {
     };
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     // Get their addresses
     let addrs1 = node1.listen_addrs().await;
@@ -182,7 +184,9 @@ async fn test_send_message_validates_connection_state() {
     };
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     // Get addresses and connect
     let addrs2 = node2.listen_addrs().await;
@@ -265,7 +269,9 @@ async fn test_multiple_message_exchanges() {
     };
 
     let node1 = P2PNode::new(config1).await.expect("Failed to create node1");
+    node1.start().await.expect("Failed to start node1");
     let node2 = P2PNode::new(config2).await.expect("Failed to create node2");
+    node2.start().await.expect("Failed to start node2");
 
     // Connect nodes
     let addrs2 = node2.listen_addrs().await;
