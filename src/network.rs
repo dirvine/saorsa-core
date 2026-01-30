@@ -44,6 +44,9 @@ use tracing::{debug, error, info, trace, warn};
 /// Payload bytes used for keepalive messages to prevent connection timeouts.
 const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 
+/// Channel capacity for the per-stack recv task mpsc channel.
+const RECV_CHANNEL_CAPACITY: usize = 256;
+
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -661,8 +664,10 @@ pub struct P2PNode {
     periodic_tasks_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
     /// Shutdown flag for background tasks
-    #[allow(dead_code)]
     shutdown: Arc<AtomicBool>,
+
+    /// Message receive task handles (recv tasks + consumer)
+    recv_handles: Arc<RwLock<Vec<tokio::task::JoinHandle<()>>>>,
 
     /// GeoIP provider for connection validation
     #[allow(dead_code)]
@@ -768,6 +773,7 @@ impl P2PNode {
             keepalive_handle: Arc::new(RwLock::new(None)),
             periodic_tasks_handle: Arc::new(RwLock::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
+            recv_handles: Arc::new(RwLock::new(Vec::new())),
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
             // Attestation fields - use dummy values for tests
@@ -1032,12 +1038,16 @@ impl P2PNode {
             keepalive_handle,
             periodic_tasks_handle,
             shutdown,
+            recv_handles: Arc::new(RwLock::new(Vec::new())),
             geo_provider,
             // Attestation - EntangledId will be derived later when NodeIdentity is available
             entangled_id: None,
             binary_hash,
         };
-        info!("Created P2P node with peer ID: {} (call start() to begin networking)", node.peer_id);
+        info!(
+            "Created P2P node with peer ID: {} (call start() to begin networking)",
+            node.peer_id
+        );
 
         Ok(node)
     }
@@ -1209,63 +1219,56 @@ impl P2PNode {
         Ok(())
     }
 
-    /// Start the message receiving system with background tasks
+    /// Start the message receiving system with channel-based background tasks
+    ///
+    /// Spawns per-stack recv tasks that feed into a single mpsc channel,
+    /// giving instant wakeup on data arrival without poll/timeout latency.
     async fn start_message_receiving_system(&self) -> Result<()> {
         info!("Starting message receiving system");
-        let dual = self.dual_node.clone();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(RECV_CHANNEL_CAPACITY);
+        let shutdown = Arc::clone(&self.shutdown);
+
+        let mut handles = Vec::new();
+
+        // Spawn per-stack recv tasks — both feed into the same channel
+        if let Some(v6) = self.dual_node.v6.as_ref() {
+            handles.push(v6.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
+        }
+        if let Some(v4) = self.dual_node.v4.as_ref() {
+            handles.push(v4.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
+        }
+        drop(tx); // drop original sender so rx closes when all tasks exit
+
         let event_tx = self.event_tx.clone();
-
-        tokio::spawn(async move {
+        handles.push(tokio::spawn(async move {
             info!("Message receive loop started");
-            loop {
-                match dual.receive_any().await {
-                    Ok((peer_id, bytes)) => {
-                        // Convert transport-level PeerId to the hex string used in
-                        // the peers map / active_connections so that consumers of
-                        // P2PEvent::Message can call send_message() with the source.
-                        let transport_peer_id = ant_peer_id_to_string(&peer_id);
-                        info!(
-                            "Received {} bytes from peer {}",
-                            bytes.len(),
-                            transport_peer_id
-                        );
+            while let Some((peer_id, bytes)) = rx.recv().await {
+                let transport_peer_id = ant_peer_id_to_string(&peer_id);
+                info!(
+                    "Received {} bytes from peer {}",
+                    bytes.len(),
+                    transport_peer_id
+                );
 
-                        // Skip keepalive and other protocol control messages
-                        if bytes == KEEPALIVE_PAYLOAD {
-                            trace!("Received keepalive from {}", transport_peer_id);
-                            continue;
-                        }
+                if bytes == KEEPALIVE_PAYLOAD {
+                    trace!("Received keepalive from {}", transport_peer_id);
+                    continue;
+                }
 
-                        // Expect the JSON message wrapper from create_protocol_message
-                        match parse_protocol_message(&bytes, &transport_peer_id) {
-                            Some(event) => {
-                                let _ = event_tx.send(event);
-                            }
-                            None => {
-                                warn!("Failed to parse protocol message ({} bytes)", bytes.len());
-                            }
-                        }
+                match parse_protocol_message(&bytes, &transport_peer_id) {
+                    Some(event) => {
+                        let _ = event_tx.send(event);
                     }
-                    Err(e) => {
-                        let err_str = e.to_string();
-                        // "No connected peers" errors happen frequently when one stack
-                        // (e.g., IPv4) has no connections while the other (IPv6) does.
-                        // Don't sleep for these - retry immediately to avoid missing
-                        // messages on the connected stack.
-                        if err_str.contains("No connected peers") || err_str.contains("no peers") {
-                            // Very short yield to avoid busy-looping, but allow quick retry
-                            tokio::task::yield_now().await;
-                        } else if err_str.contains("no data") || err_str.contains("timeout") {
-                            // Expected when no messages available - small sleep
-                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                        } else {
-                            warn!("Receive error: {}", e);
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
+                    None => {
+                        warn!("Failed to parse protocol message ({} bytes)", bytes.len());
                     }
                 }
             }
-        });
+            info!("Message receive loop ended — channel closed");
+        }));
+
+        *self.recv_handles.write().await = handles;
 
         Ok(())
     }
@@ -1303,8 +1306,17 @@ impl P2PNode {
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping P2P node...");
 
+        // Signal all background tasks to stop
+        self.shutdown.store(true, Ordering::Relaxed);
+
         // Set running state to false
         *self.running.write().await = false;
+
+        // Await recv system tasks
+        let handles: Vec<_> = self.recv_handles.write().await.drain(..).collect();
+        for handle in handles {
+            let _ = handle.await;
+        }
 
         // Disconnect all peers
         self.disconnect_all_peers().await?;
