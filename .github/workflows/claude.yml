@@ -30,7 +30,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0  # Full history needed for forked PRs
+
+      - name: Fetch PR head for forked PRs
+        if: github.event.issue.pull_request
+        run: |
+          # Get PR number from the issue (for issue_comment events on PRs)
+          PR_NUMBER=$(echo "${{ github.event.issue.pull_request.url }}" | grep -oE '[0-9]+$')
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+
+          # Fetch the PR head ref (works for both forked and non-forked PRs)
+          git fetch origin pull/${PR_NUMBER}/head:pr-${PR_NUMBER}
+          git checkout pr-${PR_NUMBER}
 
       - name: Run Claude Code
         id: claude
