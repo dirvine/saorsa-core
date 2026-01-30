@@ -83,6 +83,11 @@ use ant_quic::link_transport::StreamType;
 /// over the QUIC transport. Other protocols can be registered for different services.
 pub const SAORSA_DHT_PROTOCOL: ProtocolId = ProtocolId::from_static(b"saorsa-dht/1.0.0");
 
+/// Maximum message size for stream reads (16 MB)
+///
+/// This limit prevents memory exhaustion from malicious or malformed streams.
+const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+
 /// Connection lifecycle events from ant-quic
 #[derive(Debug, Clone)]
 pub enum ConnectionEvent {
@@ -124,6 +129,10 @@ pub struct P2PNetworkNode<T: LinkTransport = P2pLinkTransport> {
     peer_quality: Arc<RwLock<HashMap<PeerId, f32>>>,
     /// Shared transport for protocol multiplexing
     shared_transport: Arc<SharedTransport<T>>,
+    /// Channel receiver for incoming messages (populated by accept loop)
+    #[allow(clippy::type_complexity)]
+    incoming_msg_rx:
+        Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<(PeerId, SocketAddr, Vec<u8>)>>>,
 }
 
 /// Default maximum number of concurrent QUIC connections when not
@@ -354,6 +363,76 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
         // Create SharedTransport for protocol multiplexing
         let shared_transport = Arc::new(SharedTransport::from_arc(Arc::clone(&transport)));
+
+        // Create channel for incoming messages
+        let (incoming_msg_tx, incoming_msg_rx) = tokio::sync::mpsc::channel(1000);
+
+        // Start the persistent accept loop
+        let transport_for_accept = Arc::clone(&transport);
+        let msg_tx_for_accept = incoming_msg_tx.clone();
+        let peers_for_accept = Arc::clone(&peers_clone);
+        let peer_regions_for_accept = Arc::new(RwLock::new(HashMap::new()));
+        let shutdown_for_accept = Arc::clone(&shutdown);
+
+        tokio::spawn(async move {
+            use ant_quic::link_transport::StreamFilter;
+            use futures::StreamExt;
+
+            let mut incoming = transport_for_accept.accept(SAORSA_DHT_PROTOCOL);
+
+            while !shutdown_for_accept.load(Ordering::Relaxed) {
+                match incoming.next().await {
+                    Some(Ok(conn)) => {
+                        let peer_id = conn.peer();
+                        let addr = conn.remote_addr();
+
+                        // Register peer
+                        {
+                            let mut peers_guard = peers_for_accept.write().await;
+                            if !peers_guard.iter().any(|(p, _)| *p == peer_id) {
+                                peers_guard.push((peer_id, addr));
+
+                                let region = match addr.ip() {
+                                    std::net::IpAddr::V4(ipv4) => match ipv4.octets().first() {
+                                        Some(0..=63) => "NA".to_string(),
+                                        Some(64..=127) => "EU".to_string(),
+                                        Some(128..=191) => "APAC".to_string(),
+                                        Some(192..=223) => "SA".to_string(),
+                                        Some(224..=255) => "OTHER".to_string(),
+                                        None => "UNKNOWN".to_string(),
+                                    },
+                                    std::net::IpAddr::V6(_) => "UNKNOWN".to_string(),
+                                };
+                                let mut regions = peer_regions_for_accept.write().await;
+                                *regions.entry(region).or_insert(0) += 1;
+                            }
+                        }
+
+                        // Spawn task to handle streams on this connection
+                        let msg_tx = msg_tx_for_accept.clone();
+                        tokio::spawn(async move {
+                            let filter = StreamFilter::new();
+                            let mut incoming_streams = conn.accept_uni_typed(filter);
+
+                            while let Some(stream_result) = incoming_streams.next().await {
+                                if let Ok((_stream_type, mut recv_stream)) = stream_result
+                                    && let Ok(data) =
+                                        recv_stream.read_to_end(MAX_MESSAGE_SIZE).await
+                                    && msg_tx.send((peer_id, addr, data)).await.is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                    Some(Err(e)) => {
+                        tracing::trace!("Accept error: {}", e);
+                    }
+                    None => break,
+                }
+            }
+        });
+
         // Note: DHT handler registration happens lazily when a DhtCoreEngine is provided
         // via register_dht_handler() method.
         Ok(Self {
@@ -367,6 +446,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
             peer_regions: Arc::new(RwLock::new(HashMap::new())),
             peer_quality,
             shared_transport,
+            incoming_msg_rx: Arc::new(tokio::sync::Mutex::new(incoming_msg_rx)),
         })
     }
 
@@ -477,16 +557,71 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         }
     }
 
-    /// Send data to a specific peer
-    pub async fn send_to_peer(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
-        let conn = self
-            .transport
-            .dial(*peer_id, SAORSA_DHT_PROTOCOL)
-            .await
-            .map_err(|e| anyhow::anyhow!("Dial failed: {}", e))?;
+    /// Accept incoming connection AND read the first stream message
+    ///
+    /// This method receives from a shared channel that is populated by a persistent
+    /// accept loop started in with_transport(). This avoids race conditions from
+    /// multiple concurrent accept iterators.
+    pub async fn accept_connection_with_stream(&self) -> Result<(PeerId, SocketAddr, Vec<u8>)> {
+        let mut rx = self.incoming_msg_rx.lock().await;
+        match rx.recv().await {
+            Some(msg) => Ok(msg),
+            None => Err(anyhow::anyhow!("Accept channel closed")),
+        }
+    }
 
+    /// Static helper for region lookup (used in spawned tasks)
+    fn get_region_for_ip_static(ip: &IpAddr) -> String {
+        match ip {
+            IpAddr::V4(ipv4) => {
+                let octets = ipv4.octets();
+                match octets.first() {
+                    Some(0..=63) => "NA".to_string(),
+                    Some(64..=127) => "EU".to_string(),
+                    Some(128..=191) => "APAC".to_string(),
+                    Some(192..=223) => "SA".to_string(),
+                    Some(224..=255) => "OTHER".to_string(),
+                    None => "UNKNOWN".to_string(),
+                }
+            }
+            IpAddr::V6(_) => "UNKNOWN".to_string(),
+        }
+    }
+
+    /// Send data to a specific peer
+    ///
+    /// This method first looks up the peer's address from our local peers list,
+    /// then connects by address. This is necessary because `dial(peer_id)` only
+    /// works if ant-quic already knows the peer's address, but for peers that
+    /// connected TO us, we only have their address in our application-level peers list.
+    pub async fn send_to_peer(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
+        // Look up the peer's address from our peers list
+        let peer_addr = {
+            let peers = self.peers.read().await;
+            peers
+                .iter()
+                .find(|(p, _)| p == peer_id)
+                .map(|(_, addr)| *addr)
+        };
+
+        // Connect by address if we have it, otherwise try dial by peer_id
+        let conn = match peer_addr {
+            Some(addr) => self
+                .transport
+                .dial_addr(addr, SAORSA_DHT_PROTOCOL)
+                .await
+                .map_err(|e| anyhow::anyhow!("Dial by address failed: {}", e))?,
+            None => self
+                .transport
+                .dial(*peer_id, SAORSA_DHT_PROTOCOL)
+                .await
+                .map_err(|e| anyhow::anyhow!("Dial by peer_id failed: {}", e))?,
+        };
+
+        // Open a typed unidirectional stream for DHT messages
+        // Using DhtStore stream type for DHT protocol messages
         let mut stream = conn
-            .open_uni()
+            .open_uni_typed(StreamType::DhtStore)
             .await
             .map_err(|e| anyhow::anyhow!("Stream open failed: {}", e))?;
 
@@ -514,6 +649,19 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
             .record_stream_bandwidth(class, data.len() as u64)
             .await;
         Ok(())
+    }
+
+    /// Receive data from any peer (waits for the next message)
+    ///
+    /// This method receives from a shared channel that is populated by a persistent
+    /// accept loop started in with_transport(). This avoids race conditions from
+    /// multiple concurrent accept iterators.
+    pub async fn receive_from_any_peer(&self) -> Result<(PeerId, Vec<u8>)> {
+        let mut rx = self.incoming_msg_rx.lock().await;
+        match rx.recv().await {
+            Some((peer_id, _addr, data)) => Ok((peer_id, data)),
+            None => Err(anyhow::anyhow!("Accept channel closed")),
+        }
     }
 
     /// Get our local address
@@ -650,19 +798,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
     /// Get region for an IP address (simplified placeholder)
     fn get_region_for_ip(&self, ip: &IpAddr) -> String {
-        match ip {
-            IpAddr::V4(ipv4) => {
-                let octets = ipv4.octets();
-                match octets[0] {
-                    0..=63 => "NA".to_string(),
-                    64..=127 => "EU".to_string(),
-                    128..=191 => "APAC".to_string(),
-                    192..=223 => "SA".to_string(),
-                    224..=255 => "OTHER".to_string(),
-                }
-            }
-            IpAddr::V6(_) => "UNKNOWN".to_string(),
-        }
+        Self::get_region_for_ip_static(ip)
     }
 
     /// Get current region ratio for a specific region
@@ -1050,6 +1186,25 @@ impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
         }
     }
 
+    /// Accept the next incoming connection AND its first message
+    ///
+    /// This combines connection acceptance and stream reading into one operation,
+    /// which is needed because transport.accept() can only be called from one place
+    /// (multiple callers would compete for connections).
+    pub async fn accept_with_message(&self) -> Result<(PeerId, SocketAddr, Vec<u8>)> {
+        match (&self.v6, &self.v4) {
+            (Some(v6), Some(v4)) => {
+                tokio::select! {
+                    res6 = v6.accept_connection_with_stream() => res6,
+                    res4 = v4.accept_connection_with_stream() => res4,
+                }
+            }
+            (Some(v6), None) => v6.accept_connection_with_stream().await,
+            (None, Some(v4)) => v4.accept_connection_with_stream().await,
+            (None, None) => Err(anyhow::anyhow!("no listening nodes available")),
+        }
+    }
+
     /// Get all connected peers (merged from both stacks)
     pub async fn get_connected_peers(&self) -> Vec<(PeerId, SocketAddr)> {
         let mut out = Vec::new();
@@ -1098,6 +1253,39 @@ impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
                 .await;
         }
         res
+    }
+
+    /// Receive from any stack (race IPv6/IPv4)
+    pub async fn receive_any(&self) -> Result<(PeerId, Vec<u8>)> {
+        tracing::trace!(
+            "  [DUAL-RECV] receive_any called, v6={}, v4={}",
+            self.v6.is_some(),
+            self.v4.is_some()
+        );
+        match (&self.v6, &self.v4) {
+            (Some(v6), Some(v4)) => {
+                tracing::trace!("  [DUAL-RECV] Selecting between v6 and v4");
+                tokio::select! {
+                    res6 = v6.receive_from_any_peer() => {
+                        tracing::trace!("  [DUAL-RECV] v6 returned: {:?}", res6.as_ref().map(|(p, d)| (p, d.len())));
+                        res6
+                    },
+                    res4 = v4.receive_from_any_peer() => {
+                        tracing::trace!("  [DUAL-RECV] v4 returned: {:?}", res4.as_ref().map(|(p, d)| (p, d.len())));
+                        res4
+                    },
+                }
+            }
+            (Some(v6), None) => {
+                tracing::trace!("  [DUAL-RECV] v6 only");
+                v6.receive_from_any_peer().await
+            }
+            (None, Some(v4)) => {
+                tracing::trace!("  [DUAL-RECV] v4 only");
+                v4.receive_from_any_peer().await
+            }
+            (None, None) => Err(anyhow::anyhow!("no listening nodes available")),
+        }
     }
 
     /// Subscribe to connection lifecycle events from both stacks
