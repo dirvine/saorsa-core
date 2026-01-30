@@ -71,6 +71,7 @@ impl TestNode {
                 .await
                 .context("Failed to create P2P node")?,
         );
+        node.start().await.context("Failed to start P2P node")?;
 
         // Get actual listen addresses after node creation
         let actual_addrs = node.listen_addrs().await;
