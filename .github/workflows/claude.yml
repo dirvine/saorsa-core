@@ -34,14 +34,24 @@ jobs:
 
       - name: Fetch PR head for forked PRs
         if: github.event.issue.pull_request
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Get PR number from the issue (for issue_comment events on PRs)
+          # Get PR number and branch name
           PR_NUMBER=$(echo "${{ github.event.issue.pull_request.url }}" | grep -oE '[0-9]+$')
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
 
-          # Fetch the PR head ref (works for both forked and non-forked PRs)
-          git fetch origin pull/${PR_NUMBER}/head:pr-${PR_NUMBER}
-          git checkout pr-${PR_NUMBER}
+          # Get the PR head branch name from GitHub API
+          PR_BRANCH=$(gh api repos/${{ github.repository }}/pulls/${PR_NUMBER} --jq '.head.ref')
+          echo "PR branch: $PR_BRANCH"
+
+          # Fetch the PR head ref and create a local branch with the SAME NAME as the PR branch
+          # This ensures the Claude Code Action's internal fetch finds the branch
+          git fetch origin pull/${PR_NUMBER}/head:${PR_BRANCH}
+          git checkout ${PR_BRANCH}
+
+          # Also create a tracking ref so fetch works
+          git update-ref refs/remotes/origin/${PR_BRANCH} HEAD
 
       - name: Run Claude Code
         id: claude
