@@ -26,7 +26,7 @@ use crate::identity::rejection::RejectionReason;
 use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
-use crate::transport::ant_quic_adapter::DualStackNetworkNode;
+use crate::transport::ant_quic_adapter::{DualStackNetworkNode, ant_peer_id_to_string};
 #[allow(unused_imports)] // Temporarily unused during migration
 use crate::transport::{TransportOptions, TransportType};
 use crate::validation::RateLimitConfig;
@@ -38,8 +38,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
-use tokio::time::Instant;
+use tokio::time::{Instant, interval};
 use tracing::{debug, error, info, trace, warn};
+
+/// Payload bytes used for keepalive messages to prevent connection timeouts.
+const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1195,8 +1198,7 @@ impl P2PNode {
             loop {
                 match dual.accept_any().await {
                     Ok((ant_peer_id, remote_sock)) => {
-                        let peer_id =
-                            crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
+                        let peer_id = ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
                         // Optional: basic IP rate limiting
                         let _ = rate_limiter.check_ip(&remote_sock.ip());
@@ -1227,55 +1229,29 @@ impl P2PNode {
             loop {
                 match dual.receive_any().await {
                     Ok((peer_id, bytes)) => {
-                        info!("Received {} bytes from peer {}", bytes.len(), peer_id);
+                        // Convert transport-level PeerId to the hex string used in
+                        // the peers map / active_connections so that consumers of
+                        // P2PEvent::Message can call send_message() with the source.
+                        let transport_peer_id = ant_peer_id_to_string(&peer_id);
+                        info!(
+                            "Received {} bytes from peer {}",
+                            bytes.len(),
+                            transport_peer_id
+                        );
 
                         // Skip keepalive and other protocol control messages
-                        if bytes == b"keepalive" {
-                            trace!("Received keepalive from {}", peer_id);
+                        if bytes == KEEPALIVE_PAYLOAD {
+                            trace!("Received keepalive from {}", transport_peer_id);
                             continue;
                         }
 
                         // Expect the JSON message wrapper from create_protocol_message
-                        match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            Ok(value) => {
-                                if let (Some(protocol), Some(data), Some(from)) = (
-                                    value.get("protocol").and_then(|v| v.as_str()),
-                                    value.get("data").and_then(|v| v.as_array()),
-                                    value.get("from").and_then(|v| v.as_str()),
-                                ) {
-                                    let payload: Vec<u8> = data
-                                        .iter()
-                                        .filter_map(|v| v.as_u64().map(|n| n as u8))
-                                        .collect();
-                                    debug!(
-                                        "Emitting P2PEvent::Message - topic: {}, from: {}, payload_len: {}",
-                                        protocol,
-                                        from,
-                                        payload.len()
-                                    );
-                                    let _ = event_tx.send(P2PEvent::Message {
-                                        topic: protocol.to_string(),
-                                        source: from.to_string(),
-                                        data: payload,
-                                    });
-                                } else {
-                                    debug!(
-                                        "Message missing required fields. protocol={:?}, data={:?}, from={:?}",
-                                        value.get("protocol"),
-                                        value.get("data").is_some(),
-                                        value.get("from")
-                                    );
-                                }
+                        match parse_protocol_message(&bytes, &transport_peer_id) {
+                            Some(event) => {
+                                let _ = event_tx.send(event);
                             }
-                            Err(e) => {
-                                // Log first 100 bytes to help debug
-                                let preview: Vec<u8> = bytes.iter().take(100).copied().collect();
-                                warn!(
-                                    "Failed to parse message JSON: {} (received {} bytes): {:?}",
-                                    e,
-                                    bytes.len(),
-                                    preview
-                                );
+                            None => {
+                                warn!("Failed to parse protocol message ({} bytes)", bytes.len());
                             }
                         }
                     }
@@ -1299,50 +1275,6 @@ impl P2PNode {
                 }
             }
         });
-
-        Ok(())
-    }
-
-    /// Handle a received message and generate appropriate events
-    #[allow(dead_code)]
-    async fn handle_received_message(
-        &self,
-        message_data: Vec<u8>,
-        peer_id: &PeerId,
-        _protocol: &str,
-        event_tx: &broadcast::Sender<P2PEvent>,
-    ) -> Result<()> {
-        // MCP removed: no special protocol handling
-
-        // Parse the message format we created in create_protocol_message
-        match serde_json::from_slice::<serde_json::Value>(&message_data) {
-            Ok(message) => {
-                if let (Some(protocol), Some(data), Some(from)) = (
-                    message.get("protocol").and_then(|v| v.as_str()),
-                    message.get("data").and_then(|v| v.as_array()),
-                    message.get("from").and_then(|v| v.as_str()),
-                ) {
-                    // Convert data array back to bytes
-                    let data_bytes: Vec<u8> = data
-                        .iter()
-                        .filter_map(|v| v.as_u64().map(|n| n as u8))
-                        .collect();
-
-                    // Generate message event
-                    let event = P2PEvent::Message {
-                        topic: protocol.to_string(),
-                        source: from.to_string(),
-                        data: data_bytes,
-                    };
-
-                    let _ = event_tx.send(event);
-                    debug!("Generated message event from peer: {}", peer_id);
-                }
-            }
-            Err(e) => {
-                warn!("Failed to parse received message from {}: {}", peer_id, e);
-            }
-        }
 
         Ok(())
     }
@@ -1561,8 +1493,7 @@ impl P2PNode {
         .await
         {
             Ok(Ok(peer)) => {
-                let connected_peer_id =
-                    crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer);
+                let connected_peer_id = ant_peer_id_to_string(&peer);
                 info!("Successfully connected to peer: {}", connected_peer_id);
 
                 // Prevent self-connections by checking if remote peer_id matches our own
@@ -1816,6 +1747,42 @@ fn create_protocol_message_static(protocol: &str, data: Vec<u8>) -> Result<Vec<u
     })
 }
 
+/// Parse a JSON protocol message into a `P2PEvent::Message`.
+///
+/// Returns `None` if the bytes are not valid JSON or lack the required
+/// `"protocol"`, `"data"`, or `"from"` fields.
+///
+/// The `"from"` field is a required part of the wire protocol (messages that
+/// omit it are considered malformed and silently dropped), but it is **not**
+/// used as the event source.  Instead, `source` — the transport-level peer ID
+/// derived from the authenticated QUIC connection — is used so that consumers
+/// can pass it directly to `send_message()`.  This eliminates a spoofing
+/// vector where a peer could claim an arbitrary identity via the JSON payload.
+fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let protocol = value.get("protocol")?.as_str()?;
+    let data = value.get("data")?.as_array()?;
+    // "from" is a required protocol field (messages without it are dropped),
+    // but we use the transport peer ID as the authoritative source.
+    let logical_from = value.get("from")?.as_str()?;
+    let payload: Vec<u8> = data
+        .iter()
+        .filter_map(|v| v.as_u64().map(|n| n as u8))
+        .collect();
+    debug!(
+        "Parsed P2PEvent::Message - topic: {}, source: {} (logical: {}), payload_len: {}",
+        protocol,
+        source,
+        logical_from,
+        payload.len()
+    );
+    Some(P2PEvent::Message {
+        topic: protocol.to_string(),
+        source: source.to_string(),
+        data: payload,
+    })
+}
+
 impl P2PNode {
     /// Subscribe to network events
     pub fn subscribe_events(&self) -> broadcast::Receiver<P2PEvent> {
@@ -2059,8 +2026,7 @@ impl P2PNode {
                             peer_id,
                             remote_address,
                         } => {
-                            let peer_id_str =
-                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            let peer_id_str = ant_peer_id_to_string(&peer_id);
                             debug!(
                                 "Connection established: peer={}, addr={}",
                                 peer_id_str, remote_address
@@ -2119,8 +2085,7 @@ impl P2PNode {
                             let _ = event_tx.send(P2PEvent::PeerConnected(peer_id_str));
                         }
                         ConnectionEvent::Lost { peer_id, reason } => {
-                            let peer_id_str =
-                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            let peer_id_str = ant_peer_id_to_string(&peer_id);
                             debug!("Connection lost: peer={}, reason={}", peer_id_str, reason);
 
                             // Remove from active connections
@@ -2136,8 +2101,7 @@ impl P2PNode {
                             let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
                         }
                         ConnectionEvent::Failed { peer_id, reason } => {
-                            let peer_id_str =
-                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            let peer_id_str = ant_peer_id_to_string(&peer_id);
                             debug!("Connection failed: peer={}, reason={}", peer_id_str, reason);
 
                             // Remove from active connections
@@ -2195,8 +2159,7 @@ impl P2PNode {
                             peer_id,
                             remote_address,
                         } => {
-                            let peer_id_str =
-                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            let peer_id_str = ant_peer_id_to_string(&peer_id);
                             debug!(
                                 "Connection established: peer={}, addr={}",
                                 peer_id_str, remote_address
@@ -2298,8 +2261,7 @@ impl P2PNode {
                             let _ = event_tx.send(P2PEvent::PeerConnected(peer_id_str));
                         }
                         ConnectionEvent::Lost { peer_id, reason } => {
-                            let peer_id_str =
-                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            let peer_id_str = ant_peer_id_to_string(&peer_id);
                             debug!("Connection lost: peer={}, reason={}", peer_id_str, reason);
 
                             // Remove from active connections
@@ -2315,8 +2277,7 @@ impl P2PNode {
                             let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
                         }
                         ConnectionEvent::Failed { peer_id, reason } => {
-                            let peer_id_str =
-                                crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                            let peer_id_str = ant_peer_id_to_string(&peer_id);
                             warn!("Connection failed: peer={}, reason={}", peer_id_str, reason);
 
                             // Remove from active connections
@@ -2367,10 +2328,7 @@ impl P2PNode {
         dual_node: Arc<DualStackNetworkNode>,
         shutdown: Arc<AtomicBool>,
     ) {
-        use tokio::time::{Duration, interval};
-
         const KEEPALIVE_INTERVAL_SECS: u64 = 15; // Half of 30-second timeout
-        const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive"; // Small payload
 
         let mut interval = interval(Duration::from_secs(KEEPALIVE_INTERVAL_SECS));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -2436,8 +2394,6 @@ impl P2PNode {
         stale_threshold: Duration,
         shutdown: Arc<AtomicBool>,
     ) {
-        use tokio::time::interval;
-
         let cleanup_threshold = stale_threshold * 2;
         let mut interval = interval(Duration::from_millis(100));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -4050,5 +4006,102 @@ mod tests {
         let loopback_v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5000);
         let normalized_v4 = normalize_wildcard_to_loopback(loopback_v4);
         assert_eq!(normalized_v4, loopback_v4);
+    }
+
+    // ---- parse_protocol_message regression tests ----
+
+    #[test]
+    fn test_parse_protocol_message_uses_transport_peer_id_as_source() {
+        // Regression: P2PEvent::Message.source must be the transport peer ID,
+        // NOT the "from" field from the JSON payload.  This ensures consumers
+        // can pass source directly to send_message().
+        let transport_id = "abcdef0123456789";
+        let logical_id = "spoofed-logical-id";
+        let msg = serde_json::json!({
+            "protocol": "test/v1",
+            "data": [1, 2, 3],
+            "from": logical_id,
+        });
+        let bytes = serde_json::to_vec(&msg).unwrap();
+
+        let event =
+            parse_protocol_message(&bytes, transport_id).expect("valid message should parse");
+
+        match event {
+            P2PEvent::Message {
+                topic,
+                source,
+                data,
+            } => {
+                assert_eq!(source, transport_id, "source must be the transport peer ID");
+                assert_ne!(
+                    source, logical_id,
+                    "source must NOT be the logical 'from' field"
+                );
+                assert_eq!(topic, "test/v1");
+                assert_eq!(data, vec![1u8, 2, 3]);
+            }
+            other => panic!("expected P2PEvent::Message, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_protocol_message_rejects_missing_from() {
+        // "from" is a required protocol field; messages without it are dropped.
+        let msg = serde_json::json!({
+            "protocol": "test/v1",
+            "data": [1, 2, 3],
+        });
+        let bytes = serde_json::to_vec(&msg).unwrap();
+
+        assert!(
+            parse_protocol_message(&bytes, "peer-id").is_none(),
+            "message missing 'from' must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_parse_protocol_message_rejects_missing_protocol() {
+        let msg = serde_json::json!({
+            "data": [1, 2, 3],
+            "from": "sender",
+        });
+        let bytes = serde_json::to_vec(&msg).unwrap();
+
+        assert!(parse_protocol_message(&bytes, "peer-id").is_none());
+    }
+
+    #[test]
+    fn test_parse_protocol_message_rejects_missing_data() {
+        let msg = serde_json::json!({
+            "protocol": "test/v1",
+            "from": "sender",
+        });
+        let bytes = serde_json::to_vec(&msg).unwrap();
+
+        assert!(parse_protocol_message(&bytes, "peer-id").is_none());
+    }
+
+    #[test]
+    fn test_parse_protocol_message_rejects_invalid_json() {
+        assert!(parse_protocol_message(b"not json", "peer-id").is_none());
+    }
+
+    #[test]
+    fn test_parse_protocol_message_empty_payload() {
+        let msg = serde_json::json!({
+            "protocol": "ping",
+            "data": [],
+            "from": "sender",
+        });
+        let bytes = serde_json::to_vec(&msg).unwrap();
+
+        let event = parse_protocol_message(&bytes, "transport-peer")
+            .expect("valid message with empty data should parse");
+
+        match event {
+            P2PEvent::Message { data, .. } => assert!(data.is_empty()),
+            other => panic!("expected P2PEvent::Message, got {:?}", other),
+        }
     }
 }
