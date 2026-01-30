@@ -21,6 +21,7 @@ use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
 use crate::control::RejectionMessage;
 use crate::dht::DHT;
+use crate::dht_network_manager::DhtNetworkManager;
 use crate::error::{NetworkError, P2PError, P2pResult as Result};
 use crate::identity::rejection::RejectionReason;
 use crate::security::GeoProvider;
@@ -654,6 +655,10 @@ pub struct P2PNode {
     /// BLAKE3 hash of the running binary for attestation.
     /// In production, this is computed at startup from the executable.
     binary_hash: [u8; 32],
+
+    /// DHT Network Manager for cross-node DHT replication (optional)
+    /// When present, DHT operations are delegated to this manager for network-wide replication.
+    dht_network_manager: Option<Arc<DhtNetworkManager>>,
 }
 
 /// Normalize wildcard bind addresses to localhost loopback addresses
@@ -751,6 +756,7 @@ impl P2PNode {
             // Attestation fields - use dummy values for tests
             entangled_id: None,
             binary_hash: [0u8; 32],
+            dht_network_manager: None,
         })
     }
     /// Create a new P2P node with the given configuration
@@ -991,6 +997,7 @@ impl P2PNode {
             // Attestation - EntangledId will be derived later when NodeIdentity is available
             entangled_id: None,
             binary_hash,
+            dht_network_manager: None,
         };
         info!("Created P2P node with peer ID: {}", node.peer_id);
 
@@ -1116,8 +1123,10 @@ impl P2PNode {
 
         // MCP removed
 
-        // Start message receiving system
-        self.start_message_receiving_system().await?;
+        // NOTE: Message receiving is now integrated into the accept loop in start_network_listeners()
+        // The old start_message_receiving_system() is no longer needed as it competed with the accept
+        // loop for incoming connections, causing messages to be lost.
+        // self.start_message_receiving_system().await?;
 
         // Connect to bootstrap peers
         self.connect_bootstrap_peers().await?;
@@ -1139,7 +1148,9 @@ impl P2PNode {
             *la = addrs.clone();
         }
 
-        // Spawn a background accept loop that handles incoming connections from either stack
+        // Spawn a background loop that accepts connections AND handles their messages
+        // Uses accept_with_message() which is the ONLY place calling transport.accept(),
+        // avoiding competition between multiple accept loops.
         let event_tx = self.event_tx.clone();
         let peers = self.peers.clone();
         let active_connections = self.active_connections.clone();
@@ -1147,16 +1158,76 @@ impl P2PNode {
         let dual = self.dual_node.clone();
         tokio::spawn(async move {
             loop {
-                match dual.accept_any().await {
-                    Ok((ant_peer_id, remote_sock)) => {
+                match dual.accept_with_message().await {
+                    Ok((ant_peer_id, remote_sock, message_data)) => {
                         let peer_id =
                             crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
-                        // Optional: basic IP rate limiting
-                        let _ = rate_limiter.check_ip(&remote_sock.ip());
+
+                        // Rate limiting - log if rate limit exceeded
+                        if let Err(e) = rate_limiter.check_ip(&remote_sock.ip()) {
+                            warn!("Rate limit exceeded for IP {}: {}", remote_sock.ip(), e);
+                        }
+
+                        // Register peer
                         let _ = event_tx.send(P2PEvent::PeerConnected(peer_id.clone()));
                         register_new_peer(&peers, &peer_id, &remote_addr).await;
-                        active_connections.write().await.insert(peer_id);
+                        active_connections.write().await.insert(peer_id.clone());
+
+                        // Process the message
+                        trace!("Received {} bytes from {}", message_data.len(), peer_id);
+                        match serde_json::from_slice::<serde_json::Value>(&message_data) {
+                            Ok(value) => {
+                                if let (Some(protocol), Some(data), Some(from)) = (
+                                    value.get("protocol").and_then(|v| v.as_str()),
+                                    value.get("data").and_then(|v| v.as_array()),
+                                    value.get("from").and_then(|v| v.as_str()),
+                                ) {
+                                    // Security: Validate that 'from' matches the actual connection peer ID
+                                    // This prevents peer ID spoofing attacks
+                                    if from != peer_id {
+                                        warn!(
+                                            "Peer ID mismatch: message claims from='{}' but connection is from '{}'. Using connection peer ID.",
+                                            from, peer_id
+                                        );
+                                    }
+                                    // Always use the authenticated peer_id from the connection, not the claimed 'from'
+                                    let verified_source = peer_id.clone();
+
+                                    // Security: Validate u8 bounds on payload bytes
+                                    let payload: Vec<u8> = data
+                                        .iter()
+                                        .filter_map(|v| {
+                                            v.as_u64().and_then(|n| {
+                                                if n <= 255 {
+                                                    Some(n as u8)
+                                                } else {
+                                                    warn!("Invalid byte value {} in message payload, skipping", n);
+                                                    None
+                                                }
+                                            })
+                                        })
+                                        .collect();
+                                    trace!(
+                                        "Forwarding message on topic {} from {}",
+                                        protocol, verified_source
+                                    );
+                                    let _ = event_tx.send(P2PEvent::Message {
+                                        topic: protocol.to_string(),
+                                        source: verified_source,
+                                        data: payload,
+                                    });
+                                } else {
+                                    debug!(
+                                        "Message from {} missing required fields (protocol/data/from)",
+                                        peer_id
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Failed to parse JSON message from {}: {}", peer_id, e);
+                            }
+                        }
                     }
                     Err(e) => {
                         warn!("Accept failed: {}", e);
@@ -1166,11 +1237,15 @@ impl P2PNode {
             }
         });
 
+        // NOTE: start_message_receiving_system() is NOT called here
+        // because accept_with_message() handles both connection acceptance and message receiving.
+
         info!("Dual-stack listeners active on: {:?}", addrs);
         Ok(())
     }
 
     /// Start the message receiving system with background tasks
+    #[allow(dead_code)]
     async fn start_message_receiving_system(&self) -> Result<()> {
         info!("Starting message receiving system");
         let dual = self.dual_node.clone();
@@ -1179,29 +1254,49 @@ impl P2PNode {
         tokio::spawn(async move {
             loop {
                 match dual.receive_any().await {
-                    Ok((_peer_id, bytes)) => {
+                    Ok((peer_id, bytes)) => {
+                        let peer_id_str =
+                            crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
                         // Expect the JSON message wrapper from create_protocol_message
-                        #[allow(clippy::collapsible_if)]
-                        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            if let (Some(protocol), Some(data), Some(from)) = (
-                                value.get("protocol").and_then(|v| v.as_str()),
-                                value.get("data").and_then(|v| v.as_array()),
-                                value.get("from").and_then(|v| v.as_str()),
-                            ) {
-                                let payload: Vec<u8> = data
-                                    .iter()
-                                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                                    .collect();
-                                let _ = event_tx.send(P2PEvent::Message {
-                                    topic: protocol.to_string(),
-                                    source: from.to_string(),
-                                    data: payload,
-                                });
+                        match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                            Ok(value) => {
+                                if let (Some(protocol), Some(data), Some(from)) = (
+                                    value.get("protocol").and_then(|v| v.as_str()),
+                                    value.get("data").and_then(|v| v.as_array()),
+                                    value.get("from").and_then(|v| v.as_str()),
+                                ) {
+                                    // Security: Use authenticated peer ID, not claimed 'from'
+                                    if from != peer_id_str {
+                                        warn!(
+                                            "Peer ID mismatch in receive: claims '{}' but is '{}'",
+                                            from, peer_id_str
+                                        );
+                                    }
+                                    let verified_source = peer_id_str;
+
+                                    // Security: Validate u8 bounds
+                                    let payload: Vec<u8> = data
+                                        .iter()
+                                        .filter_map(|v| {
+                                            v.as_u64().and_then(|n| {
+                                                if n <= 255 { Some(n as u8) } else { None }
+                                            })
+                                        })
+                                        .collect();
+                                    let _ = event_tx.send(P2PEvent::Message {
+                                        topic: protocol.to_string(),
+                                        source: verified_source,
+                                        data: payload,
+                                    });
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Failed to parse message from {:?}: {}", peer_id, e);
                             }
                         }
                     }
                     Err(e) => {
-                        warn!("Receive error: {}", e);
+                        debug!("Receive error: {}", e);
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     }
                 }
@@ -1597,14 +1692,9 @@ impl P2PNode {
             )));
         }
 
-        // **NEW**: Check if the ant-quic connection is actually active
+        // Check if the ant-quic connection is actually active
         // This is the critical fix for the connection state synchronization issue
         if !self.is_connection_active(peer_id).await {
-            debug!(
-                "Connection to peer {} exists in peers map but ant-quic connection is closed",
-                peer_id
-            );
-
             // Clean up stale peer entry
             self.remove_peer(peer_id).await;
 
@@ -2340,19 +2430,45 @@ impl P2PNode {
         self.dht.as_ref()
     }
 
+    /// Set the DHT Network Manager for cross-node replication
+    ///
+    /// When a `DhtNetworkManager` is set, DHT operations (`dht_put`, `dht_get`)
+    /// will be delegated to the manager for network-wide replication instead of
+    /// local-only storage.
+    pub fn set_dht_network_manager(&mut self, manager: Arc<DhtNetworkManager>) {
+        self.dht_network_manager = Some(manager);
+    }
+
+    /// Get the DHT Network Manager reference (if configured)
+    pub fn dht_network_manager(&self) -> Option<&Arc<DhtNetworkManager>> {
+        self.dht_network_manager.as_ref()
+    }
+
     /// Store a value in the DHT
+    ///
+    /// When a `DhtNetworkManager` is configured, this delegates to the manager
+    /// for cross-node replication. Otherwise, it stores locally only.
     pub async fn dht_put(&self, key: crate::dht::Key, value: Vec<u8>) -> Result<()> {
+        // If DhtNetworkManager is available, delegate to it for cross-node replication
+        if let Some(ref manager) = self.dht_network_manager {
+            match manager.put(key, value.clone()).await {
+                Ok(_result) => return Ok(()),
+                Err(e) => {
+                    warn!("DhtNetworkManager put failed, falling back to local: {e}");
+                    // Fall through to local storage
+                }
+            }
+        }
+
+        // Local-only storage (fallback or when manager not available)
         if let Some(ref dht) = self.dht {
             let mut dht_instance = dht.write().await;
             let dht_key = crate::dht::DhtKey::from_bytes(key);
-            dht_instance
-                .store(&dht_key, value.clone())
-                .await
-                .map_err(|e| {
-                    P2PError::Dht(crate::error::DhtError::StoreFailed(
-                        format!("{:?}: {e}", key).into(),
-                    ))
-                })?;
+            dht_instance.store(&dht_key, value).await.map_err(|e| {
+                P2PError::Dht(crate::error::DhtError::StoreFailed(
+                    format!("{:?}: {e}", key).into(),
+                ))
+            })?;
 
             Ok(())
         } else {
@@ -2363,7 +2479,31 @@ impl P2PNode {
     }
 
     /// Retrieve a value from the DHT
+    ///
+    /// When a `DhtNetworkManager` is configured, this delegates to the manager
+    /// which can query remote nodes. Otherwise, it retrieves from local storage only.
     pub async fn dht_get(&self, key: crate::dht::Key) -> Result<Option<Vec<u8>>> {
+        // If DhtNetworkManager is available, delegate to it for cross-node lookup
+        if let Some(ref manager) = self.dht_network_manager {
+            match manager.get(&key).await {
+                Ok(crate::dht_network_manager::DhtNetworkResult::GetSuccess { value, .. }) => {
+                    return Ok(Some(value));
+                }
+                Ok(crate::dht_network_manager::DhtNetworkResult::GetNotFound { .. }) => {
+                    return Ok(None);
+                }
+                Ok(_) => {
+                    warn!("Unexpected result from DhtNetworkManager get");
+                    // Fall through to local lookup
+                }
+                Err(e) => {
+                    warn!("DhtNetworkManager get failed, falling back to local: {e}");
+                    // Fall through to local lookup
+                }
+            }
+        }
+
+        // Local-only retrieval (fallback or when manager not available)
         if let Some(ref dht) = self.dht {
             let dht_instance = dht.read().await;
             let dht_key = crate::dht::DhtKey::from_bytes(key);
