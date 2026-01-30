@@ -64,6 +64,7 @@ async fn main() -> Result<()> {
 
     // Create and start the node
     let node = P2PNode::new(config).await?;
+    node.start().await?;
 
     // Handle bootstrap peers
     let mut bootstrap_addrs: Vec<Multiaddr> = Vec::new();

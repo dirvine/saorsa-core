@@ -46,6 +46,7 @@ impl TestUser {
 
         let peer_id = format!("test_user_{}", username);
         let node = P2PNode::new(config).await?;
+        node.start().await?;
 
         Ok(Self {
             node: Arc::new(node),
@@ -55,7 +56,7 @@ impl TestUser {
     }
 
     async fn start(&self) -> Result<()> {
-        // TODO: Implement when node.start() API is available
+        // Node is already started after P2PNode::new() + start() in TestUser::new()
         sleep(Duration::from_millis(100)).await;
         Ok(())
     }

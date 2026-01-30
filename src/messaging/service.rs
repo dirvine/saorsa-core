@@ -293,6 +293,7 @@ impl MessagingService {
             }
 
             let node = crate::network::P2PNode::new(node_config).await?;
+            node.start().await?;
             Arc::new(node)
         };
         let transport = Arc::new(MessageTransport::new(network, dht_client.clone()).await?);

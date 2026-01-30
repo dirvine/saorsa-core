@@ -1037,17 +1037,7 @@ impl P2PNode {
             entangled_id: None,
             binary_hash,
         };
-        info!("Created P2P node with peer ID: {}", node.peer_id);
-
-        // Start the network listeners to populate listen addresses
-        node.start_network_listeners().await?;
-
-        // Update the connection monitor with actual peers reference
-        node.start_connection_monitor().await;
-
-        // Start message receiving system so messages work immediately after node creation
-        // This is critical for basic P2P messaging to work
-        node.start_message_receiving_system().await?;
+        info!("Created P2P node with peer ID: {} (call start() to begin networking)", node.peer_id);
 
         Ok(node)
     }
@@ -1159,11 +1149,12 @@ impl P2PNode {
         // Start listening on configured addresses using transport layer
         self.start_network_listeners().await?;
 
+        // Update the connection monitor with actual peers reference
+        self.start_connection_monitor().await;
+
         // Log current listen addresses
         let listen_addrs = self.listen_addrs.read().await;
         info!("P2P node started on addresses: {:?}", *listen_addrs);
-
-        // MCP removed
 
         // Start message receiving system
         self.start_message_receiving_system().await?;
