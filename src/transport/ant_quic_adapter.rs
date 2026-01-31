@@ -133,6 +133,7 @@ impl P2PNetworkNode<P2pLinkTransport> {
             .bind_addr(bind_addr)
             .max_connections(100)
             .conservative_timeouts()
+            .data_channel_capacity(P2pConfig::DEFAULT_DATA_CHANNEL_CAPACITY)
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build P2P config: {}", e))?;
 
@@ -167,7 +168,8 @@ impl P2PNetworkNode<P2pLinkTransport> {
         let mut builder = P2pConfig::builder()
             .bind_addr(bind_addr)
             .max_connections(100)
-            .conservative_timeouts();
+            .conservative_timeouts()
+            .data_channel_capacity(P2pConfig::DEFAULT_DATA_CHANNEL_CAPACITY);
 
         // Apply NAT traversal settings if present
         if let Some(ref nat_config) = net_config.to_ant_config() {

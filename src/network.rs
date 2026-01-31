@@ -1351,10 +1351,12 @@ impl P2PNode {
         // Set running state to false
         *self.running.write().await = false;
 
-        // Shut down the transport endpoints first.  This cancels the
+        // Shut down the transport endpoints first. This cancels the
         // endpoint CancellationToken which unblocks any recv() calls
         // and aborts per-connection reader tasks inside ant-quic.
-        // Without this, the recv tasks below would block forever.
+        // Note: ant-quic >=0.20 races recv() against the shutdown token
+        // internally, so this is belt-and-suspenders -- but calling it
+        // first is still the safest ordering.
         self.dual_node.shutdown_endpoints().await;
 
         // Await recv system tasks
