@@ -212,6 +212,10 @@ impl P2PNetworkNode<P2pLinkTransport> {
         tx: tokio::sync::mpsc::Sender<(PeerId, Vec<u8>)>,
         shutdown: Arc<AtomicBool>,
     ) -> tokio::task::JoinHandle<()> {
+        /// Maximum size of a single received message (16 MB).
+        /// Messages exceeding this limit are dropped to prevent memory exhaustion.
+        const MAX_RECV_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+
         let transport = Arc::clone(&self.transport);
         tokio::spawn(async move {
             loop {
@@ -220,6 +224,13 @@ impl P2PNetworkNode<P2pLinkTransport> {
                 }
                 match transport.endpoint().recv().await {
                     Ok(msg) => {
+                        if msg.1.len() > MAX_RECV_MESSAGE_SIZE {
+                            tracing::warn!(
+                                "Dropping oversized message ({} bytes) from peer",
+                                msg.1.len()
+                            );
+                            continue;
+                        }
                         if tx.send(msg).await.is_err() {
                             break; // channel closed
                         }

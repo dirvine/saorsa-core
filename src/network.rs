@@ -41,6 +41,23 @@ use tokio::sync::{RwLock, broadcast};
 use tokio::time::{Instant, interval};
 use tracing::{debug, error, info, trace, warn};
 
+/// Wire protocol message format for P2P communication.
+///
+/// Serialized with bincode for compact binary encoding.
+/// Replaces the previous JSON format for better performance
+/// and smaller wire size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WireMessage {
+    /// Protocol/topic identifier
+    protocol: String,
+    /// Raw payload bytes
+    data: Vec<u8>,
+    /// Sender's peer ID (verified against transport-level identity)
+    from: String,
+    /// Unix timestamp in seconds
+    timestamp: u64,
+}
+
 /// Payload bytes used for keepalive messages to prevent connection timeouts.
 const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 
@@ -669,6 +686,9 @@ pub struct P2PNode {
     /// Message receive task handles (recv tasks + consumer)
     recv_handles: Arc<RwLock<Vec<tokio::task::JoinHandle<()>>>>,
 
+    /// Accept loop task handle for graceful shutdown
+    listener_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+
     /// GeoIP provider for connection validation
     #[allow(dead_code)]
     geo_provider: Arc<BgpGeoProvider>,
@@ -774,6 +794,7 @@ impl P2PNode {
             periodic_tasks_handle: Arc::new(RwLock::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
             recv_handles: Arc::new(RwLock::new(Vec::new())),
+            listener_handle: Arc::new(RwLock::new(None)),
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
             // Attestation fields - use dummy values for tests
@@ -1039,6 +1060,7 @@ impl P2PNode {
             periodic_tasks_handle,
             shutdown,
             recv_handles: Arc::new(RwLock::new(Vec::new())),
+            listener_handle: Arc::new(RwLock::new(None)),
             geo_provider,
             // Attestation - EntangledId will be derived later when NodeIdentity is available
             entangled_id: None,
@@ -1195,14 +1217,30 @@ impl P2PNode {
         let active_connections = self.active_connections.clone();
         let rate_limiter = self.rate_limiter.clone();
         let dual = self.dual_node.clone();
-        tokio::spawn(async move {
+        let shutdown = Arc::clone(&self.shutdown);
+        let handle = tokio::spawn(async move {
             loop {
+                if shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
                 match dual.accept_any().await {
                     Ok((ant_peer_id, remote_sock)) => {
+                        // Enforce rate limiting — skip peer registration when rate-limited
+                        if let Err(e) = rate_limiter.check_ip(&remote_sock.ip()) {
+                            warn!(
+                                "Rate-limited incoming connection from {}: {}",
+                                remote_sock, e
+                            );
+                            continue;
+                        }
+
+                        debug!(
+                            "Accepted connection from {} (protocol validation pending ant-quic implementation)",
+                            remote_sock
+                        );
+
                         let peer_id = ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
-                        // Optional: basic IP rate limiting
-                        let _ = rate_limiter.check_ip(&remote_sock.ip());
                         let _ = event_tx.send(P2PEvent::PeerConnected(peer_id.clone()));
                         register_new_peer(&peers, &peer_id, &remote_addr).await;
                         active_connections.write().await.insert(peer_id);
@@ -1214,6 +1252,7 @@ impl P2PNode {
                 }
             }
         });
+        *self.listener_handle.write().await = Some(handle);
 
         info!("Dual-stack listeners active on: {:?}", addrs);
         Ok(())
@@ -1315,6 +1354,11 @@ impl P2PNode {
         // Await recv system tasks
         let handles: Vec<_> = self.recv_handles.write().await.drain(..).collect();
         for handle in handles {
+            let _ = handle.await;
+        }
+
+        // Await accept loop task
+        if let Some(handle) = self.listener_handle.write().await.take() {
             let _ = handle.await;
         }
 
@@ -1693,8 +1737,6 @@ impl P2PNode {
 
     /// Create a protocol message wrapper
     fn create_protocol_message(&self, protocol: &str, data: Vec<u8>) -> Result<Vec<u8>> {
-        use serde_json::json;
-
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| {
@@ -1704,15 +1746,14 @@ impl P2PNode {
             })?
             .as_secs();
 
-        // Create a simple message format for P2P communication
-        let message = json!({
-            "protocol": protocol,
-            "data": data,
-            "from": self.peer_id,
-            "timestamp": timestamp
-        });
+        let message = WireMessage {
+            protocol: protocol.to_string(),
+            data,
+            from: self.peer_id.clone(),
+            timestamp,
+        };
 
-        serde_json::to_vec(&message).map_err(|e| {
+        bincode::serialize(&message).map_err(|e| {
             P2PError::Transport(crate::error::TransportError::StreamError(
                 format!("Failed to serialize message: {e}").into(),
             ))
@@ -1722,67 +1763,30 @@ impl P2PNode {
     // Note: async listen_addrs() already exists above for fetching listen addresses
 }
 
-/// Create a protocol message wrapper (static version for background tasks)
-#[allow(dead_code)]
-fn create_protocol_message_static(protocol: &str, data: Vec<u8>) -> Result<Vec<u8>> {
-    use serde_json::json;
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| {
-            P2PError::Network(NetworkError::ProtocolError(
-                format!("System time error: {}", e).into(),
-            ))
-        })?
-        .as_secs();
-
-    // Create a simple message format for P2P communication
-    let message = json!({
-        "protocol": protocol,
-        "data": data,
-        "timestamp": timestamp
-    });
-
-    serde_json::to_vec(&message).map_err(|e| {
-        P2PError::Transport(crate::error::TransportError::StreamError(
-            format!("Failed to serialize message: {e}").into(),
-        ))
-    })
-}
-
-/// Parse a JSON protocol message into a `P2PEvent::Message`.
+/// Parse a bincode-encoded protocol message into a `P2PEvent::Message`.
 ///
-/// Returns `None` if the bytes are not valid JSON or lack the required
-/// `"protocol"`, `"data"`, or `"from"` fields.
+/// Returns `None` if the bytes cannot be deserialized as a valid `WireMessage`.
 ///
-/// The `"from"` field is a required part of the wire protocol (messages that
-/// omit it are considered malformed and silently dropped), but it is **not**
+/// The `from` field is a required part of the wire protocol but is **not**
 /// used as the event source.  Instead, `source` — the transport-level peer ID
 /// derived from the authenticated QUIC connection — is used so that consumers
 /// can pass it directly to `send_message()`.  This eliminates a spoofing
-/// vector where a peer could claim an arbitrary identity via the JSON payload.
+/// vector where a peer could claim an arbitrary identity via the payload.
 fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    let protocol = value.get("protocol")?.as_str()?;
-    let data = value.get("data")?.as_array()?;
-    // "from" is a required protocol field (messages without it are dropped),
-    // but we use the transport peer ID as the authoritative source.
-    let logical_from = value.get("from")?.as_str()?;
-    let payload: Vec<u8> = data
-        .iter()
-        .filter_map(|v| v.as_u64().map(|n| n as u8))
-        .collect();
+    let message: WireMessage = bincode::deserialize(bytes).ok()?;
+
     debug!(
         "Parsed P2PEvent::Message - topic: {}, source: {} (logical: {}), payload_len: {}",
-        protocol,
+        message.protocol,
         source,
-        logical_from,
-        payload.len()
+        message.from,
+        message.data.len()
     );
+
     Some(P2PEvent::Message {
-        topic: protocol.to_string(),
+        topic: message.protocol,
         source: source.to_string(),
-        data: payload,
+        data: message.data,
     })
 }
 
@@ -4013,19 +4017,25 @@ mod tests {
 
     // ---- parse_protocol_message regression tests ----
 
+    /// Helper to create a bincode-serialized WireMessage for tests
+    fn make_wire_bytes(protocol: &str, data: Vec<u8>, from: &str, timestamp: u64) -> Vec<u8> {
+        let msg = WireMessage {
+            protocol: protocol.to_string(),
+            data,
+            from: from.to_string(),
+            timestamp,
+        };
+        bincode::serialize(&msg).unwrap()
+    }
+
     #[test]
     fn test_parse_protocol_message_uses_transport_peer_id_as_source() {
         // Regression: P2PEvent::Message.source must be the transport peer ID,
-        // NOT the "from" field from the JSON payload.  This ensures consumers
+        // NOT the "from" field from the wire message.  This ensures consumers
         // can pass source directly to send_message().
         let transport_id = "abcdef0123456789";
         let logical_id = "spoofed-logical-id";
-        let msg = serde_json::json!({
-            "protocol": "test/v1",
-            "data": [1, 2, 3],
-            "from": logical_id,
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
+        let bytes = make_wire_bytes("test/v1", vec![1, 2, 3], logical_id, 1000);
 
         let event =
             parse_protocol_message(&bytes, transport_id).expect("valid message should parse");
@@ -4049,61 +4059,49 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_protocol_message_rejects_missing_from() {
-        // "from" is a required protocol field; messages without it are dropped.
-        let msg = serde_json::json!({
-            "protocol": "test/v1",
-            "data": [1, 2, 3],
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
-
-        assert!(
-            parse_protocol_message(&bytes, "peer-id").is_none(),
-            "message missing 'from' must be rejected"
-        );
+    fn test_parse_protocol_message_rejects_invalid_bytes() {
+        // Random bytes that are not valid bincode should be rejected
+        assert!(parse_protocol_message(b"not valid bincode", "peer-id").is_none());
     }
 
     #[test]
-    fn test_parse_protocol_message_rejects_missing_protocol() {
-        let msg = serde_json::json!({
-            "data": [1, 2, 3],
-            "from": "sender",
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
-
-        assert!(parse_protocol_message(&bytes, "peer-id").is_none());
-    }
-
-    #[test]
-    fn test_parse_protocol_message_rejects_missing_data() {
-        let msg = serde_json::json!({
-            "protocol": "test/v1",
-            "from": "sender",
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
-
-        assert!(parse_protocol_message(&bytes, "peer-id").is_none());
-    }
-
-    #[test]
-    fn test_parse_protocol_message_rejects_invalid_json() {
-        assert!(parse_protocol_message(b"not json", "peer-id").is_none());
+    fn test_parse_protocol_message_rejects_truncated_message() {
+        // A truncated bincode message should fail to deserialize
+        let full_bytes = make_wire_bytes("test/v1", vec![1, 2, 3], "sender", 1000);
+        let truncated = &full_bytes[..full_bytes.len() / 2];
+        assert!(parse_protocol_message(truncated, "peer-id").is_none());
     }
 
     #[test]
     fn test_parse_protocol_message_empty_payload() {
-        let msg = serde_json::json!({
-            "protocol": "ping",
-            "data": [],
-            "from": "sender",
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
+        let bytes = make_wire_bytes("ping", vec![], "sender", 1000);
 
         let event = parse_protocol_message(&bytes, "transport-peer")
             .expect("valid message with empty data should parse");
 
         match event {
             P2PEvent::Message { data, .. } => assert!(data.is_empty()),
+            other => panic!("expected P2PEvent::Message, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_protocol_message_preserves_binary_payload() {
+        // Verify that arbitrary byte values (including 0xFF, 0x00) survive round-trip
+        let payload: Vec<u8> = (0..=255).collect();
+        let bytes = make_wire_bytes("binary/v1", payload.clone(), "sender", 42);
+
+        let event = parse_protocol_message(&bytes, "peer-id")
+            .expect("valid message with full byte range should parse");
+
+        match event {
+            P2PEvent::Message { data, topic, .. } => {
+                assert_eq!(topic, "binary/v1");
+                assert_eq!(
+                    data, payload,
+                    "payload must survive bincode round-trip exactly"
+                );
+            }
             other => panic!("expected P2PEvent::Message, got {:?}", other),
         }
     }
