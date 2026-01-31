@@ -223,19 +223,22 @@ impl P2PNetworkNode<P2pLinkTransport> {
                     break;
                 }
                 match transport.endpoint().recv().await {
-                    Ok(msg) => {
-                        if msg.1.len() > MAX_RECV_MESSAGE_SIZE {
+                    Ok((peer_id, data)) => {
+                        if data.len() > MAX_RECV_MESSAGE_SIZE {
                             tracing::warn!(
                                 "Dropping oversized message ({} bytes) from peer",
-                                msg.1.len()
+                                data.len()
                             );
                             continue;
                         }
-                        if tx.send(msg).await.is_err() {
+                        if tx.send((peer_id, data)).await.is_err() {
                             break; // channel closed
                         }
                     }
-                    Err(_) => break, // endpoint shutting down or channel closed
+                    Err(e) => {
+                        tracing::debug!("Recv task exiting: {e}");
+                        break;
+                    }
                 }
             }
         })
