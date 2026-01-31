@@ -776,6 +776,21 @@ pub struct DualStackNetworkNode<T: LinkTransport = P2pLinkTransport> {
 }
 
 impl DualStackNetworkNode<P2pLinkTransport> {
+    /// Shut down the underlying QUIC endpoints on both stacks.
+    ///
+    /// This cancels each endpoint's internal `CancellationToken`, which
+    /// unblocks any in-flight `recv()` calls and aborts per-connection
+    /// reader tasks.  Call this **before** joining background tasks that
+    /// are blocked inside `endpoint().recv()`.
+    pub async fn shutdown_endpoints(&self) {
+        if let Some(ref v6) = self.v6 {
+            v6.transport.endpoint().shutdown().await;
+        }
+        if let Some(ref v4) = self.v4 {
+            v4.transport.endpoint().shutdown().await;
+        }
+    }
+
     /// Create dual nodes bound to IPv6 and IPv4 addresses
     pub async fn new(v6_addr: Option<SocketAddr>, v4_addr: Option<SocketAddr>) -> Result<Self> {
         let v6 = if let Some(addr) = v6_addr {

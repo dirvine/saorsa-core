@@ -1351,6 +1351,12 @@ impl P2PNode {
         // Set running state to false
         *self.running.write().await = false;
 
+        // Shut down the transport endpoints first.  This cancels the
+        // endpoint CancellationToken which unblocks any recv() calls
+        // and aborts per-connection reader tasks inside ant-quic.
+        // Without this, the recv tasks below would block forever.
+        self.dual_node.shutdown_endpoints().await;
+
         // Await recv system tasks
         let handles: Vec<_> = self.recv_handles.write().await.drain(..).collect();
         for handle in handles {
