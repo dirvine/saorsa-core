@@ -170,7 +170,7 @@ Advanced storage orchestration with EigenTrust integration:
 ### Feature Flags
 ```toml
 default = ["metrics"]
-metrics = ["dep:prometheus", "ant-quic/prometheus"]  # Prometheus monitoring
+metrics = ["dep:prometheus"]  # Prometheus monitoring
 ```
 
 ## Testing Infrastructure
