@@ -126,12 +126,24 @@ pub struct P2PNetworkNode<T: LinkTransport = P2pLinkTransport> {
     shared_transport: Arc<SharedTransport<T>>,
 }
 
+/// Default maximum number of concurrent QUIC connections when not
+/// explicitly configured.
+pub const DEFAULT_MAX_CONNECTIONS: usize = 100;
+
 impl P2PNetworkNode<P2pLinkTransport> {
     /// Create a new P2P network node with default P2pLinkTransport
     pub async fn new(bind_addr: SocketAddr) -> Result<Self> {
+        Self::new_with_max_connections(bind_addr, DEFAULT_MAX_CONNECTIONS).await
+    }
+
+    /// Create a new P2P network node with a specific connection limit.
+    pub async fn new_with_max_connections(
+        bind_addr: SocketAddr,
+        max_connections: usize,
+    ) -> Result<Self> {
         let config = P2pConfig::builder()
             .bind_addr(bind_addr)
-            .max_connections(100)
+            .max_connections(max_connections)
             .conservative_timeouts()
             .data_channel_capacity(P2pConfig::DEFAULT_DATA_CHANNEL_CAPACITY)
             .build()
@@ -167,7 +179,7 @@ impl P2PNetworkNode<P2pLinkTransport> {
         // Build P2pConfig based on NetworkConfig
         let mut builder = P2pConfig::builder()
             .bind_addr(bind_addr)
-            .max_connections(100)
+            .max_connections(DEFAULT_MAX_CONNECTIONS)
             .conservative_timeouts()
             .data_channel_capacity(P2pConfig::DEFAULT_DATA_CHANNEL_CAPACITY);
 
@@ -196,6 +208,24 @@ impl P2PNetworkNode<P2pLinkTransport> {
             .send(peer_id, data)
             .await
             .map_err(|e| anyhow::anyhow!("Send failed: {e}"))
+    }
+
+    /// Disconnect a specific peer, closing the underlying QUIC connection.
+    ///
+    /// Calls `P2pEndpoint::disconnect()` to tear down the QUIC connection
+    /// and abort the per-connection reader task, then removes the peer from
+    /// the local registry.
+    pub async fn disconnect_peer_quic(&self, peer_id: &PeerId) {
+        if let Err(e) = self.transport.endpoint().disconnect(peer_id).await {
+            tracing::debug!("QUIC disconnect for peer {}: {}", peer_id, e);
+        }
+        // Also clean up from generic adapter state
+        P2PNetworkNode::<P2pLinkTransport>::disconnect_peer_inner(
+            &self.peers,
+            &self.peer_quality,
+            peer_id,
+        )
+        .await;
     }
 
     /// Spawn a background task that continuously receives messages from the
@@ -760,6 +790,31 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         self.event_tx.subscribe()
     }
 
+    /// Disconnect a specific peer by removing it from local tracking.
+    ///
+    /// For `P2pLinkTransport`, prefer `disconnect_peer_quic()` which also
+    /// tears down the underlying QUIC connection.
+    pub async fn disconnect_peer(&self, peer_id: &PeerId) {
+        Self::disconnect_peer_inner(&self.peers, &self.peer_quality, peer_id).await;
+    }
+
+    /// Shared helper to remove a peer from adapter-level tracking.
+    async fn disconnect_peer_inner(
+        peers: &RwLock<Vec<(PeerId, SocketAddr)>>,
+        peer_quality: &RwLock<HashMap<PeerId, f32>>,
+        peer_id: &PeerId,
+    ) {
+        {
+            let mut peers = peers.write().await;
+            peers.retain(|(p, _)| p != peer_id);
+        }
+        {
+            let mut quality_map = peer_quality.write().await;
+            quality_map.remove(peer_id);
+        }
+        tracing::debug!("Disconnected peer {} from adapter", peer_id);
+    }
+
     /// Shutdown the node gracefully
     pub async fn shutdown(&mut self) {
         tracing::info!("Shutting down P2PNetworkNode");
@@ -796,15 +851,26 @@ impl DualStackNetworkNode<P2pLinkTransport> {
         }
     }
 
-    /// Create dual nodes bound to IPv6 and IPv4 addresses
+    /// Create dual nodes bound to IPv6 and IPv4 addresses with default
+    /// connection limit.
     pub async fn new(v6_addr: Option<SocketAddr>, v4_addr: Option<SocketAddr>) -> Result<Self> {
+        Self::new_with_max_connections(v6_addr, v4_addr, DEFAULT_MAX_CONNECTIONS).await
+    }
+
+    /// Create dual nodes with an explicit maximum connection limit that
+    /// is forwarded to `P2pConfig::max_connections`.
+    pub async fn new_with_max_connections(
+        v6_addr: Option<SocketAddr>,
+        v4_addr: Option<SocketAddr>,
+        max_connections: usize,
+    ) -> Result<Self> {
         let v6 = if let Some(addr) = v6_addr {
-            Some(P2PNetworkNode::new(addr).await?)
+            Some(P2PNetworkNode::new_with_max_connections(addr, max_connections).await?)
         } else {
             None
         };
         let v4 = if let Some(addr) = v4_addr {
-            Some(P2PNetworkNode::new(addr).await?)
+            Some(P2PNetworkNode::new_with_max_connections(addr, max_connections).await?)
         } else {
             None
         };
@@ -836,6 +902,28 @@ impl DualStackNetworkNode<P2pLinkTransport> {
         let ant_peer = string_to_ant_peer_id(peer_id)
             .map_err(|e| anyhow::anyhow!("Invalid peer ID: {}", e))?;
         self.send_to_peer_optimized(&ant_peer, data).await
+    }
+
+    /// Disconnect a peer by closing the underlying QUIC connection.
+    ///
+    /// Tries both IPv6 and IPv4 stacks. Uses `P2pEndpoint::disconnect()`
+    /// to actively tear down the QUIC connection rather than waiting for
+    /// idle timeout.
+    pub async fn disconnect_peer(&self, peer_id: &PeerId) {
+        if let Some(ref v6) = self.v6 {
+            v6.disconnect_peer_quic(peer_id).await;
+        }
+        if let Some(ref v4) = self.v4 {
+            v4.disconnect_peer_quic(peer_id).await;
+        }
+    }
+
+    /// Disconnect a peer by string PeerId.
+    pub async fn disconnect_peer_string(&self, peer_id: &str) -> Result<()> {
+        let ant_peer = string_to_ant_peer_id(peer_id)
+            .map_err(|e| anyhow::anyhow!("Invalid peer ID: {}", e))?;
+        self.disconnect_peer(&ant_peer).await;
+        Ok(())
     }
 }
 
