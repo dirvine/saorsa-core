@@ -19,10 +19,8 @@
 use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
-use crate::control::RejectionMessage;
 use crate::dht::DHT;
 use crate::error::{NetworkError, P2PError, P2pResult as Result};
-use crate::identity::rejection::RejectionReason;
 use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
@@ -948,7 +946,7 @@ impl P2PNode {
         };
 
         let dual_node = Arc::new(
-            DualStackNetworkNode::new(v6_opt, v4_opt)
+            DualStackNetworkNode::new_with_max_connections(v6_opt, v4_opt, config.max_connections)
                 .await
                 .map_err(|e| {
                     P2PError::Transport(crate::error::TransportError::SetupFailed(
@@ -1557,8 +1555,9 @@ impl P2PNode {
                         "Detected self-connection to own address {} (peer_id: {}), rejecting",
                         address, connected_peer_id
                     );
-                    // Don't add this connection to our peer list - the underlying QUIC connection
-                    // will eventually timeout, but we won't track it as a valid peer
+                    // Actively close the QUIC connection instead of leaking it
+                    // until idle timeout
+                    self.dual_node.disconnect_peer(&peer).await;
                     return Err(P2PError::Network(
                         crate::error::NetworkError::InvalidAddress(
                             format!("Cannot connect to self ({})", address).into(),
@@ -1620,8 +1619,16 @@ impl P2PNode {
     }
 
     /// Disconnect from a peer
+    ///
+    /// Actively closes the underlying QUIC connection via
+    /// `P2pEndpoint::disconnect()` and removes the peer from all
+    /// local tracking maps.
     pub async fn disconnect_peer(&self, peer_id: &PeerId) -> Result<()> {
         info!("Disconnecting from peer: {}", peer_id);
+
+        // Close the actual QUIC connection so the remote side is notified
+        // immediately rather than waiting for idle timeout.
+        self.dual_node.disconnect_peer_string(peer_id).await.ok();
 
         // Remove from active connections
         self.active_connections.write().await.remove(peer_id);
@@ -2021,7 +2028,7 @@ impl P2PNode {
     /// where early connections could be missed if subscription happens after the task starts.
     #[allow(clippy::too_many_arguments)]
     async fn connection_lifecycle_monitor_with_rx(
-        _dual_node: Arc<DualStackNetworkNode>,
+        dual_node: Arc<DualStackNetworkNode>,
         mut event_rx: broadcast::Receiver<crate::transport::ant_quic_adapter::ConnectionEvent>,
         active_connections: Arc<RwLock<HashSet<String>>>,
         peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
@@ -2069,6 +2076,9 @@ impl P2PNode {
                                     "Rejecting connection from {} ({}) due to GeoIP policy",
                                     peer_id_str, remote_address
                                 );
+                                // Actively close the QUIC connection instead of
+                                // leaking it until idle timeout
+                                dual_node.disconnect_peer(&peer_id).await;
                                 continue;
                             }
 
@@ -2147,184 +2157,6 @@ impl P2PNode {
         }
     }
 
-    /// Connection lifecycle monitor task - processes ant-quic connection events
-    /// and updates active_connections HashSet and peers map
-    ///
-    /// DEPRECATED: Use `connection_lifecycle_monitor_with_rx` instead to avoid race conditions
-    #[allow(dead_code)]
-    async fn connection_lifecycle_monitor(
-        dual_node: Arc<DualStackNetworkNode>,
-        active_connections: Arc<RwLock<HashSet<String>>>,
-        peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
-        event_tx: broadcast::Sender<P2PEvent>,
-        geo_provider: Arc<BgpGeoProvider>,
-        local_peer_id: String,
-    ) {
-        use crate::transport::ant_quic_adapter::ConnectionEvent;
-
-        let mut event_rx = dual_node.subscribe_connection_events();
-
-        info!("Connection lifecycle monitor started");
-
-        loop {
-            match event_rx.recv().await {
-                Ok(event) => {
-                    match event {
-                        ConnectionEvent::Established {
-                            peer_id,
-                            remote_address,
-                        } => {
-                            let peer_id_str = ant_peer_id_to_string(&peer_id);
-                            debug!(
-                                "Connection established: peer={}, addr={}",
-                                peer_id_str, remote_address
-                            );
-
-                            // **GeoIP Validation**
-                            // Check if the peer's IP is allowed
-                            let ip = remote_address.ip();
-                            let is_rejected = match ip {
-                                std::net::IpAddr::V4(v4) => {
-                                    // Check if it's a hosting provider or VPN
-                                    if let Some(asn) = geo_provider.lookup_ipv4_asn(v4) {
-                                        geo_provider.is_hosting_asn(asn)
-                                            || geo_provider.is_vpn_asn(asn)
-                                    } else {
-                                        false
-                                    }
-                                }
-                                std::net::IpAddr::V6(v6) => {
-                                    let info = geo_provider.lookup(v6);
-                                    info.is_hosting_provider || info.is_vpn_provider
-                                }
-                            };
-
-                            if is_rejected {
-                                info!(
-                                    "Rejecting connection from {} ({}) due to GeoIP policy (Hosting/VPN)",
-                                    peer_id_str, remote_address
-                                );
-
-                                // Create rejection message
-                                let rejection = RejectionMessage {
-                                    reason: RejectionReason::GeoIpPolicy,
-                                    message:
-                                        "Connection rejected: Hosting/VPN providers not allowed"
-                                            .to_string(),
-                                    suggested_target: None, // Could suggest a different region if we knew more
-                                };
-
-                                // Serialize message
-                                if let Ok(data) = serde_json::to_vec(&rejection) {
-                                    // Create protocol message
-                                    let timestamp = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs();
-
-                                    let message = serde_json::json!({
-                                        "protocol": "control",
-                                        "data": data,
-                                        "from": local_peer_id,
-                                        "timestamp": timestamp
-                                    });
-
-                                    if let Ok(msg_bytes) = serde_json::to_vec(&message) {
-                                        // Send rejection message
-                                        // We use send_to_peer directly on dual_node to avoid the checks in P2PNode::send_message
-                                        // which might fail if we haven't fully registered the peer yet
-                                        let _ = dual_node.send_to_peer(&peer_id, &msg_bytes).await;
-
-                                        // Give it a moment to send before disconnecting?
-                                        // ant-quic might handle this, but a small yield is safe
-                                        tokio::task::yield_now().await;
-                                    }
-                                }
-
-                                // Disconnect (TODO: Add disconnect method to dual_node or just drop?)
-                                // For now, we just don't add it to active connections, effectively ignoring it
-                                // Ideally we should actively close the connection
-                                continue;
-                            }
-
-                            // Add to active connections
-                            active_connections.write().await.insert(peer_id_str.clone());
-
-                            // Update peer info or insert new
-                            let mut peers_lock = peers.write().await;
-                            if let Some(peer_info) = peers_lock.get_mut(&peer_id_str) {
-                                peer_info.status = ConnectionStatus::Connected;
-                                peer_info.connected_at = Instant::now();
-                            } else {
-                                // New incoming peer
-                                debug!("Registering new incoming peer: {}", peer_id_str);
-                                peers_lock.insert(
-                                    peer_id_str.clone(),
-                                    PeerInfo {
-                                        peer_id: peer_id_str.clone(),
-                                        addresses: vec![remote_address.to_string()],
-                                        status: ConnectionStatus::Connected,
-                                        last_seen: Instant::now(),
-                                        connected_at: Instant::now(),
-                                        protocols: Vec::new(),
-                                        heartbeat_count: 0,
-                                    },
-                                );
-                            }
-
-                            // Broadcast connection event
-                            let _ = event_tx.send(P2PEvent::PeerConnected(peer_id_str));
-                        }
-                        ConnectionEvent::Lost { peer_id, reason } => {
-                            let peer_id_str = ant_peer_id_to_string(&peer_id);
-                            debug!("Connection lost: peer={}, reason={}", peer_id_str, reason);
-
-                            // Remove from active connections
-                            active_connections.write().await.remove(&peer_id_str);
-
-                            // Update peer info status
-                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
-                                peer_info.status = ConnectionStatus::Disconnected;
-                                peer_info.last_seen = Instant::now();
-                            }
-
-                            // Broadcast disconnection event
-                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
-                        }
-                        ConnectionEvent::Failed { peer_id, reason } => {
-                            let peer_id_str = ant_peer_id_to_string(&peer_id);
-                            warn!("Connection failed: peer={}, reason={}", peer_id_str, reason);
-
-                            // Remove from active connections
-                            active_connections.write().await.remove(&peer_id_str);
-
-                            // Update peer info status
-                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
-                                peer_info.status = ConnectionStatus::Failed(reason.clone());
-                            }
-
-                            // Broadcast disconnection event
-                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
-                        }
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    warn!(
-                        "Connection event monitor lagged, skipped {} events",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    info!("Connection event channel closed, stopping monitor");
-                    break;
-                }
-            }
-        }
-
-        info!("Connection lifecycle monitor stopped");
-    }
-
     /// Start connection monitor (called after node initialization)
     async fn start_connection_monitor(&self) {
         // The monitor task is already spawned in new() with a temporary peers map
@@ -2372,25 +2204,28 @@ impl P2PNode {
 
             debug!("Sending keepalive to {} active connections", peers.len());
 
-            // Send keepalive to each peer using optimized send method
-            // This uses P2pEndpoint::send() which corresponds with recv()
-            for peer_id in peers {
-                match dual_node
-                    .send_to_peer_string_optimized(&peer_id, KEEPALIVE_PAYLOAD)
-                    .await
-                {
-                    Ok(_) => {
-                        trace!("Keepalive sent to peer: {}", peer_id);
+            // Send keepalives concurrently so one slow/stuck peer doesn't
+            // delay keepalives to all others and cause cascading timeouts.
+            let futs: Vec<_> = peers
+                .into_iter()
+                .map(|peer_id| {
+                    let node = Arc::clone(&dual_node);
+                    async move {
+                        if let Err(e) = node
+                            .send_to_peer_string_optimized(&peer_id, KEEPALIVE_PAYLOAD)
+                            .await
+                        {
+                            debug!(
+                                "Failed to send keepalive to peer {}: {} (connection may have closed)",
+                                peer_id, e
+                            );
+                        } else {
+                            trace!("Keepalive sent to peer: {}", peer_id);
+                        }
                     }
-                    Err(e) => {
-                        debug!(
-                            "Failed to send keepalive to peer {}: {} (connection may have closed)",
-                            peer_id, e
-                        );
-                        // Don't remove from active_connections here - let the lifecycle monitor handle it
-                    }
-                }
-            }
+                })
+                .collect();
+            futures::future::join_all(futs).await;
         }
 
         info!("Keepalive task stopped");
