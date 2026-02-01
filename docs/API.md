@@ -596,7 +596,7 @@ Enable optional features in `Cargo.toml`:
 
 ```toml
 [dependencies]
-saorsa-core = { version = "0.5", features = ["metrics"] }
+saorsa-core = { version = "0.10", features = ["metrics"] }
 ```
 
 | Feature | Description |
@@ -627,8 +627,9 @@ spawn(async move {
 
 | saorsa-core | ant-quic | Rust | Features |
 |-------------|----------|------|----------|
-| 0.5.x | 0.14.x | 1.75+ | Full PQC, unified config |
-| 0.4.x | 0.10.x | 1.70+ | NAT traversal |
+| 0.10.x | 0.21.x | 1.78+ | Event-driven recv, PQC-only transport |
+| 0.4.x–0.9.x | 0.14.x | 1.75+ | Unified config, PQC integration |
+| 0.3.x | 0.10.x | 1.70+ | NAT traversal |
 
 ---
 
