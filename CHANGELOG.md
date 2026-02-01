@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-02-01
+
+### Changed
+- **ant-quic v0.20+ Migration**: Migrated from polling-based `receive_from_any_peer` API to event-driven channel-based `recv()` architecture
+- **Wire Protocol**: Replaced JSON wire protocol with bincode for compact binary encoding via typed `WireMessage` struct
+- **Graceful Shutdown**: Implemented proper shutdown: signal tasks → shut down QUIC endpoints → join task handles
+- **Keepalive Optimization**: Converted sequential keepalive sending to concurrent via `join_all()`
+
+### Added
+- **transport_peer_id()**: Added `P2PNode::transport_peer_id()` for transport-level peer identification
+- **disconnect_peer()**: Added active connection cleanup instead of leaking until idle timeout
+- **Configurable max_connections**: Wired `NodeConfig.max_connections` through to `P2pConfig`
+
+### Fixed
+- **Connection Lifecycle**: Close leaked QUIC connections properly
+- **Message Pipeline**: Hardened receive pipeline with bincode migration and safety checks
+- **Shutdown Hang**: Shut down QUIC endpoints before joining recv tasks
+- **Receive Loop**: Removed duplicate receive loops by moving networking setup from new() to start()
+- **Event Source**: Use transport peer ID as P2PEvent source for correct message routing
+- **CI Workflow**: Fixed minimal-versions job to use nightly toolchain for `-Z` flag support
+
+### Removed
+- **connection_lifecycle_monitor()**: Removed deprecated function with JSON/bincode serialization mismatch
+
 ## [0.10.1] - 2026-01-29
 
 ### Changed
