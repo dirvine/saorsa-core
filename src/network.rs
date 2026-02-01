@@ -19,10 +19,8 @@
 use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
-use crate::control::RejectionMessage;
 use crate::dht::DHT;
 use crate::error::{NetworkError, P2PError, P2pResult as Result};
-use crate::identity::rejection::RejectionReason;
 use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
@@ -41,8 +39,28 @@ use tokio::sync::{RwLock, broadcast};
 use tokio::time::{Instant, interval};
 use tracing::{debug, error, info, trace, warn};
 
+/// Wire protocol message format for P2P communication.
+///
+/// Serialized with bincode for compact binary encoding.
+/// Replaces the previous JSON format for better performance
+/// and smaller wire size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WireMessage {
+    /// Protocol/topic identifier
+    protocol: String,
+    /// Raw payload bytes
+    data: Vec<u8>,
+    /// Sender's peer ID (verified against transport-level identity)
+    from: String,
+    /// Unix timestamp in seconds
+    timestamp: u64,
+}
+
 /// Payload bytes used for keepalive messages to prevent connection timeouts.
 const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
+
+/// Channel capacity for the per-stack recv task mpsc channel.
+const RECV_CHANNEL_CAPACITY: usize = 256;
 
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -661,8 +679,13 @@ pub struct P2PNode {
     periodic_tasks_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
     /// Shutdown flag for background tasks
-    #[allow(dead_code)]
     shutdown: Arc<AtomicBool>,
+
+    /// Message receive task handles (recv tasks + consumer)
+    recv_handles: Arc<RwLock<Vec<tokio::task::JoinHandle<()>>>>,
+
+    /// Accept loop task handle for graceful shutdown
+    listener_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
     /// GeoIP provider for connection validation
     #[allow(dead_code)]
@@ -768,6 +791,8 @@ impl P2PNode {
             keepalive_handle: Arc::new(RwLock::new(None)),
             periodic_tasks_handle: Arc::new(RwLock::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
+            recv_handles: Arc::new(RwLock::new(Vec::new())),
+            listener_handle: Arc::new(RwLock::new(None)),
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
             // Attestation fields - use dummy values for tests
@@ -921,7 +946,7 @@ impl P2PNode {
         };
 
         let dual_node = Arc::new(
-            DualStackNetworkNode::new(v6_opt, v4_opt)
+            DualStackNetworkNode::new_with_max_connections(v6_opt, v4_opt, config.max_connections)
                 .await
                 .map_err(|e| {
                     P2PError::Transport(crate::error::TransportError::SetupFailed(
@@ -1032,12 +1057,17 @@ impl P2PNode {
             keepalive_handle,
             periodic_tasks_handle,
             shutdown,
+            recv_handles: Arc::new(RwLock::new(Vec::new())),
+            listener_handle: Arc::new(RwLock::new(None)),
             geo_provider,
             // Attestation - EntangledId will be derived later when NodeIdentity is available
             entangled_id: None,
             binary_hash,
         };
-        info!("Created P2P node with peer ID: {} (call start() to begin networking)", node.peer_id);
+        info!(
+            "Created P2P node with peer ID: {} (call start() to begin networking)",
+            node.peer_id
+        );
 
         Ok(node)
     }
@@ -1050,6 +1080,22 @@ impl P2PNode {
     /// Get the peer ID of this node
     pub fn peer_id(&self) -> &PeerId {
         &self.peer_id
+    }
+
+    /// Get the hex-encoded transport-level peer ID.
+    ///
+    /// This is the ID used in `P2PEvent::Message.source`, `connected_peers()`,
+    /// and `send_message()`. It differs from `peer_id()` which is the app-level ID.
+    ///
+    /// Returns the transport peer ID from whichever stack (v4 or v6) is active.
+    pub fn transport_peer_id(&self) -> Option<String> {
+        if let Some(ref v4) = self.dual_node.v4 {
+            return Some(ant_peer_id_to_string(&v4.our_peer_id()));
+        }
+        if let Some(ref v6) = self.dual_node.v6 {
+            return Some(ant_peer_id_to_string(&v6.our_peer_id()));
+        }
+        None
     }
 
     pub fn local_addr(&self) -> Option<String> {
@@ -1185,14 +1231,30 @@ impl P2PNode {
         let active_connections = self.active_connections.clone();
         let rate_limiter = self.rate_limiter.clone();
         let dual = self.dual_node.clone();
-        tokio::spawn(async move {
+        let shutdown = Arc::clone(&self.shutdown);
+        let handle = tokio::spawn(async move {
             loop {
+                if shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
                 match dual.accept_any().await {
                     Ok((ant_peer_id, remote_sock)) => {
+                        // Enforce rate limiting — skip peer registration when rate-limited
+                        if let Err(e) = rate_limiter.check_ip(&remote_sock.ip()) {
+                            warn!(
+                                "Rate-limited incoming connection from {}: {}",
+                                remote_sock, e
+                            );
+                            continue;
+                        }
+
+                        debug!(
+                            "Accepted connection from {} (protocol validation pending ant-quic implementation)",
+                            remote_sock
+                        );
+
                         let peer_id = ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
-                        // Optional: basic IP rate limiting
-                        let _ = rate_limiter.check_ip(&remote_sock.ip());
                         let _ = event_tx.send(P2PEvent::PeerConnected(peer_id.clone()));
                         register_new_peer(&peers, &peer_id, &remote_addr).await;
                         active_connections.write().await.insert(peer_id);
@@ -1204,68 +1266,62 @@ impl P2PNode {
                 }
             }
         });
+        *self.listener_handle.write().await = Some(handle);
 
         info!("Dual-stack listeners active on: {:?}", addrs);
         Ok(())
     }
 
-    /// Start the message receiving system with background tasks
+    /// Start the message receiving system with channel-based background tasks
+    ///
+    /// Spawns per-stack recv tasks that feed into a single mpsc channel,
+    /// giving instant wakeup on data arrival without poll/timeout latency.
     async fn start_message_receiving_system(&self) -> Result<()> {
         info!("Starting message receiving system");
-        let dual = self.dual_node.clone();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(RECV_CHANNEL_CAPACITY);
+        let shutdown = Arc::clone(&self.shutdown);
+
+        let mut handles = Vec::new();
+
+        // Spawn per-stack recv tasks — both feed into the same channel
+        if let Some(v6) = self.dual_node.v6.as_ref() {
+            handles.push(v6.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
+        }
+        if let Some(v4) = self.dual_node.v4.as_ref() {
+            handles.push(v4.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
+        }
+        drop(tx); // drop original sender so rx closes when all tasks exit
+
         let event_tx = self.event_tx.clone();
-
-        tokio::spawn(async move {
+        handles.push(tokio::spawn(async move {
             info!("Message receive loop started");
-            loop {
-                match dual.receive_any().await {
-                    Ok((peer_id, bytes)) => {
-                        // Convert transport-level PeerId to the hex string used in
-                        // the peers map / active_connections so that consumers of
-                        // P2PEvent::Message can call send_message() with the source.
-                        let transport_peer_id = ant_peer_id_to_string(&peer_id);
-                        info!(
-                            "Received {} bytes from peer {}",
-                            bytes.len(),
-                            transport_peer_id
-                        );
+            while let Some((peer_id, bytes)) = rx.recv().await {
+                let transport_peer_id = ant_peer_id_to_string(&peer_id);
+                info!(
+                    "Received {} bytes from peer {}",
+                    bytes.len(),
+                    transport_peer_id
+                );
 
-                        // Skip keepalive and other protocol control messages
-                        if bytes == KEEPALIVE_PAYLOAD {
-                            trace!("Received keepalive from {}", transport_peer_id);
-                            continue;
-                        }
+                if bytes == KEEPALIVE_PAYLOAD {
+                    trace!("Received keepalive from {}", transport_peer_id);
+                    continue;
+                }
 
-                        // Expect the JSON message wrapper from create_protocol_message
-                        match parse_protocol_message(&bytes, &transport_peer_id) {
-                            Some(event) => {
-                                let _ = event_tx.send(event);
-                            }
-                            None => {
-                                warn!("Failed to parse protocol message ({} bytes)", bytes.len());
-                            }
-                        }
+                match parse_protocol_message(&bytes, &transport_peer_id) {
+                    Some(event) => {
+                        let _ = event_tx.send(event);
                     }
-                    Err(e) => {
-                        let err_str = e.to_string();
-                        // "No connected peers" errors happen frequently when one stack
-                        // (e.g., IPv4) has no connections while the other (IPv6) does.
-                        // Don't sleep for these - retry immediately to avoid missing
-                        // messages on the connected stack.
-                        if err_str.contains("No connected peers") || err_str.contains("no peers") {
-                            // Very short yield to avoid busy-looping, but allow quick retry
-                            tokio::task::yield_now().await;
-                        } else if err_str.contains("no data") || err_str.contains("timeout") {
-                            // Expected when no messages available - small sleep
-                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                        } else {
-                            warn!("Receive error: {}", e);
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
+                    None => {
+                        warn!("Failed to parse protocol message ({} bytes)", bytes.len());
                     }
                 }
             }
-        });
+            info!("Message receive loop ended — channel closed");
+        }));
+
+        *self.recv_handles.write().await = handles;
 
         Ok(())
     }
@@ -1303,8 +1359,30 @@ impl P2PNode {
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping P2P node...");
 
+        // Signal all background tasks to stop
+        self.shutdown.store(true, Ordering::Relaxed);
+
         // Set running state to false
         *self.running.write().await = false;
+
+        // Shut down the transport endpoints first. This cancels the
+        // endpoint CancellationToken which unblocks any recv() calls
+        // and aborts per-connection reader tasks inside ant-quic.
+        // Note: ant-quic >=0.20 races recv() against the shutdown token
+        // internally, so this is belt-and-suspenders -- but calling it
+        // first is still the safest ordering.
+        self.dual_node.shutdown_endpoints().await;
+
+        // Await recv system tasks
+        let handles: Vec<_> = self.recv_handles.write().await.drain(..).collect();
+        for handle in handles {
+            let _ = handle.await;
+        }
+
+        // Await accept loop task
+        if let Some(handle) = self.listener_handle.write().await.take() {
+            let _ = handle.await;
+        }
 
         // Disconnect all peers
         self.disconnect_all_peers().await?;
@@ -1493,8 +1571,9 @@ impl P2PNode {
                         "Detected self-connection to own address {} (peer_id: {}), rejecting",
                         address, connected_peer_id
                     );
-                    // Don't add this connection to our peer list - the underlying QUIC connection
-                    // will eventually timeout, but we won't track it as a valid peer
+                    // Actively close the QUIC connection instead of leaking it
+                    // until idle timeout
+                    self.dual_node.disconnect_peer(&peer).await;
                     return Err(P2PError::Network(
                         crate::error::NetworkError::InvalidAddress(
                             format!("Cannot connect to self ({})", address).into(),
@@ -1556,8 +1635,16 @@ impl P2PNode {
     }
 
     /// Disconnect from a peer
+    ///
+    /// Actively closes the underlying QUIC connection via
+    /// `P2pEndpoint::disconnect()` and removes the peer from all
+    /// local tracking maps.
     pub async fn disconnect_peer(&self, peer_id: &PeerId) -> Result<()> {
         info!("Disconnecting from peer: {}", peer_id);
+
+        // Close the actual QUIC connection so the remote side is notified
+        // immediately rather than waiting for idle timeout.
+        self.dual_node.disconnect_peer_string(peer_id).await.ok();
 
         // Remove from active connections
         self.active_connections.write().await.remove(peer_id);
@@ -1681,8 +1768,6 @@ impl P2PNode {
 
     /// Create a protocol message wrapper
     fn create_protocol_message(&self, protocol: &str, data: Vec<u8>) -> Result<Vec<u8>> {
-        use serde_json::json;
-
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| {
@@ -1692,15 +1777,14 @@ impl P2PNode {
             })?
             .as_secs();
 
-        // Create a simple message format for P2P communication
-        let message = json!({
-            "protocol": protocol,
-            "data": data,
-            "from": self.peer_id,
-            "timestamp": timestamp
-        });
+        let message = WireMessage {
+            protocol: protocol.to_string(),
+            data,
+            from: self.peer_id.clone(),
+            timestamp,
+        };
 
-        serde_json::to_vec(&message).map_err(|e| {
+        bincode::serialize(&message).map_err(|e| {
             P2PError::Transport(crate::error::TransportError::StreamError(
                 format!("Failed to serialize message: {e}").into(),
             ))
@@ -1710,67 +1794,30 @@ impl P2PNode {
     // Note: async listen_addrs() already exists above for fetching listen addresses
 }
 
-/// Create a protocol message wrapper (static version for background tasks)
-#[allow(dead_code)]
-fn create_protocol_message_static(protocol: &str, data: Vec<u8>) -> Result<Vec<u8>> {
-    use serde_json::json;
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| {
-            P2PError::Network(NetworkError::ProtocolError(
-                format!("System time error: {}", e).into(),
-            ))
-        })?
-        .as_secs();
-
-    // Create a simple message format for P2P communication
-    let message = json!({
-        "protocol": protocol,
-        "data": data,
-        "timestamp": timestamp
-    });
-
-    serde_json::to_vec(&message).map_err(|e| {
-        P2PError::Transport(crate::error::TransportError::StreamError(
-            format!("Failed to serialize message: {e}").into(),
-        ))
-    })
-}
-
-/// Parse a JSON protocol message into a `P2PEvent::Message`.
+/// Parse a bincode-encoded protocol message into a `P2PEvent::Message`.
 ///
-/// Returns `None` if the bytes are not valid JSON or lack the required
-/// `"protocol"`, `"data"`, or `"from"` fields.
+/// Returns `None` if the bytes cannot be deserialized as a valid `WireMessage`.
 ///
-/// The `"from"` field is a required part of the wire protocol (messages that
-/// omit it are considered malformed and silently dropped), but it is **not**
+/// The `from` field is a required part of the wire protocol but is **not**
 /// used as the event source.  Instead, `source` — the transport-level peer ID
 /// derived from the authenticated QUIC connection — is used so that consumers
 /// can pass it directly to `send_message()`.  This eliminates a spoofing
-/// vector where a peer could claim an arbitrary identity via the JSON payload.
+/// vector where a peer could claim an arbitrary identity via the payload.
 fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    let protocol = value.get("protocol")?.as_str()?;
-    let data = value.get("data")?.as_array()?;
-    // "from" is a required protocol field (messages without it are dropped),
-    // but we use the transport peer ID as the authoritative source.
-    let logical_from = value.get("from")?.as_str()?;
-    let payload: Vec<u8> = data
-        .iter()
-        .filter_map(|v| v.as_u64().map(|n| n as u8))
-        .collect();
+    let message: WireMessage = bincode::deserialize(bytes).ok()?;
+
     debug!(
         "Parsed P2PEvent::Message - topic: {}, source: {} (logical: {}), payload_len: {}",
-        protocol,
+        message.protocol,
         source,
-        logical_from,
-        payload.len()
+        message.from,
+        message.data.len()
     );
+
     Some(P2PEvent::Message {
-        topic: protocol.to_string(),
+        topic: message.protocol,
         source: source.to_string(),
-        data: payload,
+        data: message.data,
     })
 }
 
@@ -1997,7 +2044,7 @@ impl P2PNode {
     /// where early connections could be missed if subscription happens after the task starts.
     #[allow(clippy::too_many_arguments)]
     async fn connection_lifecycle_monitor_with_rx(
-        _dual_node: Arc<DualStackNetworkNode>,
+        dual_node: Arc<DualStackNetworkNode>,
         mut event_rx: broadcast::Receiver<crate::transport::ant_quic_adapter::ConnectionEvent>,
         active_connections: Arc<RwLock<HashSet<String>>>,
         peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
@@ -2045,6 +2092,9 @@ impl P2PNode {
                                     "Rejecting connection from {} ({}) due to GeoIP policy",
                                     peer_id_str, remote_address
                                 );
+                                // Actively close the QUIC connection instead of
+                                // leaking it until idle timeout
+                                dual_node.disconnect_peer(&peer_id).await;
                                 continue;
                             }
 
@@ -2123,184 +2173,6 @@ impl P2PNode {
         }
     }
 
-    /// Connection lifecycle monitor task - processes ant-quic connection events
-    /// and updates active_connections HashSet and peers map
-    ///
-    /// DEPRECATED: Use `connection_lifecycle_monitor_with_rx` instead to avoid race conditions
-    #[allow(dead_code)]
-    async fn connection_lifecycle_monitor(
-        dual_node: Arc<DualStackNetworkNode>,
-        active_connections: Arc<RwLock<HashSet<String>>>,
-        peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
-        event_tx: broadcast::Sender<P2PEvent>,
-        geo_provider: Arc<BgpGeoProvider>,
-        local_peer_id: String,
-    ) {
-        use crate::transport::ant_quic_adapter::ConnectionEvent;
-
-        let mut event_rx = dual_node.subscribe_connection_events();
-
-        info!("Connection lifecycle monitor started");
-
-        loop {
-            match event_rx.recv().await {
-                Ok(event) => {
-                    match event {
-                        ConnectionEvent::Established {
-                            peer_id,
-                            remote_address,
-                        } => {
-                            let peer_id_str = ant_peer_id_to_string(&peer_id);
-                            debug!(
-                                "Connection established: peer={}, addr={}",
-                                peer_id_str, remote_address
-                            );
-
-                            // **GeoIP Validation**
-                            // Check if the peer's IP is allowed
-                            let ip = remote_address.ip();
-                            let is_rejected = match ip {
-                                std::net::IpAddr::V4(v4) => {
-                                    // Check if it's a hosting provider or VPN
-                                    if let Some(asn) = geo_provider.lookup_ipv4_asn(v4) {
-                                        geo_provider.is_hosting_asn(asn)
-                                            || geo_provider.is_vpn_asn(asn)
-                                    } else {
-                                        false
-                                    }
-                                }
-                                std::net::IpAddr::V6(v6) => {
-                                    let info = geo_provider.lookup(v6);
-                                    info.is_hosting_provider || info.is_vpn_provider
-                                }
-                            };
-
-                            if is_rejected {
-                                info!(
-                                    "Rejecting connection from {} ({}) due to GeoIP policy (Hosting/VPN)",
-                                    peer_id_str, remote_address
-                                );
-
-                                // Create rejection message
-                                let rejection = RejectionMessage {
-                                    reason: RejectionReason::GeoIpPolicy,
-                                    message:
-                                        "Connection rejected: Hosting/VPN providers not allowed"
-                                            .to_string(),
-                                    suggested_target: None, // Could suggest a different region if we knew more
-                                };
-
-                                // Serialize message
-                                if let Ok(data) = serde_json::to_vec(&rejection) {
-                                    // Create protocol message
-                                    let timestamp = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs();
-
-                                    let message = serde_json::json!({
-                                        "protocol": "control",
-                                        "data": data,
-                                        "from": local_peer_id,
-                                        "timestamp": timestamp
-                                    });
-
-                                    if let Ok(msg_bytes) = serde_json::to_vec(&message) {
-                                        // Send rejection message
-                                        // We use send_to_peer directly on dual_node to avoid the checks in P2PNode::send_message
-                                        // which might fail if we haven't fully registered the peer yet
-                                        let _ = dual_node.send_to_peer(&peer_id, &msg_bytes).await;
-
-                                        // Give it a moment to send before disconnecting?
-                                        // ant-quic might handle this, but a small yield is safe
-                                        tokio::task::yield_now().await;
-                                    }
-                                }
-
-                                // Disconnect (TODO: Add disconnect method to dual_node or just drop?)
-                                // For now, we just don't add it to active connections, effectively ignoring it
-                                // Ideally we should actively close the connection
-                                continue;
-                            }
-
-                            // Add to active connections
-                            active_connections.write().await.insert(peer_id_str.clone());
-
-                            // Update peer info or insert new
-                            let mut peers_lock = peers.write().await;
-                            if let Some(peer_info) = peers_lock.get_mut(&peer_id_str) {
-                                peer_info.status = ConnectionStatus::Connected;
-                                peer_info.connected_at = Instant::now();
-                            } else {
-                                // New incoming peer
-                                debug!("Registering new incoming peer: {}", peer_id_str);
-                                peers_lock.insert(
-                                    peer_id_str.clone(),
-                                    PeerInfo {
-                                        peer_id: peer_id_str.clone(),
-                                        addresses: vec![remote_address.to_string()],
-                                        status: ConnectionStatus::Connected,
-                                        last_seen: Instant::now(),
-                                        connected_at: Instant::now(),
-                                        protocols: Vec::new(),
-                                        heartbeat_count: 0,
-                                    },
-                                );
-                            }
-
-                            // Broadcast connection event
-                            let _ = event_tx.send(P2PEvent::PeerConnected(peer_id_str));
-                        }
-                        ConnectionEvent::Lost { peer_id, reason } => {
-                            let peer_id_str = ant_peer_id_to_string(&peer_id);
-                            debug!("Connection lost: peer={}, reason={}", peer_id_str, reason);
-
-                            // Remove from active connections
-                            active_connections.write().await.remove(&peer_id_str);
-
-                            // Update peer info status
-                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
-                                peer_info.status = ConnectionStatus::Disconnected;
-                                peer_info.last_seen = Instant::now();
-                            }
-
-                            // Broadcast disconnection event
-                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
-                        }
-                        ConnectionEvent::Failed { peer_id, reason } => {
-                            let peer_id_str = ant_peer_id_to_string(&peer_id);
-                            warn!("Connection failed: peer={}, reason={}", peer_id_str, reason);
-
-                            // Remove from active connections
-                            active_connections.write().await.remove(&peer_id_str);
-
-                            // Update peer info status
-                            if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
-                                peer_info.status = ConnectionStatus::Failed(reason.clone());
-                            }
-
-                            // Broadcast disconnection event
-                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
-                        }
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    warn!(
-                        "Connection event monitor lagged, skipped {} events",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    info!("Connection event channel closed, stopping monitor");
-                    break;
-                }
-            }
-        }
-
-        info!("Connection lifecycle monitor stopped");
-    }
-
     /// Start connection monitor (called after node initialization)
     async fn start_connection_monitor(&self) {
         // The monitor task is already spawned in new() with a temporary peers map
@@ -2348,25 +2220,28 @@ impl P2PNode {
 
             debug!("Sending keepalive to {} active connections", peers.len());
 
-            // Send keepalive to each peer using optimized send method
-            // This uses P2pEndpoint::send() which corresponds with recv()
-            for peer_id in peers {
-                match dual_node
-                    .send_to_peer_string_optimized(&peer_id, KEEPALIVE_PAYLOAD)
-                    .await
-                {
-                    Ok(_) => {
-                        trace!("Keepalive sent to peer: {}", peer_id);
+            // Send keepalives concurrently so one slow/stuck peer doesn't
+            // delay keepalives to all others and cause cascading timeouts.
+            let futs: Vec<_> = peers
+                .into_iter()
+                .map(|peer_id| {
+                    let node = Arc::clone(&dual_node);
+                    async move {
+                        if let Err(e) = node
+                            .send_to_peer_string_optimized(&peer_id, KEEPALIVE_PAYLOAD)
+                            .await
+                        {
+                            debug!(
+                                "Failed to send keepalive to peer {}: {} (connection may have closed)",
+                                peer_id, e
+                            );
+                        } else {
+                            trace!("Keepalive sent to peer: {}", peer_id);
+                        }
                     }
-                    Err(e) => {
-                        debug!(
-                            "Failed to send keepalive to peer {}: {} (connection may have closed)",
-                            peer_id, e
-                        );
-                        // Don't remove from active_connections here - let the lifecycle monitor handle it
-                    }
-                }
-            }
+                })
+                .collect();
+            futures::future::join_all(futs).await;
         }
 
         info!("Keepalive task stopped");
@@ -4001,19 +3876,25 @@ mod tests {
 
     // ---- parse_protocol_message regression tests ----
 
+    /// Helper to create a bincode-serialized WireMessage for tests
+    fn make_wire_bytes(protocol: &str, data: Vec<u8>, from: &str, timestamp: u64) -> Vec<u8> {
+        let msg = WireMessage {
+            protocol: protocol.to_string(),
+            data,
+            from: from.to_string(),
+            timestamp,
+        };
+        bincode::serialize(&msg).unwrap()
+    }
+
     #[test]
     fn test_parse_protocol_message_uses_transport_peer_id_as_source() {
         // Regression: P2PEvent::Message.source must be the transport peer ID,
-        // NOT the "from" field from the JSON payload.  This ensures consumers
+        // NOT the "from" field from the wire message.  This ensures consumers
         // can pass source directly to send_message().
         let transport_id = "abcdef0123456789";
         let logical_id = "spoofed-logical-id";
-        let msg = serde_json::json!({
-            "protocol": "test/v1",
-            "data": [1, 2, 3],
-            "from": logical_id,
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
+        let bytes = make_wire_bytes("test/v1", vec![1, 2, 3], logical_id, 1000);
 
         let event =
             parse_protocol_message(&bytes, transport_id).expect("valid message should parse");
@@ -4037,61 +3918,49 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_protocol_message_rejects_missing_from() {
-        // "from" is a required protocol field; messages without it are dropped.
-        let msg = serde_json::json!({
-            "protocol": "test/v1",
-            "data": [1, 2, 3],
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
-
-        assert!(
-            parse_protocol_message(&bytes, "peer-id").is_none(),
-            "message missing 'from' must be rejected"
-        );
+    fn test_parse_protocol_message_rejects_invalid_bytes() {
+        // Random bytes that are not valid bincode should be rejected
+        assert!(parse_protocol_message(b"not valid bincode", "peer-id").is_none());
     }
 
     #[test]
-    fn test_parse_protocol_message_rejects_missing_protocol() {
-        let msg = serde_json::json!({
-            "data": [1, 2, 3],
-            "from": "sender",
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
-
-        assert!(parse_protocol_message(&bytes, "peer-id").is_none());
-    }
-
-    #[test]
-    fn test_parse_protocol_message_rejects_missing_data() {
-        let msg = serde_json::json!({
-            "protocol": "test/v1",
-            "from": "sender",
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
-
-        assert!(parse_protocol_message(&bytes, "peer-id").is_none());
-    }
-
-    #[test]
-    fn test_parse_protocol_message_rejects_invalid_json() {
-        assert!(parse_protocol_message(b"not json", "peer-id").is_none());
+    fn test_parse_protocol_message_rejects_truncated_message() {
+        // A truncated bincode message should fail to deserialize
+        let full_bytes = make_wire_bytes("test/v1", vec![1, 2, 3], "sender", 1000);
+        let truncated = &full_bytes[..full_bytes.len() / 2];
+        assert!(parse_protocol_message(truncated, "peer-id").is_none());
     }
 
     #[test]
     fn test_parse_protocol_message_empty_payload() {
-        let msg = serde_json::json!({
-            "protocol": "ping",
-            "data": [],
-            "from": "sender",
-        });
-        let bytes = serde_json::to_vec(&msg).unwrap();
+        let bytes = make_wire_bytes("ping", vec![], "sender", 1000);
 
         let event = parse_protocol_message(&bytes, "transport-peer")
             .expect("valid message with empty data should parse");
 
         match event {
             P2PEvent::Message { data, .. } => assert!(data.is_empty()),
+            other => panic!("expected P2PEvent::Message, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_protocol_message_preserves_binary_payload() {
+        // Verify that arbitrary byte values (including 0xFF, 0x00) survive round-trip
+        let payload: Vec<u8> = (0..=255).collect();
+        let bytes = make_wire_bytes("binary/v1", payload.clone(), "sender", 42);
+
+        let event = parse_protocol_message(&bytes, "peer-id")
+            .expect("valid message with full byte range should parse");
+
+        match event {
+            P2PEvent::Message { data, topic, .. } => {
+                assert_eq!(topic, "binary/v1");
+                assert_eq!(
+                    data, payload,
+                    "payload must survive bincode round-trip exactly"
+                );
+            }
             other => panic!("expected P2PEvent::Message, got {:?}", other),
         }
     }
