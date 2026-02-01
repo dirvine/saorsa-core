@@ -1,7 +1,9 @@
 use saorsa_core::control::RejectionMessage;
 use saorsa_core::identity::rejection::RejectionReason;
-use saorsa_core::network::{NodeConfig, P2PNode};
-use tokio::time::Duration;
+use saorsa_core::network::{NodeConfig, P2PEvent, P2PNode};
+use saorsa_core::security::GeoProvider;
+use std::net::{Ipv4Addr, Ipv6Addr};
+use tokio::time::{Duration, timeout};
 
 #[tokio::test]
 #[ignore = "Requires full P2P network - run with --ignored"]
@@ -114,4 +116,64 @@ async fn test_geoip_rejection_flow() {
         received_rejection,
         "Node B did not receive rejection message"
     );
+}
+
+#[tokio::test]
+async fn test_geoip_rejection_emits_control_message() {
+    let _ = tracing_subscriber::fmt::try_init();
+    let mut config_a = NodeConfig::new().unwrap();
+    config_a.listen_addr = "127.0.0.1:0".parse().unwrap();
+    config_a.enable_ipv6 = false;
+
+    let mut config_b = NodeConfig::new().unwrap();
+    config_b.listen_addr = "127.0.0.1:0".parse().unwrap();
+    config_b.enable_ipv6 = false;
+
+    let node_a = P2PNode::new(config_a).await.unwrap();
+    let node_b = P2PNode::new(config_b).await.unwrap();
+
+    let geo = node_a.geo_provider_for_testing();
+    geo.force_hosting_ipv4_for_testing(Ipv4Addr::LOCALHOST);
+    geo.force_hosting_ipv6_for_testing(Ipv6Addr::LOCALHOST);
+    let ipv4_asn = geo
+        .lookup_ipv4_asn(Ipv4Addr::LOCALHOST)
+        .expect("forced IPv4 ASN");
+    assert!(geo.is_hosting_asn(ipv4_asn));
+    let ipv6_asn = geo
+        .lookup(Ipv6Addr::LOCALHOST)
+        .asn
+        .expect("forced IPv6 ASN");
+    assert!(geo.is_hosting_asn(ipv6_asn));
+
+    node_a.start().await.unwrap();
+    node_b.start().await.unwrap();
+
+    let mut events_b = node_b.subscribe_events();
+    let addr = node_a
+        .listen_addrs()
+        .await
+        .first()
+        .cloned()
+        .expect("node A must expose a listen address")
+        .to_string();
+
+    let _ = node_b.connect_peer(&addr).await;
+
+    let control_payload = timeout(Duration::from_secs(5), async {
+        loop {
+            match events_b.recv().await {
+                Ok(P2PEvent::Message { topic, data, .. }) if topic == "control" => break data,
+                Ok(_) => continue,
+                Err(_) => continue,
+            }
+        }
+    })
+    .await
+    .expect("Timed out waiting for control message");
+
+    let rejection: RejectionMessage = serde_json::from_slice(&control_payload).unwrap();
+    assert_eq!(rejection.reason, RejectionReason::GeoIpPolicy);
+
+    node_b.stop().await.unwrap();
+    node_a.stop().await.unwrap();
 }

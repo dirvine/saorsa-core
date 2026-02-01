@@ -145,6 +145,46 @@ impl BgpGeoProvider {
         self.load_common_prefixes();
     }
 
+    /// Force a specific IPv4 address to be treated as hosting-only (test helper).
+    pub fn force_hosting_ipv4_for_testing(&self, ip: Ipv4Addr) {
+        let asn = Self::testing_override_asn(u32::from(ip));
+        self.hosting_asns.write().insert(asn);
+        let mut prefixes = self.ipv4_prefixes.write();
+        prefixes.push(Ipv4Prefix::new(ip.octets(), 32, asn));
+        prefixes.sort_by(|a, b| b.prefix_len.cmp(&a.prefix_len));
+    }
+
+    /// Force a specific IPv6 address to be treated as hosting-only (test helper).
+    pub fn force_hosting_ipv6_for_testing(&self, ip: Ipv6Addr) {
+        let asn = Self::testing_override_asn(ip.segments()[7] as u32);
+        self.hosting_asns.write().insert(asn);
+        let (high, low) = Self::split_ipv6(ip);
+        self.ipv6_prefixes.write().push(Ipv6Prefix {
+            network_high: high,
+            network_low: low,
+            prefix_len: 128,
+            asn,
+        });
+    }
+
+    fn testing_override_asn(tag: u32) -> u32 {
+        const TEST_ASN_BASE: u32 = 424_242;
+        TEST_ASN_BASE.wrapping_add(tag & 0x0FFF)
+    }
+
+    fn split_ipv6(ip: Ipv6Addr) -> (u64, u64) {
+        let segments = ip.segments();
+        let high = ((segments[0] as u64) << 48)
+            | ((segments[1] as u64) << 32)
+            | ((segments[2] as u64) << 16)
+            | segments[3] as u64;
+        let low = ((segments[4] as u64) << 48)
+            | ((segments[5] as u64) << 32)
+            | ((segments[6] as u64) << 16)
+            | segments[7] as u64;
+        (high, low)
+    }
+
     /// Load known hosting/cloud provider ASNs
     fn load_hosting_asns(&mut self) {
         let mut hosting = self.hosting_asns.write();

@@ -19,8 +19,10 @@
 use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
+use crate::control::RejectionMessage;
 use crate::dht::DHT;
 use crate::error::{NetworkError, P2PError, P2pResult as Result};
+use crate::identity::rejection::RejectionReason;
 use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
@@ -61,6 +63,33 @@ const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 
 /// Channel capacity for the per-stack recv task mpsc channel.
 const RECV_CHANNEL_CAPACITY: usize = 256;
+
+/// Message surfaced to peers when GeoIP enforcement rejects a connection.
+const GEOIP_REJECTION_MESSAGE: &str = "Connection rejected: Hosting/VPN providers not allowed";
+
+fn encode_wire_message(protocol: &str, data: Vec<u8>, from: &str) -> Result<Vec<u8>> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| {
+            P2PError::Network(NetworkError::ProtocolError(
+                format!("System time error: {e}").into(),
+            ))
+        })?
+        .as_secs();
+
+    let message = WireMessage {
+        protocol: protocol.to_string(),
+        data,
+        from: from.to_string(),
+        timestamp,
+    };
+
+    bincode::serialize(&message).map_err(|e| {
+        P2PError::Transport(crate::error::TransportError::StreamError(
+            format!("Failed to serialize message: {e}").into(),
+        ))
+    })
+}
 
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1148,6 +1177,11 @@ impl P2PNode {
         &self.config
     }
 
+    /// Expose the GeoIP provider for controlled testing scenarios.
+    pub fn geo_provider_for_testing(&self) -> Arc<BgpGeoProvider> {
+        Arc::clone(&self.geo_provider)
+    }
+
     /// Start the P2P node
     pub async fn start(&self) -> Result<()> {
         info!("Starting P2P node...");
@@ -1752,27 +1786,7 @@ impl P2PNode {
 
     /// Create a protocol message wrapper
     fn create_protocol_message(&self, protocol: &str, data: Vec<u8>) -> Result<Vec<u8>> {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| {
-                P2PError::Network(NetworkError::ProtocolError(
-                    format!("System time error: {}", e).into(),
-                ))
-            })?
-            .as_secs();
-
-        let message = WireMessage {
-            protocol: protocol.to_string(),
-            data,
-            from: self.peer_id.clone(),
-            timestamp,
-        };
-
-        bincode::serialize(&message).map_err(|e| {
-            P2PError::Transport(crate::error::TransportError::StreamError(
-                format!("Failed to serialize message: {e}").into(),
-            ))
-        })
+        encode_wire_message(protocol, data, &self.peer_id)
     }
 
     // Note: async listen_addrs() already exists above for fetching listen addresses
@@ -2034,7 +2048,7 @@ impl P2PNode {
         peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
         event_tx: broadcast::Sender<P2PEvent>,
         geo_provider: Arc<BgpGeoProvider>,
-        _local_peer_id: String,
+        local_peer_id: String,
     ) {
         use crate::transport::ant_quic_adapter::ConnectionEvent;
 
@@ -2076,6 +2090,20 @@ impl P2PNode {
                                     "Rejecting connection from {} ({}) due to GeoIP policy",
                                     peer_id_str, remote_address
                                 );
+                                let rejection_result = Self::send_geoip_rejection_message(
+                                    &dual_node,
+                                    &peer_id_str,
+                                    &local_peer_id,
+                                )
+                                .await;
+                                if let Err(err) = rejection_result {
+                                    warn!(
+                                        "Failed to send GeoIP rejection message to {}: {}",
+                                        peer_id_str, err
+                                    );
+                                } else {
+                                    tokio::task::yield_now().await;
+                                }
                                 // Actively close the QUIC connection instead of
                                 // leaking it until idle timeout
                                 dual_node.disconnect_peer(&peer_id).await;
@@ -2155,6 +2183,35 @@ impl P2PNode {
                 }
             }
         }
+    }
+
+    async fn send_geoip_rejection_message(
+        dual_node: &DualStackNetworkNode,
+        peer_id: &str,
+        local_peer_id: &str,
+    ) -> Result<()> {
+        let rejection = RejectionMessage {
+            reason: RejectionReason::GeoIpPolicy,
+            message: GEOIP_REJECTION_MESSAGE.to_string(),
+            suggested_target: None,
+        };
+
+        let payload = serde_json::to_vec(&rejection).map_err(|e| {
+            P2PError::Transport(crate::error::TransportError::StreamError(
+                format!("Failed to serialize GeoIP rejection: {e}").into(),
+            ))
+        })?;
+
+        let wire_bytes = encode_wire_message("control", payload, local_peer_id)?;
+
+        dual_node
+            .send_to_peer_string_optimized(peer_id, &wire_bytes)
+            .await
+            .map_err(|e| {
+                P2PError::Transport(crate::error::TransportError::StreamError(
+                    format!("Failed to send GeoIP rejection: {e}").into(),
+                ))
+            })
     }
 
     /// Start connection monitor (called after node initialization)
