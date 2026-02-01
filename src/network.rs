@@ -1082,6 +1082,22 @@ impl P2PNode {
         &self.peer_id
     }
 
+    /// Get the hex-encoded transport-level peer ID.
+    ///
+    /// This is the ID used in `P2PEvent::Message.source`, `connected_peers()`,
+    /// and `send_message()`. It differs from `peer_id()` which is the app-level ID.
+    ///
+    /// Returns the transport peer ID from whichever stack (v4 or v6) is active.
+    pub fn transport_peer_id(&self) -> Option<String> {
+        if let Some(ref v4) = self.dual_node.v4 {
+            return Some(ant_peer_id_to_string(&v4.our_peer_id()));
+        }
+        if let Some(ref v6) = self.dual_node.v6 {
+            return Some(ant_peer_id_to_string(&v6.our_peer_id()));
+        }
+        None
+    }
+
     pub fn local_addr(&self) -> Option<String> {
         self.listen_addrs
             .try_read()
