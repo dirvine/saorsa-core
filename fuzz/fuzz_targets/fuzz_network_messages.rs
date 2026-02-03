@@ -28,10 +28,10 @@ fuzz_target!(|data: &[u8]| {
 
     // Fuzz message deserialization
     // This tests that malformed messages don't cause panics
-    let _ = bincode::deserialize::<Message>(data);
+    let _ = postcard::from_bytes::<Message>(data);
     
     // Fuzz message validation
-    if let Ok(msg) = bincode::deserialize::<Message>(data) {
+    if let Ok(msg) = postcard::from_bytes::<Message>(data) {
         // Validate message fields
         let _ = validate_non_empty_string(&msg.id);
         let _ = validate_string_length(&msg.sender, 1, 1024);

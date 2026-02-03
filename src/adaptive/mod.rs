@@ -127,7 +127,7 @@ pub enum AdaptiveNetworkError {
     Network(#[from] std::io::Error),
 
     #[error("Serialization error: {0}")]
-    Serialization(#[from] bincode::Error),
+    Serialization(#[from] postcard::Error),
 
     #[error("Other error: {0}")]
     Other(String),
@@ -382,8 +382,8 @@ mod tests {
     #[test]
     fn test_content_hash_serialization() {
         let hash = ContentHash([42u8; 32]);
-        let serialized = bincode::serialize(&hash).unwrap();
-        let deserialized: ContentHash = bincode::deserialize(&serialized).unwrap();
+        let serialized = postcard::to_stdvec(&hash).unwrap();
+        let deserialized: ContentHash = postcard::from_bytes(&serialized).unwrap();
         assert_eq!(hash, deserialized);
     }
 

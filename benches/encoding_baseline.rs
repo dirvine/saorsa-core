@@ -391,7 +391,7 @@ fn bench_bincode_vs_json(c: &mut Criterion) {
                 let message = create_rich_message(size_kb);
 
                 b.iter(|| {
-                    let bincode = bincode::serialize(&message);
+                    let bincode = postcard::to_stdvec(&message);
                     black_box(bincode)
                 });
             },
@@ -419,11 +419,11 @@ fn bench_bincode_vs_json(c: &mut Criterion) {
             &size_kb,
             |b, &size_kb| {
                 let message = create_rich_message(size_kb);
-                let bincode = bincode::serialize(&message).expect("bincode serialization");
+                let bincode = postcard::to_stdvec(&message).expect("bincode serialization");
 
                 b.iter(|| {
                     let deserialized: Result<RichMessage, _> =
-                        bincode::deserialize(black_box(&bincode));
+                        postcard::from_bytes(black_box(&bincode));
                     black_box(deserialized)
                 });
             },
@@ -438,7 +438,7 @@ fn bench_bincode_vs_json(c: &mut Criterion) {
 
                 // Pre-compute size metrics once
                 let json = serde_json::to_vec(&message).expect("JSON serialization");
-                let bincode = bincode::serialize(&message).expect("bincode serialization");
+                let bincode = postcard::to_stdvec(&message).expect("bincode serialization");
                 let ratio = bincode.len() as f64 / json.len() as f64;
 
                 // Log actual metrics
@@ -454,7 +454,7 @@ fn bench_bincode_vs_json(c: &mut Criterion) {
                     // Measure serialization throughput on pre-built message
                     let json = serde_json::to_vec(black_box(&message)).expect("JSON serialization");
                     let bincode =
-                        bincode::serialize(black_box(&message)).expect("bincode serialization");
+                        postcard::to_stdvec(black_box(&message)).expect("bincode serialization");
 
                     // Return size ratio: bincode / json (expect < 1.0, meaning bincode is smaller)
                     let ratio = bincode.len() as f64 / json.len() as f64;

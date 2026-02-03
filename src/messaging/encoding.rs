@@ -4,10 +4,11 @@
 //!
 //! ## Encoding Format
 //!
-//! Messages are encoded using **Bincode** (binary format):
+//! Messages are encoded using **Postcard** (binary format):
 //! - 30-40% smaller than JSON
 //! - 2-3x faster serialization
 //! - Rust-native with excellent serde integration
+//! - #[no_std] compatible for embedded systems
 //!
 //! ## Performance Characteristics
 //!
@@ -31,9 +32,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-/// Serialize data with bincode binary encoding
+/// Serialize data with postcard binary encoding
 ///
-/// This function uses bincode to serialize any serde-compatible type
+/// This function uses postcard to serialize any serde-compatible type
 /// into a compact binary format. It is significantly faster and produces
 /// smaller output than JSON serialization.
 ///
@@ -56,12 +57,12 @@ use serde::{Deserialize, Serialize};
 /// assert!(!bytes.is_empty());
 /// ```
 pub fn encode<T: Serialize>(data: &T) -> Result<Vec<u8>> {
-    bincode::serialize(data).context("Failed to encode data with bincode")
+    postcard::to_stdvec(data).context("Failed to encode data with postcard")
 }
 
-/// Deserialize data from bincode binary encoding
+/// Deserialize data from postcard binary encoding
 ///
-/// This function uses bincode to deserialize binary data back into
+/// This function uses postcard to deserialize binary data back into
 /// the original type. It is significantly faster than JSON deserialization.
 ///
 /// # Arguments
@@ -111,7 +112,7 @@ pub fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
         ));
     }
 
-    bincode::deserialize::<T>(bytes)
+    postcard::from_bytes::<T>(bytes)
         .with_context(|| format!("Failed to decode message ({} bytes)", bytes.len()))
 }
 
@@ -131,7 +132,7 @@ mod tests {
         let original = TestMessage {
             id: 12345,
             content: "Hello, World!".to_string(),
-            tags: vec!["test".to_string(), "bincode".to_string()],
+            tags: vec!["test".to_string(), "postcard".to_string()],
         };
 
         // Encode
@@ -172,11 +173,11 @@ mod tests {
     }
 
     #[test]
-    fn test_bincode_size_comparison() {
-        // Test to document bincode vs JSON size characteristics
-        // Note: Bincode's advantage varies by message structure:
+    fn test_postcard_size_comparison() {
+        // Test to document postcard vs JSON size characteristics
+        // Note: Postcard's advantage varies by message structure:
         // - Very large messages (10KB+): Minimal difference (both dominated by content)
-        // - Complex nested structures: Bincode advantage from no field names
+        // - Complex nested structures: Postcard advantage from no field names
         // - Simple flat structures: May be similar size or slightly larger
         // The main advantage is serialization SPEED (2-3x faster), not just size
         let message = TestMessage {
@@ -185,25 +186,25 @@ mod tests {
             tags: vec!["tag1".to_string(), "tag2".to_string(), "tag3".to_string()],
         };
 
-        // Bincode encoding
-        let bincode_bytes = encode(&message).expect("bincode encoding should succeed");
+        // Postcard encoding
+        let postcard_bytes = encode(&message).expect("postcard encoding should succeed");
 
         // JSON encoding (for comparison)
         let json_bytes =
             serde_json::to_vec(&message).expect("JSON encoding should succeed for comparison");
 
         println!(
-            "Bincode size: {} bytes, JSON size: {} bytes",
-            bincode_bytes.len(),
+            "Postcard size: {} bytes, JSON size: {} bytes",
+            postcard_bytes.len(),
             json_bytes.len()
         );
 
         // Both encodings should produce reasonable sizes
-        assert!(!bincode_bytes.is_empty(), "bincode should produce output");
+        assert!(!postcard_bytes.is_empty(), "postcard should produce output");
         assert!(!json_bytes.is_empty(), "JSON should produce output");
 
         // For complex messages like RichMessage with 25+ fields and nested structures,
-        // bincode provides 30-40% size reduction. Speed improvement is 2-3x regardless.
+        // postcard provides 30-40% size reduction. Speed improvement is 2-3x regardless.
     }
 
     #[test]

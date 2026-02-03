@@ -368,7 +368,7 @@ impl PeerDHTRecord {
         }
 
         // Endpoints (serialized deterministically)
-        let endpoints_data = bincode::serialize(&self.endpoints).map_err(|e| {
+        let endpoints_data = postcard::to_stdvec(&self.endpoints).map_err(|e| {
             P2PError::Storage(crate::error::StorageError::Database(
                 format!("Failed to serialize endpoints: {}", e).into(),
             ))
