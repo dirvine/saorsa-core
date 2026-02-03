@@ -25,8 +25,6 @@ use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
 use crate::transport::ant_quic_adapter::{DualStackNetworkNode, ant_peer_id_to_string};
-#[allow(unused_imports)] // Temporarily unused during migration
-use crate::transport::{TransportOptions, TransportType};
 use crate::validation::RateLimitConfig;
 use crate::validation::RateLimiter;
 use crate::{NetworkAddress, PeerId};
@@ -656,7 +654,6 @@ pub struct P2PNode {
     dual_node: Arc<DualStackNetworkNode>,
 
     /// Rate limiter for connection and request throttling
-    #[allow(dead_code)]
     rate_limiter: Arc<RateLimiter>,
 
     /// Active connections (tracked by peer_id)
