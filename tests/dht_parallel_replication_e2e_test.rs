@@ -81,7 +81,10 @@ async fn test_single_node_put_get_roundtrip() -> Result<()> {
         DhtNetworkResult::GetSuccess {
             value: retrieved, ..
         } => {
-            assert_eq!(retrieved, value, "Retrieved value should match stored value");
+            assert_eq!(
+                retrieved, value,
+                "Retrieved value should match stored value"
+            );
         }
         other => panic!("Expected GetSuccess, got: {:?}", other),
     }
