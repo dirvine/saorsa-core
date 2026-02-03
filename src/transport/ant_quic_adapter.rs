@@ -315,13 +315,17 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
                             quality_map.insert(peer, quality);
                         }
 
-                        // Use first observed address or default to unspecified
-                        let addr = caps.observed_addrs.first().copied().unwrap_or_else(|| {
-                            std::net::SocketAddr::new(
-                                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                                0,
-                            )
-                        });
+                        // Use first observed address; skip event if none available
+                        let addr = match caps.observed_addrs.first().copied() {
+                            Some(a) => a,
+                            None => {
+                                tracing::warn!(
+                                    "Peer {} connected but no observed address available, skipping event",
+                                    peer
+                                );
+                                continue;
+                            }
+                        };
 
                         // Note: Peer tracking with geographic validation is done by
                         // add_peer() in connect_to_peer() and accept_connection().

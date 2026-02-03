@@ -457,26 +457,34 @@ impl DhtNetworkManager {
                 ))
             })?;
 
-        // Replicate to closest nodes
+        // Replicate to closest nodes in parallel for better performance
         let mut replicated_count = 1; // Local storage
-        for node in &closest_nodes {
-            debug!("Sending PUT to peer: {}", &node.peer_id);
-            match self
-                .send_dht_request(&node.peer_id, operation.clone())
-                .await
-            {
+
+        // Create parallel replication requests
+        let replication_futures = closest_nodes.iter().map(|node| {
+            let peer_id = node.peer_id.clone();
+            let op = operation.clone();
+            async move {
+                debug!("Sending PUT to peer: {}", peer_id);
+                (peer_id.clone(), self.send_dht_request(&peer_id, op).await)
+            }
+        });
+
+        // Execute all replication requests in parallel
+        let results = futures::future::join_all(replication_futures).await;
+
+        // Count successful replications
+        for (peer_id, result) in results {
+            match result {
                 Ok(DhtNetworkResult::PutSuccess { .. }) => {
                     replicated_count += 1;
-                    debug!("Replicated to peer: {}", &node.peer_id);
+                    debug!("Replicated to peer: {}", peer_id);
                 }
                 Ok(result) => {
-                    debug!(
-                        "Unexpected result from peer {}: {:?}",
-                        &node.peer_id, result
-                    );
+                    debug!("Unexpected result from peer {}: {:?}", peer_id, result);
                 }
                 Err(e) => {
-                    debug!("Failed to replicate to peer {}: {}", &node.peer_id, e);
+                    debug!("Failed to replicate to peer {}: {}", peer_id, e);
                 }
             }
         }
@@ -485,7 +493,7 @@ impl DhtNetworkManager {
             "PUT operation completed: key={}, replicated_to={}/{}",
             hex::encode(key),
             replicated_count,
-            closest_nodes.len() + 1
+            closest_nodes.len().saturating_add(1)
         );
 
         Ok(DhtNetworkResult::PutSuccess {
@@ -524,12 +532,19 @@ impl DhtNetworkManager {
             return Ok(DhtNetworkResult::GetNotFound { key: *key });
         }
 
-        // Query nodes until we find the value
-        for node in &closest_nodes {
-            match self
-                .send_dht_request(&node.peer_id, operation.clone())
-                .await
-            {
+        // Query nodes in parallel for better performance
+        let query_futures = closest_nodes.iter().map(|node| {
+            let peer_id = node.peer_id.clone();
+            let op = operation.clone();
+            async move { (peer_id.clone(), self.send_dht_request(&peer_id, op).await) }
+        });
+
+        // Execute all queries in parallel
+        let results = futures::future::join_all(query_futures).await;
+
+        // Find first successful result
+        for (peer_id, result) in results {
+            match result {
                 Ok(DhtNetworkResult::GetSuccess { value, source, .. }) => {
                     info!(
                         "Found value for key {} from peer: {}",
@@ -555,18 +570,15 @@ impl DhtNetworkManager {
                 Ok(DhtNetworkResult::GetNotFound { .. }) => {
                     debug!(
                         "Peer {} does not have value for key {}",
-                        node.peer_id.clone(),
+                        peer_id,
                         hex::encode(key)
                     );
                 }
                 Ok(result) => {
-                    warn!(
-                        "Unexpected result from peer {}: {:?}",
-                        &node.peer_id, result
-                    );
+                    warn!("Unexpected result from peer {}: {:?}", peer_id, result);
                 }
                 Err(e) => {
-                    warn!("Failed to query peer {}: {}", node.peer_id.clone(), e);
+                    warn!("Failed to query peer {}: {}", peer_id, e);
                 }
             }
         }

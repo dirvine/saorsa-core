@@ -801,7 +801,8 @@ impl P2PNode {
     pub async fn new(config: NodeConfig) -> Result<Self> {
         let peer_id = config.peer_id.clone().unwrap_or_else(|| {
             // Generate a random peer ID for now
-            format!("peer_{}", &uuid::Uuid::new_v4().to_string()[..8])
+            let uuid_str = uuid::Uuid::new_v4().to_string();
+            format!("peer_{}", uuid_str.chars().take(8).collect::<String>())
         });
 
         let (event_tx, _) = broadcast::channel(1000);
@@ -2728,7 +2729,7 @@ impl P2PNode {
             for peer_id in &peers_to_mark_disconnected {
                 if let Some(peer_info) = peers.get_mut(peer_id) {
                     peer_info.status = ConnectionStatus::Disconnected;
-                    peer_info.last_seen = now; // Reset for cleanup timer
+                    // Preserve last_seen timestamp for cleanup logic
                 }
             }
         }
