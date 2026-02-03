@@ -322,7 +322,7 @@ impl WalWriter {
 
     /// Write entry to WAL
     fn write_entry(&mut self, entry: &WalEntry) -> Result<()> {
-        let serialized = bincode::serialize(entry).map_err(|e| {
+        let serialized = postcard::to_stdvec(entry).map_err(|e| {
             P2PError::Storage(StorageError::Database(
                 format!("Failed to serialize WAL entry: {e}").into(),
             ))
@@ -495,7 +495,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
         };
 
         // Serialize value
-        let serialized_value = bincode::serialize(&value).map_err(|e| {
+        let serialized_value = postcard::to_stdvec(&value).map_err(|e| {
             P2PError::Storage(StorageError::Database(
                 format!("Failed to serialize value: {e}").into(),
             ))
@@ -679,7 +679,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
         for (key, value) in changes {
             let serialized_value = value
                 .as_ref()
-                .map(|v| bincode::serialize(v))
+                .map(|v| postcard::to_stdvec(v))
                 .transpose()
                 .map_err(|e| {
                     P2PError::Storage(StorageError::Database(
@@ -731,7 +731,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
         };
 
         // Create snapshot
-        let snapshot_data = bincode::serialize(&current_state).map_err(|e| {
+        let snapshot_data = postcard::to_stdvec(&current_state).map_err(|e| {
             P2PError::Storage(StorageError::Database(
                 format!("Failed to serialize snapshot: {e}").into(),
             ))
@@ -766,7 +766,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
                 })?;
 
             // Write header
-            let header_data = bincode::serialize(&header).map_err(|e| {
+            let header_data = postcard::to_stdvec(&header).map_err(|e| {
                 P2PError::Storage(StorageError::Database(
                     format!("Failed to serialize header: {e}").into(),
                 ))
@@ -856,7 +856,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
             match self.load_snapshot(snapshot_path).await {
                 Ok((header, loaded_state)) => {
                     // Verify checksum
-                    let data = bincode::serialize(&loaded_state).map_err(|e| {
+                    let data = postcard::to_stdvec(&loaded_state).map_err(|e| {
                         P2PError::Storage(StorageError::Database(
                             format!("Failed to serialize for checksum: {e}").into(),
                         ))
@@ -974,7 +974,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
             }
 
             // Deserialize entry
-            let entry: WalEntry = match bincode::deserialize(&buffer) {
+            let entry: WalEntry = match postcard::from_bytes(&buffer) {
                 Ok(e) => e,
                 Err(_) => {
                     stats.corruption_events.push(CorruptionEvent {
@@ -1004,7 +1004,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
             match entry.transaction_type {
                 TransactionType::Upsert | TransactionType::Batch => {
                     if let Some(value_data) = entry.value {
-                        match bincode::deserialize::<T>(&value_data) {
+                        match postcard::from_bytes::<T>(&value_data) {
                             Ok(value) => {
                                 let mut state_guard = self.state.write().map_err(|_| {
                                     P2PError::Storage(StorageError::LockPoisoned(
@@ -1201,7 +1201,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
             ))
         })?;
 
-        let header: SnapshotHeader = bincode::deserialize(&header_data).map_err(|e| {
+        let header: SnapshotHeader = postcard::from_bytes(&header_data).map_err(|e| {
             P2PError::Storage(StorageError::Database(
                 format!("Failed to deserialize header: {e}").into(),
             ))
@@ -1216,7 +1216,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
         })?;
 
         // Deserialize state
-        let state: HashMap<String, T> = bincode::deserialize(&snapshot_data).map_err(|e| {
+        let state: HashMap<String, T> = postcard::from_bytes(&snapshot_data).map_err(|e| {
             P2PError::Storage(StorageError::Database(
                 format!("Failed to deserialize snapshot: {e}").into(),
             ))
@@ -1285,7 +1285,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
             })?;
 
             // Deserialize entry
-            if let Ok(entry) = bincode::deserialize::<WalEntry>(&buffer) {
+            if let Ok(entry) = postcard::from_bytes::<WalEntry>(&buffer) {
                 max_transaction_id = max_transaction_id.max(entry.transaction_id);
             }
         }
@@ -1412,7 +1412,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
         report.total_entries = state.len();
 
         for (key, value) in state.iter() {
-            let serialized = bincode::serialize(value).map_err(|e| {
+            let serialized = postcard::to_stdvec(value).map_err(|e| {
                 P2PError::Storage(StorageError::Database(
                     format!("Failed to serialize for size: {e}").into(),
                 ))
@@ -1428,7 +1428,7 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + PartialEq + Send + Sync 
         let (header, state) = self.load_snapshot(path).await?;
 
         // Verify checksum
-        let data = bincode::serialize(&state).map_err(|e| {
+        let data = postcard::to_stdvec(&state).map_err(|e| {
             P2PError::Storage(StorageError::Database(
                 format!("Failed to serialize for checksum: {e}").into(),
             ))

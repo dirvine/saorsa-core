@@ -435,7 +435,7 @@ impl ChurnHandler {
         // 5. Notify network via gossip
         let message = GossipMessage {
             topic: "node_departing".to_string(),
-            data: bincode::serialize(&node_id)
+            data: postcard::to_stdvec(&node_id)
                 .map_err(|e| anyhow::anyhow!("Serialization error: {}", e))?,
             from: self.node_id.clone(),
             seqno: 0, // Will be set by gossip subsystem
@@ -532,7 +532,7 @@ impl ChurnHandler {
         let churn_rate = self.stats.read().await.churn_rate;
         let message = GossipMessage {
             topic: "high_churn_alert".to_string(),
-            data: bincode::serialize(&churn_rate)
+            data: postcard::to_stdvec(&churn_rate)
                 .map_err(|e| anyhow::anyhow!("Serialization error: {}", e))?,
             from: self.node_id.clone(),
             seqno: 0, // Will be set by gossip subsystem

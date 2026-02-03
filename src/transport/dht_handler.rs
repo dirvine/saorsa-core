@@ -81,12 +81,12 @@ impl DhtStreamHandler {
     async fn handle_query(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT query");
 
-        let message: DhtMessage = bincode::deserialize(&data)
+        let message: DhtMessage = postcard::from_bytes(&data)
             .map_err(|e| LinkError::Internal(format!("Failed to deserialize query: {e}")))?;
 
         let response = self.process_message(message).await?;
 
-        let response_bytes = bincode::serialize(&response)
+        let response_bytes = postcard::to_stdvec(&response)
             .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
 
         Ok(Some(Bytes::from(response_bytes)))
@@ -96,12 +96,12 @@ impl DhtStreamHandler {
     async fn handle_store(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT store");
 
-        let message: DhtMessage = bincode::deserialize(&data)
+        let message: DhtMessage = postcard::from_bytes(&data)
             .map_err(|e| LinkError::Internal(format!("Failed to deserialize store: {e}")))?;
 
         let response = self.process_message(message).await?;
 
-        let response_bytes = bincode::serialize(&response)
+        let response_bytes = postcard::to_stdvec(&response)
             .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
 
         Ok(Some(Bytes::from(response_bytes)))
@@ -111,12 +111,12 @@ impl DhtStreamHandler {
     async fn handle_witness(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT witness");
 
-        let message: DhtMessage = bincode::deserialize(&data)
+        let message: DhtMessage = postcard::from_bytes(&data)
             .map_err(|e| LinkError::Internal(format!("Failed to deserialize witness: {e}")))?;
 
         let response = self.process_message(message).await?;
 
-        let response_bytes = bincode::serialize(&response)
+        let response_bytes = postcard::to_stdvec(&response)
             .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
 
         Ok(Some(Bytes::from(response_bytes)))
@@ -126,12 +126,12 @@ impl DhtStreamHandler {
     async fn handle_replication(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT replication");
 
-        let message: DhtMessage = bincode::deserialize(&data)
+        let message: DhtMessage = postcard::from_bytes(&data)
             .map_err(|e| LinkError::Internal(format!("Failed to deserialize replication: {e}")))?;
 
         let response = self.process_message(message).await?;
 
-        let response_bytes = bincode::serialize(&response)
+        let response_bytes = postcard::to_stdvec(&response)
             .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
 
         Ok(Some(Bytes::from(response_bytes)))

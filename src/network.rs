@@ -1784,7 +1784,7 @@ impl P2PNode {
             timestamp,
         };
 
-        bincode::serialize(&message).map_err(|e| {
+        postcard::to_stdvec(&message).map_err(|e| {
             P2PError::Transport(crate::error::TransportError::StreamError(
                 format!("Failed to serialize message: {e}").into(),
             ))
@@ -1794,7 +1794,7 @@ impl P2PNode {
     // Note: async listen_addrs() already exists above for fetching listen addresses
 }
 
-/// Parse a bincode-encoded protocol message into a `P2PEvent::Message`.
+/// Parse a postcard-encoded protocol message into a `P2PEvent::Message`.
 ///
 /// Returns `None` if the bytes cannot be deserialized as a valid `WireMessage`.
 ///
@@ -1804,7 +1804,7 @@ impl P2PNode {
 /// can pass it directly to `send_message()`.  This eliminates a spoofing
 /// vector where a peer could claim an arbitrary identity via the payload.
 fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
-    let message: WireMessage = bincode::deserialize(bytes).ok()?;
+    let message: WireMessage = postcard::from_bytes(bytes).ok()?;
 
     debug!(
         "Parsed P2PEvent::Message - topic: {}, source: {} (logical: {}), payload_len: {}",
@@ -3884,7 +3884,7 @@ mod tests {
             from: from.to_string(),
             timestamp,
         };
-        bincode::serialize(&msg).unwrap()
+        postcard::to_stdvec(&msg).unwrap()
     }
 
     #[test]

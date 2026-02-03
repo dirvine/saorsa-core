@@ -150,7 +150,7 @@ impl ZeroCopyMessage {
 
     /// Deserialize without copying
     pub fn deserialize<T: serde::de::DeserializeOwned>(&self) -> Result<T> {
-        bincode::deserialize(&self.data).map_err(AdaptiveNetworkError::Serialization)
+        postcard::from_bytes(&self.data).map_err(AdaptiveNetworkError::Serialization)
     }
 }
 
@@ -180,7 +180,7 @@ impl OptimizedSerializer {
         buffer.clear();
 
         // Serialize to buffer
-        let serialized = bincode::serialize(value).map_err(AdaptiveNetworkError::Serialization)?;
+        let serialized = postcard::to_stdvec(value).map_err(AdaptiveNetworkError::Serialization)?;
         buffer.extend_from_slice(&serialized);
 
         // Optional compression

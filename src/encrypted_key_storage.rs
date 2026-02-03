@@ -752,7 +752,7 @@ impl EncryptedKeyStorageManager {
         let derived_key = self.derive_key(password, salt).await?;
 
         // Serialize key data
-        let serialized_data = bincode::serialize(key_data)
+        let serialized_data = postcard::to_stdvec(key_data)
             .map_err(|e| P2PError::Storage(StorageError::Database(e.to_string().into())))?;
 
         // Encrypt data using saorsa-pqc ChaCha20Poly1305
@@ -789,7 +789,7 @@ impl EncryptedKeyStorageManager {
 
         // Write to file atomically
         let temp_path = self.storage_path.with_extension("tmp");
-        let serialized_storage = bincode::serialize(&storage)
+        let serialized_storage = postcard::to_stdvec(&storage)
             .map_err(|e| P2PError::Storage(StorageError::Database(e.to_string().into())))?;
 
         {
@@ -820,7 +820,7 @@ impl EncryptedKeyStorageManager {
         file.read_to_end(&mut data).map_err(P2PError::Io)?;
 
         // Deserialize storage
-        let storage: EncryptedKeyStorage = bincode::deserialize(&data).map_err(|e| {
+        let storage: EncryptedKeyStorage = postcard::from_bytes(&data).map_err(|e| {
             P2PError::Storage(crate::error::StorageError::CorruptionDetected(
                 format!("Deserialization failed: {}", e).into(),
             ))
@@ -856,7 +856,7 @@ impl EncryptedKeyStorageManager {
             })?;
 
         // Deserialize key data
-        let key_data: KeyStorageData = bincode::deserialize(&decrypted_data).map_err(|e| {
+        let key_data: KeyStorageData = postcard::from_bytes(&decrypted_data).map_err(|e| {
             P2PError::Storage(crate::error::StorageError::CorruptionDetected(
                 format!("Deserialization failed: {}", e).into(),
             ))
@@ -872,7 +872,7 @@ impl EncryptedKeyStorageManager {
         let mut data = Vec::new();
         file.read_to_end(&mut data).map_err(P2PError::Io)?;
 
-        let storage: EncryptedKeyStorage = bincode::deserialize(&data).map_err(|e| {
+        let storage: EncryptedKeyStorage = postcard::from_bytes(&data).map_err(|e| {
             P2PError::Storage(crate::error::StorageError::CorruptionDetected(
                 format!("Deserialization failed: {}", e).into(),
             ))

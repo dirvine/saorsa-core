@@ -34,7 +34,7 @@ pub enum StorageError {
     EncryptionError(String),
 
     #[error("Serialization error: {0}")]
-    SerializationError(#[from] bincode::Error),
+    SerializationError(#[from] postcard::Error),
 
     #[error("Key not found: {0}")]
     KeyNotFound(String),
@@ -181,7 +181,7 @@ impl StorageManager {
         metadata: Option<serde_json::Value>,
     ) -> Result<()> {
         // Serialize data
-        let plaintext = bincode::serialize(data)?;
+        let plaintext = postcard::to_stdvec(data)?;
 
         // Encrypt data
         let encrypted = self.encrypt(&plaintext)?;
@@ -196,7 +196,7 @@ impl StorageManager {
         };
 
         // Serialize wrapper
-        let wrapper_bytes = bincode::serialize(&wrapper)?;
+        let wrapper_bytes = postcard::to_stdvec(&wrapper)?;
 
         // Store in DHT
         let hash = blake3::hash(key.as_bytes());
@@ -223,13 +223,13 @@ impl StorageManager {
             .ok_or_else(|| StorageError::KeyNotFound(key.to_string()))?;
 
         // Deserialize wrapper
-        let wrapper: EncryptedData = bincode::deserialize(&value)?;
+        let wrapper: EncryptedData = postcard::from_bytes(&value)?;
 
         // Decrypt data
         let plaintext = self.decrypt(&wrapper.ciphertext, &wrapper.nonce)?;
 
         // Deserialize data
-        let data = bincode::deserialize(&plaintext)?;
+        let data = postcard::from_bytes(&plaintext)?;
 
         Ok(data)
     }
@@ -241,7 +241,7 @@ impl StorageManager {
         data: &T,
         _ttl: Duration,
     ) -> Result<()> {
-        let value = bincode::serialize(data)?;
+        let value = postcard::to_stdvec(data)?;
 
         let hash = blake3::hash(key.as_bytes());
         let dht_key = *hash.as_bytes();
@@ -265,7 +265,7 @@ impl StorageManager {
             .map_err(|e| StorageError::DhtError(e.to_string()))?
             .ok_or_else(|| StorageError::KeyNotFound(key.to_string()))?;
 
-        let data = bincode::deserialize(&value)?;
+        let data = postcard::from_bytes(&value)?;
         Ok(data)
     }
 

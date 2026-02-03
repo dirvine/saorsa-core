@@ -102,7 +102,7 @@ impl KeyExchange {
         let payload = KemInitiationPayload {
             ciphertext: ciphertext.as_bytes().to_vec(),
         };
-        let payload_bytes = bincode::serialize(&payload)?;
+        let payload_bytes = postcard::to_stdvec(&payload)?;
         Ok(KeyExchangeMessage {
             sender: self.identity.clone(),
             recipient: peer,
@@ -116,7 +116,7 @@ impl KeyExchange {
         if msg.message_type != KeyExchangeType::Initiation {
             return Err(anyhow::anyhow!("Unexpected message type"));
         }
-        let payload: KemInitiationPayload = bincode::deserialize(&msg.payload)?;
+        let payload: KemInitiationPayload = postcard::from_bytes(&msg.payload)?;
         let kem_ct = MlKemCiphertext::from_bytes(&payload.ciphertext)
             .map_err(|e| anyhow::anyhow!("Invalid KEM ciphertext: {:?}", e))?;
         let shared = crate::quantum_crypto::ant_quic_integration::ml_kem_decapsulate(

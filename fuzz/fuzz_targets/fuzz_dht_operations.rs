@@ -60,8 +60,8 @@ fuzz_target!(|data: &[u8]| {
             let _ = value.validate();
             
             // Test serialization round-trip
-            if let Ok(serialized) = bincode::serialize(&value) {
-                let _ = bincode::deserialize::<DhtValue>(&serialized);
+            if let Ok(serialized) = postcard::to_stdvec(&value) {
+                let _ = postcard::from_bytes::<DhtValue>(&serialized);
             }
         }
     }

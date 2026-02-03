@@ -211,7 +211,7 @@ impl ContentStore {
 
         // Store metadata
         let metadata_key = Self::metadata_key(&hash);
-        let metadata_bytes = bincode::serialize(&metadata)?;
+        let metadata_bytes = postcard::to_stdvec(&metadata)?;
         db.insert(metadata_key, metadata_bytes);
 
         // Update cache
@@ -265,7 +265,7 @@ impl ContentStore {
                 // Get metadata
                 let metadata_key = Self::metadata_key(hash);
                 let metadata = if let Some(metadata_bytes) = db.get(&metadata_key) {
-                    bincode::deserialize(metadata_bytes)?
+                    postcard::from_bytes(metadata_bytes)?
                 } else {
                     // Create default metadata if missing
                     ContentMetadata {

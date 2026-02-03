@@ -588,7 +588,7 @@ impl DhtRecord {
     /// Serialize the record to bytes
     pub fn serialize(&self) -> P2pResult<Vec<u8>> {
         let bytes =
-            bincode::serialize(self).map_err(|e| P2PError::Serialization(e.to_string().into()))?;
+            postcard::to_stdvec(self).map_err(|e| P2PError::Serialization(e.to_string().into()))?;
 
         if bytes.len() > MAX_RECORD_SIZE {
             return Err(P2PError::RecordTooLarge(bytes.len()));
@@ -603,7 +603,7 @@ impl DhtRecord {
             return Err(P2PError::RecordTooLarge(bytes.len()));
         }
 
-        bincode::deserialize(bytes).map_err(|e| P2PError::Serialization(e.to_string().into()))
+        postcard::from_bytes(bytes).map_err(|e| P2PError::Serialization(e.to_string().into()))
     }
 
     /// Check if the record is still valid (not expired)
