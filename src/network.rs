@@ -59,6 +59,9 @@ struct WireMessage {
 /// Payload bytes used for keepalive messages to prevent connection timeouts.
 const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 
+/// Capacity of the internal channel used by the message receiving system.
+const MESSAGE_RECV_CHANNEL_CAPACITY: usize = 256;
+
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -1225,9 +1228,9 @@ impl P2PNode {
             *la = addrs.clone();
         }
 
-        // Spawn a background loop that accepts connections AND handles their messages
-        // Uses accept_with_message() which is the ONLY place calling transport.accept(),
-        // avoiding competition between multiple accept loops.
+        // Spawn a background accept loop that handles incoming connections from either stack.
+        // This only handles peer registration. Message data is received separately
+        // via start_message_receiving_system() which uses endpoint().recv().
         let event_tx = self.event_tx.clone();
         let peers = self.peers.clone();
         let active_connections = self.active_connections.clone();
@@ -1239,76 +1242,23 @@ impl P2PNode {
                 if shutdown.load(Ordering::Relaxed) {
                     break;
                 }
-                match dual.accept_with_message().await {
-                    Ok((ant_peer_id, remote_sock, message_data)) => {
+                match dual.accept_any().await {
+                    Ok((ant_peer_id, remote_sock)) => {
+                        // Enforce rate limiting
+                        if let Err(e) = rate_limiter.check_ip(&remote_sock.ip()) {
+                            warn!(
+                                "Rate-limited incoming connection from {}: {}",
+                                remote_sock, e
+                            );
+                            continue;
+                        }
+
                         let peer_id =
                             crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
-
-                        // Rate limiting - log if rate limit exceeded
-                        if let Err(e) = rate_limiter.check_ip(&remote_sock.ip()) {
-                            warn!("Rate limit exceeded for IP {}: {}", remote_sock.ip(), e);
-                        }
-
-                        // Register peer
                         let _ = event_tx.send(P2PEvent::PeerConnected(peer_id.clone()));
                         register_new_peer(&peers, &peer_id, &remote_addr).await;
-                        active_connections.write().await.insert(peer_id.clone());
-
-                        // Process the message
-                        trace!("Received {} bytes from {}", message_data.len(), peer_id);
-                        match serde_json::from_slice::<serde_json::Value>(&message_data) {
-                            Ok(value) => {
-                                if let (Some(protocol), Some(data), Some(from)) = (
-                                    value.get("protocol").and_then(|v| v.as_str()),
-                                    value.get("data").and_then(|v| v.as_array()),
-                                    value.get("from").and_then(|v| v.as_str()),
-                                ) {
-                                    // Security: Validate that 'from' matches the actual connection peer ID
-                                    // This prevents peer ID spoofing attacks
-                                    if from != peer_id {
-                                        warn!(
-                                            "Peer ID mismatch: message claims from='{}' but connection is from '{}'. Using connection peer ID.",
-                                            from, peer_id
-                                        );
-                                    }
-                                    // Always use the authenticated peer_id from the connection, not the claimed 'from'
-                                    let verified_source = peer_id.clone();
-
-                                    // Security: Validate u8 bounds on payload bytes
-                                    let payload: Vec<u8> = data
-                                        .iter()
-                                        .filter_map(|v| {
-                                            v.as_u64().and_then(|n| {
-                                                if n <= 255 {
-                                                    Some(n as u8)
-                                                } else {
-                                                    warn!("Invalid byte value {} in message payload, skipping", n);
-                                                    None
-                                                }
-                                            })
-                                        })
-                                        .collect();
-                                    trace!(
-                                        "Forwarding message on topic {} from {}",
-                                        protocol, verified_source
-                                    );
-                                    let _ = event_tx.send(P2PEvent::Message {
-                                        topic: protocol.to_string(),
-                                        source: verified_source,
-                                        data: payload,
-                                    });
-                                } else {
-                                    debug!(
-                                        "Message from {} missing required fields (protocol/data/from)",
-                                        peer_id
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                debug!("Failed to parse JSON message from {}: {}", peer_id, e);
-                            }
-                        }
+                        active_connections.write().await.insert(peer_id);
                     }
                     Err(e) => {
                         warn!("Accept failed: {}", e);
@@ -1319,10 +1269,66 @@ impl P2PNode {
         });
         *self.listener_handle.write().await = Some(handle);
 
-        // NOTE: start_message_receiving_system() is NOT called here
-        // because accept_with_message() handles both connection acceptance and message receiving.
+        // Start the recv-based message receiving system.
+        // This uses endpoint().recv() which matches endpoint().send() used by send_message().
+        // The accept loop above handles incoming connections (peer registration) and DHT
+        // typed streams, while this handles general P2P messaging via the raw endpoint API.
+        self.start_message_receiving_system().await?;
 
         info!("Dual-stack listeners active on: {:?}", addrs);
+        Ok(())
+    }
+
+    /// Spawns per-stack recv tasks that feed into a single mpsc channel,
+    /// then a dispatcher task that parses incoming bytes and emits P2P events.
+    async fn start_message_receiving_system(&self) -> Result<()> {
+        info!("Starting message receiving system");
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(MESSAGE_RECV_CHANNEL_CAPACITY);
+        let shutdown = Arc::clone(&self.shutdown);
+
+        let mut handles = Vec::new();
+
+        // Spawn per-stack recv tasks — both feed into the same channel
+        if let Some(v6) = self.dual_node.v6.as_ref() {
+            handles.push(v6.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
+        }
+        if let Some(v4) = self.dual_node.v4.as_ref() {
+            handles.push(v4.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
+        }
+        drop(tx); // drop original sender so rx closes when all tasks exit
+
+        let event_tx = self.event_tx.clone();
+        handles.push(tokio::spawn(async move {
+            info!("Message receive loop started");
+            while let Some((peer_id, bytes)) = rx.recv().await {
+                let transport_peer_id =
+                    crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                trace!(
+                    "Received {} bytes from peer {}",
+                    bytes.len(),
+                    transport_peer_id
+                );
+
+                if bytes == KEEPALIVE_PAYLOAD {
+                    trace!("Received keepalive from {}", transport_peer_id);
+                    continue;
+                }
+
+                match parse_protocol_message(&bytes, &transport_peer_id) {
+                    Some(event) => {
+                        let _ = event_tx.send(event);
+                    }
+                    None => {
+                        warn!("Failed to parse protocol message ({} bytes)", bytes.len());
+                    }
+                }
+            }
+            info!("Message receive loop ended — channel closed");
+        }));
+
+        *self.recv_handles.write().await = handles;
+
         Ok(())
     }
 
@@ -1725,9 +1731,9 @@ impl P2PNode {
             raw_data_len
         );
 
-        // Send via ant-quic dual-node using the optimized send method
-        // This uses P2pEndpoint::send() which corresponds with recv() for proper
-        // bidirectional communication
+        // Send via ant-quic dual-node using the raw endpoint send method.
+        // This uses endpoint().send() which corresponds with endpoint().recv()
+        // in the message receiving system.
         let send_fut = self
             .dual_node
             .send_to_peer_string_optimized(peer_id, &_message_data);
@@ -1795,8 +1801,6 @@ impl P2PNode {
 /// can pass it directly to `send_message()`. This eliminates a spoofing
 /// vector where a peer could claim an arbitrary identity via the payload.
 ///
-/// **Note**: This function is only used in tests to verify message parsing logic.
-#[cfg(test)]
 fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
     let message: WireMessage = bincode::deserialize(bytes).ok()?;
 
