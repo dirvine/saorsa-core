@@ -134,7 +134,10 @@ reqwest = { version = "0.12", features = ["stream", "rustls-tls"], default-featu
 num_cpus = "1.16"
 
 # Database dependencies for message persistence (SQLite only, replaced sqlx to avoid rsa vulnerability)
+# Pin deadpool deps to avoid CI version conflict (deadpool-sync 0.1.5 pulls incompatible deadpool-runtime 0.2.0)
 deadpool-sqlite = "0.12.1"
+deadpool-runtime = "=0.1.4"
+deadpool-sync = "=0.1.4"
 rusqlite = { version = "0.37", features = ["chrono", "serde_json", "uuid", "bundled"] }
 
 # WebRTC implementation - using saorsa-webrtc with pluggable signaling
