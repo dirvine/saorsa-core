@@ -144,7 +144,8 @@ rusqlite = { version = "0.37", features = ["chrono", "serde_json", "uuid", "bund
 
 # Fix wyz 0.5.0 compatibility issue with tap 1.0 (CI build failure)
 # wyz 0.5.0 has incorrect import path for tap::Pipe, fixed in 0.5.1
-wyz = ">=0.5.1"
+# Exact pin required: >=0.5.1 doesn't override transitive resolution under -Z minimal-versions
+wyz = "=0.5.1"
 
 # WebRTC implementation - using saorsa-webrtc with pluggable signaling
 saorsa-webrtc = "0.1.2"
