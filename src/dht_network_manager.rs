@@ -865,10 +865,14 @@ impl DhtNetworkManager {
                 Some(DhtKey::from_bytes(key))
             }
             Ok(bytes) if !bytes.is_empty() => {
-                // Short but valid hex - pad with zeros
-                let mut key = [0u8; 32];
-                key[..bytes.len()].copy_from_slice(&bytes);
-                Some(DhtKey::from_bytes(key))
+                // Short peer IDs must be rejected: zero-padding would cluster them
+                // near the zero key, violating Kademlia XOR distance assumptions
+                warn!(
+                    "Peer ID hex '{}' decoded to {} bytes, shorter than required 32 bytes",
+                    peer_id,
+                    bytes.len()
+                );
+                None
             }
             Ok(_) => {
                 warn!("Empty peer ID bytes");
