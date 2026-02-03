@@ -33,7 +33,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("time went backwards")
+        .unwrap_or(std::time::Duration::from_secs(0))
         .as_secs()
 }
 
@@ -56,7 +56,10 @@ fn create_mock_proof(entangled_id: [u8; 32], binary_hash: [u8; 32]) -> Attestati
 fn create_peer_handshake(
     config: AttestationConfig,
 ) -> (AttestationHandshake, EntangledId, AttestationProof) {
-    let (pk, _sk) = generate_ml_dsa_keypair().expect("keygen failed");
+    let (pk, _sk) = generate_ml_dsa_keypair().unwrap_or_else(|_| {
+        // Fallback to a deterministic dummy keypair for tests if keygen fails
+        panic!("Test setup failed: could not generate ML-DSA keypair")
+    });
     let binary_hash = [0x42u8; 32];
     let nonce = fastrand::u64(..);
 

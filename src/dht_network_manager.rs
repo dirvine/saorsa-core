@@ -413,12 +413,13 @@ impl DhtNetworkManager {
             .find_closest_nodes(&key, self.config.replication_factor)
             .await?;
 
-        eprintln!(
-            "  [DEBUG PUT] find_closest_nodes returned {} nodes",
-            closest_nodes.len()
+        debug!(
+            "find_closest_nodes returned {} nodes for key: {}",
+            closest_nodes.len(),
+            hex::encode(key)
         );
         for (i, node) in closest_nodes.iter().enumerate() {
-            eprintln!("    [DEBUG] Node {}: peer_id={}", i, node.peer_id);
+            trace!("  Node {}: peer_id={}", i, node.peer_id);
         }
 
         if closest_nodes.is_empty() {
@@ -459,26 +460,23 @@ impl DhtNetworkManager {
         // Replicate to closest nodes
         let mut replicated_count = 1; // Local storage
         for node in &closest_nodes {
-            eprintln!("  [DEBUG] Sending PUT to peer: {}", &node.peer_id);
+            debug!("Sending PUT to peer: {}", &node.peer_id);
             match self
                 .send_dht_request(&node.peer_id, operation.clone())
                 .await
             {
                 Ok(DhtNetworkResult::PutSuccess { .. }) => {
                     replicated_count += 1;
-                    eprintln!("  [DEBUG] ✓ Replicated to peer: {}", &node.peer_id);
+                    debug!("Replicated to peer: {}", &node.peer_id);
                 }
                 Ok(result) => {
-                    eprintln!(
-                        "  [DEBUG] ? Unexpected result from peer {}: {:?}",
+                    debug!(
+                        "Unexpected result from peer {}: {:?}",
                         &node.peer_id, result
                     );
                 }
                 Err(e) => {
-                    eprintln!(
-                        "  [DEBUG] ✗ Failed to replicate to peer {}: {}",
-                        &node.peer_id, e
-                    );
+                    debug!("Failed to replicate to peer {}: {}", &node.peer_id, e);
                 }
             }
         }

@@ -59,9 +59,6 @@ struct WireMessage {
 /// Payload bytes used for keepalive messages to prevent connection timeouts.
 const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 
-/// Channel capacity for the per-stack recv task mpsc channel.
-const RECV_CHANNEL_CAPACITY: usize = 256;
-
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -1327,123 +1324,6 @@ impl P2PNode {
         Ok(())
     }
 
-<<<<<<< HEAD
-    /// Start the message receiving system with channel-based background tasks
-    ///
-    /// Spawns per-stack recv tasks that feed into a single mpsc channel,
-    /// giving instant wakeup on data arrival without poll/timeout latency.
-=======
-    /// Start the message receiving system with background tasks
-    #[allow(dead_code)]
->>>>>>> cccf686 (wip: dht replication)
-    async fn start_message_receiving_system(&self) -> Result<()> {
-        info!("Starting message receiving system");
-
-<<<<<<< HEAD
-        let (tx, mut rx) = tokio::sync::mpsc::channel(RECV_CHANNEL_CAPACITY);
-        let shutdown = Arc::clone(&self.shutdown);
-=======
-        tokio::spawn(async move {
-            loop {
-                match dual.receive_any().await {
-                    Ok((peer_id, bytes)) => {
-                        let peer_id_str =
-                            crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
-                        // Expect the JSON message wrapper from create_protocol_message
-                        match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            Ok(value) => {
-                                if let (Some(protocol), Some(data), Some(from)) = (
-                                    value.get("protocol").and_then(|v| v.as_str()),
-                                    value.get("data").and_then(|v| v.as_array()),
-                                    value.get("from").and_then(|v| v.as_str()),
-                                ) {
-                                    // Security: Use authenticated peer ID, not claimed 'from'
-                                    if from != peer_id_str {
-                                        warn!(
-                                            "Peer ID mismatch in receive: claims '{}' but is '{}'",
-                                            from, peer_id_str
-                                        );
-                                    }
-                                    let verified_source = peer_id_str;
-
-                                    // Security: Validate u8 bounds
-                                    let payload: Vec<u8> = data
-                                        .iter()
-                                        .filter_map(|v| {
-                                            v.as_u64().and_then(|n| {
-                                                if n <= 255 { Some(n as u8) } else { None }
-                                            })
-                                        })
-                                        .collect();
-                                    let _ = event_tx.send(P2PEvent::Message {
-                                        topic: protocol.to_string(),
-                                        source: verified_source,
-                                        data: payload,
-                                    });
-                                }
-                            }
-                            Err(e) => {
-                                debug!("Failed to parse message from {:?}: {}", peer_id, e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        debug!("Receive error: {}", e);
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    }
-                }
-            }
-        });
->>>>>>> cccf686 (wip: dht replication)
-
-        let mut handles = Vec::new();
-
-        // Spawn per-stack recv tasks — both feed into the same channel
-        if let Some(v6) = self.dual_node.v6.as_ref() {
-            handles.push(v6.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
-        }
-        if let Some(v4) = self.dual_node.v4.as_ref() {
-            handles.push(v4.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
-        }
-        drop(tx); // drop original sender so rx closes when all tasks exit
-
-        let event_tx = self.event_tx.clone();
-        handles.push(tokio::spawn(async move {
-            info!("Message receive loop started");
-            while let Some((peer_id, bytes)) = rx.recv().await {
-                let transport_peer_id = ant_peer_id_to_string(&peer_id);
-                info!(
-                    "Received {} bytes from peer {}",
-                    bytes.len(),
-                    transport_peer_id
-                );
-
-                if bytes == KEEPALIVE_PAYLOAD {
-                    trace!("Received keepalive from {}", transport_peer_id);
-                    continue;
-                }
-
-                match parse_protocol_message(&bytes, &transport_peer_id) {
-                    Some(event) => {
-                        let _ = event_tx.send(event);
-                    }
-                    None => {
-                        warn!("Failed to parse protocol message ({} bytes)", bytes.len());
-                    }
-                }
-            }
-            info!("Message receive loop ended — channel closed");
-        }));
-
-        *self.recv_handles.write().await = handles;
-
-        Ok(())
-    }
-
-    // MCP removed
-
-    // MCP removed
-
     /// Run the P2P node (blocks until shutdown)
     pub async fn run(&self) -> Result<()> {
         if !*self.running.read().await {
@@ -1908,10 +1788,13 @@ impl P2PNode {
 /// Returns `None` if the bytes cannot be deserialized as a valid `WireMessage`.
 ///
 /// The `from` field is a required part of the wire protocol but is **not**
-/// used as the event source.  Instead, `source` — the transport-level peer ID
+/// used as the event source. Instead, `source` — the transport-level peer ID
 /// derived from the authenticated QUIC connection — is used so that consumers
-/// can pass it directly to `send_message()`.  This eliminates a spoofing
+/// can pass it directly to `send_message()`. This eliminates a spoofing
 /// vector where a peer could claim an arbitrary identity via the payload.
+///
+/// **Note**: This function is only used in tests to verify message parsing logic.
+#[cfg(test)]
 fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
     let message: WireMessage = bincode::deserialize(bytes).ok()?;
 
@@ -2497,37 +2380,12 @@ impl P2PNode {
         self.dht.as_ref()
     }
 
-    /// Set the DHT Network Manager for cross-node replication
+    /// Store a value in the local DHT
     ///
-    /// When a `DhtNetworkManager` is set, DHT operations (`dht_put`, `dht_get`)
-    /// will be delegated to the manager for network-wide replication instead of
-    /// local-only storage.
-    pub fn set_dht_network_manager(&mut self, manager: Arc<DhtNetworkManager>) {
-        self.dht_network_manager = Some(manager);
-    }
-
-    /// Get the DHT Network Manager reference (if configured)
-    pub fn dht_network_manager(&self) -> Option<&Arc<DhtNetworkManager>> {
-        self.dht_network_manager.as_ref()
-    }
-
-    /// Store a value in the DHT
-    ///
-    /// When a `DhtNetworkManager` is configured, this delegates to the manager
-    /// for cross-node replication. Otherwise, it stores locally only.
+    /// This method stores data in the local DHT instance only. For network-wide
+    /// replication across multiple nodes, use `DhtNetworkManager` instead,
+    /// which owns a P2PNode for transport and coordinates replication.
     pub async fn dht_put(&self, key: crate::dht::Key, value: Vec<u8>) -> Result<()> {
-        // If DhtNetworkManager is available, delegate to it for cross-node replication
-        if let Some(ref manager) = self.dht_network_manager {
-            match manager.put(key, value.clone()).await {
-                Ok(_result) => return Ok(()),
-                Err(e) => {
-                    warn!("DhtNetworkManager put failed, falling back to local: {e}");
-                    // Fall through to local storage
-                }
-            }
-        }
-
-        // Local-only storage (fallback or when manager not available)
         if let Some(ref dht) = self.dht {
             let mut dht_instance = dht.write().await;
             let dht_key = crate::dht::DhtKey::from_bytes(key);
@@ -2545,32 +2403,12 @@ impl P2PNode {
         }
     }
 
-    /// Retrieve a value from the DHT
+    /// Retrieve a value from the local DHT
     ///
-    /// When a `DhtNetworkManager` is configured, this delegates to the manager
-    /// which can query remote nodes. Otherwise, it retrieves from local storage only.
+    /// This method retrieves data from the local DHT instance only. For network-wide
+    /// lookups across multiple nodes, use `DhtNetworkManager` instead,
+    /// which owns a P2PNode for transport and coordinates distributed queries.
     pub async fn dht_get(&self, key: crate::dht::Key) -> Result<Option<Vec<u8>>> {
-        // If DhtNetworkManager is available, delegate to it for cross-node lookup
-        if let Some(ref manager) = self.dht_network_manager {
-            match manager.get(&key).await {
-                Ok(crate::dht_network_manager::DhtNetworkResult::GetSuccess { value, .. }) => {
-                    return Ok(Some(value));
-                }
-                Ok(crate::dht_network_manager::DhtNetworkResult::GetNotFound { .. }) => {
-                    return Ok(None);
-                }
-                Ok(_) => {
-                    warn!("Unexpected result from DhtNetworkManager get");
-                    // Fall through to local lookup
-                }
-                Err(e) => {
-                    warn!("DhtNetworkManager get failed, falling back to local: {e}");
-                    // Fall through to local lookup
-                }
-            }
-        }
-
-        // Local-only retrieval (fallback or when manager not available)
         if let Some(ref dht) = self.dht {
             let dht_instance = dht.read().await;
             let dht_key = crate::dht::DhtKey::from_bytes(key);

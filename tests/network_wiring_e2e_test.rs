@@ -30,10 +30,16 @@ use tracing::{debug, info, warn};
 fn create_test_node_config() -> NodeConfig {
     NodeConfig {
         peer_id: None,
-        listen_addr: "127.0.0.1:0".parse().expect("Invalid address"),
+        listen_addr: "127.0.0.1:0".parse().unwrap_or_else(|_| {
+            panic!("Test setup error: hardcoded address should parse")
+        }),
         listen_addrs: vec![
-            "127.0.0.1:0".parse().expect("Invalid address"),
-            "[::]:0".parse().expect("Invalid address"),
+            "127.0.0.1:0".parse().unwrap_or_else(|_| {
+                panic!("Test setup error: hardcoded IPv4 address should parse")
+            }),
+            "[::]:0".parse().unwrap_or_else(|_| {
+                panic!("Test setup error: hardcoded IPv6 address should parse")
+            }),
         ],
         bootstrap_peers: vec![],
         bootstrap_peers_str: vec![],
@@ -45,10 +51,16 @@ fn create_test_node_config() -> NodeConfig {
 fn create_test_node_config_with_stale_threshold(threshold: Duration) -> NodeConfig {
     NodeConfig {
         peer_id: None,
-        listen_addr: "127.0.0.1:0".parse().expect("Invalid address"),
+        listen_addr: "127.0.0.1:0".parse().unwrap_or_else(|_| {
+            panic!("Test setup error: hardcoded address should parse")
+        }),
         listen_addrs: vec![
-            "127.0.0.1:0".parse().expect("Invalid address"),
-            "[::]:0".parse().expect("Invalid address"),
+            "127.0.0.1:0".parse().unwrap_or_else(|_| {
+                panic!("Test setup error: hardcoded IPv4 address should parse")
+            }),
+            "[::]:0".parse().unwrap_or_else(|_| {
+                panic!("Test setup error: hardcoded IPv6 address should parse")
+            }),
         ],
         bootstrap_peers: vec![],
         bootstrap_peers_str: vec![],

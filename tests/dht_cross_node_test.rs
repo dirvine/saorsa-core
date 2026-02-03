@@ -161,21 +161,24 @@ async fn test_cross_node_dht_store_retrieve() -> Result<()> {
     Ok(())
 }
 
-/// Test P2PNode with DhtNetworkManager integration
+/// Test correct architecture: DhtNetworkManager owns P2PNode
+///
+/// This test demonstrates the correct layering per ADR-001:
+/// - DHT layer (DhtNetworkManager) sits above transport layer (P2PNode)
+/// - DhtNetworkManager owns and uses P2PNode for transport
+/// - Applications use DhtNetworkManager directly for network-wide operations
 #[tokio::test]
-async fn test_p2p_node_with_dht_manager() -> Result<()> {
-    // Create P2PNode
+async fn test_correct_architecture_dht_owns_transport() -> Result<()> {
+    // Create DhtNetworkManager (DHT layer)
+    // It internally creates and owns a P2PNode (transport layer)
     let node_config = NodeConfig::builder()
-        .peer_id("p2p_dht_test_node".to_string())
+        .peer_id("architecture_test_node".to_string())
         .listen_port(0)
         .ipv6(false)
         .build()?;
 
-    let mut node = P2PNode::new(node_config.clone()).await?;
-
-    // Create and configure DhtNetworkManager
     let dht_config = DhtNetworkConfig {
-        local_peer_id: "p2p_dht_test_node".to_string(),
+        local_peer_id: "architecture_test_node".to_string(),
         dht_config: DHTConfig::default(),
         node_config,
         bootstrap_nodes: vec![],
@@ -185,64 +188,59 @@ async fn test_p2p_node_with_dht_manager() -> Result<()> {
         enable_security: false,
     };
 
+    // Correct pattern: Create DhtNetworkManager which owns P2PNode internally
     let manager = Arc::new(DhtNetworkManager::new(dht_config).await?);
     manager.start().await?;
 
-    // Set the manager on the node
-    node.set_dht_network_manager(Arc::clone(&manager));
+    // Test DHT operations through the manager (correct layer)
+    let key = key_from_str("architecture_test_key");
+    let value = b"architecture_test_value".to_vec();
 
-    // Verify the manager is set
+    // Put through DhtNetworkManager (network-wide replication)
+    let put_result = manager.put(key, value.clone()).await?;
     assert!(
-        node.dht_network_manager().is_some(),
-        "DhtNetworkManager should be set on the node"
+        matches!(put_result, DhtNetworkResult::PutSuccess { .. }),
+        "Put should succeed through manager"
     );
 
-    // Test DHT operations through the node
-    let key = key_from_str("p2p_node_test_key");
-    let value = b"p2p_node_test_value".to_vec();
-
-    // Put through the node (should delegate to DhtNetworkManager)
-    node.dht_put(key, value.clone()).await?;
-
-    // Get through the node (should delegate to DhtNetworkManager)
-    let retrieved = node.dht_get(key).await?;
-    assert!(retrieved.is_some(), "Value should be retrievable after put");
-    assert_eq!(
-        retrieved.unwrap(),
-        value,
-        "Retrieved value should match stored value"
-    );
+    // Get through DhtNetworkManager (network-wide lookup)
+    let get_result = manager.get(&key).await?;
+    match get_result {
+        DhtNetworkResult::GetSuccess {
+            value: retrieved, ..
+        } => {
+            assert_eq!(retrieved, value, "Retrieved value should match");
+        }
+        _ => panic!("Get should succeed through manager"),
+    }
 
     manager.stop().await?;
     Ok(())
 }
 
-/// Test that P2PNode falls back to local DHT when no manager is set
+/// Test P2PNode local-only DHT operations (transport layer only)
+///
+/// P2PNode provides local-only DHT storage without network replication.
+/// For network-wide operations, use DhtNetworkManager instead.
 #[tokio::test]
-async fn test_p2p_node_local_dht_fallback() -> Result<()> {
-    // Create P2PNode without DhtNetworkManager
+async fn test_p2p_node_local_dht_only() -> Result<()> {
+    // Create P2PNode (transport layer only)
     let node_config = NodeConfig::builder()
-        .peer_id("local_dht_test_node".to_string())
+        .peer_id("local_only_test_node".to_string())
         .listen_port(0)
         .ipv6(false)
         .build()?;
 
     let node = P2PNode::new(node_config).await?;
 
-    // Verify no manager is set
-    assert!(
-        node.dht_network_manager().is_none(),
-        "DhtNetworkManager should not be set"
-    );
+    // Test local-only DHT operations (no network replication)
+    let key = key_from_str("local_only_test_key");
+    let value = b"local_only_test_value".to_vec();
 
-    // Test local DHT operations
-    let key = key_from_str("local_fallback_test_key");
-    let value = b"local_fallback_test_value".to_vec();
-
-    // Put should work with local DHT
+    // Put stores locally only (no replication)
     node.dht_put(key, value.clone()).await?;
 
-    // Get should work with local DHT
+    // Get retrieves from local storage only (no network query)
     let retrieved = node.dht_get(key).await?;
     assert!(
         retrieved.is_some(),
