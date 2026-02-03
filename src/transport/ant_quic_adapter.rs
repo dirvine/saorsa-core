@@ -396,17 +396,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
                             if !peers_guard.iter().any(|(p, _)| *p == peer_id) {
                                 peers_guard.push((peer_id, addr));
 
-                                let region = match addr.ip() {
-                                    std::net::IpAddr::V4(ipv4) => match ipv4.octets().first() {
-                                        Some(0..=63) => "NA".to_string(),
-                                        Some(64..=127) => "EU".to_string(),
-                                        Some(128..=191) => "APAC".to_string(),
-                                        Some(192..=223) => "SA".to_string(),
-                                        Some(224..=255) => "OTHER".to_string(),
-                                        None => "UNKNOWN".to_string(),
-                                    },
-                                    std::net::IpAddr::V6(_) => "UNKNOWN".to_string(),
-                                };
+                                let region = Self::get_region_for_ip_static(&addr.ip());
                                 let mut regions = peer_regions_for_accept.write().await;
                                 *regions.entry(region).or_insert(0) += 1;
                             }

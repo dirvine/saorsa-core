@@ -801,8 +801,9 @@ impl P2PNode {
     pub async fn new(config: NodeConfig) -> Result<Self> {
         let peer_id = config.peer_id.clone().unwrap_or_else(|| {
             // Generate a random peer ID for now
+            // Safe: UUID v4 canonical format is always 36 characters
             let uuid_str = uuid::Uuid::new_v4().to_string();
-            format!("peer_{}", uuid_str.chars().take(8).collect::<String>())
+            format!("peer_{}", &uuid_str[..8])
         });
 
         let (event_tx, _) = broadcast::channel(1000);
