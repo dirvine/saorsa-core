@@ -977,43 +977,15 @@ impl DhtNetworkManager {
                 // This can happen if handle_dht_response rejected the response
                 // or if the operation was cleaned up elsewhere
                 self.active_operations.write().await.remove(message_id);
-
-                // Try local fallback before giving up
-                if let Some(result) = self.try_local_fallback(message_id).await {
-                    return Ok(result);
-                }
-
                 Err(P2PError::Network(NetworkError::ProtocolError(
                     "Response channel closed unexpectedly".into(),
                 )))
             }
             Err(_timeout) => {
-                // Timeout - clean up and return error
                 self.active_operations.write().await.remove(message_id);
-
-                // Try local fallback before giving up
-                if let Some(result) = self.try_local_fallback(message_id).await {
-                    return Ok(result);
-                }
-
                 Err(P2PError::Network(NetworkError::Timeout))
             }
         }
-    }
-
-    /// Try local DHT as fallback for Get and FindNode operations
-    ///
-    /// Called when network response times out or channel closes.
-    /// This is safe because we've already removed the operation from active_operations.
-    async fn try_local_fallback(&self, message_id: &str) -> Option<DhtNetworkResult> {
-        // We need to check what operation this was for local fallback
-        // But the operation was already removed, so we need to get it before removal
-        // This is handled by the caller checking before removal
-
-        // For now, this method requires the caller to have saved the operation info
-        // We'll just return None and let the caller handle fallback if needed
-        debug!("Local fallback not available for message_id: {message_id}");
-        None
     }
 
     /// Handle incoming DHT network response (for real network integration)
