@@ -25,6 +25,7 @@ use crate::{
     error::{DhtError, NetworkError},
     network::{NodeConfig, P2PNode},
 };
+use futures::stream::{FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -532,18 +533,17 @@ impl DhtNetworkManager {
             return Ok(DhtNetworkResult::GetNotFound { key: *key });
         }
 
-        // Query nodes in parallel for better performance
-        let query_futures = closest_nodes.iter().map(|node| {
-            let peer_id = node.peer_id.clone();
-            let op = operation.clone();
-            async move { (peer_id.clone(), self.send_dht_request(&peer_id, op).await) }
-        });
+        // Query nodes in parallel, return on first success
+        let mut futures: FuturesUnordered<_> = closest_nodes
+            .iter()
+            .map(|node| {
+                let peer_id = node.peer_id.clone();
+                let op = operation.clone();
+                async move { (peer_id.clone(), self.send_dht_request(&peer_id, op).await) }
+            })
+            .collect();
 
-        // Execute all queries in parallel
-        let results = futures::future::join_all(query_futures).await;
-
-        // Find first successful result
-        for (peer_id, result) in results {
+        while let Some((peer_id, result)) = futures.next().await {
             match result {
                 Ok(DhtNetworkResult::GetSuccess { value, source, .. }) => {
                     info!(
