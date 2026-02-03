@@ -75,6 +75,8 @@ rand_chacha = "0.3"
 zeroize = { version = "1.8", features = ["derive"] }
 # Constant-time operations for cryptographic security
 subtle = "2.6"
+# Pin to fix stdsimd compilation error on newer Rust nightly (CVE-fix in 4.1.1+)
+curve25519-dalek = "4.1.3"
 # TODO: Remove once fully migrated to saorsa-pqc - keeping temporarily for compatibility
 blake3 = "1.6"
 hmac = "0.12"

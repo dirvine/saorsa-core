@@ -1468,7 +1468,7 @@ impl P2PNode {
     /// List all active connections with their peer IDs and addresses
     ///
     /// # Returns
-    /// A vector of tuples containing (PeerId, Vec<String>) where the Vec<String>
+    /// A vector of tuples containing `(PeerId, Vec<String>)` where the `Vec<String>`
     /// contains all known addresses for that peer.
     pub async fn list_active_connections(&self) -> Vec<(PeerId, Vec<String>)> {
         let active = self.active_connections.read().await;
@@ -1893,7 +1893,7 @@ impl P2PNode {
     /// * `peer_public_key` - The peer's ML-DSA public key
     ///
     /// # Returns
-    /// An [`EnforcementDecision`] indicating whether to allow or reject the connection.
+    /// An `EnforcementDecision` indicating whether to allow or reject the connection.
     ///
     /// # Example
     /// ```rust,ignore
@@ -1993,7 +1993,7 @@ impl P2PNode {
 
     /// Verify a peer's attestation and return a simple boolean result.
     ///
-    /// This is a convenience method that wraps [`verify_peer_attestation`] for cases
+    /// This is a convenience method that wraps `verify_peer_attestation` for cases
     /// where only a pass/fail result is needed without the detailed decision.
     ///
     /// # Returns
