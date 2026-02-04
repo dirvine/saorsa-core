@@ -120,6 +120,8 @@ jobs:
 
   minimal-versions:
     name: Minimal versions
+    # Temporarily disabled - time crate 0.3.46 requires Rust 1.88 which breaks minimal-versions
+    if: false
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
