@@ -40,9 +40,6 @@ const MIN_CONCURRENT_OPERATIONS: usize = 10;
 /// Number of peers to query for iterative node lookups
 const ITERATIVE_LOOKUP_PEERS: usize = 3;
 
-/// Response timeout for DHT operations (seconds)
-const RESPONSE_TIMEOUT_SECS: u64 = 10;
-
 /// DHT node representation for network operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DHTNode {
@@ -997,7 +994,7 @@ impl DhtNetworkManager {
         _message_id: &str,
         response_rx: oneshot::Receiver<(PeerId, DhtNetworkResult)>,
     ) -> Result<DhtNetworkResult> {
-        let response_timeout = Duration::from_secs(RESPONSE_TIMEOUT_SECS);
+        let response_timeout = self.config.request_timeout;
 
         // Wait for response with timeout - no polling, no TOCTOU race
         match tokio::time::timeout(response_timeout, response_rx).await {
