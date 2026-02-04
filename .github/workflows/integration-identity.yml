@@ -71,8 +71,8 @@ jobs:
           find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
           df -h
 
-      - name: Identity Management
-        run: cargo nextest run --test identity_management_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+      - name: Node Identity Crypto
+        run: cargo nextest run --test node_identity_crypto_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Node Identity
         run: cargo nextest run --test node_identity_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast

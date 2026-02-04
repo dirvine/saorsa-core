@@ -200,7 +200,8 @@ pub struct AdaptiveDHT {
     dht_config: DHTConfig,
     config: AdaptiveDhtConfig,
     trust_provider: Arc<dyn TrustProvider>,
-    #[allow(dead_code)]
+    /// Router for adaptive path selection. Used by pub(crate) DHT methods
+    /// reserved for future internal use (put, get, etc.).
     router: Arc<AdaptiveRouter>,
     hyperbolic_space: Arc<HyperbolicSpace>,
     som: Arc<SelfOrganizingMap>,
