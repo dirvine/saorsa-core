@@ -69,8 +69,7 @@ The persistence layer provides durable, encrypted, and replicated storage for th
 /system/              - System metadata and configuration
 /dht/                 - DHT records and routing table
 /identity/            - User identities and keys
-/chat/                - Chat messages and channels
-/projects/            - Project data and collaboration
+/apps/                - Upper-layer application data (saorsa-node)
 /files/               - File chunks and metadata
 /cache/               - Temporary cached data
 ```
@@ -405,7 +404,7 @@ ttl_seconds = 3600
 # Encryption
 [persistence.encryption]
 enabled = true
-algorithm = "chacha20poly1305"
+algorithm = "saorsa-pqc-aead"
 key_rotation_days = 90
 
 # Replication

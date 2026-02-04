@@ -165,7 +165,7 @@ impl ReplicationManager {
         let mut candidates = HashMap::new();
 
         // Get nodes from each routing strategy
-        let strategies = self.router.get_all_strategies();
+        let strategies = self.router.get_all_strategies().await;
         for (strategy_name, strategy) in strategies {
             let nodes = strategy
                 .find_closest_nodes(_content_hash, count * 2)

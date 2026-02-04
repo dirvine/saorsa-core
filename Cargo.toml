@@ -27,15 +27,6 @@ mocks = []
 h2_greedy = []
 # Test utilities including mock DHT for integration tests
 test-utils = []
-# Entangled Attestation system (Phase 1: Entangled Identity)
-# Enables EntangledId derivation and verification for software attestation
-attestation = []
-# Enable real SP1 zkVM proof generation (requires SP1 SDK and toolchain)
-# Without this feature, a mock prover is used for testing
-zkvm-prover = ["dep:sp1-sdk"]
-# Enable SP1 Groth16/PLONK verification (lightweight, NOT post-quantum secure)
-# Use for on-chain verification compatibility only
-zkvm-verifier-groth16 = ["dep:sp1-verifier"]
 
 [dependencies]
 # Core async and serialization
@@ -81,8 +72,6 @@ curve25519-dalek = "4.1.3"
 blake3 = "1.6"
 hmac = "0.12"
 hkdf = "0.12"
-# AEAD encryption for messaging
-chacha20poly1305 = "0.10"
 
 # Performance optimization
 parking_lot = "0.12"
@@ -102,19 +91,6 @@ fastrand = "2.3"
 postcard = { version = "1.1", features = ["use-std"] }
 lru = "0.16"
 
-# DHT dependencies
-saorsa-rsps = "0.2.0"
-
-# zkVM-compatible logic crate for attestation and verification
-saorsa-logic = { version = "0.1", features = ["std", "alloc"] }
-
-# SP1 SDK for zkVM proof generation and STARK verification (optional, heavy dependency)
-# Enable with zkvm-prover feature for real proof generation and STARK verification
-sp1-sdk = { version = "5.2.4", optional = true }
-
-# SP1 Verifier for Groth16/PLONK verification (lightweight, NOT post-quantum secure)
-# Enable with zkvm-verifier-groth16 feature for on-chain compatible verification
-sp1-verifier = { version = "5.2.4", optional = true, default-features = false }
 
 # Monitoring (optional to avoid build script issues on docs.rs)
 prometheus = { version = "0.14", optional = true, default-features = false }
@@ -135,11 +111,6 @@ tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.12", features = ["stream", "rustls-tls"], default-features = false }
 num_cpus = "1.16"
 
-# Database dependencies for message persistence (SQLite only, replaced sqlx to avoid rsa vulnerability)
-# Pin deadpool deps to avoid CI version conflict (deadpool-sync 0.1.5 pulls incompatible deadpool-runtime 0.2.0)
-deadpool-sqlite = "0.12.1"
-deadpool-runtime = "=0.1.4"
-deadpool-sync = "=0.1.4"
 rusqlite = { version = "0.37", features = ["chrono", "serde_json", "uuid", "bundled"] }
 
 # Fix wyz 0.5.0 compatibility issue with tap 1.0 (CI build failure)
@@ -147,8 +118,6 @@ rusqlite = { version = "0.37", features = ["chrono", "serde_json", "uuid", "bund
 # Exact pin required: >=0.5.1 doesn't override transitive resolution under -Z minimal-versions
 wyz = "=0.5.1"
 
-# WebRTC implementation - using saorsa-webrtc with pluggable signaling
-saorsa-webrtc = "0.1.2"
 
 # CLI dependencies (needed for identity CLI types used in tests)
 clap = { version = "4.5", features = ["derive"] }
@@ -177,10 +146,6 @@ harness = false
 
 [[bench]]
 name = "validation_bench"
-harness = false
-
-[[bench]]
-name = "encoding_baseline"
 harness = false
 
 [[test]]

@@ -3,7 +3,6 @@
 //! Provides the main DHT functionality with k=8 replication, load balancing, and fault tolerance.
 
 use crate::dht::{
-    content_addressing::ContentAddress,
     geographic_routing::GeographicRegion,
     metrics::SecurityMetricsCollector,
     routing_maintenance::{
@@ -11,9 +10,8 @@ use crate::dht::{
         close_group_validator::{
             CloseGroupFailure, CloseGroupValidator, CloseGroupValidatorConfig,
         },
-        data_integrity_monitor::DataIntegrityMonitor,
     },
-    witness::{DhtOperation, OperationMetadata, OperationType, WitnessReceiptSystem},
+    // witness system removed
 };
 use crate::security::{IPDiversityConfig, IPDiversityEnforcer};
 use anyhow::{Result, anyhow};
@@ -405,12 +403,10 @@ pub struct DhtCoreEngine {
     data_store: Arc<RwLock<DataStore>>,
     replication_manager: Arc<RwLock<ReplicationManager>>,
     load_balancer: Arc<RwLock<LoadBalancer>>,
-    witness_system: Arc<WitnessReceiptSystem>,
 
     // Security Components (using parking_lot RwLock as they are synchronous)
     security_metrics: Arc<SecurityMetricsCollector>,
     bucket_refresh_manager: Arc<parking_lot::RwLock<BucketRefreshManager>>,
-    data_integrity_monitor: Arc<parking_lot::RwLock<DataIntegrityMonitor>>,
     close_group_validator: Arc<parking_lot::RwLock<CloseGroupValidator>>,
     ip_diversity_enforcer: Arc<parking_lot::RwLock<IPDiversityEnforcer>>,
     eviction_manager: Arc<parking_lot::RwLock<EvictionManager>>,
@@ -434,10 +430,6 @@ impl DhtCoreEngine {
         bucket_refresh_manager.set_validator(close_group_validator.clone());
         let bucket_refresh_manager = Arc::new(parking_lot::RwLock::new(bucket_refresh_manager));
 
-        let data_integrity_monitor = Arc::new(parking_lot::RwLock::new(
-            DataIntegrityMonitor::with_defaults(),
-        ));
-
         let ip_diversity_enforcer = Arc::new(parking_lot::RwLock::new(IPDiversityEnforcer::new(
             IPDiversityConfig::default(),
         )));
@@ -457,10 +449,8 @@ impl DhtCoreEngine {
             data_store: Arc::new(RwLock::new(DataStore::new())),
             replication_manager: Arc::new(RwLock::new(ReplicationManager::new(8))),
             load_balancer: Arc::new(RwLock::new(LoadBalancer::new())),
-            witness_system: Arc::new(WitnessReceiptSystem::new()),
             security_metrics,
             bucket_refresh_manager,
-            data_integrity_monitor,
             close_group_validator,
             ip_diversity_enforcer,
             eviction_manager,
@@ -471,7 +461,6 @@ impl DhtCoreEngine {
     /// Start background maintenance tasks for security and health
     pub fn start_maintenance_tasks(&self) {
         let refresh_manager = self.bucket_refresh_manager.clone();
-        let integrity_monitor = self.data_integrity_monitor.clone();
         let eviction_manager = self.eviction_manager.clone();
         let close_group_validator = self.close_group_validator.clone();
         let security_metrics = self.security_metrics.clone();
@@ -584,17 +573,7 @@ impl DhtCoreEngine {
                     }
                 }
 
-                // 2. Run Data Integrity Checks
-                {
-                    let mut monitor = integrity_monitor.write();
-                    if monitor.is_check_due() {
-                        monitor.mark_check_started();
-                        let _keys = monitor.get_keys_needing_check();
-                        // Dispatch attestation challenges (placeholder)
-                    }
-                }
-
-                // 3. Active Eviction Enforcement
+                // 2. Active Eviction Enforcement
                 {
                     let mut eviction_mgr = eviction_manager.write();
                     let candidates = eviction_mgr.get_eviction_candidates();
@@ -630,35 +609,11 @@ impl DhtCoreEngine {
         let load_balancer = self.load_balancer.read().await;
         let selected_nodes = load_balancer.select_least_loaded(&target_nodes, 8);
 
-        // Hook: Track content in DataIntegrityMonitor
-        {
-            let mut monitor = self.data_integrity_monitor.write();
-            monitor.track_content(key.clone(), selected_nodes.to_vec());
-        }
-
         // Store locally if we're one of the selected nodes or if no nodes are available (test/single-node mode)
         if selected_nodes.contains(&self.node_id) || selected_nodes.is_empty() {
             let mut store = self.data_store.write().await;
             store.put(key.clone(), value.clone());
         }
-
-        // Create witness receipt
-        let operation = DhtOperation {
-            operation_type: OperationType::Store,
-            content_hash: ContentAddress::from_bytes(&key.0),
-            nodes: selected_nodes
-                .iter()
-                .map(|id| crate::dht::witness::NodeId::new(&format!("{:?}", id)))
-                .collect(),
-            metadata: OperationMetadata {
-                size_bytes: value.len(),
-                chunk_count: Some(1),
-                redundancy_level: Some(0.5),
-                custom: HashMap::new(),
-            },
-        };
-
-        let _receipt = self.witness_system.create_receipt(&operation).await?;
 
         Ok(StoreReceipt {
             key: key.clone(),
@@ -743,14 +698,13 @@ impl DhtCoreEngine {
         let reason_str = match &reason {
             EvictionReason::ConsecutiveFailures(_) => "consecutive_failures",
             EvictionReason::LowTrust(_) => "low_trust",
-            EvictionReason::FailedAttestation => "failed_attestation",
             EvictionReason::CloseGroupRejection => "close_group_rejection",
             EvictionReason::Stale => "stale",
         };
         self.security_metrics.record_eviction(reason_str).await;
 
         // 3. Log eviction for data integrity tracking
-        // Note: DataIntegrityMonitor tracks data health, not individual node membership
+        // Note: Data health tracking handled elsewhere
         // Evicted nodes will be removed from routing table, which affects future lookups
 
         tracing::info!(
@@ -902,15 +856,10 @@ impl std::fmt::Debug for DhtCoreEngine {
             .field("data_store", &"Arc<RwLock<DataStore>>")
             .field("replication_manager", &"Arc<RwLock<ReplicationManager>>")
             .field("load_balancer", &"Arc<RwLock<LoadBalancer>>")
-            .field("witness_system", &"Arc<WitnessReceiptSystem>")
             .field("security_metrics", &"Arc<SecurityMetricsCollector>")
             .field(
                 "bucket_refresh_manager",
                 &"Arc<parking_lot::RwLock<BucketRefreshManager>>",
-            )
-            .field(
-                "data_integrity_monitor",
-                &"Arc<parking_lot::RwLock<DataIntegrityMonitor>>",
             )
             .field(
                 "close_group_validator",

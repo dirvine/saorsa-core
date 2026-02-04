@@ -56,9 +56,6 @@ pub struct Config {
     pub transport: TransportConfig,
     /// Identity configuration
     pub identity: IdentityConfig,
-    /// Attestation configuration for software integrity verification
-    #[serde(default)]
-    pub attestation: crate::attestation::AttestationConfig,
 }
 
 /// Network configuration

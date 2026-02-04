@@ -61,13 +61,8 @@ pub mod fwid;
 /// Use `use saorsa_core::prelude::*;` to import commonly used types.
 pub mod prelude;
 
-/// Public API matching the spec
-pub mod api;
-
 /// Network address types
 pub mod address;
-/// User directory mapping (UserId <-> FourWordAddress)
-pub mod address_book;
 
 /// Network core functionality
 pub mod network;
@@ -99,57 +94,11 @@ pub mod telemetry;
 /// Security and cryptography
 pub mod security;
 
-/// Entangled Attestation system for software integrity verification
-pub mod attestation;
-
 /// BGP-based GeoIP provider using open-source routing data
 pub mod bgp_geo_provider;
 
 /// User identity and privacy system
 pub mod identity;
-
-/// DHT-based storage for multi-device sync
-pub mod storage;
-
-// Re-export main API functions
-pub use api::{
-    GroupKeyPair,
-    MemberRef,
-    clear_dht_client,
-    get_data,
-    get_identity,
-    get_presence,
-    // Group API
-    group_identity_canonical_sign_bytes,
-    group_identity_create,
-    group_identity_fetch,
-    group_identity_publish,
-    group_identity_update_members_signed,
-    identity_fetch,
-    register_headless,
-    // Identity API
-    register_identity,
-    // Presence API
-    register_presence,
-    set_active_device,
-    set_dht_client,
-    // Storage API
-    store_data,
-    store_dyad,
-    store_with_fec,
-};
-
-/// Chat system (Slack-like)
-pub mod chat;
-
-/// Rich messaging system (WhatsApp/Slack-style)
-pub mod messaging;
-
-/// Discuss system (Discourse-like)
-pub mod discuss;
-
-/// Projects system with hierarchical organization
-pub mod projects;
 
 /// Threshold cryptography for group operations
 pub mod threshold;
@@ -214,9 +163,6 @@ pub mod upgrade;
 
 // Re-export main types
 pub use address::{AddressBook, NetworkAddress};
-pub use address_book::{
-    address_book, get_user_by_four_words, get_user_four_words, register_user_address,
-};
 pub use identity::FourWordAddress;
 
 // New spec-compliant API exports
@@ -287,23 +233,6 @@ pub use security::{
 };
 
 // Enhanced identity removed
-
-// Storage exports
-pub use storage::{FileChunker, StorageManager}; // SyncManager temporarily disabled
-
-// Chat exports
-pub use chat::{Call, Channel, ChannelId, ChannelType, ChatManager, Message, MessageId, Thread};
-
-// Discuss exports
-pub use discuss::{
-    Badge, Category, CategoryId, DiscussManager, Poll, Reply, ReplyId, Topic, TopicId, UserStats,
-};
-
-// Projects exports
-pub use projects::{
-    Document, DocumentId, Folder, Project, ProjectAnalytics, ProjectId, ProjectsManager,
-    WorkflowState,
-};
 
 // Threshold exports
 pub use threshold::{
@@ -404,12 +333,6 @@ pub type Multiaddr = NetworkAddress;
 
 /// Saorsa Core version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-// Attestation system exports
-pub use attestation::{
-    AttestationConfig, AttestationError, AttestationResult, EnforcementMode, EntangledId,
-    SunsetTimestamp,
-};
 
 // Upgrade system exports
 pub use upgrade::{

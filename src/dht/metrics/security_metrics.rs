@@ -90,14 +90,6 @@ pub struct SecurityMetrics {
     /// Node counts per geographic region
     pub nodes_per_region: HashMap<String, u64>,
 
-    // Data attestation challenge metrics
-    /// Total attestation challenges sent
-    pub attestation_challenges_sent_total: u64,
-    /// Total attestation challenges passed
-    pub attestation_challenges_passed_total: u64,
-    /// Total attestation challenges failed
-    pub attestation_challenges_failed_total: u64,
-
     // Trust threshold violation metrics
     /// Total trust threshold violations detected
     pub trust_threshold_violations_total: u64,
@@ -154,11 +146,6 @@ pub struct SecurityMetricsCollector {
     geographic_diversity_rejections_total: AtomicU64,
     nodes_per_region: Arc<RwLock<HashMap<String, u64>>>,
 
-    // Data attestation challenges
-    attestation_challenges_sent_total: AtomicU64,
-    attestation_challenges_passed_total: AtomicU64,
-    attestation_challenges_failed_total: AtomicU64,
-
     // Trust threshold violations
     trust_threshold_violations_total: AtomicU64,
     low_trust_nodes_current: AtomicU64,
@@ -195,9 +182,6 @@ impl SecurityMetricsCollector {
             ip_diversity_rejections_total: AtomicU64::new(0),
             geographic_diversity_rejections_total: AtomicU64::new(0),
             nodes_per_region: Arc::new(RwLock::new(HashMap::new())),
-            attestation_challenges_sent_total: AtomicU64::new(0),
-            attestation_challenges_passed_total: AtomicU64::new(0),
-            attestation_challenges_failed_total: AtomicU64::new(0),
             trust_threshold_violations_total: AtomicU64::new(0),
             low_trust_nodes_current: AtomicU64::new(0),
             enforcement_mode_strict: AtomicBool::new(false),
@@ -359,25 +343,6 @@ impl SecurityMetricsCollector {
         }
     }
 
-    // ---- Data Attestation Challenge Methods ----
-
-    /// Record an attestation challenge sent
-    pub fn record_attestation_challenge_sent(&self) {
-        self.attestation_challenges_sent_total
-            .fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Record an attestation challenge result
-    pub fn record_attestation_result(&self, passed: bool) {
-        if passed {
-            self.attestation_challenges_passed_total
-                .fetch_add(1, Ordering::Relaxed);
-        } else {
-            self.attestation_challenges_failed_total
-                .fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
     // ---- Trust Threshold Violation Methods ----
 
     /// Record a trust threshold violation
@@ -471,15 +436,6 @@ impl SecurityMetricsCollector {
                 .geographic_diversity_rejections_total
                 .load(Ordering::Relaxed),
             nodes_per_region,
-            attestation_challenges_sent_total: self
-                .attestation_challenges_sent_total
-                .load(Ordering::Relaxed),
-            attestation_challenges_passed_total: self
-                .attestation_challenges_passed_total
-                .load(Ordering::Relaxed),
-            attestation_challenges_failed_total: self
-                .attestation_challenges_failed_total
-                .load(Ordering::Relaxed),
             trust_threshold_violations_total: self
                 .trust_threshold_violations_total
                 .load(Ordering::Relaxed),
@@ -521,12 +477,6 @@ impl SecurityMetricsCollector {
         self.geographic_diversity_rejections_total
             .store(0, Ordering::Relaxed);
         self.nodes_per_region.write().await.clear();
-        self.attestation_challenges_sent_total
-            .store(0, Ordering::Relaxed);
-        self.attestation_challenges_passed_total
-            .store(0, Ordering::Relaxed);
-        self.attestation_challenges_failed_total
-            .store(0, Ordering::Relaxed);
         self.trust_threshold_violations_total
             .store(0, Ordering::Relaxed);
         self.low_trust_nodes_current.store(0, Ordering::Relaxed);

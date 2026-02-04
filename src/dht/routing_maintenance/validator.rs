@@ -21,8 +21,6 @@ pub enum ValidationFailure {
     MarkedMalicious,
     /// Node is unreachable
     Unreachable,
-    /// Node failed data attestation
-    FailedAttestation,
     /// Insufficient witnesses available
     InsufficientWitnesses,
     /// Node's close group rejected it

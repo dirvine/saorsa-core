@@ -582,7 +582,7 @@ impl RoutingStrategy for TrustBasedRoutingStrategy {
         self.trust_engine.get_trust(neighbor)
     }
 
-    fn update_metrics(&mut self, path: &[NodeId], success: bool) {
+    fn update_metrics(&self, path: &[NodeId], success: bool) {
         // Update trust based on routing outcome
         if path.len() >= 2 {
             for window in path.windows(2) {

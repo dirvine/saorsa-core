@@ -44,7 +44,7 @@ pub enum PortConfig {
     ///
     /// # Example
     /// ```
-    /// use saorsa_core::messaging::PortConfig;
+    /// use saorsa_core::transport::PortConfig;
     /// let config = PortConfig::Explicit(9000);
     /// ```
     Explicit(u16),
@@ -53,7 +53,7 @@ pub enum PortConfig {
     ///
     /// # Example
     /// ```
-    /// use saorsa_core::messaging::PortConfig;
+    /// use saorsa_core::transport::PortConfig;
     /// let config = PortConfig::Range(9000, 9010);
     /// ```
     Range(u16, u16),

@@ -808,8 +808,6 @@ pub struct PrivacySettings {
     pub show_last_seen: bool,
     /// Whether to allow others to view profile information
     pub allow_profile_view: bool,
-    /// Whether to require end-to-end encryption for messaging
-    pub encrypted_messaging: bool,
     /// Whether to require proof of humanity for contact requests
     pub require_proof_of_humanity: bool,
     /// Maximum age for accepting contact requests
@@ -828,7 +826,6 @@ impl Default for PrivacySettings {
             show_online_status: true,
             show_last_seen: true,
             allow_profile_view: true,
-            encrypted_messaging: false,
             require_proof_of_humanity: false,
             max_contact_request_age: std::time::Duration::from_secs(86400 * 30), // 30 days
             enable_forward_secrecy: true,

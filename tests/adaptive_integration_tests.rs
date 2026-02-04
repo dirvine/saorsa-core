@@ -76,11 +76,11 @@ async fn test_adaptive_router_routes_with_registered_strategy() -> anyhow::Resul
         fn route_score(&self, _from: &NodeId, _to: &NodeId) -> f64 {
             1.0
         }
-        fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {}
+        fn update_metrics(&self, _path: &[NodeId], _success: bool) {}
     }
 
     router
-        .register_strategy(StrategyChoice::Kademlia, Box::new(DirectStrategy))
+        .register_strategy(StrategyChoice::Kademlia, Arc::new(DirectStrategy))
         .await;
 
     let target = NodeId::from_bytes([1u8; 32]);

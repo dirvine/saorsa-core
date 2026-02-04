@@ -63,9 +63,9 @@ pub struct MembershipProof {
     pub proof_type: MembershipProofType,
     /// Proof data (signatures, paths, etc.)
     pub proof_data: Vec<u8>,
-    /// Witness nodes that attest to membership
+    /// Peer validators that vouch for membership
     pub witnesses: Vec<PeerId>,
-    /// Witness signatures
+    /// Validator signatures
     pub witness_signatures: Vec<Vec<u8>>,
 }
 
@@ -76,8 +76,6 @@ pub enum MembershipProofType {
     SiblingSignatures,
     /// Path through DHT to verify position
     DhtPath,
-    /// Witness attestation from trusted nodes
-    WitnessAttestation,
     /// Combined proof using multiple methods
     Combined,
 }
@@ -149,8 +147,7 @@ impl AuthenticatedSiblingBroadcast {
             bytes.push(match proof.proof_type {
                 MembershipProofType::SiblingSignatures => 0,
                 MembershipProofType::DhtPath => 1,
-                MembershipProofType::WitnessAttestation => 2,
-                MembershipProofType::Combined => 3,
+                MembershipProofType::Combined => 2,
             });
             bytes.extend_from_slice(&(proof.proof_data.len() as u32).to_le_bytes());
             bytes.extend_from_slice(&proof.proof_data);
@@ -365,10 +362,6 @@ impl SiblingBroadcastValidator {
             MembershipProofType::DhtPath => {
                 // Need valid path data
                 !proof.proof_data.is_empty()
-            }
-            MembershipProofType::WitnessAttestation => {
-                // Need at least 3 witness attestations
-                proof.witnesses.len() >= 3 && proof.witness_signatures.len() >= 3
             }
             MembershipProofType::Combined => {
                 // Combined requires both witnesses and proof data

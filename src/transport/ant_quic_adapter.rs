@@ -174,7 +174,7 @@ impl P2PNetworkNode<P2pLinkTransport> {
     /// Create a new P2P network node from NetworkConfig
     pub async fn from_network_config(
         bind_addr: SocketAddr,
-        net_config: &crate::messaging::NetworkConfig,
+        net_config: &crate::transport::NetworkConfig,
     ) -> Result<Self> {
         // Build P2pConfig based on NetworkConfig
         let mut builder = P2pConfig::builder()

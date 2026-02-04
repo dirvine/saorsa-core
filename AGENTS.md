@@ -1,69 +1,26 @@
 # Agent Guidelines for Saorsa Core
 
-## New Multi-Device API (v0.3.16+)
+## DHT Phonebook + Trust Signals (Current Direction)
 
-### Core API Functions
+### Core Responsibilities
+- **DHT is a peer phonebook only** (peer records, routing, discovery).
+- **User data storage lives in saorsa-node** via `send_message`-style APIs.
+- **Trust remains in saorsa-core**: saorsa-node reports data availability outcomes
+  so EigenTrust can downscore nodes that fail to serve expected data.
+
+### Trust Signal Hook (saorsa-node → saorsa-core)
 ```rust
-// Identity Registration (one-time per user)
-use saorsa_core::{register_identity, MlDsaKeyPair};
+use saorsa_core::adaptive::{EigenTrustEngine, NodeStatisticsUpdate};
 
-let words = ["welfare", "absurd", "king", "ridge"];  // Valid four-word address
-let keypair = MlDsaKeyPair::generate()?;
-let handle = register_identity(words, &keypair).await?;
-
-// Device Registration (multi-device presence)
-use saorsa_core::{register_presence, Device, DeviceType, DeviceId, Endpoint};
-
-let devices = vec![
-    Device {
-        id: DeviceId::generate(),
-        device_type: DeviceType::Active,      // User's active machine
-        storage_gb: 100,
-        endpoint: Endpoint { 
-            protocol: "quic".to_string(),
-            address: "192.168.1.100:9000".to_string(),
-        },
-        capabilities: Default::default(),
-    },
-    Device {
-        id: DeviceId::generate(), 
-        device_type: DeviceType::Headless,    // Storage-only node
-        storage_gb: 1000,
-        endpoint: Endpoint {
-            protocol: "quic".to_string(),
-            address: "10.0.0.1:9001".to_string(),
-        },
-        capabilities: Default::default(),
-    }
-];
-
-let active_device_id = devices[0].id;
-let receipt = register_presence(&handle, devices, active_device_id).await?;
-
-// Data Storage with Automatic Strategy Selection
-use saorsa_core::{store_data, store_dyad, store_with_fec, get_data};
-
-// Single user (Direct storage)
-let data = b"My private data".to_vec();
-let storage_handle = store_data(&handle, data, 1).await?;
-
-// Two users (Full replication) 
-let storage_handle = store_dyad(&handle1, handle2.key(), data).await?;
-
-// Group storage (automatic replication)
-let storage_handle = store_data(&handle, data, 8).await?;  // 8-person group
-
-// Custom replication target (legacy FEC API)
-let storage_handle = store_with_fec(&handle, data, 8, 4).await?;  // Target ~12 replicas (clamped)
-
-// Retrieve data
-let retrieved = get_data(&storage_handle).await?;
+// After a data fetch attempt in saorsa-node:
+trust_engine
+    .update_node_stats(&peer_id, NodeStatisticsUpdate::CorrectResponse)
+    .await;
+// or on failure:
+trust_engine
+    .update_node_stats(&peer_id, NodeStatisticsUpdate::FailedResponse)
+    .await;
 ```
-
-### Storage Strategy Selection
-- **1 user**: Direct storage on user's devices
-- **2+ users**: Full replication across up to 8 devices (headless nodes prioritized)
-- **Custom**: Use `store_with_fec` to request an explicit replica target (legacy API name)
 
 ## Build/Test Commands
 - **Build**: `cargo build --all-features` (release: `cargo build --release`)
@@ -91,7 +48,7 @@ let retrieved = get_data(&storage_handle).await?;
 ### Naming Conventions
 - **Modules**: `snake_case` (e.g., `dht`, `transport`, `adaptive`)
 - **Types/Traits**: `PascalCase` (e.g., `P2PNode`, `AdaptiveNetworkNode`)
-- **Functions**: `snake_case` (e.g., `connect_to_peer`, `store_data`)
+- **Functions**: `snake_case` (e.g., `connect_to_peer`, `publish_peer_record`)
 - **Constants**: `SCREAMING_SNAKE_CASE`
 - **Fields**: `snake_case` (e.g., `content_hash`, `node_id`)
 

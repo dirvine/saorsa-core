@@ -3,9 +3,8 @@
 //! Bridges DHT operations with saorsa-core transport infrastructure, providing
 //! efficient protocol handling, connection management, and network optimization.
 
-use crate::dht::{
-    core_engine::{ConsistencyLevel, DhtCoreEngine, DhtKey, NodeCapacity, NodeId, NodeInfo},
-    witness::{OperationId, WitnessReceipt},
+use crate::dht::core_engine::{
+    ConsistencyLevel, DhtCoreEngine, DhtKey, NodeCapacity, NodeId, NodeInfo,
 };
 use anyhow::{Result, anyhow};
 use lru::LruCache;
@@ -43,7 +42,6 @@ pub enum DhtMessage {
         key: DhtKey,
         value: Vec<u8>,
         ttl: Duration,
-        witnesses: Vec<NodeId>,
     },
     Retrieve {
         key: DhtKey,
@@ -90,12 +88,10 @@ pub enum DhtMessage {
 pub enum DhtResponse {
     // Data Responses
     StoreAck {
-        receipt: Box<WitnessReceipt>,
         replicas: Vec<NodeId>,
     },
     RetrieveReply {
         value: Option<Vec<u8>>,
-        witnesses: Vec<WitnessReceipt>,
     },
 
     // Discovery Responses
@@ -463,28 +459,10 @@ impl DhtProtocolHandler {
     pub async fn handle_message(&self, message: DhtMessage) -> Result<DhtResponse> {
         match message {
             DhtMessage::Store { key, value, .. } => {
-                let value_len = value.len();
                 let mut engine = self.dht_engine.write().await;
                 let receipt = engine.store(&key, value).await?;
 
                 Ok(DhtResponse::StoreAck {
-                    receipt: Box::new(WitnessReceipt {
-                        operation_id: OperationId::new(),
-                        operation_type: crate::dht::witness::OperationType::Store,
-                        content_hash: crate::dht::content_addressing::ContentAddress::from_bytes(
-                            key.as_bytes(),
-                        ),
-                        timestamp: chrono::Utc::now(),
-                        participating_nodes: vec![crate::dht::witness::NodeId::new("local")],
-                        operation_metadata: crate::dht::witness::OperationMetadata {
-                            size_bytes: value_len,
-                            chunk_count: Some(1),
-                            redundancy_level: Some(1.0),
-                            custom: std::collections::HashMap::new(),
-                        },
-                        signature: crate::dht::witness::MlKemSignature::placeholder(),
-                        witness_proofs: vec![],
-                    }),
                     replicas: receipt.stored_at,
                 })
             }
@@ -493,10 +471,7 @@ impl DhtProtocolHandler {
                 let engine = self.dht_engine.read().await;
                 let value = engine.retrieve(&key).await?;
 
-                Ok(DhtResponse::RetrieveReply {
-                    value,
-                    witnesses: Vec::new(),
-                })
+                Ok(DhtResponse::RetrieveReply { value })
             }
 
             DhtMessage::FindNode { target, count } => {

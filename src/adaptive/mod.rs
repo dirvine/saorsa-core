@@ -62,7 +62,9 @@ pub use client::{
     AdaptiveP2PClient, Client, ClientConfig, ClientProfile, NetworkStats as ClientNetworkStats,
 };
 pub use coordinator::{NetworkConfig, NetworkCoordinator};
-pub use dht_integration::{AdaptiveDHT, KademliaRoutingStrategy};
+pub use dht_integration::{
+    AdaptiveDHT, AdaptiveDhtConfig, AdaptiveDhtDependencies, KademliaRoutingStrategy,
+};
 pub use eviction::{
     AdaptiveStrategy, CacheState, EvictionStrategy, EvictionStrategyType, FIFOStrategy,
     LFUStrategy, LRUStrategy,
@@ -262,7 +264,7 @@ pub trait RoutingStrategy: Send + Sync {
     fn route_score(&self, neighbor: &NodeId, target: &NodeId) -> f64;
 
     /// Update routing metrics based on success/failure
-    fn update_metrics(&mut self, path: &[NodeId], success: bool);
+    fn update_metrics(&self, path: &[NodeId], success: bool);
 
     /// Find closest nodes to a content hash
     async fn find_closest_nodes(

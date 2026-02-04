@@ -103,41 +103,9 @@ pub enum DeviceType {
 
 ### Identity Registration
 
-```rust
-// src/api/identity.rs
-
-/// Register a new identity (no PoW required)
-pub async fn register_identity(
-    words: [&str; 4],
-    keypair: &MlDsaKeyPair,
-) -> Result<IdentityHandle> {
-    // 1. Validate four-word format
-    let four_words = FourWordAddress::from_words(words)?;
-
-    // 2. Check if identity already exists
-    if identity_exists(&four_words).await? {
-        return Err(P2PError::IdentityAlreadyExists);
-    }
-
-    // 3. Create identity record
-    let identity = UserIdentity {
-        four_words: four_words.clone(),
-        public_key: keypair.public_key().clone(),
-        created_at: SystemTime::now(),
-        display_name: None,
-        devices: vec![],
-    };
-
-    // 4. Sign and publish to DHT
-    let signed = sign_identity(&identity, keypair)?;
-    publish_identity(&signed).await?;
-
-    Ok(IdentityHandle {
-        four_words,
-        keypair: keypair.clone(),
-    })
-}
-```
+Identity registration is now implemented in **saorsa-node**. saorsa-core only
+provides peer discovery/phonebook and trust scoring; higher layers handle
+identity records and their storage.
 
 ### Why No Proof-of-Work?
 

@@ -2,6 +2,40 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🤖 MANDATORY SUBAGENT USAGE
+
+**ALWAYS USE SUBAGENTS. THIS IS NOT OPTIONAL.**
+
+Subagents (via the `Task` tool) MUST be used whenever possible. They provide:
+- **Fresh context** - Each subagent starts clean, preventing context pollution
+- **Parallel execution** - Multiple agents can work simultaneously
+- **Specialization** - Purpose-built agents for specific tasks
+- **Unbounded execution** - No context limits when chaining agents
+
+### When to Spawn Subagents
+
+| Task Type | Action |
+|-----------|--------|
+| Code exploration/search | Spawn `Explore` agent |
+| Code review | Spawn review agents in parallel |
+| Bug fixes | Spawn `code-fixer` agent |
+| Test execution | Spawn `test-runner` agent |
+| Build validation | Spawn `build-validator` agent |
+| Security scanning | Spawn `security-scanner` agent |
+| Documentation audit | Spawn `documentation-auditor` agent |
+| Multi-step tasks | Spawn `dev-agent` or `general-purpose` agent |
+| Complex research | Spawn `Explore` or `general-purpose` agent |
+
+### Subagent Rules
+
+1. **PREFER subagents over doing work directly** - Even for "simple" tasks
+2. **PARALLELIZE when possible** - Spawn multiple agents in a single message
+3. **Use background agents** for long-running tasks (`run_in_background: true`)
+4. **Chain agents** for complex workflows - Output of one feeds the next
+5. **Never accumulate context** - Delegate to fresh agents instead
+
+**IF YOU CAN USE A SUBAGENT, YOU MUST USE A SUBAGENT.**
+
 ## Build and Development Commands
 
 ### Core Commands
@@ -71,60 +105,24 @@ let result = some_result.expect("failed");
 
 ## Architecture Overview
 
-### New Clean API (v0.3.16+)
+### DHT Phonebook + Trust Signals
 
-The codebase provides a simplified multi-device API for decentralized identity, presence, and storage:
+The current direction is to use **saorsa-core** for peer discovery and trust, and keep
+all application data and business logic in **saorsa-node**. In practice:
 
-#### Identity and Presence Registration
+- **DHT is a peer phonebook only** (peer records, routing, discovery).
+- **Chunk storage/retrieval is done via `send_message`** in saorsa-node.
+- **Trust updates remain in saorsa-core**: saorsa-node reports data availability
+  outcomes so EigenTrust can downscore nodes that fail to serve expected data.
+
+Example trust signal hook:
 ```rust
-use saorsa_core::{register_identity, register_presence, MlDsaKeyPair, Device, DeviceType, DeviceId, Endpoint};
+use saorsa_core::adaptive::{EigenTrustEngine, NodeStatisticsUpdate};
 
-// One-time identity registration
-let words = ["welfare", "absurd", "king", "ridge"];
-let keypair = MlDsaKeyPair::generate()?;
-let handle = register_identity(words, &keypair).await?;
-
-// Register devices (multi-device support)
-let device = Device {
-    id: DeviceId::generate(),
-    device_type: DeviceType::Active,  // or Headless for storage nodes
-    storage_gb: 100,
-    endpoint: Endpoint {
-        protocol: "quic".to_string(),
-        address: "192.168.1.100:9000".to_string(),
-    },
-    capabilities: Default::default(),
-};
-
-let device_id = device.id;
-register_presence(&handle, vec![device], device_id).await?;
+trust_engine
+    .update_node_stats(&peer_id, NodeStatisticsUpdate::CorrectResponse)
+    .await;
 ```
-
-#### Storage with Automatic Strategy Selection
-```rust
-use saorsa_core::{store_data, store_dyad, store_with_fec, get_data};
-
-// Single user - Direct storage
-let data = b"Private data".to_vec();
-let storage_handle = store_data(&handle, data, 1).await?;
-
-// Two users - Full replication  
-let storage_handle = store_dyad(&handle1, handle2.key(), data).await?;
-
-// Group - Automatic replication based on size (capped at 8 replicas)
-let storage_handle = store_data(&handle, data, 10).await?; // Replicates to 8 peers
-
-// Custom replication target (legacy API name)
-let storage_handle = store_with_fec(&handle, data, 8, 4).await?;
-
-// Retrieve (automatic decryption/reconstruction)
-let retrieved = get_data(&storage_handle).await?;
-```
-
-Storage strategies are automatically selected based on group size:
-- **1 user**: Direct storage (single active device)
-- **2+ users**: Full replication across `min(group_size, 8)` devices (headless-first)
-- **Custom**: `store_with_fec` interprets `data_shards + parity_shards` as the desired replica count (legacy name retained for compatibility)
 
 ### Multi-Layer P2P Architecture
 

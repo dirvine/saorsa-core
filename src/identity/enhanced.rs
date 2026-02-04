@@ -220,7 +220,7 @@ pub struct Team {
 /// Organization settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrganizationSettings {
-    pub default_chat_encryption: bool,
+    pub default_data_encryption: bool,
     pub require_2fa: bool,
     pub session_timeout: std::time::Duration,
     pub allowed_domains: Vec<String>,
@@ -230,20 +230,20 @@ pub struct OrganizationSettings {
 /// Organization features
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrganizationFeatures {
-    pub chat_enabled: bool,
-    pub discuss_enabled: bool,
-    pub projects_enabled: bool,
-    pub voice_video_enabled: bool,
+    pub collaboration_enabled: bool,
+    pub forums_enabled: bool,
+    pub project_tracking_enabled: bool,
+    pub realtime_media_enabled: bool,
     pub ai_enabled: bool,
 }
 
 impl Default for OrganizationFeatures {
     fn default() -> Self {
         Self {
-            chat_enabled: true,
-            discuss_enabled: true,
-            projects_enabled: true,
-            voice_video_enabled: true,
+            collaboration_enabled: false,
+            forums_enabled: false,
+            project_tracking_enabled: false,
+            realtime_media_enabled: false,
             ai_enabled: true,
         }
     }
@@ -397,7 +397,7 @@ impl EnhancedIdentityManager {
             departments: Vec::new(),
             created_at: SystemTime::now(),
             settings: OrganizationSettings {
-                default_chat_encryption: true,
+                default_data_encryption: true,
                 require_2fa: false,
                 session_timeout: std::time::Duration::from_secs(86400), // 24 hours
                 allowed_domains: Vec::new(),

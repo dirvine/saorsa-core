@@ -124,7 +124,6 @@ impl Record {
 }
 
 // Re-export other DHT modules
-pub mod client;
 pub mod content_addressing;
 pub mod enhanced_storage;
 pub mod geographic_network_integration;
@@ -135,13 +134,8 @@ pub mod network_integration;
 pub mod node_failure_tracker;
 pub mod optimized_storage;
 pub mod replication_grace_period;
-pub mod rsps_integration;
 pub mod skademlia;
-pub mod witness;
-pub mod witness_client;
-pub mod witness_protocol;
-pub mod witness_selection;
-pub mod witness_signer;
+// Witness/attestation modules removed.
 
 /// IPv6-based DHT identity for security parity
 pub mod ipv6_identity;
@@ -172,9 +166,8 @@ pub mod metrics;
 
 // Re-export routing maintenance types for convenience
 pub use routing_maintenance::{
-    BucketRefreshManager, DataChallenge, EvictionManager, EvictionReason, MaintenanceConfig,
-    MaintenanceScheduler, MaintenanceTask, NodeLivenessState, NodeValidationResult, RefreshTier,
-    ValidationFailure, WitnessSelectionCriteria, compute_attested_hash,
+    BucketRefreshManager, EvictionManager, EvictionReason, MaintenanceConfig, MaintenanceScheduler,
+    MaintenanceTask, NodeLivenessState, NodeValidationResult, RefreshTier, ValidationFailure,
 };
 
 // Re-export security coordinator types

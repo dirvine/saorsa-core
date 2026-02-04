@@ -66,7 +66,7 @@ pub struct AdaptiveRouter {
     _local_id: NodeId,
 
     /// Routing strategies
-    strategies: Arc<RwLock<HashMap<StrategyChoice, Box<dyn RoutingStrategy>>>>,
+    strategies: Arc<RwLock<HashMap<StrategyChoice, Arc<dyn RoutingStrategy>>>>,
 
     /// Multi-armed bandit for strategy selection
     bandit: Arc<RwLock<ThompsonSampling>>,
@@ -99,7 +99,7 @@ impl AdaptiveRouter {
     pub async fn register_strategy(
         &self,
         choice: StrategyChoice,
-        strategy: Box<dyn RoutingStrategy>,
+        strategy: Arc<dyn RoutingStrategy>,
     ) {
         let mut strategies = self.strategies.write().await;
         strategies.insert(choice, strategy);
@@ -185,9 +185,12 @@ impl AdaptiveRouter {
     }
 
     /// Get all routing strategies
-    pub fn get_all_strategies(&self) -> HashMap<String, Arc<dyn RoutingStrategy>> {
-        // For now, return empty as strategies are stored differently
-        HashMap::new()
+    pub async fn get_all_strategies(&self) -> HashMap<String, Arc<dyn RoutingStrategy>> {
+        let strategies = self.strategies.read().await;
+        strategies
+            .iter()
+            .map(|(choice, strategy)| (format!("{choice:?}"), Arc::clone(strategy)))
+            .collect()
     }
 
     /// Mark a node as unreliable
@@ -306,7 +309,7 @@ impl RoutingStrategy for KademliaRouting {
         1.0 / (1.0 + distance as f64)
     }
 
-    fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {
+    fn update_metrics(&self, _path: &[NodeId], _success: bool) {
         // Update routing table based on success/failure
     }
 }
@@ -352,7 +355,7 @@ impl RoutingStrategy for HyperbolicRouting {
         0.0 // Placeholder for now
     }
 
-    fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {
+    fn update_metrics(&self, _path: &[NodeId], _success: bool) {
         // Update coordinate estimates
     }
 }
@@ -379,7 +382,7 @@ impl RoutingStrategy for TrustRouting {
         self.trust_provider.get_trust(neighbor)
     }
 
-    fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {
+    fn update_metrics(&self, _path: &[NodeId], _success: bool) {
         // Trust updates handled by trust provider
     }
 }
@@ -416,7 +419,7 @@ impl RoutingStrategy for SOMRouting {
         0.0 // Placeholder for now
     }
 
-    fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {
+    fn update_metrics(&self, _path: &[NodeId], _success: bool) {
         // Update SOM positions
     }
 }
@@ -499,7 +502,7 @@ impl RoutingStrategy for MockRoutingStrategy {
         0.5
     }
 
-    fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {
+    fn update_metrics(&self, _path: &[NodeId], _success: bool) {
         // Mock implementation - do nothing
     }
 }

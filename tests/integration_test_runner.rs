@@ -85,29 +85,6 @@ impl IntegrationTestRunner {
                 all_passed = false;
             }
         }
-        // Storage
-        {
-            let category = "Storage Integration";
-            println!("\n📋 Running {} Tests...", category);
-            println!("{}", "-".repeat(40));
-            let category_start = Instant::now();
-            let category_passed = self.run_storage_tests().await?;
-            let category_duration = category_start.elapsed();
-            if category_passed {
-                println!(
-                    "✅ {} tests PASSED ({:.2}s)",
-                    category,
-                    category_duration.as_secs_f64()
-                );
-            } else {
-                println!(
-                    "❌ {} tests FAILED ({:.2}s)",
-                    category,
-                    category_duration.as_secs_f64()
-                );
-                all_passed = false;
-            }
-        }
         // Security
         {
             let category = "Security Integration";
@@ -180,21 +157,6 @@ impl IntegrationTestRunner {
         ];
 
         self.run_test_category("network_integration_comprehensive_test", &network_tests)
-            .await
-    }
-
-    async fn run_storage_tests(&mut self) -> Result<bool> {
-        let storage_tests = vec![
-            "test_basic_store_and_retrieve",
-            "test_replication_factor_compliance",
-            "test_storage_consistency_under_load",
-            "test_storage_recovery_after_node_failure",
-            "test_large_data_storage_and_retrieval",
-            "test_storage_space_management",
-            "test_concurrent_read_write_performance",
-        ];
-
-        self.run_test_category("storage_integration_comprehensive_test", &storage_tests)
             .await
     }
 
