@@ -84,6 +84,20 @@ saorsa-core does **not** replicate application data. saorsa-node:
 - Replicates via `send_message` and reports success/failure back to EigenTrust.
 - Reacts to churn events from `DhtNetworkManager::subscribe_events()` and re‑replicates.
 
+Minimal wiring helper:
+```rust
+use saorsa_core::adaptive::ReplicaPlanner;
+use saorsa_core::DhtNetworkEvent;
+
+let planner = ReplicaPlanner::new(adaptive_dht, dht_manager);
+let mut events = planner.subscribe_churn();
+tokio::spawn(async move {
+    while let Ok(DhtNetworkEvent::PeerDisconnected { peer_id }) = events.recv().await {
+        // re-replicate any data that had replicas on peer_id
+    }
+});
+```
+
 ### Four-Word Endpoints
 
 - Endpoints are encoded/decoded using the `four-word-networking` crate's adaptive API.

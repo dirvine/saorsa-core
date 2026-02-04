@@ -38,6 +38,20 @@ Application storage and data replication are handled in saorsa-node using `send_
 saorsa-node is also responsible for replica tracking and re‑replication on churn,
 using core’s routing outputs and `DhtNetworkManager::subscribe_events()`.
 
+Example churn hook:
+```rust
+use saorsa_core::adaptive::ReplicaPlanner;
+use saorsa_core::DhtNetworkEvent;
+
+let planner = ReplicaPlanner::new(adaptive_dht, dht_manager);
+let mut events = planner.subscribe_churn();
+tokio::spawn(async move {
+    while let Ok(DhtNetworkEvent::PeerDisconnected { peer_id }) = events.recv().await {
+        // re-replicate any data that had replicas on peer_id
+    }
+});
+```
+
 ## Notes
 - Four‑word encoding/decoding is handled by the `four-word-networking` crate and is used only for network endpoints.
 - IPv4+port encodes to 4 words; decoding returns both IP and port. IPv6 word count is decided by the crate.

@@ -46,6 +46,7 @@ pub mod monitoring;
 pub mod multi_armed_bandit;
 pub mod performance;
 pub mod q_learning_cache;
+pub mod replica_planner;
 pub mod replication;
 pub mod retrieval;
 pub mod routing;
@@ -92,6 +93,7 @@ pub use q_learning_cache::{
     AccessInfo, CacheAction, CacheStatistics, QLearnCacheManager as QLearningCacheManager,
     QLearningConfig, StateVector,
 };
+pub use replica_planner::ReplicaPlanner;
 pub use replication::{ReplicaInfo, ReplicationManager, ReplicationStrategy};
 pub use retrieval::{RetrievalManager, RetrievalStrategy};
 pub use routing::AdaptiveRouter;

@@ -46,15 +46,16 @@ saorsa-core does **not** replicate application data. saorsa-node is responsible 
 3. Replicating via `send_message` and updating trust based on outcomes.
 4. Reacting to churn and re‑replicating when peers drop.
 
-Recommended wiring:
+Recommended wiring (using `ReplicaPlanner`):
 ```rust
 use saorsa_core::{
-    adaptive::{AdaptiveDHT, ReplicationManager},
+    adaptive::ReplicaPlanner,
     DhtNetworkManager,
 };
 
 // 1) Subscribe to churn signals
-let mut events = dht_manager.subscribe_events();
+let planner = ReplicaPlanner::new(adaptive_dht, dht_manager);
+let mut events = planner.subscribe_churn();
 tokio::spawn(async move {
     while let Ok(event) = events.recv().await {
         if let saorsa_core::DhtNetworkEvent::PeerDisconnected { peer_id } = event {
@@ -64,7 +65,9 @@ tokio::spawn(async move {
 });
 
 // 2) Choose replica targets (routing-only)
-let targets = adaptive_dht.find_closest_nodes(&content_node_id, replica_count).await?;
+let targets = planner
+    .select_replica_targets(content_hash, replica_count)
+    .await?;
 
 // 3) Replicate over send_message (saorsa-node chunk protocol)
 // 4) Report success/failure back to EigenTrust
