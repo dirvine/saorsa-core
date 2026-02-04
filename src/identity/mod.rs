@@ -11,28 +11,27 @@
 // distributed under these licenses is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
-//! Identity management module
+//! Cryptographic Identity Module
 //!
-//! Provides identity creation, management, and encryption with quantum-resistant capabilities.
+//! Provides cryptographic node identity for the P2P network using post-quantum
+//! ML-DSA signatures. This module handles peer identity (NodeIdentity), NOT
+//! user-facing identity management (which was removed).
+//!
+//! # Core Types
+//!
+//! - `NodeIdentity`: Cryptographic identity with ML-DSA keypair
+//! - `NodeId`: 32-byte hash of public key (PeerId)
+//! - `FourWordAddress`: Human-readable address for bootstrap
 //!
 //! # Identity Restart System
 //!
-//! The identity restart system enables nodes to detect when their identity doesn't
-//! "fit" a DHT close group and automatically regenerate with a new identity.
-//!
-//! Key components:
-//! - `rejection`: Network rejection reasons and information
-//! - `fitness`: Proactive fitness monitoring
-//! - `regeneration`: Regeneration trigger with loop prevention
-//! - `targeting`: Targeted identity generation
-//! - `restart`: Main orchestrator with state persistence
+//! Enables nodes to detect when their identity doesn't "fit" a DHT close group
+//! and automatically regenerate with a new identity.
 
 pub mod cli;
 pub mod encryption;
-pub mod enhanced;
 pub mod fitness;
 pub mod four_words;
-pub mod manager;
 pub mod node_identity;
 pub mod regeneration;
 pub mod rejection;
@@ -43,9 +42,7 @@ pub mod targeting;
 #[cfg(test)]
 mod four_words_error_tests;
 
-pub use enhanced::*;
 pub use four_words::{FourWordAddress, WordEncoder};
-pub use manager::{IdentityManager, UserIdentity};
 pub use node_identity::{IdentityData, NodeId, NodeIdentity};
 pub use secure_node_identity::SecureNodeIdentity;
 

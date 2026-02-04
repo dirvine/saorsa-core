@@ -115,17 +115,8 @@ impl WordEncoder {
 
 ### Identity Integration
 
-Four-word addresses integrate with the identity system:
-
-```rust
-// User registration with four-word identity
-let words = ["welfare", "absurd", "king", "ridge"];
-let keypair = MlDsaKeyPair::generate()?;
-let handle = register_identity(words, &keypair).await?;
-
-// The four words become the user's memorable identifier
-// Can be shared verbally: "My address is welfare-absurd-king-ridge"
-```
+Four-word addresses are reserved for **network endpoints only**. Identity registration
+and user-level identifiers are handled in saorsa-node or higher layers.
 
 ### Separator Flexibility
 
@@ -143,7 +134,8 @@ With a 2,048-word dictionary (2^11 words), four words provide:
 - Sufficient for IPv4 + port encoding
 - Not intended for cryptographic key material
 
-For cryptographic identities, the four words reference a full ML-DSA-65 public key stored in the DHT.
+For cryptographic identities, upper layers bind identities to public keys without relying on
+four-word addresses.
 
 ## Consequences
 

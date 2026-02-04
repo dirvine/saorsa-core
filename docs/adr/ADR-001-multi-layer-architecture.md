@@ -65,7 +65,7 @@ We adopt a **multi-layer architecture** with clearly defined boundaries and inte
 ├─────────────────────────────────────────────────────────────────┤
 │                     Security Layer (Cross-Cutting)               │
 │  ┌──────────────┐  ┌─────────────────┐  ┌────────────────────┐  │
-│  │ PQC (ML-DSA) │  │ Attestation     │  │ Secure Memory      │  │
+│  │ PQC (ML-DSA) │  │ Trust/Validation│  │ Secure Memory      │  │
 │  └──────────────┘  └─────────────────┘  └────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -122,21 +122,19 @@ Manages cryptographic identities:
 
 **Interface**: `FourWordAddress`, `DeviceRegistry`
 
-#### 6. Application Layer (`src/chat/`, `src/discuss/`, `src/projects/`, `src/storage/`)
+#### 6. Application Layer (upper-level, e.g. saorsa-node)
 
-Provides user-facing functionality:
-- Slack-like chat with channels and threads
-- Discourse-like discussions
-- Project management with hierarchies
-- Automatic storage strategy selection
+Provides user-facing functionality above saorsa-core:
+- Application-specific data types and business logic
+- User messaging and collaboration (outside this crate)
+- Automatic storage strategy selection via saorsa-core APIs
 
-**Interface**: Domain-specific managers (ChatManager, etc.)
+**Interface**: Domain-specific managers in upper layers
 
 #### 7. Security Layer (Cross-cutting)
 
 Applied throughout the stack:
 - Post-quantum cryptography (ML-DSA-65, ML-KEM-768)
-- Entangled attestation for software integrity
 - Secure memory management
 - Rate limiting and validation
 

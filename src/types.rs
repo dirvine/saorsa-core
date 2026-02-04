@@ -22,17 +22,7 @@ pub struct Forward {
     pub exp: u64,
 }
 
-// New clean types modules
-pub mod identity;
-pub mod presence;
-pub mod storage;
-
-// Re-export main types
-pub use identity::{Identity, IdentityHandle, MlDsaKeyPair};
-pub use presence::{
-    Device, DeviceCapabilities, DeviceId, DeviceType, Endpoint, Presence, PresenceReceipt,
-};
-pub use storage::{MAX_REPLICATION_TARGET, ShardMap, StorageHandle, StorageStrategy};
+// Placeholder for future shared types modules.
 
 /// Example strong typing implementations (future replacements for string-based IDs)
 ///

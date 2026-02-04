@@ -20,8 +20,6 @@ pub struct MaintenanceConfig {
     pub max_consecutive_failures: u32,
     /// Minimum trust threshold for eviction (0.0-1.0)
     pub min_trust_threshold: f64,
-    /// How often to run data attestation challenges
-    pub attestation_interval: Duration,
     /// Byzantine fault tolerance parameter (f in 3f+1)
     /// Default: 2 (tolerate 2 Byzantine faults, need 5 witnesses)
     pub bft_fault_tolerance: usize,
@@ -35,7 +33,6 @@ impl Default for MaintenanceConfig {
             ping_timeout: Duration::from_secs(5),
             max_consecutive_failures: 3,
             min_trust_threshold: 0.15,
-            attestation_interval: Duration::from_secs(300),
             bft_fault_tolerance: 2,
         }
     }

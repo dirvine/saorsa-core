@@ -18,7 +18,7 @@
 //! |------|------|---------|
 //! | DhtQuery | 0x10 | GET, FIND_NODE, FIND_VALUE requests |
 //! | DhtStore | 0x11 | PUT, STORE requests with data |
-//! | DhtWitness | 0x12 | Witness requests for BFT |
+//! | DhtWitness | 0x12 | (removed) |
 //! | DhtReplication | 0x13 | Background replication traffic |
 
 use ant_quic::link_transport::{LinkError, LinkResult, ProtocolHandler, StreamType};
@@ -32,13 +32,12 @@ use tracing::{debug, error, trace, warn};
 
 use crate::dht::core_engine::DhtCoreEngine;
 use crate::dht::network_integration::{DhtMessage, DhtResponse, ErrorCode};
-use crate::dht::witness::{OperationId, WitnessReceipt};
+// witness system removed
 
 /// DHT stream types handled by this handler.
 const DHT_STREAM_TYPES: &[StreamType] = &[
     StreamType::DhtQuery,
     StreamType::DhtStore,
-    StreamType::DhtWitness,
     StreamType::DhtReplication,
 ];
 
@@ -47,7 +46,7 @@ const DHT_STREAM_TYPES: &[StreamType] = &[
 /// Routes incoming DHT streams to the appropriate handlers based on stream type:
 /// - DhtQuery: Handles GET, FIND_NODE, FIND_VALUE requests
 /// - DhtStore: Handles PUT, STORE requests with data payloads
-/// - DhtWitness: Handles witness requests for Byzantine fault tolerance
+/// - DhtWitness: Removed
 /// - DhtReplication: Handles background replication and repair traffic
 pub struct DhtStreamHandler {
     /// Reference to the DHT engine for processing requests.
@@ -107,21 +106,6 @@ impl DhtStreamHandler {
         Ok(Some(Bytes::from(response_bytes)))
     }
 
-    /// Handle a DHT witness request.
-    async fn handle_witness(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
-        trace!(peer = ?peer, size = data.len(), "Processing DHT witness");
-
-        let message: DhtMessage = postcard::from_bytes(&data)
-            .map_err(|e| LinkError::Internal(format!("Failed to deserialize witness: {e}")))?;
-
-        let response = self.process_message(message).await?;
-
-        let response_bytes = postcard::to_stdvec(&response)
-            .map_err(|e| LinkError::Internal(format!("Failed to serialize response: {e}")))?;
-
-        Ok(Some(Bytes::from(response_bytes)))
-    }
-
     /// Handle a DHT replication request.
     async fn handle_replication(&self, peer: PeerId, data: Bytes) -> LinkResult<Option<Bytes>> {
         trace!(peer = ?peer, size = data.len(), "Processing DHT replication");
@@ -141,33 +125,12 @@ impl DhtStreamHandler {
     async fn process_message(&self, message: DhtMessage) -> LinkResult<DhtResponse> {
         match message {
             DhtMessage::Store { key, value, .. } => {
-                let value_len = value.len();
                 let mut engine = self.dht_engine.write().await;
 
                 match engine.store(&key, value).await {
                     Ok(receipt) => {
                         debug!(key = ?key, "DHT store successful");
                         Ok(DhtResponse::StoreAck {
-                            receipt: Box::new(WitnessReceipt {
-                                operation_id: OperationId::new(),
-                                operation_type: crate::dht::witness::OperationType::Store,
-                                content_hash:
-                                    crate::dht::content_addressing::ContentAddress::from_bytes(
-                                        key.as_bytes(),
-                                    ),
-                                timestamp: chrono::Utc::now(),
-                                participating_nodes: vec![crate::dht::witness::NodeId::new(
-                                    "local",
-                                )],
-                                operation_metadata: crate::dht::witness::OperationMetadata {
-                                    size_bytes: value_len,
-                                    chunk_count: Some(1),
-                                    redundancy_level: Some(1.0),
-                                    custom: std::collections::HashMap::new(),
-                                },
-                                signature: crate::dht::witness::MlKemSignature::placeholder(),
-                                witness_proofs: vec![],
-                            }),
                             replicas: receipt.stored_at,
                         })
                     }
@@ -188,10 +151,7 @@ impl DhtStreamHandler {
                 match engine.retrieve(&key).await {
                     Ok(value) => {
                         debug!(key = ?key, found = value.is_some(), "DHT retrieve completed");
-                        Ok(DhtResponse::RetrieveReply {
-                            value,
-                            witnesses: Vec::new(),
-                        })
+                        Ok(DhtResponse::RetrieveReply { value })
                     }
                     Err(e) => {
                         warn!(key = ?key, error = %e, "DHT retrieve failed");
@@ -290,24 +250,6 @@ impl DhtStreamHandler {
 
                 match engine.store(&key, value).await {
                     Ok(receipt) => Ok(DhtResponse::StoreAck {
-                        receipt: Box::new(WitnessReceipt {
-                            operation_id: OperationId::new(),
-                            operation_type: crate::dht::witness::OperationType::Store,
-                            content_hash:
-                                crate::dht::content_addressing::ContentAddress::from_bytes(
-                                    key.as_bytes(),
-                                ),
-                            timestamp: chrono::Utc::now(),
-                            participating_nodes: vec![],
-                            operation_metadata: crate::dht::witness::OperationMetadata {
-                                size_bytes: 0,
-                                chunk_count: None,
-                                redundancy_level: None,
-                                custom: std::collections::HashMap::new(),
-                            },
-                            signature: crate::dht::witness::MlKemSignature::placeholder(),
-                            witness_proofs: vec![],
-                        }),
                         replicas: receipt.stored_at,
                     }),
                     Err(e) => Ok(DhtResponse::Error {
@@ -348,7 +290,6 @@ impl ProtocolHandler for DhtStreamHandler {
         match stream_type {
             StreamType::DhtQuery => self.handle_query(peer, data).await,
             StreamType::DhtStore => self.handle_store(peer, data).await,
-            StreamType::DhtWitness => self.handle_witness(peer, data).await,
             StreamType::DhtReplication => self.handle_replication(peer, data).await,
             _ => {
                 error!(
@@ -401,8 +342,6 @@ pub enum DhtStreamType {
     Query,
     /// Store operations (PUT, STORE).
     Store,
-    /// Witness operations for BFT.
-    Witness,
     /// Background replication.
     Replication,
 }
@@ -413,7 +352,6 @@ impl DhtStreamType {
         match self {
             Self::Query => StreamType::DhtQuery,
             Self::Store => StreamType::DhtStore,
-            Self::Witness => StreamType::DhtWitness,
             Self::Replication => StreamType::DhtReplication,
         }
     }
@@ -447,10 +385,9 @@ mod tests {
 
     #[test]
     fn test_dht_stream_types() {
-        assert_eq!(DHT_STREAM_TYPES.len(), 4);
+        assert_eq!(DHT_STREAM_TYPES.len(), 3);
         assert!(DHT_STREAM_TYPES.contains(&StreamType::DhtQuery));
         assert!(DHT_STREAM_TYPES.contains(&StreamType::DhtStore));
-        assert!(DHT_STREAM_TYPES.contains(&StreamType::DhtWitness));
         assert!(DHT_STREAM_TYPES.contains(&StreamType::DhtReplication));
     }
 
@@ -458,10 +395,6 @@ mod tests {
     fn test_dht_stream_type_conversion() {
         assert_eq!(DhtStreamType::Query.to_stream_type(), StreamType::DhtQuery);
         assert_eq!(DhtStreamType::Store.to_stream_type(), StreamType::DhtStore);
-        assert_eq!(
-            DhtStreamType::Witness.to_stream_type(),
-            StreamType::DhtWitness
-        );
         assert_eq!(
             DhtStreamType::Replication.to_stream_type(),
             StreamType::DhtReplication

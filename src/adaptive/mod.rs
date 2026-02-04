@@ -46,6 +46,7 @@ pub mod monitoring;
 pub mod multi_armed_bandit;
 pub mod performance;
 pub mod q_learning_cache;
+pub mod replica_planner;
 pub mod replication;
 pub mod retrieval;
 pub mod routing;
@@ -62,7 +63,9 @@ pub use client::{
     AdaptiveP2PClient, Client, ClientConfig, ClientProfile, NetworkStats as ClientNetworkStats,
 };
 pub use coordinator::{NetworkConfig, NetworkCoordinator};
-pub use dht_integration::{AdaptiveDHT, KademliaRoutingStrategy};
+pub use dht_integration::{
+    AdaptiveDHT, AdaptiveDhtConfig, AdaptiveDhtDependencies, KademliaRoutingStrategy,
+};
 pub use eviction::{
     AdaptiveStrategy, CacheState, EvictionStrategy, EvictionStrategyType, FIFOStrategy,
     LFUStrategy, LRUStrategy,
@@ -90,6 +93,7 @@ pub use q_learning_cache::{
     AccessInfo, CacheAction, CacheStatistics, QLearnCacheManager as QLearningCacheManager,
     QLearningConfig, StateVector,
 };
+pub use replica_planner::ReplicaPlanner;
 pub use replication::{ReplicaInfo, ReplicationManager, ReplicationStrategy};
 pub use retrieval::{RetrievalManager, RetrievalStrategy};
 pub use routing::AdaptiveRouter;
@@ -262,7 +266,7 @@ pub trait RoutingStrategy: Send + Sync {
     fn route_score(&self, neighbor: &NodeId, target: &NodeId) -> f64;
 
     /// Update routing metrics based on success/failure
-    fn update_metrics(&mut self, path: &[NodeId], success: bool);
+    fn update_metrics(&self, path: &[NodeId], success: bool);
 
     /// Find closest nodes to a content hash
     async fn find_closest_nodes(

@@ -23,6 +23,11 @@ pub mod ant_quic_adapter;
 // DHT protocol handler for SharedTransport integration
 pub mod dht_handler;
 
+// Network binding and NAT traversal configuration (moved from messaging)
+pub mod network_config;
+
+pub use network_config::{IpMode, NatTraversalMode, NetworkConfig, PortConfig, RetryBehavior};
+
 use crate::validation::{Validate, ValidationContext, validate_message_size, validate_peer_id};
 use crate::{P2PError, PeerId, Result};
 use serde::{Deserialize, Serialize};

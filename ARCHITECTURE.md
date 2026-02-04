@@ -5,14 +5,14 @@ This repository is a Rust library crate that provides a modular, post‑quantum 
 ## Goals & Scope
 - Reliable QUIC transport, DHT routing, dual‑stack endpoints (IPv6 + IPv4), and human‑readable endpoint encoding.
 - Strong security defaults using saorsa‑pqc, safe memory, and validation.
-- Extensible higher‑level features (chat, messaging, projects) on the same core.
+- Extensible higher‑level applications live above this crate (saorsa-node).
 
 ## Layered Architecture
 - Transport & Networking: `transport/`, `network/` (QUIC, NAT traversal, events, dual‑stack listeners, Happy Eyeballs dialing).
 - Routing & Discovery: `dht/`, `dht_network_manager/`, `peer_record/`.
 - Security: `quantum_crypto/`, `security.rs`, `secure_memory.rs`, `key_derivation.rs`, `encrypted_key_storage.rs`.
-- Data & Storage: `storage/`, `persistence/`, `placement/` (orchestrator, strategies, records).
-- Application Modules: `chat/`, `messaging/`, `discuss/`, `projects/`, `threshold/`.
+- Data & Storage: `persistence/`, `placement/` (orchestrator, strategies, records). Application data storage lives in saorsa-node.
+- Application Modules: provided by upper layers (not in this crate).
 - Cross‑cutting: `validation.rs`, `production.rs`, `health/`, `utils/`, `config.rs`, `error.rs`.
 
 ## Module Map (selected)
@@ -22,20 +22,38 @@ This repository is a Rust library crate that provides a modular, post‑quantum 
 
 ## Data Flow
 ```
-[Apps: chat|messaging|projects]
+[Upper-layer apps (saorsa-node)]
           |        commands/events
           v
      [network]  <->  [dht_network_manager]  <->  [dht]
           |
       [transport (QUIC)]
           |
-[placement] <-> [storage|persistence]
+[placement] <-> [persistence]
           ^
      [validation|security|secure_memory]
 ```
 
+Application storage and data replication are handled in saorsa-node using `send_message`-style APIs.
+saorsa-node is also responsible for replica tracking and re‑replication on churn,
+using core’s routing outputs and `DhtNetworkManager::subscribe_events()`.
+
+Example churn hook:
+```rust
+use saorsa_core::adaptive::ReplicaPlanner;
+use saorsa_core::DhtNetworkEvent;
+
+let planner = ReplicaPlanner::new(adaptive_dht, dht_manager);
+let mut events = planner.subscribe_churn();
+tokio::spawn(async move {
+    while let Ok(DhtNetworkEvent::PeerDisconnected { peer_id }) = events.recv().await {
+        // re-replicate any data that had replicas on peer_id
+    }
+});
+```
+
 ## Notes
-- Four‑word encoding/decoding is handled by the `four-word-networking` crate and is used only for network endpoints. Messaging uses a separate `UserHandle` to represent users.
+- Four‑word encoding/decoding is handled by the `four-word-networking` crate and is used only for network endpoints.
 - IPv4+port encodes to 4 words; decoding returns both IP and port. IPv6 word count is decided by the crate.
 
 ## Concurrency & Errors

@@ -418,14 +418,24 @@ impl NetworkCoordinator {
         let _hyperbolic_space = hyperbolic_space.clone();
         let _som = som.clone();
 
-        // Initialize DHT
+        // Initialize ML components early so AdaptiveDHT can use the same predictors
+        let churn_predictor = Arc::new(ChurnPredictor::new());
+
+        // Initialize DHT with shared adaptive layers
         let dht_config = crate::dht::DHTConfig::default();
+        let dht_dependencies = AdaptiveDhtDependencies::new(
+            identity.clone(),
+            trust_engine.clone(),
+            router.clone(),
+            hyperbolic_space.clone(),
+            som.clone(),
+            churn_predictor.clone(),
+        );
         let dht = Arc::new(
-            AdaptiveDHT::new(
+            AdaptiveDHT::new_with_dependencies(
                 dht_config,
-                identity.clone(),
-                trust_engine.clone(),
-                router.clone(),
+                AdaptiveDhtConfig::default(),
+                dht_dependencies,
             )
             .await?,
         );
@@ -446,9 +456,6 @@ impl NetworkCoordinator {
         let storage = Arc::new(ContentStore::new(storage_config).await.map_err(|e| {
             P2PError::Storage(crate::error::StorageError::Database(e.to_string().into()))
         })?);
-
-        // Initialize ML components
-        let churn_predictor = Arc::new(ChurnPredictor::new());
 
         let replication_config = ReplicationConfig {
             min_replicas: 3,

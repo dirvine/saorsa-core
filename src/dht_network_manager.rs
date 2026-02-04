@@ -201,6 +201,8 @@ pub struct DhtNetworkManager {
     maintenance_scheduler: Arc<RwLock<MaintenanceScheduler>>,
     /// Semaphore for limiting concurrent message handlers (backpressure)
     message_handler_semaphore: Arc<Semaphore>,
+    /// Whether this manager owns the P2P node lifecycle
+    manage_node_lifecycle: bool,
 }
 
 /// DHT operation context
@@ -320,6 +322,7 @@ pub struct DhtNetworkStats {
 }
 
 impl DhtNetworkManager {
+    #[allow(dead_code)]
     /// Create a new DHT Network Manager
     pub async fn new(config: DhtNetworkConfig) -> Result<Self> {
         info!(
@@ -370,9 +373,70 @@ impl DhtNetworkManager {
             stats: Arc::new(RwLock::new(DhtNetworkStats::default())),
             maintenance_scheduler,
             message_handler_semaphore,
+            manage_node_lifecycle: true,
         };
 
         info!("DHT Network Manager created successfully");
+        Ok(manager)
+    }
+
+    /// Create a DHT Network Manager attached to an existing P2P node.
+    ///
+    /// This variant does not assume ownership of the node lifecycle and will
+    /// avoid stopping the node when the manager shuts down.
+    pub async fn new_with_node(node: Arc<P2PNode>, mut config: DhtNetworkConfig) -> Result<Self> {
+        let node_peer_id = node.peer_id().clone();
+        if config.local_peer_id.is_empty() {
+            config.local_peer_id = node_peer_id.clone();
+        } else if config.local_peer_id != node_peer_id {
+            warn!(
+                "DHT config peer_id ({}) differs from node peer_id ({}); using config value",
+                config.local_peer_id, node_peer_id
+            );
+        }
+
+        info!(
+            "Creating attached DHT Network Manager for peer: {}",
+            config.local_peer_id
+        );
+
+        // Create DHT instance
+        let dht_key = {
+            let bytes = config.local_peer_id.as_bytes();
+            let mut key = [0u8; 32];
+            let len = bytes.len().min(32);
+            key[..len].copy_from_slice(&bytes[..len]);
+            key
+        };
+        let node_id = DhtNodeId::from_bytes(dht_key);
+        let dht = Arc::new(RwLock::new(DhtCoreEngine::new(node_id).map_err(|e| {
+            P2PError::Dht(DhtError::StorageFailed(e.to_string().into()))
+        })?));
+
+        let (event_tx, _) = broadcast::channel(1000);
+        let maintenance_config = MaintenanceConfig::from(&config.dht_config);
+        let maintenance_scheduler =
+            Arc::new(RwLock::new(MaintenanceScheduler::new(maintenance_config)));
+        let message_handler_semaphore = Arc::new(Semaphore::new(
+            config
+                .max_concurrent_operations
+                .max(MIN_CONCURRENT_OPERATIONS),
+        ));
+
+        let manager = Self {
+            dht,
+            node,
+            config,
+            active_operations: Arc::new(RwLock::new(HashMap::new())),
+            event_tx,
+            dht_peers: Arc::new(RwLock::new(HashMap::new())),
+            stats: Arc::new(RwLock::new(DhtNetworkStats::default())),
+            maintenance_scheduler,
+            message_handler_semaphore,
+            manage_node_lifecycle: false,
+        };
+
+        info!("Attached DHT Network Manager created successfully");
         Ok(manager)
     }
 
@@ -383,8 +447,10 @@ impl DhtNetworkManager {
     pub async fn start(self: &Arc<Self>) -> Result<()> {
         info!("Starting DHT Network Manager...");
 
-        // Start the P2P node
-        self.node.start().await?;
+        // Start the P2P node if we own lifecycle or it is not running yet
+        if self.manage_node_lifecycle || !self.node.is_running().await {
+            self.node.start().await?;
+        }
 
         // Subscribe to network events
         self.start_network_event_handler(Arc::clone(self)).await?;
@@ -406,14 +472,19 @@ impl DhtNetworkManager {
         // Send leave messages to connected peers
         self.leave_network().await?;
 
-        // Stop the P2P node
-        self.node.stop().await?;
+        // Stop the P2P node only if we own its lifecycle
+        if self.manage_node_lifecycle {
+            self.node.stop().await?;
+        }
 
         info!("DHT Network Manager stopped");
         Ok(())
     }
 
-    /// Put a value in the DHT
+    /// Put a value in the DHT.
+    ///
+    /// Reserved for potential future use beyond peer phonebook/routing.
+    #[allow(dead_code)]
     pub async fn put(&self, key: Key, value: Vec<u8>) -> Result<DhtNetworkResult> {
         info!(
             "Putting value for key: {} ({} bytes)",
@@ -520,7 +591,91 @@ impl DhtNetworkManager {
         })
     }
 
-    /// Get a value from the DHT
+    /// Store a value locally without network replication.
+    ///
+    /// Reserved for potential future use beyond peer phonebook/routing.
+    #[allow(dead_code)]
+    pub async fn store_local(&self, key: Key, value: Vec<u8>) -> Result<()> {
+        self.dht
+            .write()
+            .await
+            .store(&DhtKey::from_bytes(key), value)
+            .await
+            .map_err(|e| {
+                P2PError::Dht(crate::error::DhtError::StoreFailed(
+                    format!("Local storage failed for key {}: {e}", hex::encode(key)).into(),
+                ))
+            })?;
+        Ok(())
+    }
+
+    /// Retrieve a value from local storage without network lookup.
+    ///
+    /// Reserved for potential future use beyond peer phonebook/routing.
+    #[allow(dead_code)]
+    pub async fn get_local(&self, key: &Key) -> Result<Option<Vec<u8>>> {
+        self.dht
+            .read()
+            .await
+            .retrieve(&DhtKey::from_bytes(*key))
+            .await
+            .map_err(|e| {
+                P2PError::Dht(crate::error::DhtError::StoreFailed(
+                    format!("Local retrieve failed for key {}: {e}", hex::encode(key)).into(),
+                ))
+            })
+    }
+
+    /// Put a value in the DHT targeting a specific set of peers.
+    ///
+    /// Reserved for potential future use beyond peer phonebook/routing.
+    #[allow(dead_code)]
+    pub async fn put_with_targets(
+        &self,
+        key: Key,
+        value: Vec<u8>,
+        targets: &[PeerId],
+    ) -> Result<DhtNetworkResult> {
+        let operation = DhtNetworkOperation::Put {
+            key,
+            value: value.clone(),
+        };
+
+        self.store_local(key, value.clone()).await?;
+
+        let mut replicated_count = 1usize;
+        let replication_futures = targets.iter().map(|peer_id| {
+            let peer = peer_id.clone();
+            let op = operation.clone();
+            async move { (peer.clone(), self.send_dht_request(&peer, op).await) }
+        });
+
+        let results = futures::future::join_all(replication_futures).await;
+        for (peer_id, result) in results {
+            match result {
+                Ok(DhtNetworkResult::PutSuccess { .. }) => {
+                    replicated_count += 1;
+                    debug!("Replicated to peer: {}", peer_id);
+                }
+                Ok(other) => {
+                    debug!("Unexpected result from peer {}: {:?}", peer_id, other);
+                }
+                Err(e) => {
+                    debug!("Failed to replicate to peer {}: {}", peer_id, e);
+                }
+            }
+        }
+
+        Ok(DhtNetworkResult::PutSuccess {
+            key,
+            replicated_to: replicated_count,
+        })
+    }
+
+    /// Get a value from the DHT.
+    ///
+    /// Reserved for potential future use beyond peer phonebook/routing.
+    #[allow(dead_code)]
     pub async fn get(&self, key: &Key) -> Result<DhtNetworkResult> {
         info!("Getting value for key: {}", hex::encode(key));
 
@@ -734,7 +889,7 @@ impl DhtNetworkManager {
     }
 
     /// Find closest nodes to a key using local routing table and connected peers
-    async fn find_closest_nodes(&self, key: &Key, count: usize) -> Result<Vec<DHTNode>> {
+    pub async fn find_closest_nodes(&self, key: &Key, count: usize) -> Result<Vec<DHTNode>> {
         debug!(
             "Finding {} closest nodes to key: {}",
             count,
@@ -1213,10 +1368,21 @@ impl DhtNetworkManager {
                 // if let Err(e) = dht_guard.remove_node(&message.source).await {
                 //     warn!("Failed to remove leaving node from routing table: {}", e);
                 // }
-
                 Ok(DhtNetworkResult::LeaveSuccess)
             }
         }
+    }
+
+    /// Send a DHT request directly to a peer.
+    ///
+    /// Reserved for potential future use beyond peer phonebook/routing.
+    #[allow(dead_code)]
+    pub async fn send_request(
+        &self,
+        peer_id: &PeerId,
+        operation: DhtNetworkOperation,
+    ) -> Result<DhtNetworkResult> {
+        self.send_dht_request(peer_id, operation).await
     }
 
     /// Handle DHT response message
@@ -1621,12 +1787,6 @@ impl DhtNetworkManager {
                             }
                             Ok(())
                         }
-                        MaintenanceTask::DataAttestation => {
-                            debug!("Running DataAttestation maintenance task");
-                            // Challenge nodes to prove they hold data they claim to store
-                            // This is critical for network integrity
-                            Ok(())
-                        }
                         MaintenanceTask::EvictionEvaluation => {
                             debug!("Running EvictionEvaluation maintenance task");
                             // Evaluate nodes for eviction based on:
@@ -1760,19 +1920,6 @@ impl DhtNetworkManager {
     ///
     /// Returns the value if it exists in local storage, None otherwise.
     /// Unlike `get()`, this does NOT query remote nodes.
-    pub async fn get_local(&self, key: &Key) -> Option<Vec<u8>> {
-        match self
-            .dht
-            .read()
-            .await
-            .retrieve(&DhtKey::from_bytes(*key))
-            .await
-        {
-            Ok(Some(value)) => Some(value),
-            _ => None,
-        }
-    }
-
     /// Connect to a specific peer by address
     ///
     /// This is useful for manually building network topology in tests.

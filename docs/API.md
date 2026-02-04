@@ -4,8 +4,7 @@ This document provides a comprehensive guide to the saorsa-core public API.
 
 ## Table of Contents
 
-- [Identity Management](#identity-management)
-- [Storage Operations](#storage-operations)
+- [Phonebook & Trust Signals](#phonebook--trust-signals)
 - [DHT Operations](#dht-operations)
 - [Network & Transport](#network--transport)
 - [Cryptography](#cryptography)
@@ -15,138 +14,63 @@ This document provides a comprehensive guide to the saorsa-core public API.
 
 ---
 
-## Identity Management
+## Phonebook & Trust Signals
 
-### Register Identity
+saorsa-core uses the DHT strictly as a **peer phonebook** (routing + peer records).
+Application data storage is handled in **saorsa-node** via `send_message`-style APIs.
 
-Create a new identity bound to an ML-DSA-65 keypair.
-
-```rust
-use saorsa_core::{register_identity, MlDsaKeyPair};
-
-// Generate a new keypair
-let keypair = MlDsaKeyPair::generate()?;
-
-// Register with four-word address
-let words = ["welfare", "absurd", "king", "ridge"];
-let handle = register_identity(words, &keypair).await?;
-```
-
-### Register Headless Device
-
-Register a storage-only device (always-on node).
+To keep reputation accurate, saorsa-node reports data availability outcomes back to
+saorsa-core’s trust engine:
 
 ```rust
-use saorsa_core::{register_headless, Device, DeviceType, DeviceId, Endpoint};
+use saorsa_core::adaptive::{EigenTrustEngine, NodeStatisticsUpdate};
 
-let device = Device {
-    id: DeviceId::generate(),
-    device_type: DeviceType::Headless,
-    storage_gb: 500,
-    endpoint: Endpoint {
-        protocol: "quic".to_string(),
-        address: "192.168.1.100:9000".to_string(),
-    },
-    capabilities: Default::default(),
-};
+// On successful data fetch:
+trust_engine
+    .update_node_stats(&peer_id, NodeStatisticsUpdate::CorrectResponse)
+    .await;
 
-let handle = register_headless(&keypair, device).await?;
-```
-
-### Register Presence
-
-Announce devices and set active device.
-
-```rust
-use saorsa_core::{register_presence, set_active_device};
-
-// Register devices with identity
-register_presence(&handle, vec![device1, device2], active_device_id).await?;
-
-// Change active device
-set_active_device(&handle, new_device_id).await?;
-```
-
-### Fetch Identity
-
-Retrieve identity by four-word address.
-
-```rust
-use saorsa_core::identity_fetch;
-
-let identity = identity_fetch(&["welfare", "absurd", "king", "ridge"]).await?;
-println!("Public key: {:?}", identity.public_key);
-```
-
-### Four-Word Addresses
-
-Human-readable addresses for network endpoints.
-
-```rust
-use saorsa_core::bootstrap::{WordEncoder, FourWordAddress};
-
-let encoder = WordEncoder::new();
-
-// Encode socket address to four words
-let addr: SocketAddr = "192.168.1.100:9000".parse()?;
-let four_words = encoder.encode_socket_addr(&addr)?;
-println!("Address: {}", four_words.0);  // e.g., "welfare-absurd-king-ridge"
-
-// Decode back to socket address
-let decoded = encoder.decode_to_socket_addr(&four_words)?;
-assert_eq!(addr, decoded);
+// On failure:
+trust_engine
+    .update_node_stats(&peer_id, NodeStatisticsUpdate::FailedResponse)
+    .await;
 ```
 
 ---
 
-## Storage Operations
+## Data Replication Flow (saorsa-node)
 
-### Store Data (Automatic Strategy)
+saorsa-core does **not** replicate application data. saorsa-node is responsible for:
+1. Storing chunks locally and tracking replica sets.
+2. Selecting target peers using saorsa-core’s adaptive routing outputs.
+3. Replicating via `send_message` and updating trust based on outcomes.
+4. Reacting to churn and re‑replicating when peers drop.
 
-Store data with automatic replication strategy based on group size.
-
+Recommended wiring (using `ReplicaPlanner`):
 ```rust
-use saorsa_core::store_data;
+use saorsa_core::{
+    adaptive::ReplicaPlanner,
+    DhtNetworkManager,
+};
 
-// Single user: direct storage
-let data = b"My private data".to_vec();
-let handle = store_data(&identity_handle, data, 1).await?;
+// 1) Subscribe to churn signals
+let planner = ReplicaPlanner::new(adaptive_dht, dht_manager);
+let mut events = planner.subscribe_churn();
+tokio::spawn(async move {
+    while let Ok(event) = events.recv().await {
+        if let saorsa_core::DhtNetworkEvent::PeerDisconnected { peer_id } = event {
+            // saorsa-node should re-replicate any data that had replicas on peer_id
+        }
+    }
+});
 
-// Group: automatic replication (capped at 8 replicas)
-let handle = store_data(&identity_handle, data, 10).await?;
-```
+// 2) Choose replica targets (routing-only)
+let targets = planner
+    .select_replica_targets(content_hash, replica_count)
+    .await?;
 
-### Store Dyad (Two-User Replication)
-
-Full replication between two users.
-
-```rust
-use saorsa_core::store_dyad;
-
-let data = b"Shared between two users".to_vec();
-let handle = store_dyad(&handle1, handle2.key(), data).await?;
-```
-
-### Store with Custom Replication
-
-Explicit control over replica count.
-
-```rust
-use saorsa_core::store_with_fec;
-
-// Store with 8 data shards + 4 parity shards (interpreted as 12 replicas)
-let handle = store_with_fec(&handle, data, 8, 4).await?;
-```
-
-### Retrieve Data
-
-Automatic decryption and reconstruction.
-
-```rust
-use saorsa_core::get_data;
-
-let retrieved = get_data(&storage_handle).await?;
-println!("Data: {:?}", retrieved);
+// 3) Replicate over send_message (saorsa-node chunk protocol)
+// 4) Report success/failure back to EigenTrust
 ```
 
 ---
@@ -155,27 +79,45 @@ println!("Data: {:?}", retrieved);
 
 ### DHT Network Manager
 
-High-level DHT operations with network integration.
+High-level DHT operations with network integration. Use this for **peer discovery**
+and routing. Application data should travel over `send_message` in saorsa-node.
 
 ```rust
-use saorsa_core::{DhtNetworkManager, DhtNetworkConfig, Key, Record};
+use saorsa_core::{DhtNetworkManager, DhtNetworkConfig, Key};
 
 // Create manager
 let config = DhtNetworkConfig::default();
 let manager = DhtNetworkManager::new(config).await?;
 
-// Store record
-let key = Key::from_bytes(b"my-key");
-let record = Record::new(b"my-value".to_vec());
-manager.store(key.clone(), record).await?;
+// Find closest peers to a key (peer routing / phonebook lookups)
+let key: Key = *blake3::hash(b\"peer-id\").as_bytes();
+let peers = manager.find_closest_nodes(&key, 8).await?;
+```
 
-// Retrieve record
-if let Some(record) = manager.get(&key).await? {
-    println!("Value: {:?}", record.value);
-}
+### AdaptiveDHT (Recommended)
 
-// Find closest peers
-let peers = manager.get_closest_peers(&key, 8).await;
+Adaptive DHT for peer routing that enforces layered scoring (trust, geo, churn,
+hyperbolic, SOM). Use this for **phonebook/routing**, not application data storage.
+
+```rust
+use saorsa_core::adaptive::{AdaptiveDHT, AdaptiveDhtConfig, AdaptiveDhtDependencies};
+use saorsa_core::{DhtNetworkConfig, P2PNode};
+use std::sync::Arc;
+
+// Create your P2P node and DHT network config
+let node = Arc::new(P2PNode::new(node_config).await?);
+let dht_net = DhtNetworkConfig::default();
+
+// Dependencies can be provided from your adaptive stack
+let deps = AdaptiveDhtDependencies::with_defaults(identity, trust_provider, router);
+
+// Attach AdaptiveDHT to the running node
+let dht = AdaptiveDHT::attach_to_node(node, dht_net, AdaptiveDhtConfig::default(), deps).await?;
+
+// Store and retrieve
+let key = *blake3::hash(b\"example-key\").as_bytes();
+dht.put(key, b\"example-value\".to_vec()).await?;
+let value = dht.get(key).await?;
 ```
 
 ### Low-Level DHT
@@ -183,18 +125,13 @@ let peers = manager.get_closest_peers(&key, 8).await;
 Direct DHT operations.
 
 ```rust
-use saorsa_core::dht::{Key, Record, DhtConfig};
+use saorsa_core::dht::{Key, Record, DHTConfig};
 
 // Create key from bytes
-let key = Key::from_bytes(b"content-hash");
+let key: Key = *blake3::hash(b\"content-hash\").as_bytes();
 
-// Create record with TTL
-let record = Record {
-    key: key.clone(),
-    value: data,
-    publisher: Some(peer_id),
-    expires: Some(SystemTime::now() + Duration::from_secs(3600)),
-};
+// Create record
+let record = Record::new(key, data, "peer-id".to_string());
 ```
 
 ### DHT Subscriptions
@@ -238,32 +175,6 @@ let node = P2PNode::builder()
 node.run().await?;
 ```
 
-### Network Configuration
-
-Configure network behavior.
-
-```rust
-use saorsa_core::messaging::{NetworkConfig, PortConfig, IpMode, NatTraversalMode};
-
-// Default: OS-assigned port, IPv4-only, P2P NAT traversal
-let config = NetworkConfig::default();
-
-// Explicit port
-let config = NetworkConfig::with_port(9000);
-
-// Port range with fallback
-let config = NetworkConfig::with_port_range(9000, 9010);
-
-// Advanced NAT configuration
-let config = NetworkConfig::advanced_nat(
-    20,     // concurrency_limit
-    15,     // max_candidates
-    true,   // enable_symmetric_nat
-    true,   // enable_relay_fallback
-    true,   // prefer_rfc_nat_traversal
-);
-```
-
 ### Connection Events
 
 Subscribe to connection events.
@@ -283,29 +194,6 @@ while let Some(event) = subscription.recv().await {
         }
     }
 }
-```
-
-### Messaging Service
-
-High-level messaging with rich features.
-
-```rust
-use saorsa_core::messaging::{MessagingService, NetworkConfig};
-
-let service = MessagingService::new_with_config(
-    four_word_address,
-    dht_client,
-    NetworkConfig::default(),
-).await?;
-
-// Get listen addresses
-let addrs = service.listen_addrs().await;
-
-// Connect to peer
-service.connect_peer(&peer_addr).await?;
-
-// Send message
-service.send_message(&peer_id, message).await?;
 ```
 
 ---
@@ -429,7 +317,7 @@ use saorsa_core::{NodeAgeVerifier, NodeAgeConfig, OperationType};
 let verifier = NodeAgeVerifier::new(NodeAgeConfig::default());
 
 // Check if node can perform operation
-let result = verifier.verify_operation(&peer_id, OperationType::Witness)?;
+let result = verifier.verify_operation(&peer_id, OperationType::Replication)?;
 
 match result {
     AgeVerificationResult::Allowed => println!("Operation permitted"),
@@ -572,12 +460,12 @@ match limiter.check_rate(ip_addr) {
 All operations return `Result<T, P2PError>`:
 
 ```rust
-use saorsa_core::{P2PError, Result};
+use saorsa_core::{DhtNetworkManager, P2PError, Result};
 
-fn example() -> Result<()> {
-    let data = get_data(&handle).await.map_err(|e| {
+async fn example(manager: &DhtNetworkManager) -> Result<()> {
+    let key = *blake3::hash(b"peer-id").as_bytes();
+    let _peers = manager.find_closest_nodes(&key, 8).await.map_err(|e| {
         match e {
-            P2PError::NotFound => println!("Data not found"),
             P2PError::Timeout(_) => println!("Operation timed out"),
             P2PError::Network(e) => println!("Network error: {}", e),
             _ => println!("Other error: {}", e),

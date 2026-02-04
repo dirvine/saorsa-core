@@ -257,7 +257,7 @@ impl RetrievalManager {
         let start_time = Instant::now();
 
         // Get Kademlia routing strategy
-        let strategies = self.router.get_all_strategies();
+        let strategies = self.router.get_all_strategies().await;
         let kademlia_strategy = strategies
             .get("Kademlia")
             .ok_or_else(|| anyhow::anyhow!("Kademlia strategy not available"))?;
@@ -295,7 +295,7 @@ impl RetrievalManager {
         let start_time = Instant::now();
 
         // Get hyperbolic routing strategy
-        let strategies = self.router.get_all_strategies();
+        let strategies = self.router.get_all_strategies().await;
         let hyperbolic_strategy = strategies
             .get("Hyperbolic")
             .ok_or_else(|| anyhow::anyhow!("Hyperbolic strategy not available"))?;
@@ -330,7 +330,7 @@ impl RetrievalManager {
         let start_time = Instant::now();
 
         // Get SOM routing strategy
-        let strategies = self.router.get_all_strategies();
+        let strategies = self.router.get_all_strategies().await;
         let som_strategy = strategies
             .get("SOM")
             .ok_or_else(|| anyhow::anyhow!("SOM strategy not available"))?;

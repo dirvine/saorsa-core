@@ -172,7 +172,14 @@ impl DhtTestCluster {
     async fn get_local_values(&self, key: &Key) -> HashMap<usize, Option<Vec<u8>>> {
         let mut values = HashMap::new();
         for (i, node) in self.nodes.iter().enumerate() {
-            values.insert(i, node.get_local(key).await);
+            match node.get_local(key).await {
+                Ok(val) => {
+                    values.insert(i, val);
+                }
+                Err(_) => {
+                    values.insert(i, None);
+                }
+            }
         }
         values
     }
@@ -377,7 +384,7 @@ async fn test_dht_replication_survives_originator_shutdown() -> Result<()> {
         if has_data {
             info!("  Node {}: HAS DATA locally", i);
             nodes_after.push(i);
-            if let Some(v) = local_value {
+            if let Ok(Some(v)) = local_value {
                 assert_eq!(v, value, "Node {} has corrupted data!", i);
                 info!("  Node {}: Data verified correct", i);
             }

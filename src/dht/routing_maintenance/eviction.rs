@@ -3,7 +3,7 @@
 //! Manages eviction decisions based on:
 //! - Consecutive communication failures
 //! - Low trust scores (EigenTrust integration)
-//! - Failed data attestation challenges
+//! - Failed validation checks
 //!
 //! Copyright 2024 Saorsa Labs
 //! SPDX-License-Identifier: AGPL-3.0-or-later OR Commercial
@@ -22,8 +22,6 @@ pub enum EvictionReason {
     ConsecutiveFailures(u32),
     /// Trust score fell below minimum threshold
     LowTrust(String), // String representation of f64 for Eq
-    /// Failed data attestation challenge
-    FailedAttestation,
     /// Close group consensus: node is no longer valid
     CloseGroupRejection,
     /// Node is stale (no activity for too long)
@@ -38,8 +36,6 @@ pub struct EvictionManager {
     liveness_states: HashMap<DhtNodeId, NodeLivenessState>,
     /// Trust scores (from EigenTrust integration)
     trust_scores: HashMap<DhtNodeId, f64>,
-    /// Nodes that have failed attestation
-    failed_attestations: HashMap<DhtNodeId, u32>,
     /// Nodes explicitly marked for eviction with reason
     marked_for_eviction: HashMap<DhtNodeId, EvictionReason>,
 }
@@ -52,7 +48,6 @@ impl EvictionManager {
             config,
             liveness_states: HashMap::new(),
             trust_scores: HashMap::new(),
-            failed_attestations: HashMap::new(),
             marked_for_eviction: HashMap::new(),
         }
     }
@@ -64,7 +59,6 @@ impl EvictionManager {
             config,
             liveness_states: HashMap::new(),
             trust_scores,
-            failed_attestations: HashMap::new(),
             marked_for_eviction: HashMap::new(),
         }
     }
@@ -81,22 +75,12 @@ impl EvictionManager {
         state.record_success();
     }
 
-    /// Record an attestation failure
-    pub fn record_attestation_failure(&mut self, node_id: &DhtNodeId) {
-        *self.failed_attestations.entry(node_id.clone()).or_insert(0) += 1;
-    }
-
     /// Mark a node for eviction with a specific reason
     ///
     /// This is used when a node fails validation during close group
     /// validation or other explicit eviction scenarios.
     pub fn record_eviction(&mut self, node_id: &DhtNodeId, reason: EvictionReason) {
         self.marked_for_eviction.insert(node_id.clone(), reason);
-    }
-
-    /// Reset attestation failures (e.g., after successful attestation)
-    pub fn reset_attestation_failures(&mut self, node_id: &DhtNodeId) {
-        self.failed_attestations.remove(node_id);
     }
 
     /// Update trust score for a node
@@ -140,16 +124,6 @@ impl EvictionManager {
             .unwrap_or(false) // No score means we can't evict for trust
     }
 
-    /// Check if a node has too many attestation failures
-    #[must_use]
-    pub fn has_attestation_failures(&self, node_id: &DhtNodeId) -> bool {
-        // More than one attestation failure is suspicious
-        self.failed_attestations
-            .get(node_id)
-            .map(|&count| count > 1)
-            .unwrap_or(false)
-    }
-
     /// Get the eviction reason if any
     #[must_use]
     pub fn get_eviction_reason(&self, node_id: &DhtNodeId) -> Option<EvictionReason> {
@@ -176,11 +150,6 @@ impl EvictionManager {
             .filter(|&&s| s < self.config.min_trust_threshold)
         {
             return Some(EvictionReason::LowTrust(format!("{:.4}", score)));
-        }
-
-        // Check attestation failures
-        if self.has_attestation_failures(node_id) {
-            return Some(EvictionReason::FailedAttestation);
         }
 
         None
@@ -227,7 +196,6 @@ impl EvictionManager {
     pub fn remove_node(&mut self, node_id: &DhtNodeId) {
         self.liveness_states.remove(node_id);
         self.trust_scores.remove(node_id);
-        self.failed_attestations.remove(node_id);
         self.marked_for_eviction.remove(node_id);
     }
 
@@ -341,35 +309,6 @@ mod tests {
     }
 
     #[test]
-    fn test_attestation_failure_tracking() {
-        let config = MaintenanceConfig::default();
-        let mut manager = EvictionManager::new(config);
-
-        let node_id = make_node_id();
-        assert!(!manager.has_attestation_failures(&node_id));
-
-        manager.record_attestation_failure(&node_id);
-        assert!(!manager.has_attestation_failures(&node_id)); // Only 1
-
-        manager.record_attestation_failure(&node_id);
-        assert!(manager.has_attestation_failures(&node_id)); // Now 2
-    }
-
-    #[test]
-    fn test_reset_attestation_failures() {
-        let config = MaintenanceConfig::default();
-        let mut manager = EvictionManager::new(config);
-
-        let node_id = make_node_id();
-        manager.record_attestation_failure(&node_id);
-        manager.record_attestation_failure(&node_id);
-        assert!(manager.has_attestation_failures(&node_id));
-
-        manager.reset_attestation_failures(&node_id);
-        assert!(!manager.has_attestation_failures(&node_id));
-    }
-
-    #[test]
     fn test_get_eviction_candidates() {
         let config = MaintenanceConfig {
             max_consecutive_failures: 3,
@@ -402,14 +341,12 @@ mod tests {
         let node_id = make_node_id();
         manager.record_failure(&node_id);
         manager.update_trust_score(&node_id, 0.5);
-        manager.record_attestation_failure(&node_id);
 
         manager.remove_node(&node_id);
 
         assert_eq!(manager.get_consecutive_failures(&node_id), 0);
         assert!(manager.get_liveness_state(&node_id).is_none());
         assert!(!manager.should_evict_for_trust(&node_id));
-        assert!(!manager.has_attestation_failures(&node_id));
     }
 
     #[test]

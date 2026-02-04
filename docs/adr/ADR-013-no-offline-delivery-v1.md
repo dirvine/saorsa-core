@@ -93,7 +93,7 @@ If we implement offline delivery later, candidate solutions include:
 1. **Configurable TTL**: Allow users/channels to set TTL (1 hour - 7 days)
 2. **Mailbox Nodes**: Dedicated nodes for offline storage (opt-in)
 3. **Encrypted Relay**: Store encrypted messages on recipient's designated nodes
-4. **Forward Error Correction**: Use FEC codes for resilient long-term storage
+4. **Retention Policies**: Apply explicit retention and garbage-collection policies per topic
 
 ## Related ADRs
 
@@ -105,7 +105,7 @@ If we implement offline delivery later, candidate solutions include:
 
 - Phase 2 Task 2: DHT Storage Analysis (`.planning/architecture-analysis/02-dht-storage.md`)
 - DHT TTL Configuration: `src/placement/dht_records.rs:97` (DEFAULT_TTL = 3600s)
-- Message Queueing: `src/messaging/transport.rs:312-319`
+- Message Queueing: Removed with the user messaging subsystem (out of scope for this ADR)
 
 ## Decision Date
 

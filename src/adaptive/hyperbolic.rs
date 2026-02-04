@@ -357,7 +357,7 @@ impl RoutingStrategy for HyperbolicRoutingStrategy {
         0.5
     }
 
-    fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {
+    fn update_metrics(&self, _path: &[NodeId], _success: bool) {
         // Metrics are updated in find_path via record_routing_result
     }
 }

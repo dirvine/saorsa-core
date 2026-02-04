@@ -569,7 +569,7 @@ impl RoutingStrategy for EnhancedHyperbolicRoutingStrategy {
         0.5
     }
 
-    fn update_metrics(&mut self, _path: &[NodeId], _success: bool) {
+    fn update_metrics(&self, _path: &[NodeId], _success: bool) {
         // Metrics are updated in find_enhanced_path
     }
 }

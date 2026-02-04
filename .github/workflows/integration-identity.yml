@@ -64,24 +64,18 @@ jobs:
       # build issues (linker OOM on Linux, C++20 on Windows).
       # Using -j2 to reduce parallel linking and avoid linker memory exhaustion.
       - name: Build tests
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils,attestation" -j2
+        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils" -j2
 
       - name: Clean incremental artifacts
         run: |
           find target -name "incremental" -type d -exec rm -rf {} + 2>/dev/null || true
           df -h
 
-      - name: Identity Tests
-        run: cargo nextest run --test identity_tests --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
-
-      - name: Identity Management
-        run: cargo nextest run --test identity_management_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+      - name: Node Identity Crypto
+        run: cargo nextest run --test node_identity_crypto_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Node Identity
-        run: cargo nextest run --test node_identity_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
-
-      - name: Multi-Device Tests
-        run: cargo nextest run --test multi_device_tests --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test node_identity_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
   integration-security:
     name: Security Tests
@@ -136,7 +130,7 @@ jobs:
       # build issues (linker OOM on Linux, C++20 on Windows).
       # Using -j2 to reduce parallel linking and avoid linker memory exhaustion.
       - name: Build tests
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils,attestation" -j2
+        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils" -j2
 
       - name: Clean incremental artifacts
         run: |
@@ -144,16 +138,13 @@ jobs:
           df -h
 
       - name: Security Comprehensive
-        run: cargo nextest run --test security_comprehensive_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test security_comprehensive_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Validation Security
-        run: cargo nextest run --test validation_security_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test validation_security_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Validation Tests
-        run: cargo nextest run --test validation_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
-
-      - name: Key Exchange
-        run: cargo nextest run --test key_exchange_integration_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test validation_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: EigenTrust
-        run: cargo nextest run --test eigentrust_integration_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test eigentrust_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast

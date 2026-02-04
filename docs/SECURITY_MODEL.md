@@ -2,6 +2,8 @@
 
 This document provides a comprehensive overview of the security architecture, threat mitigations, and network protections implemented in Saorsa Core.
 
+> Note: Attestation and witness subsystems are currently out of scope for saorsa-core. Any legacy references below are historical and will be revised.
+
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
@@ -25,7 +27,7 @@ Saorsa Core implements a defense-in-depth security architecture designed for dec
 - **EigenTrust++ reputation** for trust-weighted routing and storage decisions
 - **Geographic diversity enforcement** to prevent centralization and collusion
 - **Byzantine fault tolerance** with configurable f-out-of-3f+1 security model
-- **Nonce-based data attestation** using BLAKE3 to prevent precomputation attacks
+- **Data integrity verification** using BLAKE3 content hashes
 
 ---
 
@@ -39,7 +41,7 @@ All cryptographic operations use NIST-standardized post-quantum algorithms:
 |----------|-----------|----------------|
 | Digital Signatures | ML-DSA-65 (FIPS 204) | NIST Level 3 (~128-bit quantum) |
 | Key Encapsulation | ML-KEM-768 (FIPS 203) | NIST Level 3 (~128-bit quantum) |
-| Symmetric Encryption | ChaCha20-Poly1305 | 256-bit |
+| Symmetric Encryption | Upper-layer responsibility | N/A |
 | Hashing | BLAKE3 | 256-bit |
 
 ### Identity Binding
@@ -53,7 +55,7 @@ NodeId = BLAKE3(serialize(ML-DSA-65 public key))
 This binding is verified during:
 - Node join operations
 - Message authentication
-- Witness attestations
+- Routing validation and trust-based admission
 - Data storage challenges
 
 ---
@@ -76,7 +78,7 @@ pub struct NodeLivenessState {
 **Monitoring Triggers:**
 - Every DHT operation (GET, PUT, FIND_NODE)
 - Periodic health pings (configurable interval)
-- Witness attestation responses
+- Validation responses
 
 ### Eviction Criteria
 
@@ -86,7 +88,6 @@ Nodes are automatically evicted when any threshold is exceeded:
 |-----------------|-------------------|---------------|
 | Consecutive Failures | 3 failures | `max_consecutive_failures` |
 | Low Trust Score | < 0.15 | `min_trust_threshold` |
-| Failed Attestation | > 1 failure | Automatic |
 | Close Group Rejection | Consensus | BFT threshold |
 | Staleness | Configurable | `stale_timeout` |
 
@@ -147,6 +148,10 @@ Trust scores influence:
 ---
 
 ## Data Storage Verification
+
+Note: Application data storage and retrieval are handled in **saorsa-node**. saorsa-core
+tracks availability outcomes via trust signals to downscore nodes that fail to serve
+expected data.
 
 ### Nonce-Based Attestation Challenges
 

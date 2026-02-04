@@ -3,7 +3,6 @@
 //! Coordinates periodic maintenance tasks:
 //! - Bucket refresh operations
 //! - Node liveness checks
-//! - Data attestation challenges
 //! - Eviction evaluation
 //!
 //! Copyright 2024 Saorsa Labs
@@ -20,8 +19,6 @@ pub enum MaintenanceTask {
     BucketRefresh,
     /// Check liveness of nodes
     LivenessCheck,
-    /// Run data attestation challenges
-    DataAttestation,
     /// Evaluate nodes for eviction
     EvictionEvaluation,
     /// Validate nodes via close group consensus
@@ -37,7 +34,6 @@ impl MaintenanceTask {
         vec![
             MaintenanceTask::BucketRefresh,
             MaintenanceTask::LivenessCheck,
-            MaintenanceTask::DataAttestation,
             MaintenanceTask::EvictionEvaluation,
             MaintenanceTask::CloseGroupValidation,
             MaintenanceTask::RecordRepublish,
@@ -50,7 +46,6 @@ impl MaintenanceTask {
         match self {
             MaintenanceTask::BucketRefresh => config.bucket_refresh_interval,
             MaintenanceTask::LivenessCheck => config.ping_timeout * 10, // Check every 10 ping timeouts
-            MaintenanceTask::DataAttestation => config.attestation_interval,
             MaintenanceTask::EvictionEvaluation => Duration::from_secs(60), // Every minute
             MaintenanceTask::CloseGroupValidation => Duration::from_secs(300), // Every 5 minutes
             MaintenanceTask::RecordRepublish => config.republish_interval,
@@ -266,7 +261,7 @@ mod tests {
     #[test]
     fn test_maintenance_task_all() {
         let all_tasks = MaintenanceTask::all();
-        assert_eq!(all_tasks.len(), 6);
+        assert_eq!(all_tasks.len(), 5);
     }
 
     #[test]
@@ -308,7 +303,7 @@ mod tests {
     #[test]
     fn test_scheduled_task_fail() {
         let mut task =
-            ScheduledTask::new(MaintenanceTask::DataAttestation, Duration::from_secs(60));
+            ScheduledTask::new(MaintenanceTask::RecordRepublish, Duration::from_secs(60));
 
         task.start();
         task.fail();
@@ -323,7 +318,7 @@ mod tests {
         let config = MaintenanceConfig::default();
         let scheduler = MaintenanceScheduler::new(config);
 
-        assert_eq!(scheduler.tasks.len(), 6);
+        assert_eq!(scheduler.tasks.len(), 5);
         assert!(!scheduler.is_active());
     }
 
@@ -357,7 +352,9 @@ mod tests {
         }
 
         let due = scheduler.get_due_tasks();
-        assert_eq!(due.len(), 6);
+        // There are 5 maintenance task types: BucketRefresh, LivenessCheck,
+        // EvictionEvaluation, CloseGroupValidation, RecordRepublish
+        assert_eq!(due.len(), 5);
     }
 
     #[test]
@@ -391,7 +388,9 @@ mod tests {
         let scheduler = MaintenanceScheduler::new(config);
 
         let stats = scheduler.get_stats();
-        assert_eq!(stats.len(), 6);
+        // There are 5 maintenance task types: BucketRefresh, LivenessCheck,
+        // EvictionEvaluation, CloseGroupValidation, RecordRepublish
+        assert_eq!(stats.len(), 5);
 
         for stat in stats {
             assert_eq!(stat.run_count, 0);
@@ -432,9 +431,5 @@ mod tests {
         // Bucket refresh should use config interval
         let bucket_interval = MaintenanceTask::BucketRefresh.default_interval(&config);
         assert_eq!(bucket_interval, config.bucket_refresh_interval);
-
-        // Attestation should use config interval
-        let attestation_interval = MaintenanceTask::DataAttestation.default_interval(&config);
-        assert_eq!(attestation_interval, config.attestation_interval);
     }
 }

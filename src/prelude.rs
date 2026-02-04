@@ -118,11 +118,8 @@ pub use crate::dht::node_age_verifier::{
 };
 
 // ============================================================================
-// Storage & State Management
+// State Management
 // ============================================================================
-
-/// Storage management
-pub use crate::storage::{FileChunker, StorageManager};
 
 /// Persistent state
 pub use crate::persistent_state::{

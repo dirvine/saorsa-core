@@ -40,7 +40,7 @@ We **delegate all transport-layer concerns to ant-quic**, treating it as our tra
 │  │ • Identity & presence management                              ││
 │  │ • Trust computation (EigenTrust)                              ││
 │  │ • Storage placement & orchestration                           ││
-│  │ • Application-level protocols (chat, discuss, projects)       ││
+│  │ • Upper-layer applications (saorsa-node)                      ││
 │  └──────────────────────────────────────────────────────────────┘│
 │                              │                                    │
 │                              ▼                                    │

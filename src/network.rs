@@ -35,7 +35,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::{Instant, interval};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Wire protocol message format for P2P communication.
 ///
@@ -111,13 +111,6 @@ pub struct NodeConfig {
     /// When set, this configuration is used by bootstrap peer discovery and
     /// other diversity-enforcing subsystems. If `None`, defaults are used.
     pub diversity_config: Option<crate::security::IPDiversityConfig>,
-
-    /// Attestation configuration for software integrity verification.
-    ///
-    /// Controls how nodes verify each other's software attestation during handshake.
-    /// In Phase 1, this is used for "soft enforcement" (logging only).
-    #[serde(default)]
-    pub attestation_config: crate::attestation::AttestationConfig,
 
     /// Stale peer threshold - peers with no activity for this duration are considered stale.
     /// Defaults to 60 seconds. Can be reduced for testing purposes.
@@ -222,7 +215,6 @@ impl NodeConfig {
             production_config: None,
             bootstrap_cache_config: None,
             diversity_config: None,
-            attestation_config: config.attestation.clone(),
             stale_peer_threshold: default_stale_peer_threshold(),
         })
     }
@@ -352,7 +344,6 @@ impl NodeConfigBuilder {
             production_config: self.production_config,
             bootstrap_cache_config: None,
             diversity_config: None,
-            attestation_config: base_config.attestation.clone(),
             stale_peer_threshold: default_stale_peer_threshold(),
         })
     }
@@ -381,7 +372,6 @@ impl Default for NodeConfig {
             production_config: None,
             bootstrap_cache_config: None,
             diversity_config: None,
-            attestation_config: config.attestation.clone(),
             stale_peer_threshold: default_stale_peer_threshold(),
         }
     }
@@ -439,7 +429,6 @@ impl NodeConfig {
             }),
             bootstrap_cache_config: None,
             diversity_config: None,
-            attestation_config: config.attestation.clone(),
             stale_peer_threshold: default_stale_peer_threshold(),
         };
 
@@ -687,14 +676,6 @@ pub struct P2PNode {
     /// GeoIP provider for connection validation
     #[allow(dead_code)]
     geo_provider: Arc<BgpGeoProvider>,
-
-    /// This node's entangled identity (derived from public key + binary hash + nonce).
-    /// Used for software attestation verification during peer handshake.
-    entangled_id: Option<crate::attestation::EntangledId>,
-
-    /// BLAKE3 hash of the running binary for attestation.
-    /// In production, this is computed at startup from the executable.
-    binary_hash: [u8; 32],
 }
 
 /// Normalize wildcard bind addresses to localhost loopback addresses
@@ -792,9 +773,6 @@ impl P2PNode {
             listener_handle: Arc::new(RwLock::new(None)),
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
-            // Attestation fields - use dummy values for tests
-            entangled_id: None,
-            binary_hash: [0u8; 32],
         })
     }
     /// Create a new P2P node with the given configuration
@@ -1033,10 +1011,6 @@ impl P2PNode {
             Arc::new(RwLock::new(Some(handle)))
         };
 
-        // Compute binary hash for attestation (in production, this would be the actual binary)
-        // For now, we use a placeholder that will be replaced during node initialization
-        let binary_hash = Self::compute_binary_hash();
-
         let node = Self {
             config,
             peer_id,
@@ -1059,9 +1033,6 @@ impl P2PNode {
             recv_handles: Arc::new(RwLock::new(Vec::new())),
             listener_handle: Arc::new(RwLock::new(None)),
             geo_provider,
-            // Attestation - EntangledId will be derived later when NodeIdentity is available
-            entangled_id: None,
-            binary_hash,
         };
         info!(
             "Created P2P node with peer ID: {} (call start() to begin networking)",
@@ -1830,185 +1801,6 @@ impl P2PNode {
     /// Get node uptime
     pub fn uptime(&self) -> Duration {
         self.start_time.elapsed()
-    }
-
-    // =========================================================================
-    // Attestation Methods (Phase 1: Soft Enforcement)
-    // =========================================================================
-
-    /// Compute the BLAKE3 hash of the running binary.
-    ///
-    /// In production, this reads the actual executable file and hashes it.
-    /// Returns a placeholder hash if the binary cannot be read.
-    fn compute_binary_hash() -> [u8; 32] {
-        // Try to get the path to the current executable and hash it
-        if let Some(hash) = std::env::current_exe()
-            .ok()
-            .and_then(|exe_path| std::fs::read(&exe_path).ok())
-            .map(|binary_data| blake3::hash(&binary_data))
-        {
-            return *hash.as_bytes();
-        }
-        // Fallback: return a deterministic placeholder based on compile-time info
-        // This allows tests and development to work without actual binary hashing
-        let placeholder = format!(
-            "saorsa-core-v{}-{}",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::ARCH
-        );
-        let hash = blake3::hash(placeholder.as_bytes());
-        *hash.as_bytes()
-    }
-
-    /// Get this node's binary hash used for attestation.
-    #[must_use]
-    pub fn binary_hash(&self) -> &[u8; 32] {
-        &self.binary_hash
-    }
-
-    /// Get this node's entangled identity, if set.
-    #[must_use]
-    pub fn entangled_id(&self) -> Option<&crate::attestation::EntangledId> {
-        self.entangled_id.as_ref()
-    }
-
-    /// Set the entangled identity for this node.
-    ///
-    /// This should be called after the node's cryptographic identity is established,
-    /// typically by deriving from the NodeIdentity's public key.
-    pub fn set_entangled_id(&mut self, entangled_id: crate::attestation::EntangledId) {
-        self.entangled_id = Some(entangled_id);
-    }
-
-    /// Verify a peer's attestation and return the enforcement decision.
-    ///
-    /// This function implements the Entangled Attestation verification protocol
-    /// (Phase 6: Hard Enforcement). Based on the configured enforcement mode:
-    ///
-    /// - **Off**: Skips verification entirely
-    /// - **Soft**: Logs warnings but allows connections
-    /// - **Hard**: Rejects connections with invalid attestations
-    ///
-    /// # Arguments
-    /// * `peer_id` - The peer's identifier for logging
-    /// * `peer_entangled_id` - The peer's claimed entangled ID
-    /// * `peer_public_key` - The peer's ML-DSA public key
-    ///
-    /// # Returns
-    /// An `EnforcementDecision` indicating whether to allow or reject the connection.
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let decision = node.verify_peer_attestation(peer_id, &entangled_id, &public_key);
-    /// if decision.should_reject() {
-    ///     // Send rejection message and close connection
-    ///     if let Some(rejection) = decision.rejection() {
-    ///         send_rejection(peer_id, rejection);
-    ///     }
-    ///     disconnect(peer_id);
-    /// }
-    /// ```
-    pub fn verify_peer_attestation(
-        &self,
-        peer_id: &str,
-        peer_entangled_id: &crate::attestation::EntangledId,
-        peer_public_key: &crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey,
-    ) -> crate::attestation::EnforcementDecision {
-        use crate::attestation::{
-            AttestationRejection, AttestationRejectionReason, EnforcementDecision, EnforcementMode,
-        };
-
-        let config = &self.config.attestation_config;
-
-        // Skip verification if attestation is disabled
-        if !config.enabled {
-            return EnforcementDecision::Skipped;
-        }
-
-        // Verify the entangled ID derivation
-        let id_valid = peer_entangled_id.verify(peer_public_key);
-
-        // Check binary hash allowlist (if configured)
-        let binary_hash = *peer_entangled_id.binary_hash();
-        let binary_allowed = config.is_binary_allowed(&binary_hash);
-
-        match config.enforcement_mode {
-            EnforcementMode::Off => EnforcementDecision::Skipped,
-
-            EnforcementMode::Soft => {
-                // Soft enforcement: log warnings but allow connections
-                if !id_valid {
-                    warn!(
-                        peer = %peer_id,
-                        binary_hash = %hex::encode(&binary_hash[..8]),
-                        "Peer attestation verification failed: Invalid entangled ID (soft mode - allowing)"
-                    );
-                    return EnforcementDecision::AllowWithWarning {
-                        reason: AttestationRejectionReason::IdentityMismatch,
-                    };
-                }
-                if !binary_allowed {
-                    warn!(
-                        peer = %peer_id,
-                        binary_hash = %hex::encode(binary_hash),
-                        "Peer attestation verification failed: Binary not in allowlist (soft mode - allowing)"
-                    );
-                    return EnforcementDecision::AllowWithWarning {
-                        reason: AttestationRejectionReason::BinaryNotAllowed { hash: binary_hash },
-                    };
-                }
-                EnforcementDecision::Allow
-            }
-
-            EnforcementMode::Hard => {
-                // Hard enforcement: reject invalid attestations
-                if !id_valid {
-                    error!(
-                        peer = %peer_id,
-                        binary_hash = %hex::encode(&binary_hash[..8]),
-                        "REJECTING peer: Invalid entangled ID derivation"
-                    );
-                    return EnforcementDecision::Reject {
-                        rejection: AttestationRejection::identity_mismatch(),
-                    };
-                }
-                if !binary_allowed {
-                    error!(
-                        peer = %peer_id,
-                        binary_hash = %hex::encode(binary_hash),
-                        "REJECTING peer: Binary not in allowlist"
-                    );
-                    return EnforcementDecision::Reject {
-                        rejection: AttestationRejection::binary_not_allowed(binary_hash),
-                    };
-                }
-
-                info!(
-                    peer = %peer_id,
-                    entangled_id = %hex::encode(&peer_entangled_id.id()[..8]),
-                    "Peer attestation verified successfully (hard mode)"
-                );
-                EnforcementDecision::Allow
-            }
-        }
-    }
-
-    /// Verify a peer's attestation and return a simple boolean result.
-    ///
-    /// This is a convenience method that wraps `verify_peer_attestation` for cases
-    /// where only a pass/fail result is needed without the detailed decision.
-    ///
-    /// # Returns
-    /// `true` if the connection should be allowed, `false` if it should be rejected.
-    #[must_use]
-    pub fn verify_peer_attestation_simple(
-        &self,
-        peer_id: &str,
-        peer_entangled_id: &crate::attestation::EntangledId,
-        peer_public_key: &crate::quantum_crypto::ant_quic_integration::MlDsaPublicKey,
-    ) -> bool {
-        self.verify_peer_attestation(peer_id, peer_entangled_id, peer_public_key)
-            .should_allow()
     }
 
     // MCP removed: all MCP tool/service methods removed
@@ -2962,7 +2754,7 @@ async fn register_new_peer(
         connected_at: tokio::time::Instant::now(),
         last_seen: tokio::time::Instant::now(),
         status: ConnectionStatus::Connected,
-        protocols: vec!["p2p-chat/1.0.0".to_string()],
+        protocols: vec!["p2p-core/1.0.0".to_string()],
         heartbeat_count: 0,
     };
     peers_guard.insert(peer_id.clone(), peer_info);
@@ -3004,7 +2796,6 @@ mod tests {
             production_config: None,
             bootstrap_cache_config: None,
             diversity_config: None,
-            attestation_config: crate::attestation::AttestationConfig::default(),
             stale_peer_threshold: default_stale_peer_threshold(),
         }
     }

@@ -227,15 +227,8 @@ pub enum VerificationLevel {
     HumanVerification,
 }
 
-// High-value operations require stronger verification
-impl StorageManager {
-    pub async fn store_large_data(&self, data: &[u8]) -> Result<StorageHandle> {
-        if data.len() > VERIFICATION_THRESHOLD {
-            self.verify_with_level(VerificationLevel::MultiDevice).await?;
-        }
-        // ...
-    }
-}
+// High-value operations (implemented in saorsa-node) should require stronger verification.
+// saorsa-core provides the verification and trust primitives; upper layers enforce policy.
 ```
 
 ### Attack Scenarios and Defenses

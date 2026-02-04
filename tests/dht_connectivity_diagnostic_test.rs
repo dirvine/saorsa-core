@@ -230,7 +230,7 @@ async fn step5_local_put_get() -> Result<()> {
 
     if has_local {
         let local_value = manager.get_local(&key).await;
-        if let Some(v) = local_value {
+        if let Ok(Some(v)) = local_value {
             if v == value {
                 println!("  ✓ Local value matches!");
             } else {
