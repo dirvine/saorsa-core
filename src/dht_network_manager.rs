@@ -1034,7 +1034,7 @@ impl DhtNetworkManager {
                 Ok(Some(serde_json::to_vec(&response)?))
             }
             DhtMessageType::Response => {
-                self.handle_dht_response(&message).await?;
+                self.handle_dht_response(&message, sender).await?;
                 Ok(None)
             }
             DhtMessageType::Broadcast => {
@@ -1205,9 +1205,16 @@ impl DhtNetworkManager {
     /// Delivers the response via oneshot channel to the waiting request coroutine.
     /// Uses oneshot channel instead of shared Vec to eliminate TOCTOU races.
     ///
-    /// Security: Verifies that the response source is either the target peer we
-    /// contacted or one of the nodes we reached during the operation.
-    async fn handle_dht_response(&self, message: &DhtNetworkMessage) -> Result<()> {
+    /// Security: Verifies that the transport-level sender matches the peer we
+    /// contacted. The `sender` parameter is the transport peer ID provided by the
+    /// network layer (from `handle_dht_message`), which is the same ID space used
+    /// by `connect_peer` / `send_message`. This avoids the app-level vs transport-level
+    /// ID mismatch that would occur if we compared against `message.source`.
+    async fn handle_dht_response(
+        &self,
+        message: &DhtNetworkMessage,
+        sender: &PeerId,
+    ) -> Result<()> {
         let message_id = &message.message_id;
         debug!("Handling DHT response for message_id: {message_id}");
 
@@ -1223,16 +1230,20 @@ impl DhtNetworkManager {
         // Find the active operation and send response via oneshot channel
         let mut ops = self.active_operations.write().await;
         if let Some(context) = ops.get_mut(message_id) {
-            // Security: Verify the response source is authorized
-            // Accept responses from: the target peer OR any peer we contacted during the operation
-            let source_authorized = context.peer_id == message.source
-                || context.contacted_nodes.contains(&message.source);
+            // Security: Verify the transport-level sender is authorized.
+            // We compare the `sender` (transport peer ID from the network layer) against
+            // the peer IDs we originally contacted (also transport-level IDs).
+            // This is correct because both `context.peer_id` and `sender` come from the
+            // transport layer (connect_peer / P2PEvent), while `message.source` is the
+            // remote node's app-level config ID — a different ID space.
+            let source_authorized =
+                context.peer_id == *sender || context.contacted_nodes.contains(sender);
 
             if !source_authorized {
                 warn!(
-                    "Rejecting DHT response for {message_id}: unauthorized source {} \
+                    "Rejecting DHT response for {message_id}: unauthorized sender {} \
                      (expected {} or one of {:?})",
-                    message.source, context.peer_id, context.contacted_nodes
+                    sender, context.peer_id, context.contacted_nodes
                 );
                 return Ok(());
             }
