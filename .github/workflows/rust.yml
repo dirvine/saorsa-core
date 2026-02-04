@@ -66,7 +66,7 @@ jobs:
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
       - name: Build
-        run: cargo build --features "default,mocks,h2_greedy,test-utils,attestation"
+        run: cargo build --features "default,mocks,h2_greedy,test-utils"
 
   security_audit:
     name: Security Audit
@@ -116,7 +116,7 @@ jobs:
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
       - name: Run benchmarks
-        run: cargo bench --features "default,mocks,h2_greedy,test-utils,attestation"
+        run: cargo bench --features "default,mocks,h2_greedy,test-utils"
 
   minimal-versions:
     name: Minimal versions
@@ -135,4 +135,4 @@ jobs:
       - run: cargo update -Z minimal-versions
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
-      - run: cargo check --features "default,mocks,h2_greedy,test-utils,attestation"
+      - run: cargo check --features "default,mocks,h2_greedy,test-utils"

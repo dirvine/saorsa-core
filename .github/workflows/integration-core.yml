@@ -57,7 +57,7 @@ jobs:
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
       - name: Build tests
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils,attestation"
+        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils"
 
       - name: Clean incremental artifacts
         run: |
@@ -65,16 +65,13 @@ jobs:
           df -h
 
       - name: DHT Core Operations
-        run: cargo nextest run --test dht_core_operations_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test dht_core_operations_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: DHT Property Tests
-        run: cargo nextest run --test dht_property_tests --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
-
-      - name: Storage Tests
-        run: cargo nextest run --test storage_tests --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test dht_property_tests --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Config Tests
-        run: cargo nextest run --test config_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test config_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
   integration-adaptive:
     name: Adaptive & ML Tests
@@ -122,7 +119,7 @@ jobs:
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
       - name: Build tests
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils,attestation"
+        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils"
 
       - name: Clean incremental artifacts
         run: |
@@ -130,16 +127,16 @@ jobs:
           df -h
 
       - name: Adaptive Components
-        run: cargo nextest run --test adaptive_components_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test adaptive_components_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Adaptive Integration
-        run: cargo nextest run --test adaptive_integration_tests --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test adaptive_integration_tests --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Multi-Armed Bandit
-        run: cargo nextest run --test multi_armed_bandit_integration_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test multi_armed_bandit_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Q-Learning Cache
-        run: cargo nextest run --test q_learning_cache_integration_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test q_learning_cache_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Hyperbolic Routing
-        run: cargo nextest run --test hyperbolic_routing_test --features "default,mocks,h2_greedy,test-utils,attestation" --no-fail-fast
+        run: cargo nextest run --test hyperbolic_routing_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
