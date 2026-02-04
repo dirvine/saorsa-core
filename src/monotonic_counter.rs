@@ -418,7 +418,7 @@ impl MonotonicCounterSystem {
             ))
         })?;
 
-        let counters: HashMap<UserId, PeerCounter> = bincode::deserialize(&data).map_err(|e| {
+        let counters: HashMap<UserId, PeerCounter> = postcard::from_bytes(&data).map_err(|e| {
             P2PError::Storage(StorageError::Database(
                 format!("Failed to deserialize counters: {e}").into(),
             ))
@@ -442,7 +442,7 @@ impl MonotonicCounterSystem {
             counters.clone()
         };
 
-        let data = bincode::serialize(&counters_snapshot).map_err(|e| {
+        let data = postcard::to_stdvec(&counters_snapshot).map_err(|e| {
             P2PError::Storage(StorageError::Database(
                 format!("Failed to serialize counters: {e}").into(),
             ))

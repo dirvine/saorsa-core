@@ -143,7 +143,7 @@ impl MessageTransport {
                         });
                     } else if topic == "key_exchange" {
                         // Handle key exchange messages
-                        match bincode::deserialize::<KeyExchangeMessage>(&data) {
+                        match postcard::from_bytes::<KeyExchangeMessage>(&data) {
                             Ok(kex_msg) => {
                                 debug!("Received key exchange message from {}", source);
                                 let _ = kex_tx.send(kex_msg);
@@ -375,7 +375,7 @@ impl MessageTransport {
         debug!("Sending key exchange message to {}", recipient);
 
         // Serialize the key exchange message
-        let data = bincode::serialize(&message)
+        let data = postcard::to_stdvec(&message)
             .map_err(|e| anyhow::anyhow!("Failed to serialize key exchange message: {}", e))?;
 
         // Resolve peer address through DHT

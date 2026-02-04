@@ -719,8 +719,8 @@ impl From<serde_json::Error> for P2PError {
     }
 }
 
-impl From<bincode::Error> for P2PError {
-    fn from(err: bincode::Error) -> Self {
+impl From<postcard::Error> for P2PError {
+    fn from(err: postcard::Error) -> Self {
         P2PError::Serialization(err.to_string().into())
     }
 }

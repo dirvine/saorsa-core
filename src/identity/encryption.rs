@@ -263,11 +263,11 @@ mod tests {
             encrypt_with_device_password(data, password).expect("Encryption should succeed");
 
         // Serialize
-        let serialized = bincode::serialize(&encrypted).expect("Serialization should succeed");
+        let serialized = postcard::to_stdvec(&encrypted).expect("Serialization should succeed");
 
         // Deserialize
         let deserialized: EncryptedData =
-            bincode::deserialize(&serialized).expect("Deserialization should succeed");
+            postcard::from_bytes(&serialized).expect("Deserialization should succeed");
 
         // Verify fields match
         assert_eq!(

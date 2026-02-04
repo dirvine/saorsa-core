@@ -339,7 +339,7 @@ impl MessageRouter {
         {
             let mut high = self.high_priority.lock().await;
             while let Some((target, msg)) = high.pop_front() {
-                let msg_size = bincode::serialized_size(&msg).unwrap_or(0) as usize;
+                let msg_size = postcard::to_stdvec(&msg).map(|v| v.len()).unwrap_or(0);
                 if size + msg_size > MAX_BATCH_SIZE && !batch.is_empty() {
                     high.push_front((target, msg));
                     break;
@@ -353,7 +353,7 @@ impl MessageRouter {
         if size < MAX_BATCH_SIZE {
             let mut normal = self.normal_priority.lock().await;
             while let Some((target, msg)) = normal.pop_front() {
-                let msg_size = bincode::serialized_size(&msg).unwrap_or(0) as usize;
+                let msg_size = postcard::to_stdvec(&msg).map(|v| v.len()).unwrap_or(0);
                 if size + msg_size > MAX_BATCH_SIZE {
                     normal.push_front((target, msg));
                     break;
@@ -582,12 +582,12 @@ impl NetworkIntegrationLayer {
             .await?;
 
         // Serialize and send message
-        let data = bincode::serialize(message)?;
+        let data = postcard::to_stdvec(message)?;
         connection.send(&data).await?;
 
         // Receive response with timeout
         let response_data = timeout(Duration::from_secs(5), connection.receive()).await??;
-        let response: DhtResponse = bincode::deserialize(&response_data)?;
+        let response: DhtResponse = postcard::from_bytes(&response_data)?;
 
         // Release connection
         self.connection_pool
@@ -646,10 +646,10 @@ impl NetworkIntegrationLayer {
     ) -> Result<()> {
         loop {
             let data = connection.receive().await?;
-            let message: DhtMessage = bincode::deserialize(&data)?;
+            let message: DhtMessage = postcard::from_bytes(&data)?;
 
             let response = handler.handle_message(message).await?;
-            let response_data = bincode::serialize(&response)?;
+            let response_data = postcard::to_stdvec(&response)?;
 
             connection.send(&response_data).await?;
         }
@@ -774,7 +774,7 @@ mod tests {
                     capacity: NodeCapacity::default(),
                 },
             };
-            Ok(bincode::serialize(&response)?)
+            Ok(postcard::to_stdvec(&response)?)
         }
 
         async fn close(&mut self) -> Result<()> {

@@ -67,7 +67,7 @@ impl NodeIdentity {
             .as_secs();
 
         let payload_bytes =
-            bincode::serialize(message).map_err(AdaptiveNetworkError::Serialization)?;
+            postcard::to_stdvec(message).map_err(AdaptiveNetworkError::Serialization)?;
 
         // Create bytes to sign: payload || sender_id || timestamp
         let mut bytes_to_sign = Vec::new();
@@ -102,7 +102,7 @@ impl<T: Serialize + for<'de> Deserialize<'de>> SignedMessage<T> {
     /// Verify message signature
     pub fn verify(&self, _unused: &()) -> Result<bool> {
         let payload_bytes =
-            bincode::serialize(&self.payload).map_err(AdaptiveNetworkError::Serialization)?;
+            postcard::to_stdvec(&self.payload).map_err(AdaptiveNetworkError::Serialization)?;
 
         // Recreate bytes that were signed
         let mut bytes_to_verify = Vec::new();
