@@ -227,6 +227,26 @@ struct DhtOperationContext {
     response_tx: Option<oneshot::Sender<(PeerId, DhtNetworkResult)>>,
 }
 
+/// Drop guard that removes a DHT operation from `active_operations` on cancel.
+///
+/// When parallel GET returns early on first success, remaining in-flight
+/// futures are dropped and `wait_for_response` cleanup never runs. This
+/// guard ensures the entry is always removed.
+struct OperationGuard {
+    active_operations: Arc<RwLock<HashMap<String, DhtOperationContext>>>,
+    message_id: String,
+}
+
+impl Drop for OperationGuard {
+    fn drop(&mut self) {
+        let ops = Arc::clone(&self.active_operations);
+        let id = std::mem::take(&mut self.message_id);
+        tokio::spawn(async move {
+            ops.write().await.remove(&id);
+        });
+    }
+}
+
 impl std::fmt::Debug for DhtOperationContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DhtOperationContext")
@@ -935,6 +955,13 @@ impl DhtNetworkManager {
             .await
             .insert(message_id.clone(), operation_context);
 
+        // Guard ensures cleanup even if this future is cancelled (dropped).
+        // On normal completion, the guard's Drop removes the entry.
+        let _guard = OperationGuard {
+            active_operations: Arc::clone(&self.active_operations),
+            message_id: message_id.clone(),
+        };
+
         // Send message via network layer
         match self
             .node
@@ -945,11 +972,12 @@ impl DhtNetworkManager {
                 debug!("Sent DHT request {message_id} to peer: {peer_id}");
 
                 // Wait for response via oneshot channel with timeout
+                // Cleanup is handled by _guard on drop
                 self.wait_for_response(&message_id, response_rx).await
             }
             Err(e) => {
                 warn!("Failed to send DHT request to {peer_id}: {e}");
-                self.active_operations.write().await.remove(&message_id);
+                // _guard will clean up active_operations on drop
                 Err(e)
             }
         }
@@ -961,34 +989,28 @@ impl DhtNetworkManager {
     /// The channel is created in send_dht_request and the sender is stored in the
     /// operation context. When handle_dht_response receives a response, it sends
     /// through the channel. This function awaits on the receiver with timeout.
+    ///
+    /// Note: cleanup of `active_operations` is handled by `OperationGuard` in the
+    /// caller (`send_dht_request`), so this method does not remove entries itself.
     async fn wait_for_response(
         &self,
-        message_id: &str,
+        _message_id: &str,
         response_rx: oneshot::Receiver<(PeerId, DhtNetworkResult)>,
     ) -> Result<DhtNetworkResult> {
         let response_timeout = Duration::from_secs(RESPONSE_TIMEOUT_SECS);
 
         // Wait for response with timeout - no polling, no TOCTOU race
         match tokio::time::timeout(response_timeout, response_rx).await {
-            Ok(Ok((_source, result))) => {
-                // Response received successfully
-                // Clean up the operation context
-                self.active_operations.write().await.remove(message_id);
-                Ok(result)
-            }
+            Ok(Ok((_source, result))) => Ok(result),
             Ok(Err(_recv_error)) => {
                 // Channel closed without response (sender dropped)
                 // This can happen if handle_dht_response rejected the response
                 // or if the operation was cleaned up elsewhere
-                self.active_operations.write().await.remove(message_id);
                 Err(P2PError::Network(NetworkError::ProtocolError(
                     "Response channel closed unexpectedly".into(),
                 )))
             }
-            Err(_timeout) => {
-                self.active_operations.write().await.remove(message_id);
-                Err(P2PError::Network(NetworkError::Timeout))
-            }
+            Err(_timeout) => Err(P2PError::Network(NetworkError::Timeout)),
         }
     }
 
