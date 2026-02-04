@@ -39,7 +39,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("time went backwards")
+        .unwrap_or(std::time::Duration::from_secs(0))
         .as_secs()
 }
 

@@ -306,13 +306,17 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
                             quality_map.insert(peer, quality);
                         }
 
-                        // Use first observed address or default to unspecified
-                        let addr = caps.observed_addrs.first().copied().unwrap_or_else(|| {
-                            std::net::SocketAddr::new(
-                                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                                0,
-                            )
-                        });
+                        // Use first observed address; skip event if none available
+                        let addr = match caps.observed_addrs.first().copied() {
+                            Some(a) => a,
+                            None => {
+                                tracing::warn!(
+                                    "Peer {} connected but no observed address available, skipping event",
+                                    peer
+                                );
+                                continue;
+                            }
+                        };
 
                         // Note: Peer tracking with geographic validation is done by
                         // add_peer() in connect_to_peer() and accept_connection().
@@ -354,6 +358,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
         // Create SharedTransport for protocol multiplexing
         let shared_transport = Arc::new(SharedTransport::from_arc(Arc::clone(&transport)));
+
         // Note: DHT handler registration happens lazily when a DhtCoreEngine is provided
         // via register_dht_handler() method.
         Ok(Self {
@@ -477,16 +482,58 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         }
     }
 
-    /// Send data to a specific peer
-    pub async fn send_to_peer(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
-        let conn = self
-            .transport
-            .dial(*peer_id, SAORSA_DHT_PROTOCOL)
-            .await
-            .map_err(|e| anyhow::anyhow!("Dial failed: {}", e))?;
+    /// Static helper for region lookup (used in spawned tasks)
+    fn get_region_for_ip_static(ip: &IpAddr) -> String {
+        match ip {
+            IpAddr::V4(ipv4) => {
+                let octets = ipv4.octets();
+                match octets.first() {
+                    Some(0..=63) => "NA".to_string(),
+                    Some(64..=127) => "EU".to_string(),
+                    Some(128..=191) => "APAC".to_string(),
+                    Some(192..=223) => "SA".to_string(),
+                    Some(224..=255) => "OTHER".to_string(),
+                    None => "UNKNOWN".to_string(),
+                }
+            }
+            IpAddr::V6(_) => "UNKNOWN".to_string(),
+        }
+    }
 
+    /// Send data to a specific peer
+    ///
+    /// This method first looks up the peer's address from our local peers list,
+    /// then connects by address. This is necessary because `dial(peer_id)` only
+    /// works if ant-quic already knows the peer's address, but for peers that
+    /// connected TO us, we only have their address in our application-level peers list.
+    pub async fn send_to_peer(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
+        // Look up the peer's address from our peers list
+        let peer_addr = {
+            let peers = self.peers.read().await;
+            peers
+                .iter()
+                .find(|(p, _)| p == peer_id)
+                .map(|(_, addr)| *addr)
+        };
+
+        // Connect by address if we have it, otherwise try dial by peer_id
+        let conn = match peer_addr {
+            Some(addr) => self
+                .transport
+                .dial_addr(addr, SAORSA_DHT_PROTOCOL)
+                .await
+                .map_err(|e| anyhow::anyhow!("Dial by address failed: {}", e))?,
+            None => self
+                .transport
+                .dial(*peer_id, SAORSA_DHT_PROTOCOL)
+                .await
+                .map_err(|e| anyhow::anyhow!("Dial by peer_id failed: {}", e))?,
+        };
+
+        // Open a typed unidirectional stream for DHT messages
+        // Using DhtStore stream type for DHT protocol messages
         let mut stream = conn
-            .open_uni()
+            .open_uni_typed(StreamType::DhtStore)
             .await
             .map_err(|e| anyhow::anyhow!("Stream open failed: {}", e))?;
 
@@ -650,19 +697,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
     /// Get region for an IP address (simplified placeholder)
     fn get_region_for_ip(&self, ip: &IpAddr) -> String {
-        match ip {
-            IpAddr::V4(ipv4) => {
-                let octets = ipv4.octets();
-                match octets[0] {
-                    0..=63 => "NA".to_string(),
-                    64..=127 => "EU".to_string(),
-                    128..=191 => "APAC".to_string(),
-                    192..=223 => "SA".to_string(),
-                    224..=255 => "OTHER".to_string(),
-                }
-            }
-            IpAddr::V6(_) => "UNKNOWN".to_string(),
-        }
+        Self::get_region_for_ip_static(ip)
     }
 
     /// Get current region ratio for a specific region

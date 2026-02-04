@@ -17,10 +17,10 @@
 //! - Curated list of known hosting/VPN provider ASNs
 //!
 //! Data sources (all open/free):
-//! - RIPE RIS: https://www.ripe.net/analyse/internet-measurements/routing-information-service-ris
-//! - RouteViews: http://www.routeviews.org/
-//! - RIR delegation files: https://www.nro.net/statistics
-//! - PeeringDB (for hosting provider identification): https://www.peeringdb.com/
+//! - RIPE RIS: <https://www.ripe.net/analyse/internet-measurements/routing-information-service-ris>
+//! - RouteViews: <http://www.routeviews.org/>
+//! - RIR delegation files: <https://www.nro.net/statistics>
+//! - PeeringDB (for hosting provider identification): <https://www.peeringdb.com/>
 
 use crate::security::{GeoInfo, GeoProvider};
 use parking_lot::RwLock;

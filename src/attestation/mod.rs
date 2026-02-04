@@ -29,26 +29,26 @@
 //! - **Phase 2**: Core Logic Extraction (saorsa-logic) ✅
 //!   - Pure derivation logic in `saorsa-logic` crate (no_std, zkVM-compatible)
 //!   - Integration via `derive_entangled_id`, `verify_entangled_id`, `xor_distance`
-//!   - zkVM proof structures defined in [`zkvm`] module
+//!   - zkVM proof structures defined in `zkvm` module
 //! - **Phase 3**: zkVM Integration (SP1 proofs) ✅
-//!   - [`prover`] module: Proof generation with `AttestationProver`
-//!   - [`verifier`] module: Proof verification with `AttestationVerifier`
-//!   - [`handshake`] module: Protocol for exchanging proofs during connection
-//!   - [`metrics`] module: Observability for verification timing and success rates
+//!   - `prover` module: Proof generation with `AttestationProver`
+//!   - `verifier` module: Proof verification with `AttestationVerifier`
+//!   - `handshake` module: Protocol for exchanging proofs during connection
+//!   - `metrics` module: Observability for verification timing and success rates
 //!   - Uses STARKs for post-quantum security (Groth16 available via feature flag)
 //!   - Mock prover for testing, real SP1 prover with `zkvm-prover` feature
 //!   - Groth16 verification with `zkvm-verifier-groth16` feature (NOT post-quantum)
 //! - **Phase 4**: Lightweight Signed Heartbeats ✅
-//!   - [`signed_heartbeat`] module: ML-DSA signed heartbeat proofs
-//!   - [`SignedHeartbeat`]: Lightweight liveness proof (microseconds vs VDF seconds)
-//!   - [`HeartbeatSigner`]: Generates signed heartbeats
+//!   - `signed_heartbeat` module: ML-DSA signed heartbeat proofs
+//!   - `SignedHeartbeat`: Lightweight liveness proof (microseconds vs VDF seconds)
+//!   - `HeartbeatSigner`: Generates signed heartbeats
 //!   - No expensive VDF computation - suitable for resource-constrained devices
 //!   - Multi-node-per-device deployment support
 //! - **Phase 5**: Heartbeat Protocol Integration ✅
-//!   - [`signed_heartbeat_manager`] module: Coordination of heartbeat lifecycle
-//!   - [`SignedHeartbeatManager`]: Generates, verifies, and tracks heartbeats
-//!   - [`network_resilience`] module: Intelligent network disruption handling
-//!   - [`trust_integration`] module: EigenTrust integration for heartbeat compliance
+//!   - `signed_heartbeat_manager` module: Coordination of heartbeat lifecycle
+//!   - `SignedHeartbeatManager`: Generates, verifies, and tracks heartbeats
+//!   - `network_resilience` module: Intelligent network disruption handling
+//!   - `trust_integration` module: EigenTrust integration for heartbeat compliance
 //!   - Epoch-based scheduling with configurable intervals
 //!   - Peer status tracking (Healthy → Suspect → Unresponsive)
 //!   - Trust score adjustments based on heartbeat compliance
@@ -76,7 +76,7 @@
 //! The attestation system now provides:
 //!
 //! 1. **EntangledId derivation**: Cryptographic binding of identity to software
-//! 2. **Handshake protocol**: [`AttestationHello`] exchange during connection
+//! 2. **Handshake protocol**: `AttestationHello` exchange during connection
 //! 3. **zkVM proofs**: Verify correct EntangledId derivation without revealing secrets
 //! 4. **Enforcement modes**: [`EnforcementMode::Soft`] (current) logs but doesn't reject
 //!

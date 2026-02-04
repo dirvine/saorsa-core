@@ -757,7 +757,7 @@ impl MessagingService {
     /// Connect to a peer via their network address
     ///
     /// # Arguments
-    /// * `address` - Network address in format "ip:port" or "[ipv6]:port"
+    /// * `address` - Network address in format "ip:port" or "\[ipv6\]:port"
     ///
     /// # Returns
     /// The peer ID of the connected peer

@@ -21,11 +21,11 @@
 //! "fit" a DHT close group and automatically regenerate with a new identity.
 //!
 //! Key components:
-//! - [`rejection`]: Network rejection reasons and information
-//! - [`fitness`]: Proactive fitness monitoring
-//! - [`regeneration`]: Regeneration trigger with loop prevention
-//! - [`targeting`]: Targeted identity generation
-//! - [`restart`]: Main orchestrator with state persistence
+//! - `rejection`: Network rejection reasons and information
+//! - `fitness`: Proactive fitness monitoring
+//! - `regeneration`: Regeneration trigger with loop prevention
+//! - `targeting`: Targeted identity generation
+//! - `restart`: Main orchestrator with state persistence
 
 pub mod cli;
 pub mod encryption;

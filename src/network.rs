@@ -25,8 +25,6 @@ use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
 use crate::transport::ant_quic_adapter::{DualStackNetworkNode, ant_peer_id_to_string};
-#[allow(unused_imports)] // Temporarily unused during migration
-use crate::transport::{TransportOptions, TransportType};
 use crate::validation::RateLimitConfig;
 use crate::validation::RateLimiter;
 use crate::{NetworkAddress, PeerId};
@@ -59,8 +57,8 @@ struct WireMessage {
 /// Payload bytes used for keepalive messages to prevent connection timeouts.
 const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 
-/// Channel capacity for the per-stack recv task mpsc channel.
-const RECV_CHANNEL_CAPACITY: usize = 256;
+/// Capacity of the internal channel used by the message receiving system.
+const MESSAGE_RECV_CHANNEL_CAPACITY: usize = 256;
 
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -656,7 +654,6 @@ pub struct P2PNode {
     dual_node: Arc<DualStackNetworkNode>,
 
     /// Rate limiter for connection and request throttling
-    #[allow(dead_code)]
     rate_limiter: Arc<RateLimiter>,
 
     /// Active connections (tracked by peer_id)
@@ -804,7 +801,9 @@ impl P2PNode {
     pub async fn new(config: NodeConfig) -> Result<Self> {
         let peer_id = config.peer_id.clone().unwrap_or_else(|| {
             // Generate a random peer ID for now
-            format!("peer_{}", &uuid::Uuid::new_v4().to_string()[..8])
+            // Safe: UUID v4 canonical format is always 36 characters
+            let uuid_str = uuid::Uuid::new_v4().to_string();
+            format!("peer_{}", &uuid_str[..8])
         });
 
         let (event_tx, _) = broadcast::channel(1000);
@@ -1202,8 +1201,9 @@ impl P2PNode {
         let listen_addrs = self.listen_addrs.read().await;
         info!("P2P node started on addresses: {:?}", *listen_addrs);
 
-        // Start message receiving system
-        self.start_message_receiving_system().await?;
+        // NOTE: Message receiving is now integrated into the accept loop in start_network_listeners()
+        // The old start_message_receiving_system() is no longer needed as it competed with the accept
+        // loop for incoming connections, causing messages to be lost.
 
         // Connect to bootstrap peers
         self.connect_bootstrap_peers().await?;
@@ -1225,7 +1225,9 @@ impl P2PNode {
             *la = addrs.clone();
         }
 
-        // Spawn a background accept loop that handles incoming connections from either stack
+        // Spawn a background accept loop that handles incoming connections from either stack.
+        // This only handles peer registration. Message data is received separately
+        // via start_message_receiving_system() which uses endpoint().recv().
         let event_tx = self.event_tx.clone();
         let peers = self.peers.clone();
         let active_connections = self.active_connections.clone();
@@ -1239,7 +1241,7 @@ impl P2PNode {
                 }
                 match dual.accept_any().await {
                     Ok((ant_peer_id, remote_sock)) => {
-                        // Enforce rate limiting — skip peer registration when rate-limited
+                        // Enforce rate limiting
                         if let Err(e) = rate_limiter.check_ip(&remote_sock.ip()) {
                             warn!(
                                 "Rate-limited incoming connection from {}: {}",
@@ -1248,12 +1250,8 @@ impl P2PNode {
                             continue;
                         }
 
-                        debug!(
-                            "Accepted connection from {} (protocol validation pending ant-quic implementation)",
-                            remote_sock
-                        );
-
-                        let peer_id = ant_peer_id_to_string(&ant_peer_id);
+                        let peer_id =
+                            crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
                         let _ = event_tx.send(P2PEvent::PeerConnected(peer_id.clone()));
                         register_new_peer(&peers, &peer_id, &remote_addr).await;
@@ -1268,18 +1266,22 @@ impl P2PNode {
         });
         *self.listener_handle.write().await = Some(handle);
 
+        // Start the recv-based message receiving system.
+        // This uses endpoint().recv() which matches endpoint().send() used by send_message().
+        // The accept loop above handles incoming connections (peer registration) and DHT
+        // typed streams, while this handles general P2P messaging via the raw endpoint API.
+        self.start_message_receiving_system().await?;
+
         info!("Dual-stack listeners active on: {:?}", addrs);
         Ok(())
     }
 
-    /// Start the message receiving system with channel-based background tasks
-    ///
     /// Spawns per-stack recv tasks that feed into a single mpsc channel,
-    /// giving instant wakeup on data arrival without poll/timeout latency.
+    /// then a dispatcher task that parses incoming bytes and emits P2P events.
     async fn start_message_receiving_system(&self) -> Result<()> {
         info!("Starting message receiving system");
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(RECV_CHANNEL_CAPACITY);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(MESSAGE_RECV_CHANNEL_CAPACITY);
         let shutdown = Arc::clone(&self.shutdown);
 
         let mut handles = Vec::new();
@@ -1297,8 +1299,9 @@ impl P2PNode {
         handles.push(tokio::spawn(async move {
             info!("Message receive loop started");
             while let Some((peer_id, bytes)) = rx.recv().await {
-                let transport_peer_id = ant_peer_id_to_string(&peer_id);
-                info!(
+                let transport_peer_id =
+                    crate::transport::ant_quic_adapter::ant_peer_id_to_string(&peer_id);
+                trace!(
                     "Received {} bytes from peer {}",
                     bytes.len(),
                     transport_peer_id
@@ -1325,10 +1328,6 @@ impl P2PNode {
 
         Ok(())
     }
-
-    // MCP removed
-
-    // MCP removed
 
     /// Run the P2P node (blocks until shutdown)
     pub async fn run(&self) -> Result<()> {
@@ -1473,7 +1472,7 @@ impl P2PNode {
     /// List all active connections with their peer IDs and addresses
     ///
     /// # Returns
-    /// A vector of tuples containing (PeerId, Vec<String>) where the Vec<String>
+    /// A vector of tuples containing `(PeerId, Vec<String>)` where the `Vec<String>`
     /// contains all known addresses for that peer.
     pub async fn list_active_connections(&self) -> Vec<(PeerId, Vec<String>)> {
         let active = self.active_connections.read().await;
@@ -1698,14 +1697,9 @@ impl P2PNode {
             )));
         }
 
-        // **NEW**: Check if the ant-quic connection is actually active
+        // Check if the ant-quic connection is actually active
         // This is the critical fix for the connection state synchronization issue
         if !self.is_connection_active(peer_id).await {
-            debug!(
-                "Connection to peer {} exists in peers map but ant-quic connection is closed",
-                peer_id
-            );
-
             // Clean up stale peer entry
             self.remove_peer(peer_id).await;
 
@@ -1734,9 +1728,9 @@ impl P2PNode {
             raw_data_len
         );
 
-        // Send via ant-quic dual-node using the optimized send method
-        // This uses P2pEndpoint::send() which corresponds with recv() for proper
-        // bidirectional communication
+        // Send via ant-quic dual-node using the raw endpoint send method.
+        // This uses endpoint().send() which corresponds with endpoint().recv()
+        // in the message receiving system.
         let send_fut = self
             .dual_node
             .send_to_peer_string_optimized(peer_id, &_message_data);
@@ -1799,10 +1793,11 @@ impl P2PNode {
 /// Returns `None` if the bytes cannot be deserialized as a valid `WireMessage`.
 ///
 /// The `from` field is a required part of the wire protocol but is **not**
-/// used as the event source.  Instead, `source` — the transport-level peer ID
+/// used as the event source. Instead, `source` — the transport-level peer ID
 /// derived from the authenticated QUIC connection — is used so that consumers
-/// can pass it directly to `send_message()`.  This eliminates a spoofing
+/// can pass it directly to `send_message()`. This eliminates a spoofing
 /// vector where a peer could claim an arbitrary identity via the payload.
+///
 fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
     let message: WireMessage = bincode::deserialize(bytes).ok()?;
 
@@ -1900,7 +1895,7 @@ impl P2PNode {
     /// * `peer_public_key` - The peer's ML-DSA public key
     ///
     /// # Returns
-    /// An [`EnforcementDecision`] indicating whether to allow or reject the connection.
+    /// An `EnforcementDecision` indicating whether to allow or reject the connection.
     ///
     /// # Example
     /// ```rust,ignore
@@ -2000,7 +1995,7 @@ impl P2PNode {
 
     /// Verify a peer's attestation and return a simple boolean result.
     ///
-    /// This is a convenience method that wraps [`verify_peer_attestation`] for cases
+    /// This is a convenience method that wraps `verify_peer_attestation` for cases
     /// where only a pass/fail result is needed without the detailed decision.
     ///
     /// # Returns
@@ -2388,19 +2383,20 @@ impl P2PNode {
         self.dht.as_ref()
     }
 
-    /// Store a value in the DHT
+    /// Store a value in the local DHT
+    ///
+    /// This method stores data in the local DHT instance only. For network-wide
+    /// replication across multiple nodes, use `DhtNetworkManager` instead,
+    /// which owns a P2PNode for transport and coordinates replication.
     pub async fn dht_put(&self, key: crate::dht::Key, value: Vec<u8>) -> Result<()> {
         if let Some(ref dht) = self.dht {
             let mut dht_instance = dht.write().await;
             let dht_key = crate::dht::DhtKey::from_bytes(key);
-            dht_instance
-                .store(&dht_key, value.clone())
-                .await
-                .map_err(|e| {
-                    P2PError::Dht(crate::error::DhtError::StoreFailed(
-                        format!("{:?}: {e}", key).into(),
-                    ))
-                })?;
+            dht_instance.store(&dht_key, value).await.map_err(|e| {
+                P2PError::Dht(crate::error::DhtError::StoreFailed(
+                    format!("{:?}: {e}", key).into(),
+                ))
+            })?;
 
             Ok(())
         } else {
@@ -2410,7 +2406,11 @@ impl P2PNode {
         }
     }
 
-    /// Retrieve a value from the DHT
+    /// Retrieve a value from the local DHT
+    ///
+    /// This method retrieves data from the local DHT instance only. For network-wide
+    /// lookups across multiple nodes, use `DhtNetworkManager` instead,
+    /// which owns a P2PNode for transport and coordinates distributed queries.
     pub async fn dht_get(&self, key: crate::dht::Key) -> Result<Option<Vec<u8>>> {
         if let Some(ref dht) = self.dht {
             let dht_instance = dht.read().await;
@@ -2731,7 +2731,7 @@ impl P2PNode {
             for peer_id in &peers_to_mark_disconnected {
                 if let Some(peer_info) = peers.get_mut(peer_id) {
                     peer_info.status = ConnectionStatus::Disconnected;
-                    peer_info.last_seen = now; // Reset for cleanup timer
+                    // Preserve last_seen timestamp for cleanup logic
                 }
             }
         }
