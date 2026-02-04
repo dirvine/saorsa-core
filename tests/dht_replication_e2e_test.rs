@@ -369,12 +369,14 @@ async fn test_dht_replication_survives_originator_shutdown() -> Result<()> {
 
     // PROOF: Check if other nodes still have the data
     info!("Step 3: Verifying data on remaining nodes...");
+    let mut nodes_after = Vec::new();
     for i in 1..NODE_COUNT {
         let has_data = cluster.nodes[i].has_key_locally(&key).await;
         let local_value = cluster.nodes[i].get_local(&key).await;
 
         if has_data {
             info!("  Node {}: HAS DATA locally", i);
+            nodes_after.push(i);
             if let Some(v) = local_value {
                 assert_eq!(v, value, "Node {} has corrupted data!", i);
                 info!("  Node {}: Data verified correct", i);
@@ -383,15 +385,6 @@ async fn test_dht_replication_survives_originator_shutdown() -> Result<()> {
             info!("  Node {}: no data", i);
         }
     }
-
-    // Check final state
-    let nodes_after: Vec<_> = (1..NODE_COUNT)
-        .filter(|&i| {
-            // Synchronous check using the already-fetched data
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(cluster.nodes[i].has_key_locally(&key))
-        })
-        .collect();
 
     info!("\n=== SURVIVAL PROOF SUMMARY ===");
     info!("Nodes with data BEFORE node 0 shutdown: {:?}", nodes_before);
