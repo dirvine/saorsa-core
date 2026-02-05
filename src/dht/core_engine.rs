@@ -970,27 +970,18 @@ impl DhtCoreEngine {
             .map(|node| self.query_node_for_key(Arc::clone(&transport), node, key))
             .collect();
 
-        // Step 5: Wait for responses with timeout
-        let results =
-            tokio::time::timeout(DHT_QUERY_TIMEOUT, futures::future::join_all(query_futures)).await;
+        // Step 5: Wait for responses (each query has its own DHT_QUERY_TIMEOUT)
+        let responses = futures::future::join_all(query_futures).await;
 
-        match results {
-            Ok(responses) => {
-                // Return first successful response
-                for response in responses {
-                    if let Ok(Some(value)) = response {
-                        tracing::debug!(key = ?hex::encode(key.as_bytes()), "Key found on remote node");
-                        return Ok(Some(value));
-                    }
-                }
-                tracing::debug!(key = ?hex::encode(key.as_bytes()), "Key not found on any queried node");
-                Ok(None)
-            }
-            Err(_timeout) => {
-                tracing::warn!(key = ?hex::encode(key.as_bytes()), "DHT query timed out");
-                Ok(None)
+        // Return first successful response
+        for response in responses {
+            if let Ok(Some(value)) = response {
+                tracing::debug!(key = ?hex::encode(key.as_bytes()), "Key found on remote node");
+                return Ok(Some(value));
             }
         }
+        tracing::debug!(key = ?hex::encode(key.as_bytes()), "Key not found on any queried node");
+        Ok(None)
     }
 
     /// Query a single node for a key value
