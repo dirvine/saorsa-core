@@ -24,12 +24,12 @@
 
 use super::*;
 use bytes::{Bytes, BytesMut};
-use parking_lot::RwLock as PLRwLock;
 use std::{
     collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
+use tokio::sync::RwLock as PLRwLock;
 use tokio::sync::{Semaphore, mpsc};
 
 /// Performance configuration
@@ -169,11 +169,12 @@ impl OptimizedSerializer {
     }
 
     /// Serialize with buffer reuse
-    pub fn serialize<T: serde::Serialize>(&self, value: &T) -> Result<Bytes> {
+    pub async fn serialize<T: serde::Serialize>(&self, value: &T) -> Result<Bytes> {
         // Get buffer from pool or create new
         let mut buffer = self
             .buffer_pool
             .write()
+            .await
             .pop()
             .unwrap_or_else(|| BytesMut::with_capacity(self.config.buffer_size));
 
@@ -188,7 +189,7 @@ impl OptimizedSerializer {
             let compressed = self.compress(&buffer)?;
             // Return buffer to pool after compression
             if buffer.capacity() <= self.config.buffer_size * 2 {
-                self.buffer_pool.write().push(buffer);
+                self.buffer_pool.write().await.push(buffer);
             }
             compressed
         } else {
@@ -231,13 +232,14 @@ impl<T: Send> ConnectionPool<T> {
         let _permit = self.semaphore.acquire().await.ok()?;
         self.connections
             .write()
+            .await
             .get_mut(host)
             .and_then(|conns| conns.pop())
     }
 
     /// Return connection to pool
-    pub fn put(&self, host: String, conn: T) {
-        let mut pool = self.connections.write();
+    pub async fn put(&self, host: String, conn: T) {
+        let mut pool = self.connections.write().await;
         let conns = pool.entry(host).or_default();
 
         if conns.len() < self.max_per_host {
@@ -267,8 +269,8 @@ impl<K: Eq + std::hash::Hash + Clone, V: Clone> PerformanceCache<K, V> {
     }
 
     /// Get value from cache
-    pub fn get(&self, key: &K) -> Option<V> {
-        let entries = self.entries.read();
+    pub async fn get(&self, key: &K) -> Option<V> {
+        let entries = self.entries.read().await;
         entries.get(key).and_then(|entry| {
             if entry.inserted_at.elapsed() < self.config.ttl {
                 Some(entry.value.clone())
@@ -279,8 +281,8 @@ impl<K: Eq + std::hash::Hash + Clone, V: Clone> PerformanceCache<K, V> {
     }
 
     /// Insert value into cache
-    pub fn insert(&self, key: K, value: V) {
-        let mut entries = self.entries.write();
+    pub async fn insert(&self, key: K, value: V) {
+        let mut entries = self.entries.write().await;
 
         // Evict old entries if at capacity
         if entries.len() >= self.config.max_entries {
@@ -308,8 +310,8 @@ impl<K: Eq + std::hash::Hash + Clone, V: Clone> PerformanceCache<K, V> {
     }
 
     /// Clear expired entries
-    pub fn evict_expired(&self) {
-        let mut entries = self.entries.write();
+    pub async fn evict_expired(&self) {
+        let mut entries = self.entries.write().await;
         let _now = Instant::now();
         entries.retain(|_, entry| entry.inserted_at.elapsed() < self.config.ttl);
     }
@@ -450,18 +452,20 @@ impl PerformanceMonitor {
     }
 
     /// Start timing an operation
-    pub fn start_operation(&self, name: &str) {
+    pub async fn start_operation(&self, name: &str) {
         self.start_times
             .write()
+            .await
             .insert(name.to_string(), Instant::now());
     }
 
     /// End timing an operation
-    pub fn end_operation(&self, name: &str) {
-        if let Some(start) = self.start_times.write().remove(name) {
+    pub async fn end_operation(&self, name: &str) {
+        if let Some(start) = self.start_times.write().await.remove(name) {
             let duration = start.elapsed();
             self.operation_times
                 .write()
+                .await
                 .entry(name.to_string())
                 .or_default()
                 .push(duration);
@@ -469,8 +473,8 @@ impl PerformanceMonitor {
     }
 
     /// Get performance statistics
-    pub fn get_stats(&self, name: &str) -> Option<PerformanceStats> {
-        let times = self.operation_times.read();
+    pub async fn get_stats(&self, name: &str) -> Option<PerformanceStats> {
+        let times = self.operation_times.read().await;
         times.get(name).map(|durations| {
             let total: Duration = durations.iter().sum();
             let count = durations.len();
@@ -565,34 +569,34 @@ mod tests {
         assert_eq!(*counter.lock().await, 5);
     }
 
-    #[test]
-    fn test_performance_cache() {
+    #[tokio::test]
+    async fn test_performance_cache() {
         let cache = PerformanceCache::new(CacheConfig {
             max_entries: 2,
             ttl: Duration::from_secs(1),
             compression: false,
         });
 
-        cache.insert("key1", "value1");
-        cache.insert("key2", "value2");
+        cache.insert("key1", "value1").await;
+        cache.insert("key2", "value2").await;
 
-        assert_eq!(cache.get(&"key1"), Some("value1"));
-        assert_eq!(cache.get(&"key2"), Some("value2"));
+        assert_eq!(cache.get(&"key1").await, Some("value1"));
+        assert_eq!(cache.get(&"key2").await, Some("value2"));
 
         // Add third item, should evict oldest
-        cache.insert("key3", "value3");
-        assert_eq!(cache.get(&"key3"), Some("value3"));
+        cache.insert("key3", "value3").await;
+        assert_eq!(cache.get(&"key3").await, Some("value3"));
     }
 
-    #[test]
-    fn test_performance_monitor() {
+    #[tokio::test]
+    async fn test_performance_monitor() {
         let monitor = PerformanceMonitor::new();
 
-        monitor.start_operation("test_op");
-        std::thread::sleep(Duration::from_millis(10));
-        monitor.end_operation("test_op");
+        monitor.start_operation("test_op").await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        monitor.end_operation("test_op").await;
 
-        let stats = monitor.get_stats("test_op").unwrap();
+        let stats = monitor.get_stats("test_op").await.unwrap();
         assert_eq!(stats.count, 1);
         assert!(stats.avg_duration >= Duration::from_millis(10));
     }

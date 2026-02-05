@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 // Helper to create a test RestartManager
-fn create_test_manager() -> Arc<RestartManager> {
+async fn create_test_manager() -> Arc<RestartManager> {
     let dir = tempdir().unwrap();
     let config = RestartConfig {
         fitness: FitnessConfig::default(),
@@ -27,7 +27,7 @@ fn create_test_manager() -> Arc<RestartManager> {
     };
 
     let identity = NodeIdentity::generate().unwrap();
-    RestartManager::new(config, identity).unwrap()
+    RestartManager::new(config, identity).await.unwrap()
 }
 
 proptest! {
@@ -39,45 +39,48 @@ proptest! {
         suggestion_prefix in proptest::collection::vec(0u8..255, 0..4),
         suggestion_confidence in 0.0f64..1.0f64
     ) {
-        let manager = create_test_manager();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let manager = create_test_manager().await;
 
-        // Construct RejectionReason from byte (simulating network deserialization)
-        let reason = RejectionReason::from_byte(reason_byte);
+            // Construct RejectionReason from byte (simulating network deserialization)
+            let reason = RejectionReason::from_byte(reason_byte);
 
-        // Construct RejectionInfo
-        let mut info = RejectionInfo::new(reason)
-            .with_message(msg)
-            .with_rejecting_node("test_peer");
+            // Construct RejectionInfo
+            let mut info = RejectionInfo::new(reason)
+                .with_message(msg)
+                .with_rejecting_node("test_peer");
 
-        if has_suggestion {
-            let region = KeyspaceRegion {
-                prefix: suggestion_prefix,
-                prefix_len: 8, // Simplified
-                saturation: 0.5,
-                estimated_nodes: 10,
-            };
-            let target = TargetRegion {
-                region,
-                confidence: suggestion_confidence,
-                reason: "test suggestion".to_string(),
-            };
-            info = info.with_suggested_target(target);
-        }
-
-        // Handle rejection
-        let decision = manager.handle_rejection(info);
-
-        // Invariants:
-        // 1. Should never panic
-        // 2. Decision should be consistent with reason (e.g. Blocklisted -> Blocked)
-
-        match reason {
-            RejectionReason::Blocklisted => assert!(matches!(decision, RegenerationDecision::Blocked { .. })),
-            RejectionReason::GeoIpPolicy => {
-                 // GeoIP might trigger regeneration or wait depending on config
-                 // For default config, it might be Recommend or Proceed
+            if has_suggestion {
+                let region = KeyspaceRegion {
+                    prefix: suggestion_prefix,
+                    prefix_len: 8, // Simplified
+                    saturation: 0.5,
+                    estimated_nodes: 10,
+                };
+                let target = TargetRegion {
+                    region,
+                    confidence: suggestion_confidence,
+                    reason: "test suggestion".to_string(),
+                };
+                info = info.with_suggested_target(target);
             }
-            _ => {}
-        }
+
+            // Handle rejection
+            let decision = manager.handle_rejection(info).await;
+
+            // Invariants:
+            // 1. Should never panic
+            // 2. Decision should be consistent with reason (e.g. Blocklisted -> Blocked)
+
+            match reason {
+                RejectionReason::Blocklisted => assert!(matches!(decision, RegenerationDecision::Blocked { .. })),
+                RejectionReason::GeoIpPolicy => {
+                     // GeoIP might trigger regeneration or wait depending on config
+                     // For default config, it might be Recommend or Proceed
+                }
+                _ => {}
+            }
+        });
     }
 }

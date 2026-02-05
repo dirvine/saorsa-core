@@ -497,7 +497,13 @@ impl PlacementStrategy for WeightedPlacementStrategy {
 
             // Sample one node using weighted selection
             let selected = self.sampler.sample_nodes(&weights, 1)?;
-            let selected_node = selected[0].clone();
+            let selected_node = selected
+                .first()
+                .ok_or(PlacementError::InsufficientNodes {
+                    required: 1,
+                    available: 0,
+                })?
+                .clone();
 
             // Add to selection with metadata
             let (location, asn, region) = node_metadata

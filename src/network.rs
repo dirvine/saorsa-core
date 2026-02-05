@@ -16,6 +16,8 @@
 //! This module provides core networking functionality for the P2P Foundation.
 //! It handles peer connections, network events, and node lifecycle management.
 
+#[cfg(feature = "adaptive-ml")]
+use crate::adaptive::{EigenTrustEngine, NodeStatisticsUpdate};
 use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
@@ -676,6 +678,17 @@ pub struct P2PNode {
     /// GeoIP provider for connection validation
     #[allow(dead_code)]
     geo_provider: Arc<BgpGeoProvider>,
+
+    /// Bootstrap state tracking - indicates whether peer discovery has completed
+    is_bootstrapped: Arc<AtomicBool>,
+
+    /// EigenTrust engine for reputation management
+    ///
+    /// Used to track peer reliability based on data availability outcomes.
+    /// Consumers (like saorsa-node) should report successes and failures
+    /// via `report_peer_success()` and `report_peer_failure()` methods.
+    #[cfg(feature = "adaptive-ml")]
+    trust_engine: Option<Arc<EigenTrustEngine>>,
 }
 
 /// Normalize wildcard bind addresses to localhost loopback addresses
@@ -773,6 +786,9 @@ impl P2PNode {
             listener_handle: Arc::new(RwLock::new(None)),
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
+            is_bootstrapped: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "adaptive-ml")]
+            trust_engine: None,
         })
     }
     /// Create a new P2P node with the given configuration
@@ -888,6 +904,29 @@ impl P2PNode {
                     None
                 }
             }
+        };
+
+        // Initialize EigenTrust engine for reputation management (only with adaptive-ml feature)
+        // Pre-trusted nodes are the bootstrap nodes (they start with high trust)
+        #[cfg(feature = "adaptive-ml")]
+        let trust_engine = {
+            use crate::adaptive::NodeId;
+            use std::collections::HashSet;
+
+            // Convert bootstrap peers to NodeIds for pre-trusted set
+            let mut pre_trusted = HashSet::new();
+            for bootstrap_peer in &config.bootstrap_peers_str {
+                // Hash the bootstrap peer address to create a NodeId
+                let hash = blake3::hash(bootstrap_peer.as_bytes());
+                let mut node_id_bytes = [0u8; 32];
+                node_id_bytes.copy_from_slice(hash.as_bytes());
+                pre_trusted.insert(NodeId::from_bytes(node_id_bytes));
+            }
+
+            let engine = Arc::new(EigenTrustEngine::new(pre_trusted));
+            // Start background trust computation (every 5 minutes)
+            engine.clone().start_background_updates();
+            Some(engine)
         };
 
         // Initialize dual-stack ant-quic nodes
@@ -1033,6 +1072,9 @@ impl P2PNode {
             recv_handles: Arc::new(RwLock::new(Vec::new())),
             listener_handle: Arc::new(RwLock::new(None)),
             geo_provider,
+            is_bootstrapped: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "adaptive-ml")]
+            trust_engine,
         };
         info!(
             "Created P2P node with peer ID: {} (call start() to begin networking)",
@@ -1073,6 +1115,164 @@ impl P2PNode {
             .try_read()
             .ok()
             .and_then(|addrs| addrs.first().map(|a| a.to_string()))
+    }
+
+    /// Check if the node has completed the initial bootstrap process
+    ///
+    /// Returns `true` if the node has successfully connected to at least one
+    /// bootstrap peer and performed peer discovery (FIND_NODE).
+    pub fn is_bootstrapped(&self) -> bool {
+        self.is_bootstrapped.load(Ordering::SeqCst)
+    }
+
+    /// Manually trigger re-bootstrap (useful for recovery or network rejoin)
+    ///
+    /// This clears the bootstrapped state and attempts to reconnect to
+    /// bootstrap peers and discover new peers.
+    pub async fn re_bootstrap(&self) -> Result<()> {
+        self.is_bootstrapped.store(false, Ordering::SeqCst);
+        self.connect_bootstrap_peers().await
+    }
+
+    // =========================================================================
+    // Trust API - EigenTrust Reputation System (requires adaptive-ml feature)
+    // =========================================================================
+
+    /// Get the EigenTrust engine for direct trust operations
+    ///
+    /// This provides access to the underlying trust engine for advanced use cases.
+    /// For simple success/failure reporting, prefer `report_peer_success()` and
+    /// `report_peer_failure()`.
+    ///
+    /// Requires the `adaptive-ml` feature to be enabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// if let Some(engine) = node.trust_engine() {
+    ///     // Update node statistics directly
+    ///     engine.update_node_stats(&peer_id, NodeStatisticsUpdate::StorageContributed(1024)).await;
+    ///
+    ///     // Get global trust scores
+    ///     let scores = engine.compute_global_trust().await;
+    /// }
+    /// ```
+    #[cfg(feature = "adaptive-ml")]
+    pub fn trust_engine(&self) -> Option<Arc<EigenTrustEngine>> {
+        self.trust_engine.clone()
+    }
+
+    /// Report a successful interaction with a peer
+    ///
+    /// Call this after successful data operations to increase the peer's trust score.
+    /// This is the primary method for saorsa-node to report positive outcomes.
+    ///
+    /// Requires the `adaptive-ml` feature to be enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `peer_id` - The peer ID (as a string) of the node that performed well
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // After successfully retrieving a chunk from a peer
+    /// if let Ok(chunk) = fetch_chunk_from(&peer_id).await {
+    ///     node.report_peer_success(&peer_id).await?;
+    /// }
+    /// ```
+    #[cfg(feature = "adaptive-ml")]
+    pub async fn report_peer_success(&self, peer_id: &str) -> Result<()> {
+        if let Some(ref engine) = self.trust_engine {
+            // Convert peer_id string to NodeId by hashing
+            let hash = blake3::hash(peer_id.as_bytes());
+            let mut node_id_bytes = [0u8; 32];
+            node_id_bytes.copy_from_slice(hash.as_bytes());
+            let node_id = crate::adaptive::NodeId::from_bytes(node_id_bytes);
+
+            engine
+                .update_node_stats(&node_id, NodeStatisticsUpdate::CorrectResponse)
+                .await;
+            Ok(())
+        } else {
+            // Trust engine not initialized - this is not an error, just a no-op
+            Ok(())
+        }
+    }
+
+    /// Report a failed interaction with a peer
+    ///
+    /// Call this after failed data operations to decrease the peer's trust score.
+    /// This includes timeouts, corrupted data, or refused connections.
+    ///
+    /// Requires the `adaptive-ml` feature to be enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `peer_id` - The peer ID (as a string) of the node that failed
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // After a chunk retrieval fails
+    /// match fetch_chunk_from(&peer_id).await {
+    ///     Ok(chunk) => node.report_peer_success(&peer_id).await?,
+    ///     Err(_) => node.report_peer_failure(&peer_id).await?,
+    /// }
+    /// ```
+    #[cfg(feature = "adaptive-ml")]
+    pub async fn report_peer_failure(&self, peer_id: &str) -> Result<()> {
+        if let Some(ref engine) = self.trust_engine {
+            // Convert peer_id string to NodeId by hashing
+            let hash = blake3::hash(peer_id.as_bytes());
+            let mut node_id_bytes = [0u8; 32];
+            node_id_bytes.copy_from_slice(hash.as_bytes());
+            let node_id = crate::adaptive::NodeId::from_bytes(node_id_bytes);
+
+            engine
+                .update_node_stats(&node_id, NodeStatisticsUpdate::FailedResponse)
+                .await;
+            Ok(())
+        } else {
+            // Trust engine not initialized - this is not an error, just a no-op
+            Ok(())
+        }
+    }
+
+    /// Get the current trust score for a peer
+    ///
+    /// Returns a value between 0.0 (untrusted) and 1.0 (fully trusted).
+    /// Unknown peers return 0.0 by default.
+    ///
+    /// Requires the `adaptive-ml` feature to be enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `peer_id` - The peer ID (as a string) to query
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let trust = node.peer_trust(&peer_id);
+    /// if trust < 0.3 {
+    ///     tracing::warn!("Low trust peer: {}", peer_id);
+    /// }
+    /// ```
+    #[cfg(feature = "adaptive-ml")]
+    pub fn peer_trust(&self, peer_id: &str) -> f64 {
+        if let Some(ref engine) = self.trust_engine {
+            // Convert peer_id string to NodeId by hashing
+            let hash = blake3::hash(peer_id.as_bytes());
+            let mut node_id_bytes = [0u8; 32];
+            node_id_bytes.copy_from_slice(hash.as_bytes());
+            let node_id = crate::adaptive::NodeId::from_bytes(node_id_bytes);
+
+            use crate::adaptive::TrustProvider;
+            engine.get_trust(&node_id)
+        } else {
+            // Trust engine not initialized - return neutral trust
+            0.5
+        }
     }
 
     pub async fn subscribe(&self, topic: &str) -> Result<()> {
@@ -1124,7 +1324,9 @@ impl P2PNode {
             source: self.peer_id.clone(),
             data: data.to_vec(),
         };
-        let _ = self.event_tx.send(event);
+        if let Err(e) = self.event_tx.send(event) {
+            tracing::trace!("Event broadcast has no receivers: {}", e);
+        }
 
         Ok(())
     }
@@ -1224,7 +1426,9 @@ impl P2PNode {
                         let peer_id =
                             crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
-                        let _ = event_tx.send(P2PEvent::PeerConnected(peer_id.clone()));
+                        if let Err(e) = event_tx.send(P2PEvent::PeerConnected(peer_id.clone())) {
+                            tracing::trace!("Event broadcast has no receivers: {}", e);
+                        }
                         register_new_peer(&peers, &peer_id, &remote_addr).await;
                         active_connections.write().await.insert(peer_id);
                     }
@@ -1285,7 +1489,9 @@ impl P2PNode {
 
                 match parse_protocol_message(&bytes, &transport_peer_id) {
                     Some(event) => {
-                        let _ = event_tx.send(event);
+                        if let Err(e) = event_tx.send(event) {
+                            tracing::trace!("Event broadcast has no receivers: {}", e);
+                        }
                     }
                     None => {
                         warn!("Failed to parse protocol message ({} bytes)", bytes.len());
@@ -1346,12 +1552,34 @@ impl P2PNode {
         // Await recv system tasks
         let handles: Vec<_> = self.recv_handles.write().await.drain(..).collect();
         for handle in handles {
-            let _ = handle.await;
+            match handle.await {
+                Ok(()) => {}
+                Err(e) if e.is_cancelled() => {
+                    tracing::debug!("Recv task was cancelled during shutdown");
+                }
+                Err(e) if e.is_panic() => {
+                    tracing::error!("Recv task panicked during shutdown: {:?}", e);
+                }
+                Err(e) => {
+                    tracing::warn!("Recv task join error during shutdown: {:?}", e);
+                }
+            }
         }
 
         // Await accept loop task
         if let Some(handle) = self.listener_handle.write().await.take() {
-            let _ = handle.await;
+            match handle.await {
+                Ok(()) => {}
+                Err(e) if e.is_cancelled() => {
+                    tracing::debug!("Listener task was cancelled during shutdown");
+                }
+                Err(e) if e.is_panic() => {
+                    tracing::error!("Listener task panicked during shutdown: {:?}", e);
+                }
+                Err(e) => {
+                    tracing::warn!("Listener task join error during shutdown: {:?}", e);
+                }
+            }
         }
 
         // Disconnect all peers
@@ -1769,8 +1997,41 @@ impl P2PNode {
 /// can pass it directly to `send_message()`. This eliminates a spoofing
 /// vector where a peer could claim an arbitrary identity via the payload.
 ///
+/// Maximum allowed clock skew for message timestamps (5 minutes)
+const MAX_MESSAGE_AGE_SECS: u64 = 300;
+/// Maximum allowed future timestamp (30 seconds to account for clock drift)
+const MAX_FUTURE_SECS: u64 = 30;
+
 fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
     let message: WireMessage = postcard::from_bytes(bytes).ok()?;
+
+    // Validate timestamp to prevent replay attacks
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Reject messages that are too old (potential replay)
+    if message.timestamp < now.saturating_sub(MAX_MESSAGE_AGE_SECS) {
+        tracing::warn!(
+            "Rejecting stale message from {} (timestamp {} is {} seconds old)",
+            source,
+            message.timestamp,
+            now.saturating_sub(message.timestamp)
+        );
+        return None;
+    }
+
+    // Reject messages too far in the future (clock manipulation)
+    if message.timestamp > now + MAX_FUTURE_SECS {
+        tracing::warn!(
+            "Rejecting future-dated message from {} (timestamp {} is {} seconds ahead)",
+            source,
+            message.timestamp,
+            message.timestamp.saturating_sub(now)
+        );
+        return None;
+    }
 
     debug!(
         "Parsed P2PEvent::Message - topic: {}, source: {} (logical: {}), payload_len: {}",
@@ -1910,7 +2171,9 @@ impl P2PNode {
                             }
 
                             // Broadcast connection event
-                            let _ = event_tx.send(P2PEvent::PeerConnected(peer_id_str));
+                            if let Err(e) = event_tx.send(P2PEvent::PeerConnected(peer_id_str)) {
+                                tracing::trace!("Event broadcast has no receivers: {}", e);
+                            }
                         }
                         ConnectionEvent::Lost { peer_id, reason } => {
                             let peer_id_str = ant_peer_id_to_string(&peer_id);
@@ -1926,7 +2189,9 @@ impl P2PNode {
                             }
 
                             // Broadcast disconnection event
-                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
+                            if let Err(e) = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str)) {
+                                tracing::trace!("Event broadcast has no receivers: {}", e);
+                            }
                         }
                         ConnectionEvent::Failed { peer_id, reason } => {
                             let peer_id_str = ant_peer_id_to_string(&peer_id);
@@ -1942,7 +2207,9 @@ impl P2PNode {
                             }
 
                             // Broadcast disconnection event
-                            let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str));
+                            if let Err(e) = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str)) {
+                                tracing::trace!("Event broadcast has no receivers: {}", e);
+                            }
                         }
                     }
                 }
@@ -2124,7 +2391,9 @@ impl P2PNode {
             // Phase 3: Remove from active_connections and emit events
             for peer_id in &peers_to_mark_disconnected {
                 active_connections.write().await.remove(peer_id);
-                let _ = event_tx.send(P2PEvent::PeerDisconnected(peer_id.clone()));
+                if let Err(e) = event_tx.send(P2PEvent::PeerDisconnected(peer_id.clone())) {
+                    tracing::trace!("Event broadcast has no receivers: {}", e);
+                }
                 info!(peer_id = %peer_id, "Stale peer disconnected");
             }
 
@@ -2301,7 +2570,59 @@ impl P2PNode {
         0
     }
 
-    /// Connect to bootstrap peers
+    /// Discover peers from a connected bootstrap peer using FIND_NODE
+    ///
+    /// Sends a FIND_NODE request for our own peer ID to discover nearby peers
+    /// and populate the routing table. This is the core of Kademlia peer discovery.
+    async fn discover_peers_from(&self, peer_id: &PeerId) -> Result<usize> {
+        use crate::dht::network_integration::DhtMessage;
+
+        info!("Discovering peers from bootstrap peer: {}", peer_id);
+
+        // Create our node ID as a DhtKey for the FIND_NODE query
+        // We query for ourselves to find nodes closest to us
+        let our_id_bytes = {
+            use blake3::Hasher;
+            let mut hasher = Hasher::new();
+            hasher.update(self.peer_id.as_bytes());
+            let digest = hasher.finalize();
+            let mut bytes = [0u8; 32];
+            bytes.copy_from_slice(digest.as_bytes());
+            bytes
+        };
+        let target_key = crate::dht::DhtKey::from_bytes(our_id_bytes);
+
+        // Create FIND_NODE message
+        let find_node_msg = DhtMessage::FindNode {
+            target: target_key,
+            count: 20, // Request up to 20 closest nodes
+        };
+
+        // Serialize the message
+        let message_bytes = postcard::to_allocvec(&find_node_msg).map_err(|e| {
+            P2PError::Network(NetworkError::ProtocolError(
+                format!("Failed to serialize FIND_NODE message: {e}").into(),
+            ))
+        })?;
+
+        // Send the FIND_NODE request
+        self.send_message(peer_id, "/dht/1.0.0", message_bytes)
+            .await?;
+
+        // Note: Response handling is asynchronous through the message handler.
+        // For now, we log the request and let the response handler populate
+        // the routing table when it receives FindNodeReply.
+        //
+        // TODO: Implement request-response correlation with a timeout to get
+        // actual discovered peer count. For now, return 0 to indicate we sent
+        // the request but don't have immediate response data.
+
+        info!("Sent FIND_NODE request to {} for peer discovery", peer_id);
+
+        Ok(0) // Actual count would require awaiting the response
+    }
+
+    /// Connect to bootstrap peers and perform initial peer discovery
     async fn connect_bootstrap_peers(&self) -> Result<()> {
         let mut bootstrap_contacts = Vec::new();
         let mut used_cache = false;
@@ -2386,14 +2707,17 @@ impl P2PNode {
             return Ok(());
         }
 
-        // Connect to bootstrap peers
+        // Connect to bootstrap peers and perform peer discovery
         let mut successful_connections = 0;
+        let mut connected_peer_ids: Vec<PeerId> = Vec::new();
+
         for contact in bootstrap_contacts {
             for addr in &contact.addresses {
                 match self.connect_peer(&addr.to_string()).await {
                     Ok(peer_id) => {
                         info!("Connected to bootstrap peer: {} ({})", peer_id, addr);
                         successful_connections += 1;
+                        connected_peer_ids.push(peer_id.clone());
 
                         // Update bootstrap cache with successful connection
                         if let Some(ref bootstrap_manager) = self.bootstrap_manager {
@@ -2438,9 +2762,32 @@ impl P2PNode {
             // Keep running and allow background discovery / retries to populate peers later.
             return Ok(());
         }
+
         info!(
             "Successfully connected to {} bootstrap peers",
             successful_connections
+        );
+
+        // Perform peer discovery from connected bootstrap peers
+        // Send FIND_NODE(self) to discover nearby peers and populate routing table
+        for peer_id in &connected_peer_ids {
+            match self.discover_peers_from(peer_id).await {
+                Ok(_) => {
+                    info!("Peer discovery initiated from bootstrap peer: {}", peer_id);
+                }
+                Err(e) => {
+                    warn!("Failed to discover peers from {}: {}", peer_id, e);
+                }
+            }
+        }
+
+        // Mark node as bootstrapped - we have connected to bootstrap peers
+        // and initiated peer discovery
+        self.is_bootstrapped.store(true, Ordering::SeqCst);
+        info!(
+            "Bootstrap complete: connected to {} peers, initiated {} discovery requests",
+            successful_connections,
+            connected_peer_ids.len()
         );
 
         Ok(())
@@ -3667,7 +4014,15 @@ mod tests {
 
     // ---- parse_protocol_message regression tests ----
 
-    /// Helper to create a bincode-serialized WireMessage for tests
+    /// Get current Unix timestamp for tests
+    fn current_timestamp() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    /// Helper to create a postcard-serialized WireMessage for tests
     fn make_wire_bytes(protocol: &str, data: Vec<u8>, from: &str, timestamp: u64) -> Vec<u8> {
         let msg = WireMessage {
             protocol: protocol.to_string(),
@@ -3685,7 +4040,7 @@ mod tests {
         // can pass source directly to send_message().
         let transport_id = "abcdef0123456789";
         let logical_id = "spoofed-logical-id";
-        let bytes = make_wire_bytes("test/v1", vec![1, 2, 3], logical_id, 1000);
+        let bytes = make_wire_bytes("test/v1", vec![1, 2, 3], logical_id, current_timestamp());
 
         let event =
             parse_protocol_message(&bytes, transport_id).expect("valid message should parse");
@@ -3717,14 +4072,14 @@ mod tests {
     #[test]
     fn test_parse_protocol_message_rejects_truncated_message() {
         // A truncated bincode message should fail to deserialize
-        let full_bytes = make_wire_bytes("test/v1", vec![1, 2, 3], "sender", 1000);
+        let full_bytes = make_wire_bytes("test/v1", vec![1, 2, 3], "sender", current_timestamp());
         let truncated = &full_bytes[..full_bytes.len() / 2];
         assert!(parse_protocol_message(truncated, "peer-id").is_none());
     }
 
     #[test]
     fn test_parse_protocol_message_empty_payload() {
-        let bytes = make_wire_bytes("ping", vec![], "sender", 1000);
+        let bytes = make_wire_bytes("ping", vec![], "sender", current_timestamp());
 
         let event = parse_protocol_message(&bytes, "transport-peer")
             .expect("valid message with empty data should parse");
@@ -3739,7 +4094,7 @@ mod tests {
     fn test_parse_protocol_message_preserves_binary_payload() {
         // Verify that arbitrary byte values (including 0xFF, 0x00) survive round-trip
         let payload: Vec<u8> = (0..=255).collect();
-        let bytes = make_wire_bytes("binary/v1", payload.clone(), "sender", 42);
+        let bytes = make_wire_bytes("binary/v1", payload.clone(), "sender", current_timestamp());
 
         let event = parse_protocol_message(&bytes, "peer-id")
             .expect("valid message with full byte range should parse");

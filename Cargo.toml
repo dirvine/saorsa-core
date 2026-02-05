@@ -21,7 +21,9 @@ no-default-features = true
 default-target = "x86_64-unknown-linux-gnu"
 
 [features]
-default = ["metrics"]
+# NOTE: adaptive-ml is now required by core code paths (network.rs, dht/core_engine.rs)
+# and must be enabled by default for the crate to compile.
+default = ["metrics", "adaptive-ml"]
 metrics = ["dep:prometheus"]
 # Compile-time gate for test/dummy helpers. Off by default.
 mocks = []
@@ -29,6 +31,48 @@ mocks = []
 h2_greedy = []
 # Test utilities including mock DHT for integration tests
 test-utils = []
+
+# ============================================================================
+# Experimental Features (not production-wired yet)
+# ============================================================================
+#
+# These features are implemented but NOT integrated into production code paths.
+# Enable them for testing or development only.
+
+# Machine learning components: Thompson Sampling, Q-Learning, EigenTrust, LSTM
+adaptive-ml = []
+
+# Trust-weighted peer selection using EigenTrust in routing decisions
+trust-routing = []
+
+# Region-aware routing and geographic peer selection
+geographic = []
+
+# Sybil attack detection for DHT protection
+sybil-detection = []
+
+# Collusion detection for witness validation
+collusion-detection = []
+
+# S/Kademlia security extensions (requires trust-routing)
+skademlia = ["trust-routing"]
+
+# Storage orchestration and placement engine (requires adaptive-ml)
+placement = ["adaptive-ml"]
+
+# Enable all experimental features
+experimental = [
+    "adaptive-ml",
+    "trust-routing",
+    "geographic",
+    "sybil-detection",
+    "collusion-detection",
+    "skademlia",
+    "placement",
+]
+
+# Backwards compatibility alias
+full = ["experimental"]
 
 [dependencies]
 # Core async and serialization

@@ -156,6 +156,7 @@ pub use crate::rate_limit::{
 // ============================================================================
 
 /// Placement system
+#[cfg(feature = "placement")]
 pub use crate::placement::{
     AuditSystem, DataPointer, DhtRecord, DiversityEnforcer, GeographicLocation, GroupBeacon,
     NetworkRegion, NodeAd, PlacementConfig, PlacementDecision, PlacementEngine, PlacementMetrics,
@@ -164,10 +165,11 @@ pub use crate::placement::{
 };
 
 // ============================================================================
-// Adaptive Networking
+// Adaptive Networking (feature-gated)
 // ============================================================================
 
-/// Adaptive network types (re-exported from adaptive module)
+/// Adaptive network types (requires "adaptive-ml" feature)
+#[cfg(feature = "adaptive-ml")]
 pub use crate::adaptive::{
     // Traits
     AdaptiveNetworkNode,

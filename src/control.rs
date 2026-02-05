@@ -85,7 +85,7 @@ impl ControlMessageHandler {
             };
 
             // Trigger restart manager
-            self.restart_manager.handle_rejection(info);
+            self.restart_manager.handle_rejection(info).await;
         } else {
             debug!("Received unknown control message from {}", source);
         }

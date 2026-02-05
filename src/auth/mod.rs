@@ -100,14 +100,14 @@ impl SingleWriteAuth {
 #[async_trait]
 impl WriteAuth for SingleWriteAuth {
     async fn verify(&self, record: &[u8], sigs: &[Sig]) -> Result<bool> {
-        if sigs.is_empty() {
+        let Some(first_sig) = sigs.first() else {
             return Ok(false);
-        }
+        };
 
         let pk = MlDsaPublicKey::from_bytes(self.pub_key.as_bytes())
             .map_err(|e| anyhow::anyhow!("invalid ML-DSA public key: {e}"))?;
         const SIG_LEN: usize = 3309;
-        let sig_bytes = sigs[0].as_bytes();
+        let sig_bytes = first_sig.as_bytes();
         if sig_bytes.len() != SIG_LEN {
             return Ok(false);
         }
@@ -149,11 +149,14 @@ impl DelegatedWriteAuth {
 #[async_trait]
 impl WriteAuth for DelegatedWriteAuth {
     async fn verify(&self, record: &[u8], sigs: &[Sig]) -> Result<bool> {
-        if sigs.is_empty() || self.authorized_keys.is_empty() {
+        let Some(first_sig) = sigs.first() else {
+            return Ok(false);
+        };
+        if self.authorized_keys.is_empty() {
             return Ok(false);
         }
         const SIG_LEN: usize = 3309;
-        let sig_bytes = sigs[0].as_bytes();
+        let sig_bytes = first_sig.as_bytes();
         if sig_bytes.len() != SIG_LEN {
             return Ok(false);
         }
