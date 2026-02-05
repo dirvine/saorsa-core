@@ -469,9 +469,11 @@ const MAX_PARALLEL_QUERIES: usize = 3;
 /// K parameter - replication factor
 const K: usize = 8;
 
-/// Maximum value size for DHT store operations (1 MB)
-/// Prevents memory exhaustion from malicious oversized values
-const MAX_DHT_VALUE_SIZE: usize = 1024 * 1024;
+/// Maximum value size for DHT store operations (512 bytes)
+/// The DHT is designed as a "phonebook" for peer discovery, not general storage.
+/// Record types (NODE_AD, GROUP_BEACON, DATA_POINTER) should fit within 512 bytes.
+/// Larger data should be stored via send_message() in the application layer.
+const MAX_DHT_VALUE_SIZE: usize = 512;
 
 /// Maximum node count for FindNode requests
 /// Prevents amplification attacks by limiting response size
@@ -872,7 +874,7 @@ impl DhtCoreEngine {
     /// than query operations since data persistence depends on node reliability.
     ///
     /// # Errors
-    /// Returns an error if the value exceeds `MAX_DHT_VALUE_SIZE` (1 MB).
+    /// Returns an error if the value exceeds `MAX_DHT_VALUE_SIZE` (512 bytes).
     pub async fn store(&mut self, key: &DhtKey, value: Vec<u8>) -> Result<StoreReceipt> {
         // Security: Reject oversized values to prevent memory exhaustion
         if value.len() > MAX_DHT_VALUE_SIZE {

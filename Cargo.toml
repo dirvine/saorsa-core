@@ -203,6 +203,15 @@ path = "tests/eigentrust_integration_test.rs"
 name = "gossipsub_integration_test"
 path = "tests/gossipsub_integration_test.rs"
 
+# Examples requiring adaptive-ml feature
+[[example]]
+name = "security_example"
+required-features = ["adaptive-ml"]
+
+[[example]]
+name = "adaptive_network_monitor"
+required-features = ["adaptive-ml"]
+
 # Platform-specific dependencies for secure memory management
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

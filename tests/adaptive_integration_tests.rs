@@ -1,4 +1,6 @@
 //! Adaptive integration tests aligned with current APIs
+#![cfg(feature = "adaptive-ml")]
+
 use saorsa_core::adaptive::q_learning_cache::{ActionType, StateVector};
 use saorsa_core::adaptive::*;
 use std::sync::Arc;

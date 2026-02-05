@@ -11,6 +11,8 @@
 // distributed under these licenses is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
+#![cfg(feature = "adaptive-ml")]
+
 //! Integration tests for Multi-Armed Bandit routing optimization
 
 use saorsa_core::adaptive::{
