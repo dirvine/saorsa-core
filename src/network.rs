@@ -17,7 +17,7 @@
 //! It handles peer connections, network events, and node lifecycle management.
 
 #[cfg(feature = "adaptive-ml")]
-use crate::adaptive::{EigenTrustEngine, NodeStatisticsUpdate};
+use crate::adaptive::{EigenTrustEngine, NodeId as AdaptiveNodeId, NodeStatisticsUpdate};
 use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
@@ -1167,6 +1167,25 @@ impl P2PNode {
         self.trust_engine.clone()
     }
 
+    /// Canonical conversion from PeerId string to adaptive NodeId for trust.
+    ///
+    /// PeerId strings are hex-encoded 32-byte identifiers. This decodes them
+    /// back to raw bytes, matching the DHT NodeId representation used by
+    /// `trust_peer_selector`. Falls back to blake3 hash for non-hex IDs.
+    #[cfg(feature = "adaptive-ml")]
+    fn peer_id_to_trust_node_id(peer_id: &str) -> AdaptiveNodeId {
+        if let Ok(bytes) = hex::decode(peer_id)
+            && bytes.len() == 32
+        {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            return AdaptiveNodeId::from_bytes(arr);
+        }
+        // Non-hex or wrong length: hash to 32 bytes as fallback
+        let hash = blake3::hash(peer_id.as_bytes());
+        AdaptiveNodeId::from_bytes(*hash.as_bytes())
+    }
+
     /// Report a successful interaction with a peer
     ///
     /// Call this after successful data operations to increase the peer's trust score.
@@ -1189,11 +1208,7 @@ impl P2PNode {
     #[cfg(feature = "adaptive-ml")]
     pub async fn report_peer_success(&self, peer_id: &str) -> Result<()> {
         if let Some(ref engine) = self.trust_engine {
-            // Convert peer_id string to NodeId by hashing
-            let hash = blake3::hash(peer_id.as_bytes());
-            let mut node_id_bytes = [0u8; 32];
-            node_id_bytes.copy_from_slice(hash.as_bytes());
-            let node_id = crate::adaptive::NodeId::from_bytes(node_id_bytes);
+            let node_id = Self::peer_id_to_trust_node_id(peer_id);
 
             engine
                 .update_node_stats(&node_id, NodeStatisticsUpdate::CorrectResponse)
@@ -1228,11 +1243,7 @@ impl P2PNode {
     #[cfg(feature = "adaptive-ml")]
     pub async fn report_peer_failure(&self, peer_id: &str) -> Result<()> {
         if let Some(ref engine) = self.trust_engine {
-            // Convert peer_id string to NodeId by hashing
-            let hash = blake3::hash(peer_id.as_bytes());
-            let mut node_id_bytes = [0u8; 32];
-            node_id_bytes.copy_from_slice(hash.as_bytes());
-            let node_id = crate::adaptive::NodeId::from_bytes(node_id_bytes);
+            let node_id = Self::peer_id_to_trust_node_id(peer_id);
 
             engine
                 .update_node_stats(&node_id, NodeStatisticsUpdate::FailedResponse)
@@ -1266,11 +1277,7 @@ impl P2PNode {
     #[cfg(feature = "adaptive-ml")]
     pub fn peer_trust(&self, peer_id: &str) -> f64 {
         if let Some(ref engine) = self.trust_engine {
-            // Convert peer_id string to NodeId by hashing
-            let hash = blake3::hash(peer_id.as_bytes());
-            let mut node_id_bytes = [0u8; 32];
-            node_id_bytes.copy_from_slice(hash.as_bytes());
-            let node_id = crate::adaptive::NodeId::from_bytes(node_id_bytes);
+            let node_id = Self::peer_id_to_trust_node_id(peer_id);
 
             use crate::adaptive::TrustProvider;
             engine.get_trust(&node_id)

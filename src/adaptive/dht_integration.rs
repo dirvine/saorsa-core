@@ -340,6 +340,16 @@ impl AdaptiveDHT {
     }
 
     fn peer_id_to_node_id(peer_id: &PeerId) -> NodeId {
+        // PeerId strings are hex-encoded 32-byte node IDs. Decode to raw bytes
+        // to match the DHT NodeId representation used by trust_peer_selector.
+        if let Ok(bytes) = hex::decode(peer_id.as_str())
+            && bytes.len() == 32
+        {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            return NodeId::from_bytes(arr);
+        }
+        // Fallback for non-hex peer IDs
         let hash = blake3::hash(peer_id.as_bytes());
         NodeId::from_bytes(*hash.as_bytes())
     }
