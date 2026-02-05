@@ -132,8 +132,9 @@ jobs:
 
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
+      # adaptive-ml is required for gossipsub and coordinator tests.
       - name: Build tests
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils"
+        run: cargo build --tests --features "default,adaptive-ml,mocks,h2_greedy,test-utils"
 
       - name: Clean incremental artifacts
         run: |
@@ -141,13 +142,13 @@ jobs:
           df -h
 
       - name: Gossipsub
-        run: cargo nextest run --test gossipsub_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test gossipsub_integration_test --features "default,adaptive-ml,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Four Word Integration
-        run: cargo nextest run --test four_word_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test four_word_integration_test --features "default,adaptive-ml,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Coordinator Integration
-        run: cargo nextest run --test coordinator_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test coordinator_integration_test --features "default,adaptive-ml,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Health Integration
-        run: cargo nextest run --test health_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test health_integration_test --features "default,adaptive-ml,mocks,h2_greedy,test-utils" --no-fail-fast
