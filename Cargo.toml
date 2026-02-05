@@ -31,15 +31,16 @@ h2_greedy = []
 test-utils = []
 
 # ============================================================================
-# Experimental Features (not production-wired yet)
+# Optional Features (production-ready with fallbacks)
 # ============================================================================
 #
-# These features are implemented but NOT integrated into production code paths.
-# Enable them for testing or development only.
+# These features enhance functionality but are NOT required for core operation.
+# All code paths have fallback implementations when these features are disabled.
+# Enable them for enhanced trust-weighted routing and ML-based optimization.
 
 # Machine learning components: Thompson Sampling, Q-Learning, EigenTrust, LSTM
 # Enables trust-weighted peer selection, EigenTrust reputation tracking, and ML-based optimization.
-# All code paths have fallback implementations when this feature is disabled.
+# When disabled: DHT uses standard Kademlia routing without trust weighting.
 adaptive-ml = []
 
 # Trust-weighted peer selection using EigenTrust in routing decisions
