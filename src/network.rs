@@ -1415,16 +1415,11 @@ impl P2PNode {
         let active_connections = self.active_connections.clone();
         let rate_limiter = self.rate_limiter.clone();
         let dual = self.dual_node.clone();
-        let shutdown = self.shutdown.clone();
         let handle = tokio::spawn(async move {
             loop {
-                if shutdown.load(Ordering::Relaxed) {
-                    break;
-                }
                 let Some((ant_peer_id, remote_sock)) = dual.accept_any().await else {
-                    // Stream ended (ant-quic timeout or transport teardown).
-                    // Loop back to check shutdown and retry.
-                    continue;
+                    // Transport shut down — exit the accept loop.
+                    break;
                 };
 
                 // Enforce rate limiting
@@ -1538,7 +1533,8 @@ impl P2PNode {
 
         // Signal all background tasks to stop
         self.shutdown.store(true, Ordering::Relaxed);
-        self.dual_node.signal_shutdown();
+        // signal_shutdown() removed: shutdown is fully handled by
+        // the CancellationToken via shutdown_endpoints() below.
 
         // Set running state to false
         *self.running.write().await = false;

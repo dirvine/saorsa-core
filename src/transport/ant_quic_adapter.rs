@@ -76,6 +76,7 @@ use ant_quic::{LinkConn, LinkEvent, LinkTransport, P2pConfig, P2pLinkTransport, 
 // Import saorsa-transport types for SharedTransport integration
 use ant_quic::SharedTransport;
 use ant_quic::link_transport::StreamType;
+use futures::StreamExt;
 
 /// Protocol identifier for saorsa DHT overlay
 ///
@@ -457,15 +458,14 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
     /// Try to accept one incoming connection.
     ///
-    /// Returns `Some(...)` on success, `None` if the accept stream ends
-    /// (either ant-quic timeout or transport shutdown). The caller is
-    /// responsible for retrying and checking shutdown.
+    /// Returns `Some(...)` on success, `None` when the endpoint has shut
+    /// down. A `None` return is terminal — the caller should exit its
+    /// accept loop.
     ///
     /// **NOTE**: Protocol-based filtering is not yet implemented in ant-quic's `accept()` method.
     /// This method accepts connections for ANY protocol, not just `SAORSA_DHT_PROTOCOL`.
     /// Applications must validate that incoming connections are using the expected protocol.
     pub async fn accept_connection(&self) -> Option<(PeerId, SocketAddr)> {
-        use futures::StreamExt;
         let mut incoming = self.transport.accept(SAORSA_DHT_PROTOCOL);
         while let Some(conn_result) = incoming.next().await {
             match conn_result {
@@ -477,7 +477,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
                     return Some((peer_id, addr));
                 }
                 Err(e) => {
-                    tracing::debug!("Accept stream error (retrying): {}", e);
+                    tracing::debug!("Accept stream error: {}", e);
                 }
             }
         }
@@ -968,16 +968,6 @@ impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
     /// Create with custom transports (for testing)
     pub fn with_transports(v6: Option<P2PNetworkNode<T>>, v4: Option<P2PNetworkNode<T>>) -> Self {
         Self { v6, v4 }
-    }
-
-    /// Signal both stacks to stop accepting connections.
-    pub fn signal_shutdown(&self) {
-        if let Some(ref v6) = self.v6 {
-            v6.shutdown.store(true, Ordering::Relaxed);
-        }
-        if let Some(ref v4) = self.v4 {
-            v4.shutdown.store(true, Ordering::Relaxed);
-        }
     }
 
     /// Happy Eyeballs connect: race IPv6 and IPv4 attempts
