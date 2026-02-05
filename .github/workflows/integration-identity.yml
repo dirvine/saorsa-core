@@ -129,7 +129,7 @@ jobs:
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
       # Using -j2 to reduce parallel linking and avoid linker memory exhaustion.
-      - name: Build tests
+      - name: Build tests (default features)
         run: cargo build --tests --features "default,mocks,h2_greedy,test-utils" -j2
 
       - name: Clean incremental artifacts
@@ -146,5 +146,9 @@ jobs:
       - name: Validation Tests
         run: cargo nextest run --test validation_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
+      # adaptive-ml is only required for EigenTrust tests
+      - name: Build EigenTrust test (adaptive-ml)
+        run: cargo build --tests --features "default,adaptive-ml,mocks,h2_greedy,test-utils" -j2
+
       - name: EigenTrust
-        run: cargo nextest run --test eigentrust_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test eigentrust_integration_test --features "default,adaptive-ml,mocks,h2_greedy,test-utils" --no-fail-fast

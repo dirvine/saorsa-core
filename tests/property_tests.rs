@@ -1,4 +1,5 @@
 // Copyright (c) 2025 Saorsa Labs Limited
+#![cfg(feature = "adaptive-ml")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // This file is part of the Saorsa P2P network.
 

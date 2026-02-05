@@ -384,7 +384,14 @@ impl QLearnCacheManager {
 
         // Exploitation: best Q-value
         let q_table = self.q_table.read().await;
-        let mut best_action = &available_actions[0];
+        // Safety: We already checked available_actions.is_empty() above and returned early,
+        // so this match arm is unreachable. Using match instead of direct index to satisfy
+        // the project's no-panic code standards.
+        let Some(first_action) = available_actions.first() else {
+            // Unreachable due to the is_empty() check above
+            return Ok(CacheAction::DoNothing);
+        };
+        let mut best_action = first_action;
         let mut best_q = f64::NEG_INFINITY;
 
         for action in &available_actions {

@@ -242,7 +242,7 @@ impl DerivationPath {
     pub fn from_string(path_str: &str) -> Result<Self> {
         let parts: Vec<&str> = path_str.split('/').collect();
 
-        if parts.is_empty() || parts[0] != "m" {
+        if parts.first() != Some(&"m") {
             return Err(P2PError::Security(SecurityError::InvalidKey(
                 "Invalid derivation path format".to_string().into(),
             )));

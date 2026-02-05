@@ -1,5 +1,6 @@
 // Copyright 2024 Saorsa Labs Limited
 //
+#![cfg(feature = "adaptive-ml")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Cache eviction strategy integration tests
 

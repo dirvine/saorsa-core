@@ -30,6 +30,51 @@ h2_greedy = []
 # Test utilities including mock DHT for integration tests
 test-utils = []
 
+# ============================================================================
+# Optional Features (production-ready with fallbacks)
+# ============================================================================
+#
+# These features enhance functionality but are NOT required for core operation.
+# All code paths have fallback implementations when these features are disabled.
+# Enable them for enhanced trust-weighted routing and ML-based optimization.
+
+# Machine learning components: Thompson Sampling, Q-Learning, EigenTrust, LSTM
+# Enables trust-weighted peer selection, EigenTrust reputation tracking, and ML-based optimization.
+# When disabled: DHT uses standard Kademlia routing without trust weighting.
+adaptive-ml = []
+
+# Trust-weighted peer selection using EigenTrust in routing decisions
+trust-routing = []
+
+# Region-aware routing and geographic peer selection
+geographic = []
+
+# Sybil attack detection for DHT protection
+sybil-detection = []
+
+# Collusion detection for witness validation
+collusion-detection = []
+
+# S/Kademlia security extensions (requires trust-routing)
+skademlia = ["trust-routing"]
+
+# Storage orchestration and placement engine (requires adaptive-ml)
+placement = ["adaptive-ml"]
+
+# Enable all experimental features
+experimental = [
+    "adaptive-ml",
+    "trust-routing",
+    "geographic",
+    "sybil-detection",
+    "collusion-detection",
+    "skademlia",
+    "placement",
+]
+
+# Backwards compatibility alias
+full = ["experimental"]
+
 [dependencies]
 # Core async and serialization
 tokio = { version = "1.49", features = ["full"] }
@@ -157,6 +202,15 @@ path = "tests/eigentrust_integration_test.rs"
 [[test]]
 name = "gossipsub_integration_test"
 path = "tests/gossipsub_integration_test.rs"
+
+# Examples requiring adaptive-ml feature
+[[example]]
+name = "security_example"
+required-features = ["adaptive-ml"]
+
+[[example]]
+name = "adaptive_network_monitor"
+required-features = ["adaptive-ml"]
 
 # Platform-specific dependencies for secure memory management
 [target.'cfg(unix)'.dependencies]

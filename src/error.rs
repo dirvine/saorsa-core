@@ -181,6 +181,10 @@ pub enum P2PError {
     // WebRTC bridge errors
     #[error("WebRTC error: {0}")]
     WebRtcError(String),
+
+    // Trust system errors
+    #[error("Trust error: {0}")]
+    Trust(Cow<'static, str>),
 }
 
 /// Network-related errors
@@ -737,6 +741,7 @@ impl From<tokio::time::error::Elapsed> for P2PError {
     }
 }
 
+#[cfg(feature = "adaptive-ml")]
 impl From<crate::adaptive::AdaptiveNetworkError> for P2PError {
     fn from(err: crate::adaptive::AdaptiveNetworkError) -> Self {
         use crate::adaptive::AdaptiveNetworkError;
@@ -746,16 +751,16 @@ impl From<crate::adaptive::AdaptiveNetworkError> for P2PError {
                 P2PError::Serialization(ser_err.to_string().into())
             }
             AdaptiveNetworkError::Routing(msg) => {
-                P2PError::Internal(format!("Routing error: {}", msg).into())
+                P2PError::Internal(format!("Routing error: {msg}").into())
             }
             AdaptiveNetworkError::Trust(msg) => {
-                P2PError::Internal(format!("Trust error: {}", msg).into())
+                P2PError::Internal(format!("Trust error: {msg}").into())
             }
             AdaptiveNetworkError::Learning(msg) => {
-                P2PError::Internal(format!("Learning error: {}", msg).into())
+                P2PError::Internal(format!("Learning error: {msg}").into())
             }
             AdaptiveNetworkError::Gossip(msg) => {
-                P2PError::Internal(format!("Gossip error: {}", msg).into())
+                P2PError::Internal(format!("Gossip error: {msg}").into())
             }
             AdaptiveNetworkError::Other(msg) => P2PError::Internal(msg.into()),
         }
@@ -853,6 +858,7 @@ fn error_type_name(error: &P2PError) -> &'static str {
         P2PError::TimeError => "TimeError",
         P2PError::InvalidInput(_) => "InvalidInput",
         P2PError::WebRtcError(_) => "WebRTC",
+        P2PError::Trust(_) => "Trust",
     }
 }
 

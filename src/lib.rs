@@ -143,6 +143,7 @@ pub mod encrypted_key_storage;
 pub mod persistent_state;
 
 /// Adaptive P2P network implementation
+#[cfg(feature = "adaptive-ml")]
 pub mod adaptive;
 
 /// Configuration management system
@@ -153,9 +154,11 @@ pub mod control;
 pub mod health;
 
 /// Geographic-aware networking enhancements for P2P routing optimization
+#[cfg(feature = "geographic")]
 pub mod geographic_enhanced_network;
 
 /// Placement Loop & Storage Orchestration System
+#[cfg(feature = "placement")]
 pub mod placement;
 
 /// Auto-upgrade system for cross-platform binary updates
@@ -194,7 +197,12 @@ pub use monotonic_counter::{
     BatchUpdateRequest, BatchUpdateResult, CounterStats, MonotonicCounterSystem, PeerCounter,
     SequenceValidationResult,
 };
-pub use network::{ConnectionStatus, NodeBuilder, NodeConfig, P2PEvent, P2PNode, PeerInfo};
+pub use network::{
+    ConnectionStatus, NetworkSender, NodeBuilder, NodeConfig, P2PEvent, P2PNode, PeerInfo,
+};
+// Trust system exports for saorsa-node integration (requires adaptive-ml feature)
+#[cfg(feature = "adaptive-ml")]
+pub use adaptive::{EigenTrustEngine, NodeStatistics, NodeStatisticsUpdate, TrustProvider};
 pub use telemetry::{Metrics, StreamClass, record_lookup, record_timeout, telemetry};
 // Back-compat exports for tests
 pub use config::Config;
@@ -305,8 +313,9 @@ pub use quantum_crypto::types::{
     SessionState,
 };
 
-// Placement system exports
-pub use placement::{
+// Placement system exports (feature-gated)
+#[cfg(feature = "placement")]
+pub use crate::placement::{
     AuditSystem, DataPointer, DhtRecord, DiversityEnforcer, GeographicLocation, GroupBeacon,
     NetworkRegion, NodeAd, PlacementConfig, PlacementDecision, PlacementEngine, PlacementMetrics,
     PlacementOrchestrator, RegisterPointer, RepairSystem, StorageOrchestrator,

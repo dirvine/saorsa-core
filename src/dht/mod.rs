@@ -39,7 +39,10 @@ pub use replication_grace_period::{
 pub use node_failure_tracker::{DefaultNodeFailureTracker, DhtClient, NodeFailureTracker};
 
 // Re-export existing DHT components
-pub use core_engine::{DhtCoreEngine, DhtKey, NodeCapacity, NodeId as DhtNodeId, NodeInfo};
+pub use core_engine::{
+    DhtCoreEngine, DhtKey, DhtRequestWrapper, DhtResponseWrapper, NodeCapacity,
+    NodeId as DhtNodeId, NodeInfo,
+};
 
 // Legacy type aliases for backward compatibility
 pub type DHT = DhtCoreEngine;
@@ -163,6 +166,16 @@ pub mod routing_maintenance;
 
 /// Comprehensive metrics for security, DHT health, trust, and placement
 pub mod metrics;
+
+/// Trust-aware peer selection combining XOR distance with EigenTrust scores
+#[cfg(feature = "adaptive-ml")]
+pub mod trust_peer_selector;
+
+// Re-export trust peer selector types
+#[cfg(feature = "adaptive-ml")]
+pub use trust_peer_selector::{
+    TrustAwarePeerSelector, TrustSelectionConfig, adaptive_id_to_dht_node, dht_node_to_adaptive_id,
+};
 
 // Re-export routing maintenance types for convenience
 pub use routing_maintenance::{

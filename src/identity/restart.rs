@@ -68,7 +68,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use tokio::sync::RwLock;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
@@ -266,7 +266,7 @@ pub struct RestartManager {
 
 impl RestartManager {
     /// Create a new restart manager.
-    pub fn new(config: RestartConfig, identity: NodeIdentity) -> Result<Arc<Self>> {
+    pub async fn new(config: RestartConfig, identity: NodeIdentity) -> Result<Arc<Self>> {
         let node_id = identity.node_id().clone();
 
         let fitness_monitor =
@@ -290,7 +290,7 @@ impl RestartManager {
         });
 
         // Try to load persisted state
-        if let Err(e) = manager.load_state() {
+        if let Err(e) = manager.load_state().await {
             tracing::debug!("No persisted state to load: {}", e);
         }
 
@@ -298,9 +298,8 @@ impl RestartManager {
     }
 
     /// Get the current node ID.
-    #[must_use]
-    pub fn current_node_id(&self) -> NodeId {
-        self.current_identity.read().node_id().clone()
+    pub async fn current_node_id(&self) -> NodeId {
+        self.current_identity.read().await.node_id().clone()
     }
 
     /// Get the fitness monitor.
@@ -334,10 +333,10 @@ impl RestartManager {
     }
 
     /// Handle a network rejection.
-    pub fn handle_rejection(&self, rejection: RejectionInfo) -> RegenerationDecision {
+    pub async fn handle_rejection(&self, rejection: RejectionInfo) -> RegenerationDecision {
         // Record in persistent state
         {
-            let mut state = self.persistent_state.write();
+            let mut state = self.persistent_state.write().await;
             state.rejection_history.record(rejection.clone());
         }
 
@@ -348,7 +347,7 @@ impl RestartManager {
         if let Some(target) = &rejection.suggested_target {
             self.identity_targeter.set_target(Some(target.clone()));
             // Also update persistent state to ensure it survives restarts
-            self.persistent_state.write().last_target = Some(target.clone());
+            self.persistent_state.write().await.last_target = Some(target.clone());
         }
 
         // Emit event
@@ -371,7 +370,7 @@ impl RestartManager {
         if decision.should_proceed() {
             let reason =
                 crate::identity::regeneration::RegenerationReason::Rejection(rejection.reason);
-            if let Err(e) = self.regenerate(reason) {
+            if let Err(e) = self.regenerate(reason).await {
                 tracing::warn!("Automatic regeneration after rejection failed: {}", e);
             }
         }
@@ -382,11 +381,11 @@ impl RestartManager {
     /// Perform identity regeneration.
     ///
     /// This generates a new identity targeting better keyspace regions.
-    pub fn regenerate(&self, reason: RegenerationReason) -> Result<NodeIdentity> {
-        let old_node_id = self.current_node_id();
+    pub async fn regenerate(&self, reason: RegenerationReason) -> Result<NodeIdentity> {
+        let old_node_id = self.current_node_id().await;
 
         // Get target from persistent state
-        let target = self.persistent_state.read().last_target.clone();
+        let target = self.persistent_state.read().await.last_target.clone();
 
         // Emit regeneration triggered event
         let _ = self
@@ -413,7 +412,7 @@ impl RestartManager {
 
         // Update persistent state
         {
-            let mut state = self.persistent_state.write();
+            let mut state = self.persistent_state.write().await;
             state.total_regeneration_attempts += 1;
         }
 
@@ -425,7 +424,7 @@ impl RestartManager {
         });
 
         // Update current identity (move, not clone - NodeIdentity contains secret keys)
-        *self.current_identity.write() = new_identity;
+        *self.current_identity.write().await = new_identity;
 
         // Import the identity data to create a copy for the caller
         let return_identity = NodeIdentity::import(&identity_data)?;
@@ -434,11 +433,11 @@ impl RestartManager {
     }
 
     /// Record the result of a regeneration attempt.
-    pub fn record_regeneration_result(&self, new_node_id: &NodeId, succeeded: bool) {
+    pub async fn record_regeneration_result(&self, new_node_id: &NodeId, succeeded: bool) {
         self.regeneration_trigger
             .record_result(new_node_id.clone(), succeeded);
 
-        let mut state = self.persistent_state.write();
+        let mut state = self.persistent_state.write().await;
         if succeeded {
             state.successful_regenerations += 1;
             state.consecutive_failures = 0;
@@ -452,8 +451,8 @@ impl RestartManager {
     }
 
     /// Request a full restart with the current identity.
-    pub fn request_restart(&self, reason: impl Into<String>) -> Result<()> {
-        let new_node_id = self.current_node_id();
+    pub async fn request_restart(&self, reason: impl Into<String>) -> Result<()> {
+        let new_node_id = self.current_node_id().await;
 
         let _ = self.event_tx.send(IdentitySystemEvent::RestartRequested {
             reason: reason.into(),
@@ -461,7 +460,7 @@ impl RestartManager {
         });
 
         // Persist state before restart
-        self.save_state()?;
+        self.save_state().await?;
 
         Ok(())
     }
@@ -473,9 +472,9 @@ impl RestartManager {
     }
 
     /// Start the fitness monitoring background task.
-    pub fn start_monitoring(self: &Arc<Self>) -> JoinHandle<()> {
+    pub async fn start_monitoring(self: &Arc<Self>) -> JoinHandle<()> {
         let manager = Arc::clone(self);
-        *manager.monitoring_active.write() = true;
+        *manager.monitoring_active.write().await = true;
 
         let _ = manager
             .event_tx
@@ -485,10 +484,10 @@ impl RestartManager {
             let mut last_verdict = FitnessVerdict::Healthy;
             let interval = manager.config.fitness.evaluation_interval;
 
-            while *manager.monitoring_active.read() {
+            while *manager.monitoring_active.read().await {
                 tokio::time::sleep(interval).await;
 
-                if !*manager.monitoring_active.read() {
+                if !*manager.monitoring_active.read().await {
                     break;
                 }
 
@@ -510,7 +509,7 @@ impl RestartManager {
                     let decision = manager.check_regeneration();
                     if decision.should_proceed() {
                         let reason = RegenerationReason::FitnessCheck(metrics.verdict);
-                        if let Err(e) = manager.regenerate(reason) {
+                        if let Err(e) = manager.regenerate(reason).await {
                             tracing::warn!("Automatic regeneration failed: {}", e);
                         }
                     }
@@ -526,19 +525,18 @@ impl RestartManager {
     }
 
     /// Stop the monitoring task.
-    pub fn stop_monitoring(&self) {
-        *self.monitoring_active.write() = false;
+    pub async fn stop_monitoring(&self) {
+        *self.monitoring_active.write().await = false;
     }
 
     /// Check if monitoring is active.
-    #[must_use]
-    pub fn is_monitoring(&self) -> bool {
-        *self.monitoring_active.read()
+    pub async fn is_monitoring(&self) -> bool {
+        *self.monitoring_active.read().await
     }
 
     /// Save state to disk.
-    pub fn save_state(&self) -> Result<()> {
-        let state = self.persistent_state.read().clone();
+    pub async fn save_state(&self) -> Result<()> {
+        let state = self.persistent_state.read().await.clone();
 
         // Ensure parent directory exists
         if let Some(parent) = self.config.state_path.parent() {
@@ -569,7 +567,7 @@ impl RestartManager {
     }
 
     /// Load state from disk.
-    pub fn load_state(&self) -> Result<()> {
+    pub async fn load_state(&self) -> Result<()> {
         if !self.config.state_path.exists() {
             return Err(crate::P2PError::Identity(
                 crate::error::IdentityError::InvalidFormat("No state file exists".into()),
@@ -607,7 +605,7 @@ impl RestartManager {
             self.identity_targeter.set_target(Some(target.clone()));
         }
 
-        *self.persistent_state.write() = state;
+        *self.persistent_state.write().await = state;
 
         let _ = self.event_tx.send(IdentitySystemEvent::StateLoaded {
             path: self.config.state_path.clone(),
@@ -617,16 +615,15 @@ impl RestartManager {
     }
 
     /// Get a status summary.
-    #[must_use]
-    pub fn status_summary(&self) -> RestartManagerStatus {
+    pub async fn status_summary(&self) -> RestartManagerStatus {
         let metrics = self.get_fitness();
-        let state = self.persistent_state.read();
+        let state = self.persistent_state.read().await;
 
         RestartManagerStatus {
-            node_id: self.current_node_id(),
+            node_id: self.current_node_id().await,
             fitness_verdict: metrics.verdict,
             overall_fitness_score: metrics.overall_score(),
-            monitoring_active: self.is_monitoring(),
+            monitoring_active: self.is_monitoring().await,
             consecutive_failures: state.consecutive_failures,
             total_regeneration_attempts: state.total_regeneration_attempts,
             successful_regenerations: state.successful_regenerations,
@@ -638,10 +635,33 @@ impl RestartManager {
 
 impl Drop for RestartManager {
     fn drop(&mut self) {
-        if self.config.persist_on_shutdown
-            && let Err(e) = self.save_state()
-        {
-            tracing::warn!("Failed to persist state on shutdown: {}", e);
+        if self.config.persist_on_shutdown {
+            // Try to acquire the lock without blocking
+            if let Ok(state_guard) = self.persistent_state.try_write() {
+                let state = state_guard.clone();
+                drop(state_guard); // Release the lock before doing I/O
+
+                // Ensure parent directory exists
+                if let Some(parent) = self.config.state_path.parent()
+                    && let Err(e) = std::fs::create_dir_all(parent)
+                {
+                    tracing::warn!("Failed to create state directory on shutdown: {}", e);
+                    return;
+                }
+
+                match serde_json::to_string_pretty(&state) {
+                    Ok(json) => {
+                        if let Err(e) = std::fs::write(&self.config.state_path, json) {
+                            tracing::warn!("Failed to write state file on shutdown: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to serialize state on shutdown: {}", e);
+                    }
+                }
+            } else {
+                tracing::warn!("Could not acquire lock to save state on shutdown");
+            }
         }
     }
 }
@@ -767,14 +787,14 @@ impl RestartManagerBuilder {
     /// # Errors
     ///
     /// Returns an error if identity was not set.
-    pub fn build(self) -> Result<Arc<RestartManager>> {
+    pub async fn build(self) -> Result<Arc<RestartManager>> {
         let identity = self.identity.ok_or_else(|| {
             crate::P2PError::Identity(crate::error::IdentityError::InvalidFormat(
                 "Identity must be set before building".into(),
             ))
         })?;
 
-        RestartManager::new(self.config, identity)
+        RestartManager::new(self.config, identity).await
     }
 }
 
@@ -794,58 +814,58 @@ mod tests {
         NodeIdentity::generate().unwrap()
     }
 
-    #[test]
-    fn test_restart_manager_creation() {
+    #[tokio::test]
+    async fn test_restart_manager_creation() {
         let config = RestartConfig::default();
         let identity = test_identity();
 
-        let manager = RestartManager::new(config, identity);
+        let manager = RestartManager::new(config, identity).await;
         assert!(manager.is_ok());
 
         let manager = manager.unwrap();
-        assert!(!manager.is_monitoring());
+        assert!(!manager.is_monitoring().await);
     }
 
-    #[test]
-    fn test_get_fitness() {
+    #[tokio::test]
+    async fn test_get_fitness() {
         let config = RestartConfig::default();
         let identity = test_identity();
-        let manager = RestartManager::new(config, identity).unwrap();
+        let manager = RestartManager::new(config, identity).await.unwrap();
 
         let metrics = manager.get_fitness();
         assert_eq!(metrics.verdict, FitnessVerdict::Healthy);
     }
 
-    #[test]
-    fn test_handle_rejection() {
+    #[tokio::test]
+    async fn test_handle_rejection() {
         let config = RestartConfig::default();
         let identity = test_identity();
-        let manager = RestartManager::new(config, identity).unwrap();
+        let manager = RestartManager::new(config, identity).await.unwrap();
 
         let rejection =
             RejectionInfo::new(super::super::rejection::RejectionReason::KeyspaceSaturation);
 
-        let decision = manager.handle_rejection(rejection);
+        let decision = manager.handle_rejection(rejection).await;
         assert!(decision.should_proceed());
     }
 
-    #[test]
-    fn test_regenerate() {
+    #[tokio::test]
+    async fn test_regenerate() {
         let config = RestartConfig::default();
         let identity = test_identity();
         let old_node_id = identity.node_id().clone();
-        let manager = RestartManager::new(config, identity).unwrap();
+        let manager = RestartManager::new(config, identity).await.unwrap();
 
-        let new_identity = manager.regenerate(RegenerationReason::Manual);
+        let new_identity = manager.regenerate(RegenerationReason::Manual).await;
         assert!(new_identity.is_ok());
 
         // Node ID should have changed
-        let new_node_id = manager.current_node_id();
+        let new_node_id = manager.current_node_id().await;
         assert_ne!(old_node_id, new_node_id);
     }
 
-    #[test]
-    fn test_state_persistence() {
+    #[tokio::test]
+    async fn test_state_persistence() {
         let temp_dir = tempdir().unwrap();
         let state_path = temp_dir.path().join("test_state.json");
 
@@ -853,42 +873,42 @@ mod tests {
         config.state_path = state_path.clone();
 
         let identity = test_identity();
-        let manager = RestartManager::new(config, identity).unwrap();
+        let manager = RestartManager::new(config, identity).await.unwrap();
 
         // Save state
-        let result = manager.save_state();
+        let result = manager.save_state().await;
         assert!(result.is_ok());
         assert!(state_path.exists());
 
         // Load state
-        let result = manager.load_state();
+        let result = manager.load_state().await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_status_summary() {
+    #[tokio::test]
+    async fn test_status_summary() {
         let config = RestartConfig::default();
         let identity = test_identity();
-        let manager = RestartManager::new(config, identity).unwrap();
+        let manager = RestartManager::new(config, identity).await.unwrap();
 
-        let status = manager.status_summary();
+        let status = manager.status_summary().await;
         assert_eq!(status.fitness_verdict, FitnessVerdict::Healthy);
         assert!(!status.monitoring_active);
         assert!(status.is_healthy());
     }
 
-    #[test]
-    fn test_subscribe() {
+    #[tokio::test]
+    async fn test_subscribe() {
         let config = RestartConfig::default();
         let identity = test_identity();
-        let manager = RestartManager::new(config, identity).unwrap();
+        let manager = RestartManager::new(config, identity).await.unwrap();
 
         let _rx = manager.subscribe();
         // Just verify we can subscribe
     }
 
-    #[test]
-    fn test_builder() {
+    #[tokio::test]
+    async fn test_builder() {
         let temp_dir = tempdir().unwrap();
         let state_path = temp_dir.path().join("test_state.json");
 
@@ -897,14 +917,15 @@ mod tests {
             .state_path(state_path)
             .auto_start_monitoring(false)
             .event_channel_capacity(50)
-            .build();
+            .build()
+            .await;
 
         assert!(manager.is_ok());
     }
 
-    #[test]
-    fn test_builder_missing_identity() {
-        let manager = RestartManagerBuilder::new().build();
+    #[tokio::test]
+    async fn test_builder_missing_identity() {
+        let manager = RestartManagerBuilder::new().build().await;
         assert!(manager.is_err());
     }
 

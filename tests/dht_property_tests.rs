@@ -245,8 +245,13 @@ proptest! {
                 storage.store(record.clone()).await.unwrap();
             }
 
+            // Deduplicate by key, keeping the last-stored record (matches storage semantics)
+            let final_records: HashMap<Key, &Record> = records.iter()
+                .map(|r| (r.key, r))
+                .collect();
+
             // Verify expired records are not returned
-            for record in &records {
+            for record in final_records.values() {
                 let retrieved = storage.get(&record.key).await;
 
                 if record.is_expired() {

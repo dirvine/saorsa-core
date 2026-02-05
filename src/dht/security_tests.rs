@@ -4,7 +4,7 @@ use std::time::SystemTime;
 #[tokio::test]
 async fn test_ip_diversity_enforcement_ipv6() -> anyhow::Result<()> {
     // 1. Initialize Engine
-    let mut engine = DhtCoreEngine::new(NodeId::random())?;
+    let mut engine = DhtCoreEngine::new_for_tests(NodeId::random())?;
 
     // 2. Create Node 1 (IPv6)
     let node1 = NodeInfo {
@@ -28,9 +28,12 @@ async fn test_ip_diversity_enforcement_ipv6() -> anyhow::Result<()> {
     // 5. Add Node 2 - Should Fail (Default limit is 1 per /64)
     let result = engine.add_node(node2).await;
     assert!(result.is_err());
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "IP diversity limits exceeded"
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("IP diversity limits exceeded"),
+        "Error should indicate IP diversity limits"
     );
 
     Ok(())
@@ -39,7 +42,7 @@ async fn test_ip_diversity_enforcement_ipv6() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_ip_diversity_enforcement_ipv4() -> anyhow::Result<()> {
     // Verify IPv4 addresses are now checked (security fix - IPv4 no longer bypasses)
-    let mut engine = DhtCoreEngine::new(NodeId::random())?;
+    let mut engine = DhtCoreEngine::new_for_tests(NodeId::random())?;
 
     // First node should succeed
     let node1 = NodeInfo {
@@ -59,9 +62,12 @@ async fn test_ip_diversity_enforcement_ipv4() -> anyhow::Result<()> {
     };
     let result = engine.add_node(node2).await;
     assert!(result.is_err());
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "IP diversity limits exceeded"
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("IP diversity limits exceeded"),
+        "Error should indicate IP diversity limits"
     );
 
     Ok(())
@@ -70,7 +76,7 @@ async fn test_ip_diversity_enforcement_ipv4() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_ipv4_subnet_24_limit() -> anyhow::Result<()> {
     // Test /24 subnet limit (default: 3x per-IP limit)
-    let mut engine = DhtCoreEngine::new(NodeId::random())?;
+    let mut engine = DhtCoreEngine::new_for_tests(NodeId::random())?;
 
     // Add nodes on different IPs but same /24 subnet
     let node1 = NodeInfo {
@@ -106,9 +112,12 @@ async fn test_ipv4_subnet_24_limit() -> anyhow::Result<()> {
     };
     let result = engine.add_node(node4).await;
     assert!(result.is_err());
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "IP diversity limits exceeded"
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("IP diversity limits exceeded"),
+        "Error should indicate IP diversity limits"
     );
 
     Ok(())
@@ -117,7 +126,7 @@ async fn test_ipv4_subnet_24_limit() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_mixed_ipv4_ipv6_enforcement() -> anyhow::Result<()> {
     // Test that both IPv4 and IPv6 are enforced in the same engine
-    let mut engine = DhtCoreEngine::new(NodeId::random())?;
+    let mut engine = DhtCoreEngine::new_for_tests(NodeId::random())?;
 
     // Add IPv4 node
     let node_v4 = NodeInfo {
@@ -164,7 +173,7 @@ async fn test_mixed_ipv4_ipv6_enforcement() -> anyhow::Result<()> {
 async fn test_geographic_diversity_allows_different_regions() -> anyhow::Result<()> {
     // Test that nodes from different geographic regions can be added
     // This verifies the geographic diversity enforcement doesn't block legitimate diversity
-    let mut engine = DhtCoreEngine::new(NodeId::random())?;
+    let mut engine = DhtCoreEngine::new_for_tests(NodeId::random())?;
 
     // Add node from North America (192.x.x.x range)
     let node_na = NodeInfo {
@@ -210,7 +219,7 @@ async fn test_geographic_diversity_allows_different_regions() -> anyhow::Result<
 async fn test_geographic_diversity_counts_region_nodes() -> anyhow::Result<()> {
     // Test that multiple nodes from the same region are tracked correctly
     // We use different /24 subnets to avoid IP diversity rejection
-    let mut engine = DhtCoreEngine::new(NodeId::random())?;
+    let mut engine = DhtCoreEngine::new_for_tests(NodeId::random())?;
 
     // Add 3 nodes from Europe (different /24 subnets to avoid IP diversity limits)
     let node1 = NodeInfo {

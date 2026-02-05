@@ -10,6 +10,7 @@
 //! ```
 //! cargo test --test production_integration_test -- --ignored
 //! ```
+#![cfg(feature = "adaptive-ml")]
 
 use anyhow::Result;
 use std::collections::HashMap;

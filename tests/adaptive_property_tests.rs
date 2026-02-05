@@ -1,4 +1,6 @@
 //! Property-based tests for adaptive components aligned with current APIs
+#![cfg(feature = "adaptive-ml")]
+
 use proptest::prelude::*;
 use saorsa_core::adaptive::q_learning_cache::{CacheStatistics, StateVector};
 use saorsa_core::adaptive::{HyperbolicCoordinate, HyperbolicSpace};

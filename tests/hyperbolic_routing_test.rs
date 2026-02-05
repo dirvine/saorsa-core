@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+#![cfg(feature = "adaptive-ml")]
+
 use approx::assert_relative_eq;
 use proptest::prelude::*;
 use saorsa_core::adaptive::{
