@@ -196,21 +196,27 @@ impl KademliaRoutingTable {
 
         // Collect from target bucket first, then expand outwards
         for offset in 0..256 {
-            // Check buckets in order of likely closeness
-            for bucket_idx in [
-                target_bucket.saturating_add(offset).min(255),
-                target_bucket.saturating_sub(offset),
-            ] {
-                if bucket_idx < 256 {
-                    for node in self.buckets[bucket_idx].get_nodes() {
+            // Check bucket above target (or at target when offset == 0)
+            let bucket_above = target_bucket.saturating_add(offset).min(255);
+            for node in self.buckets[bucket_above].get_nodes() {
+                let distance = node.id.0.distance(key);
+                candidates.push((node.clone(), distance));
+            }
+
+            // Check bucket below target (skip when offset == 0 to avoid duplicate)
+            if offset > 0 {
+                let bucket_below = target_bucket.saturating_sub(offset);
+                // Only check if it's a different bucket (saturating_sub may equal target_bucket)
+                if bucket_below != bucket_above {
+                    for node in self.buckets[bucket_below].get_nodes() {
                         let distance = node.id.0.distance(key);
                         candidates.push((node.clone(), distance));
                     }
                 }
             }
 
-            // Early exit: if we have enough candidates and they're sorted, we can stop
-            if candidates.len() >= count * 2 && offset > 10 {
+            // Early exit: if we have enough candidates, we can stop expanding
+            if candidates.len() >= count * 2 {
                 break;
             }
         }
@@ -358,7 +364,9 @@ impl ReplicationManager {
     fn _required_replicas(&self) -> usize {
         match self._consistency_level {
             ConsistencyLevel::One => 1,
-            // Quorum requires majority: floor(n/2) + 1
+            // Quorum requires strict majority for Byzantine fault tolerance: floor(n/2) + 1
+            // For K=8, this gives 5 (tolerates 3 failures). This is intentionally stricter
+            // than simple majority (div_ceil which gives 4) to ensure BFT guarantees.
             ConsistencyLevel::Quorum => (self._replication_factor / 2) + 1,
             ConsistencyLevel::All => self._replication_factor,
         }
@@ -862,7 +870,19 @@ impl DhtCoreEngine {
     /// When trust-weighted selection is enabled, storage targets are selected
     /// by combining XOR distance with trust scores, using stricter requirements
     /// than query operations since data persistence depends on node reliability.
+    ///
+    /// # Errors
+    /// Returns an error if the value exceeds `MAX_DHT_VALUE_SIZE` (1 MB).
     pub async fn store(&mut self, key: &DhtKey, value: Vec<u8>) -> Result<StoreReceipt> {
+        // Security: Reject oversized values to prevent memory exhaustion
+        if value.len() > MAX_DHT_VALUE_SIZE {
+            return Err(anyhow::anyhow!(
+                "Value too large: {} bytes (max: {} bytes)",
+                value.len(),
+                MAX_DHT_VALUE_SIZE
+            ));
+        }
+
         // Find nodes to store at using trust-aware selection if enabled
         let target_nodes = self.select_storage_peers(key, K).await;
 
@@ -880,7 +900,7 @@ impl DhtCoreEngine {
         // Store locally if we're one of the selected nodes or if no nodes are available (test/single-node mode)
         if selected_nodes.contains(&self.node_id) || selected_nodes.is_empty() {
             let mut store = self.data_store.write().await;
-            // Avoid unnecessary clone: key is already borrowed, value is consumed by this branch
+            // Avoid unnecessary clone of value: key is cloned for ownership, value is consumed by this branch
             store.put(key.clone(), value);
             // Return early since we've consumed value
             return Ok(StoreReceipt {

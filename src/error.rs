@@ -741,6 +741,7 @@ impl From<tokio::time::error::Elapsed> for P2PError {
     }
 }
 
+#[cfg(feature = "adaptive-ml")]
 impl From<crate::adaptive::AdaptiveNetworkError> for P2PError {
     fn from(err: crate::adaptive::AdaptiveNetworkError) -> Self {
         use crate::adaptive::AdaptiveNetworkError;

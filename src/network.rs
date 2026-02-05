@@ -914,9 +914,14 @@ impl P2PNode {
             use std::collections::HashSet;
 
             // Convert bootstrap peers to NodeIds for pre-trusted set
+            // TODO: Bootstrap peer addresses are hashed to create placeholder NodeIds here.
+            // The actual peer IDs differ from these hashes. This is a temporary solution -
+            // the pre-trusted set will be updated with real peer IDs when actual connections
+            // are established. A proper fix requires passing real peer IDs from the connection
+            // layer, which needs architectural changes.
             let mut pre_trusted = HashSet::new();
             for bootstrap_peer in &config.bootstrap_peers_str {
-                // Hash the bootstrap peer address to create a NodeId
+                // Hash the bootstrap peer address to create a placeholder NodeId
                 let hash = blake3::hash(bootstrap_peer.as_bytes());
                 let mut node_id_bytes = [0u8; 32];
                 node_id_bytes.copy_from_slice(hash.as_bytes());
@@ -1319,14 +1324,11 @@ impl P2PNode {
         }
 
         // Also send to local subscribers (for local echo and testing)
-        let event = P2PEvent::Message {
+        self.send_event(P2PEvent::Message {
             topic: topic.to_string(),
             source: self.peer_id.clone(),
             data: data.to_vec(),
-        };
-        if let Err(e) = self.event_tx.send(event) {
-            tracing::trace!("Event broadcast has no receivers: {}", e);
-        }
+        });
 
         Ok(())
     }
@@ -1426,9 +1428,7 @@ impl P2PNode {
                         let peer_id =
                             crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
                         let remote_addr = NetworkAddress::from(remote_sock);
-                        if let Err(e) = event_tx.send(P2PEvent::PeerConnected(peer_id.clone())) {
-                            tracing::trace!("Event broadcast has no receivers: {}", e);
-                        }
+                        broadcast_event(&event_tx, P2PEvent::PeerConnected(peer_id.clone()));
                         register_new_peer(&peers, &peer_id, &remote_addr).await;
                         active_connections.write().await.insert(peer_id);
                     }
@@ -1488,11 +1488,7 @@ impl P2PNode {
                 }
 
                 match parse_protocol_message(&bytes, &transport_peer_id) {
-                    Some(event) => {
-                        if let Err(e) = event_tx.send(event) {
-                            tracing::trace!("Event broadcast has no receivers: {}", e);
-                        }
-                    }
+                    Some(event) => broadcast_event(&event_tx, event),
                     None => {
                         warn!("Failed to parse protocol message ({} bytes)", bytes.len());
                     }
@@ -1826,7 +1822,7 @@ impl P2PNode {
         }
 
         // Emit connection event
-        let _ = self.event_tx.send(P2PEvent::PeerConnected(peer_id.clone()));
+        self.send_event(P2PEvent::PeerConnected(peer_id.clone()));
 
         info!("Connected to peer: {}", peer_id);
         Ok(peer_id)
@@ -1997,10 +1993,20 @@ impl P2PNode {
 /// can pass it directly to `send_message()`. This eliminates a spoofing
 /// vector where a peer could claim an arbitrary identity via the payload.
 ///
-/// Maximum allowed clock skew for message timestamps (5 minutes)
+/// Maximum allowed clock skew for message timestamps (5 minutes).
+/// This is intentionally lenient for initial deployment to accommodate nodes with
+/// misconfigured clocks or high-latency network conditions. Can be tightened (e.g., to 60s)
+/// once the network stabilizes and node clock synchronization improves.
 const MAX_MESSAGE_AGE_SECS: u64 = 300;
 /// Maximum allowed future timestamp (30 seconds to account for clock drift)
 const MAX_FUTURE_SECS: u64 = 30;
+
+/// Helper to send an event via a broadcast sender, logging at trace level if no receivers.
+fn broadcast_event(tx: &broadcast::Sender<P2PEvent>, event: P2PEvent) {
+    if let Err(e) = tx.send(event) {
+        tracing::trace!("Event broadcast has no receivers: {e}");
+    }
+}
 
 fn parse_protocol_message(bytes: &[u8], source: &str) -> Option<P2PEvent> {
     let message: WireMessage = postcard::from_bytes(bytes).ok()?;
@@ -2057,6 +2063,13 @@ impl P2PNode {
     /// Backwards-compat event stream accessor for tests
     pub fn events(&self) -> broadcast::Receiver<P2PEvent> {
         self.subscribe_events()
+    }
+
+    /// Send an event to all subscribers, logging at trace level if no receivers are present.
+    fn send_event(&self, event: P2PEvent) {
+        if let Err(e) = self.event_tx.send(event) {
+            tracing::trace!("Event broadcast has no receivers: {e}");
+        }
     }
 
     /// Get node uptime
@@ -2171,13 +2184,11 @@ impl P2PNode {
                             }
 
                             // Broadcast connection event
-                            if let Err(e) = event_tx.send(P2PEvent::PeerConnected(peer_id_str)) {
-                                tracing::trace!("Event broadcast has no receivers: {}", e);
-                            }
+                            broadcast_event(&event_tx, P2PEvent::PeerConnected(peer_id_str));
                         }
                         ConnectionEvent::Lost { peer_id, reason } => {
                             let peer_id_str = ant_peer_id_to_string(&peer_id);
-                            debug!("Connection lost: peer={}, reason={}", peer_id_str, reason);
+                            debug!("Connection lost: peer={peer_id_str}, reason={reason}");
 
                             // Remove from active connections
                             active_connections.write().await.remove(&peer_id_str);
@@ -2189,13 +2200,11 @@ impl P2PNode {
                             }
 
                             // Broadcast disconnection event
-                            if let Err(e) = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str)) {
-                                tracing::trace!("Event broadcast has no receivers: {}", e);
-                            }
+                            broadcast_event(&event_tx, P2PEvent::PeerDisconnected(peer_id_str));
                         }
                         ConnectionEvent::Failed { peer_id, reason } => {
                             let peer_id_str = ant_peer_id_to_string(&peer_id);
-                            debug!("Connection failed: peer={}, reason={}", peer_id_str, reason);
+                            debug!("Connection failed: peer={peer_id_str}, reason={reason}");
 
                             // Remove from active connections
                             active_connections.write().await.remove(&peer_id_str);
@@ -2207,9 +2216,7 @@ impl P2PNode {
                             }
 
                             // Broadcast disconnection event
-                            if let Err(e) = event_tx.send(P2PEvent::PeerDisconnected(peer_id_str)) {
-                                tracing::trace!("Event broadcast has no receivers: {}", e);
-                            }
+                            broadcast_event(&event_tx, P2PEvent::PeerDisconnected(peer_id_str));
                         }
                     }
                 }
@@ -2391,9 +2398,7 @@ impl P2PNode {
             // Phase 3: Remove from active_connections and emit events
             for peer_id in &peers_to_mark_disconnected {
                 active_connections.write().await.remove(peer_id);
-                if let Err(e) = event_tx.send(P2PEvent::PeerDisconnected(peer_id.clone())) {
-                    tracing::trace!("Event broadcast has no receivers: {}", e);
-                }
+                broadcast_event(&event_tx, P2PEvent::PeerDisconnected(peer_id.clone()));
                 info!(peer_id = %peer_id, "Stale peer disconnected");
             }
 
