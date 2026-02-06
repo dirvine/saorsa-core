@@ -455,10 +455,6 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
     /// Connect to a peer by address
     pub async fn connect_to_peer(&self, peer_addr: SocketAddr) -> Result<PeerId> {
-        info!("CONNECT_DEBUG: Starting connection to {}", peer_addr);
-
-        info!("CONNECT_DEBUG: About to call dial_addr for {}", peer_addr);
-
         // Add timeout to prevent indefinite hanging during NAT traversal/QUIC handshake
         const DIAL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -476,35 +472,15 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         })?
         .map_err(|e| anyhow::anyhow!("Failed to connect to peer {}: {}", peer_addr, e))?;
 
-        info!(
-            "CONNECT_DEBUG: dial_addr completed successfully for {}",
-            peer_addr
-        );
-
         let peer_id = conn.peer();
-        info!(
-            "CONNECT_DEBUG: Got peer_id: {} for addr {}",
-            peer_id, peer_addr
-        );
 
         // Register the peer with geographic validation
-        info!(
-            "CONNECT_DEBUG: About to call add_peer for peer {} at {}",
-            peer_id, peer_addr
-        );
         self.add_peer(peer_id, peer_addr).await;
-        info!(
-            "CONNECT_DEBUG: add_peer completed for peer {} at {}",
-            peer_id, peer_addr
-        );
 
         // Note: ConnectionEvent is broadcast by event forwarder
         // to avoid duplicate events
 
-        info!(
-            "CONNECT_DEBUG: Connection fully established to peer {} at {}",
-            peer_id, peer_addr
-        );
+        info!("Connected to peer {} at {}", peer_id, peer_addr);
         Ok(peer_id)
     }
 
@@ -686,31 +662,14 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
     /// Internal helper to register a peer with geographic validation
     async fn add_peer(&self, peer_id: PeerId, addr: SocketAddr) {
-        info!(
-            "CONNECT_DEBUG: add_peer entry for peer {} at {}",
-            peer_id, addr
-        );
-
         // Perform geographic validation if configured
         if let Some(ref config) = self.geo_config {
-            info!(
-                "CONNECT_DEBUG: Starting geographic validation for peer {} at {}",
-                peer_id, addr
-            );
             match self.validate_geographic_diversity(&addr, config).await {
                 Ok(()) => {
-                    info!(
-                        "CONNECT_DEBUG: Geographic validation passed for peer {} at {}",
-                        peer_id, addr
-                    );
                 }
                 Err(err) => match config.enforcement_mode {
                     GeoEnforcementMode::Strict => {
                         tracing::warn!("REJECTED peer {} from {} - {}", peer_id, addr, err);
-                        info!(
-                            "CONNECT_DEBUG: Geographic validation REJECTED peer {} at {} (strict mode)",
-                            peer_id, addr
-                        );
                         return;
                     }
                     GeoEnforcementMode::LogOnly => {
@@ -720,64 +679,22 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
                             addr,
                             err
                         );
-                        info!(
-                            "CONNECT_DEBUG: Geographic validation would reject peer {} at {} (log-only mode)",
-                            peer_id, addr
-                        );
                     }
                 },
             }
-        } else {
-            info!(
-                "CONNECT_DEBUG: No geographic config, skipping validation for peer {} at {}",
-                peer_id, addr
-            );
         }
 
-        info!(
-            "CONNECT_DEBUG: About to acquire peers write lock for peer {} at {}",
-            peer_id, addr
-        );
         let mut peers = self.peers.write().await;
-        info!(
-            "CONNECT_DEBUG: Acquired peers write lock for peer {} at {}",
-            peer_id, addr
-        );
 
         if !peers.iter().any(|(p, _)| *p == peer_id) {
-            info!(
-                "CONNECT_DEBUG: Peer {} not in list, adding to peers",
-                peer_id
-            );
             peers.push((peer_id, addr));
 
             let region = self.get_region_for_ip(&addr.ip());
-            info!(
-                "CONNECT_DEBUG: About to acquire peer_regions write lock for peer {} at {} (region: {})",
-                peer_id, addr, region
-            );
             let mut regions = self.peer_regions.write().await;
-            info!(
-                "CONNECT_DEBUG: Acquired peer_regions write lock for peer {} at {}",
-                peer_id, addr
-            );
             *regions.entry(region).or_insert(0) += 1;
 
             tracing::debug!("Added peer {} from {}", peer_id, addr);
-            info!(
-                "CONNECT_DEBUG: Successfully added peer {} from {} to tracking",
-                peer_id, addr
-            );
-        } else {
-            info!(
-                "CONNECT_DEBUG: Peer {} already in peers list, skipping add",
-                peer_id
-            );
         }
-        info!(
-            "CONNECT_DEBUG: add_peer exit for peer {} at {}",
-            peer_id, addr
-        );
     }
 
     /// Validate geographic diversity before adding a peer
