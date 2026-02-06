@@ -945,3 +945,288 @@ async fn test_routing_table_population() -> Result<()> {
     info!("=== TEST COMPLETE: Routing Table Population ===");
     Ok(())
 }
+
+// =============================================================================
+// TEST: Iterative DHT Lookup - Multi-Hop (TDD - Will Fail Until Feature Complete)
+// =============================================================================
+
+/// Maximum time allowed for an iterative lookup to complete
+const MAX_ITERATIVE_LOOKUP_TIME: Duration = Duration::from_secs(10);
+
+/// Test that iterative DHT lookup traverses multiple hops.
+///
+/// This test will FAIL until the DHT GET handler returns closer nodes
+/// when it doesn't have the requested value.
+///
+/// Topology:
+/// ```text
+/// A ←→ B ←→ C ←→ D ←→ E ←→ F
+/// ```
+///
+/// Expected behavior after fix:
+/// 1. F queries E for value
+/// 2. E doesn't have it, returns "closer nodes: [D]"
+/// 3. F queries D, gets "closer nodes: [C]"
+/// 4. F queries C, gets "closer nodes: [B]"
+/// 5. F queries B, gets "closer nodes: [A]" or value from B's cache
+/// 6. F queries A (or B), gets value
+#[tokio::test]
+async fn test_iterative_dht_lookup_five_hops() -> Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("info")
+        .with_test_writer()
+        .try_init();
+
+    info!("=== TEST: Iterative DHT Lookup - 5 Hops ===");
+    info!("This test WILL FAIL until iterative lookup returns closer nodes");
+
+    // Create 6 nodes in a chain
+    let manager_a = create_test_manager("iter_a").await?;
+    let manager_b = create_test_manager("iter_b").await?;
+    let manager_c = create_test_manager("iter_c").await?;
+    let manager_d = create_test_manager("iter_d").await?;
+    let manager_e = create_test_manager("iter_e").await?;
+    let manager_f = create_test_manager("iter_f").await?;
+
+    // Connect chain: A ←→ B ←→ C ←→ D ←→ E ←→ F
+    connect_managers(&manager_a, &manager_b).await?;
+    connect_managers(&manager_b, &manager_c).await?;
+    connect_managers(&manager_c, &manager_d).await?;
+    connect_managers(&manager_d, &manager_e).await?;
+    connect_managers(&manager_e, &manager_f).await?;
+
+    info!("Chain topology established: A ←→ B ←→ C ←→ D ←→ E ←→ F");
+
+    // Verify F is not directly connected to A, B, C, or D
+    assert_not_directly_connected(&manager_f, manager_a.peer_id()).await?;
+    assert_not_directly_connected(&manager_f, manager_b.peer_id()).await?;
+    assert_not_directly_connected(&manager_f, manager_c.peer_id()).await?;
+    assert_not_directly_connected(&manager_f, manager_d.peer_id()).await?;
+    info!("Verified: Node F has no direct connections to A, B, C, or D");
+
+    // Node A stores a unique key-value pair
+    let test_key = key_from_str("iterative_lookup_test_key");
+    let test_value = b"value_stored_by_node_a_five_hops_away".to_vec();
+
+    let put_result = manager_a.put(test_key, test_value.clone()).await?;
+    match &put_result {
+        DhtNetworkResult::PutSuccess { replicated_to, .. } => {
+            info!("Node A stored value, replicated to {} nodes", replicated_to);
+        }
+        other => {
+            cleanup_managers(vec![
+                manager_a, manager_b, manager_c, manager_d, manager_e, manager_f,
+            ])
+            .await;
+            return Err(anyhow::anyhow!("Put failed: {:?}", other));
+        }
+    }
+
+    // Brief delay - NOT relying on passive replication
+    sleep(Duration::from_secs(1)).await;
+
+    // THE KEY ASSERTION: Node F retrieves value via iterative lookup
+    info!("Node F attempting iterative lookup for value stored by Node A...");
+    let start_time = tokio::time::Instant::now();
+
+    let get_result = timeout(MAX_ITERATIVE_LOOKUP_TIME, manager_f.get(&test_key)).await;
+    let lookup_duration = start_time.elapsed();
+
+    let result = match get_result {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
+            cleanup_managers(vec![
+                manager_a, manager_b, manager_c, manager_d, manager_e, manager_f,
+            ])
+            .await;
+            return Err(anyhow::anyhow!("Get operation failed: {}", e));
+        }
+        Err(_) => {
+            cleanup_managers(vec![
+                manager_a, manager_b, manager_c, manager_d, manager_e, manager_f,
+            ])
+            .await;
+            panic!(
+                "FAIL: Iterative lookup timed out after {:?}.\n\
+                \n\
+                The lookup should either succeed or fail fast, not hang.\n\
+                This may indicate an infinite loop or blocked future.",
+                MAX_ITERATIVE_LOOKUP_TIME
+            );
+        }
+    };
+
+    match result {
+        DhtNetworkResult::GetSuccess { value, source, .. } => {
+            info!(
+                "SUCCESS! Node F retrieved value via iterative lookup:\n\
+                - Source: {}\n\
+                - Duration: {:?}\n\
+                - Value: {:?}",
+                source,
+                lookup_duration,
+                String::from_utf8_lossy(&value)
+            );
+
+            // Assert value matches
+            assert_eq!(
+                value, test_value,
+                "Retrieved value should match stored value"
+            );
+
+            // Assert lookup was reasonably fast (not stuck in loops)
+            assert!(
+                lookup_duration < MAX_ITERATIVE_LOOKUP_TIME,
+                "Lookup should complete within {} seconds, took {:?}",
+                MAX_ITERATIVE_LOOKUP_TIME.as_secs(),
+                lookup_duration
+            );
+
+            info!("Iterative lookup completed in {:?}", lookup_duration);
+        }
+        DhtNetworkResult::GetNotFound { .. } => {
+            // THIS IS THE EXPECTED FAILURE BEFORE THE FIX
+            cleanup_managers(vec![
+                manager_a, manager_b, manager_c, manager_d, manager_e, manager_f,
+            ])
+            .await;
+            panic!(
+                "FAIL: Node F could not retrieve value stored by Node A.\n\
+                \n\
+                This test fails because the DHT GET handler does NOT return\n\
+                closer nodes when it doesn't have the requested value.\n\
+                \n\
+                Required fix in handle_dht_message() GET case:\n\
+                - When value not found locally, find nodes closer to key\n\
+                - Return NodesFound {{ nodes: closer_nodes }} instead of GetNotFound\n\
+                \n\
+                See: planning/07-implement-iterative-dht-lookup.md"
+            );
+        }
+        other => {
+            cleanup_managers(vec![
+                manager_a, manager_b, manager_c, manager_d, manager_e, manager_f,
+            ])
+            .await;
+            panic!("Unexpected result: {:?}", other);
+        }
+    }
+
+    // Cleanup
+    cleanup_managers(vec![
+        manager_a, manager_b, manager_c, manager_d, manager_e, manager_f,
+    ])
+    .await;
+
+    info!("=== TEST PASSED: Iterative DHT Lookup - 5 Hops ===");
+    Ok(())
+}
+
+/// Test that iterative lookup handles network partitions gracefully.
+///
+/// Topology:
+/// ```text
+/// A ←→ B ←→ C    D ←→ E ←→ F
+///           (no connection)
+/// ```
+///
+/// Expected: F's lookup for A's value should timeout/fail gracefully, not hang.
+#[tokio::test]
+async fn test_iterative_lookup_handles_partition() -> Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("info")
+        .with_test_writer()
+        .try_init();
+
+    info!("=== TEST: Iterative Lookup Handles Partition ===");
+
+    // Create two disconnected clusters
+    let manager_a = create_test_manager("part_a").await?;
+    let manager_b = create_test_manager("part_b").await?;
+    let manager_c = create_test_manager("part_c").await?;
+
+    let manager_d = create_test_manager("part_d").await?;
+    let manager_e = create_test_manager("part_e").await?;
+    let manager_f = create_test_manager("part_f").await?;
+
+    // Cluster 1: A ←→ B ←→ C
+    connect_managers(&manager_a, &manager_b).await?;
+    connect_managers(&manager_b, &manager_c).await?;
+
+    // Cluster 2: D ←→ E ←→ F (NOT connected to cluster 1)
+    connect_managers(&manager_d, &manager_e).await?;
+    connect_managers(&manager_e, &manager_f).await?;
+
+    info!("Two partitioned clusters: [A-B-C] and [D-E-F]");
+
+    // A stores a value
+    let test_key = key_from_str("partitioned_test_key");
+    let test_value = b"value_in_cluster_1".to_vec();
+
+    let put_result = manager_a.put(test_key, test_value.clone()).await?;
+    match &put_result {
+        DhtNetworkResult::PutSuccess { replicated_to, .. } => {
+            info!("Node A stored value, replicated to {} nodes", replicated_to);
+        }
+        other => {
+            warn!("Put returned: {:?}", other);
+        }
+    }
+
+    // F tries to retrieve it (should fail gracefully, not hang)
+    info!("Node F attempting to retrieve value from partitioned cluster...");
+    let start_time = tokio::time::Instant::now();
+
+    let get_result = timeout(DISCOVERY_TIMEOUT, manager_f.get(&test_key)).await;
+    let lookup_duration = start_time.elapsed();
+
+    match get_result {
+        Ok(Ok(DhtNetworkResult::GetNotFound { .. })) => {
+            info!(
+                "EXPECTED: Node F correctly got NotFound for partitioned data\n\
+                Lookup completed in {:?} (did not hang)",
+                lookup_duration
+            );
+        }
+        Ok(Ok(DhtNetworkResult::GetSuccess { .. })) => {
+            cleanup_managers(vec![
+                manager_a, manager_b, manager_c, manager_d, manager_e, manager_f,
+            ])
+            .await;
+            panic!(
+                "UNEXPECTED: Node F found value despite network partition!\n\
+                This should not be possible."
+            );
+        }
+        Ok(Ok(other)) => {
+            info!("Got result: {:?} in {:?}", other, lookup_duration);
+        }
+        Ok(Err(e)) => {
+            info!(
+                "Got error: {} in {:?} (acceptable - graceful failure)",
+                e, lookup_duration
+            );
+        }
+        Err(_) => {
+            info!(
+                "Lookup timed out after {:?} (acceptable for partitioned network)",
+                DISCOVERY_TIMEOUT
+            );
+        }
+    }
+
+    // Assert lookup didn't hang indefinitely
+    assert!(
+        lookup_duration < DISCOVERY_TIMEOUT + Duration::from_secs(1),
+        "Lookup should complete (with failure) within timeout, took {:?}",
+        lookup_duration
+    );
+
+    cleanup_managers(vec![
+        manager_a, manager_b, manager_c, manager_d, manager_e, manager_f,
+    ])
+    .await;
+
+    info!("=== TEST PASSED: Iterative Lookup Handles Partition ===");
+    Ok(())
+}

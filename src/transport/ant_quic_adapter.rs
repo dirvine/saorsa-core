@@ -68,6 +68,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::sleep;
+use tracing::info;
 
 // Import ant-quic types using the new LinkTransport API (0.14+)
 use ant_quic::nat_traversal_api::PeerId;
@@ -204,11 +205,29 @@ impl P2PNetworkNode<P2pLinkTransport> {
     /// P2pEndpoint's send() method which corresponds with recv() for proper
     /// bidirectional communication.
     pub async fn send_to_peer_optimized(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
-        self.transport
-            .endpoint()
-            .send(peer_id, data)
-            .await
-            .map_err(|e| anyhow::anyhow!("Send failed: {e}"))
+        let peer_id_short = hex::encode(&peer_id.0[..8]);
+        info!(
+            "[QUIC SEND] Calling endpoint().send() to {} ({} bytes)",
+            peer_id_short,
+            data.len()
+        );
+        let result = self.transport.endpoint().send(peer_id, data).await;
+        match &result {
+            Ok(()) => {
+                info!(
+                    "[QUIC SEND] endpoint().send() returned Ok to {} ({} bytes)",
+                    peer_id_short,
+                    data.len()
+                );
+            }
+            Err(e) => {
+                info!(
+                    "[QUIC SEND] endpoint().send() returned Err to {}: {}",
+                    peer_id_short, e
+                );
+            }
+        }
+        result.map_err(|e| anyhow::anyhow!("Send failed: {e}"))
     }
 
     /// Disconnect a specific peer, closing the underlying QUIC connection.
@@ -436,23 +455,56 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
     /// Connect to a peer by address
     pub async fn connect_to_peer(&self, peer_addr: SocketAddr) -> Result<PeerId> {
-        tracing::info!("Connecting to peer at {}", peer_addr);
+        info!("CONNECT_DEBUG: Starting connection to {}", peer_addr);
 
-        let conn = self
-            .transport
-            .dial_addr(peer_addr, SAORSA_DHT_PROTOCOL)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to connect to peer: {}", e))?;
+        info!("CONNECT_DEBUG: About to call dial_addr for {}", peer_addr);
+
+        // Add timeout to prevent indefinite hanging during NAT traversal/QUIC handshake
+        const DIAL_TIMEOUT: Duration = Duration::from_secs(30);
+
+        let conn = tokio::time::timeout(
+            DIAL_TIMEOUT,
+            self.transport.dial_addr(peer_addr, SAORSA_DHT_PROTOCOL),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "Connection timeout after {:?} to {}",
+                DIAL_TIMEOUT,
+                peer_addr
+            )
+        })?
+        .map_err(|e| anyhow::anyhow!("Failed to connect to peer {}: {}", peer_addr, e))?;
+
+        info!(
+            "CONNECT_DEBUG: dial_addr completed successfully for {}",
+            peer_addr
+        );
 
         let peer_id = conn.peer();
+        info!(
+            "CONNECT_DEBUG: Got peer_id: {} for addr {}",
+            peer_id, peer_addr
+        );
 
         // Register the peer with geographic validation
+        info!(
+            "CONNECT_DEBUG: About to call add_peer for peer {} at {}",
+            peer_id, peer_addr
+        );
         self.add_peer(peer_id, peer_addr).await;
+        info!(
+            "CONNECT_DEBUG: add_peer completed for peer {} at {}",
+            peer_id, peer_addr
+        );
 
         // Note: ConnectionEvent is broadcast by event forwarder
         // to avoid duplicate events
 
-        tracing::info!("Connected to peer {} at {}", peer_id, peer_addr);
+        info!(
+            "CONNECT_DEBUG: Connection fully established to peer {} at {}",
+            peer_id, peer_addr
+        );
         Ok(peer_id)
     }
 
@@ -634,13 +686,31 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
     /// Internal helper to register a peer with geographic validation
     async fn add_peer(&self, peer_id: PeerId, addr: SocketAddr) {
+        info!(
+            "CONNECT_DEBUG: add_peer entry for peer {} at {}",
+            peer_id, addr
+        );
+
         // Perform geographic validation if configured
         if let Some(ref config) = self.geo_config {
+            info!(
+                "CONNECT_DEBUG: Starting geographic validation for peer {} at {}",
+                peer_id, addr
+            );
             match self.validate_geographic_diversity(&addr, config).await {
-                Ok(()) => {}
+                Ok(()) => {
+                    info!(
+                        "CONNECT_DEBUG: Geographic validation passed for peer {} at {}",
+                        peer_id, addr
+                    );
+                }
                 Err(err) => match config.enforcement_mode {
                     GeoEnforcementMode::Strict => {
                         tracing::warn!("REJECTED peer {} from {} - {}", peer_id, addr, err);
+                        info!(
+                            "CONNECT_DEBUG: Geographic validation REJECTED peer {} at {} (strict mode)",
+                            peer_id, addr
+                        );
                         return;
                     }
                     GeoEnforcementMode::LogOnly => {
@@ -650,21 +720,64 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
                             addr,
                             err
                         );
+                        info!(
+                            "CONNECT_DEBUG: Geographic validation would reject peer {} at {} (log-only mode)",
+                            peer_id, addr
+                        );
                     }
                 },
             }
+        } else {
+            info!(
+                "CONNECT_DEBUG: No geographic config, skipping validation for peer {} at {}",
+                peer_id, addr
+            );
         }
 
+        info!(
+            "CONNECT_DEBUG: About to acquire peers write lock for peer {} at {}",
+            peer_id, addr
+        );
         let mut peers = self.peers.write().await;
+        info!(
+            "CONNECT_DEBUG: Acquired peers write lock for peer {} at {}",
+            peer_id, addr
+        );
+
         if !peers.iter().any(|(p, _)| *p == peer_id) {
+            info!(
+                "CONNECT_DEBUG: Peer {} not in list, adding to peers",
+                peer_id
+            );
             peers.push((peer_id, addr));
 
             let region = self.get_region_for_ip(&addr.ip());
+            info!(
+                "CONNECT_DEBUG: About to acquire peer_regions write lock for peer {} at {} (region: {})",
+                peer_id, addr, region
+            );
             let mut regions = self.peer_regions.write().await;
+            info!(
+                "CONNECT_DEBUG: Acquired peer_regions write lock for peer {} at {}",
+                peer_id, addr
+            );
             *regions.entry(region).or_insert(0) += 1;
 
             tracing::debug!("Added peer {} from {}", peer_id, addr);
+            info!(
+                "CONNECT_DEBUG: Successfully added peer {} from {} to tracking",
+                peer_id, addr
+            );
+        } else {
+            info!(
+                "CONNECT_DEBUG: Peer {} already in peers list, skipping add",
+                peer_id
+            );
         }
+        info!(
+            "CONNECT_DEBUG: add_peer exit for peer {} at {}",
+            peer_id, addr
+        );
     }
 
     /// Validate geographic diversity before adding a peer
@@ -919,15 +1032,46 @@ impl DualStackNetworkNode<P2pLinkTransport> {
     /// Uses P2pEndpoint::send() which corresponds with recv() for proper
     /// bidirectional communication. Tries IPv6 first, then IPv4.
     pub async fn send_to_peer_optimized(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
-        if let Some(v6) = &self.v6
-            && v6.send_to_peer_optimized(peer_id, data).await.is_ok()
-        {
-            return Ok(());
+        let peer_id_short = hex::encode(&peer_id.0[..8]);
+        if let Some(v6) = &self.v6 {
+            info!(
+                "[DUAL SEND] Attempting IPv6 send to {} ({} bytes)",
+                peer_id_short,
+                data.len()
+            );
+            match v6.send_to_peer_optimized(peer_id, data).await {
+                Ok(()) => {
+                    info!(
+                        "[DUAL SEND] IPv6 send SUCCESS to {} ({} bytes)",
+                        peer_id_short,
+                        data.len()
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    info!("[DUAL SEND] IPv6 send FAILED to {}: {}", peer_id_short, e);
+                }
+            }
         }
-        if let Some(v4) = &self.v4
-            && v4.send_to_peer_optimized(peer_id, data).await.is_ok()
-        {
-            return Ok(());
+        if let Some(v4) = &self.v4 {
+            info!(
+                "[DUAL SEND] Attempting IPv4 send to {} ({} bytes)",
+                peer_id_short,
+                data.len()
+            );
+            match v4.send_to_peer_optimized(peer_id, data).await {
+                Ok(()) => {
+                    info!(
+                        "[DUAL SEND] IPv4 send SUCCESS to {} ({} bytes)",
+                        peer_id_short,
+                        data.len()
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    info!("[DUAL SEND] IPv4 send FAILED to {}: {}", peer_id_short, e);
+                }
+            }
         }
         Err(anyhow::anyhow!(
             "send_to_peer_optimized failed on both stacks"

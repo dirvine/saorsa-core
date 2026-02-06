@@ -1723,34 +1723,53 @@ impl P2PNode {
 
     /// Connect to a peer
     pub async fn connect_peer(&self, address: &str) -> Result<PeerId> {
-        info!("Connecting to peer at: {}", address);
+        info!("CONNECT_DEBUG: connect_peer entry for address: {}", address);
 
         // Check production limits if resource manager is enabled
+        info!("CONNECT_DEBUG: Checking resource manager for {}", address);
         let _connection_guard = if let Some(ref resource_manager) = self.resource_manager {
+            info!(
+                "CONNECT_DEBUG: Acquiring connection guard from resource manager for {}",
+                address
+            );
             Some(resource_manager.acquire_connection().await?)
         } else {
+            info!(
+                "CONNECT_DEBUG: No resource manager, skipping guard for {}",
+                address
+            );
             None
         };
+        info!(
+            "CONNECT_DEBUG: Resource manager check complete for {}",
+            address
+        );
 
         // Parse the address to SocketAddr format
+        info!("CONNECT_DEBUG: Parsing address: {}", address);
         let socket_addr: std::net::SocketAddr = address.parse().map_err(|e| {
             P2PError::Network(crate::error::NetworkError::InvalidAddress(
                 format!("{}: {}", address, e).into(),
             ))
         })?;
+        info!("CONNECT_DEBUG: Parsed socket_addr: {}", socket_addr);
 
         // Normalize wildcard addresses to loopback for local connections
         // This converts [::]:port → ::1:port and 0.0.0.0:port → 127.0.0.1:port
         let normalized_addr = normalize_wildcard_to_loopback(socket_addr);
         if normalized_addr != socket_addr {
             info!(
-                "Normalized wildcard address {} to loopback {}",
+                "CONNECT_DEBUG: Normalized wildcard address {} to loopback {}",
                 socket_addr, normalized_addr
             );
         }
 
         // Establish a real connection via dual-stack Happy Eyeballs, but cap the wait
         let addr_list = vec![normalized_addr];
+        info!(
+            "CONNECT_DEBUG: About to call connect_happy_eyeballs with timeout {:?} for {}",
+            self.config.connection_timeout, normalized_addr
+        );
         let peer_id = match tokio::time::timeout(
             self.config.connection_timeout,
             self.dual_node.connect_happy_eyeballs(&addr_list),
@@ -1759,7 +1778,10 @@ impl P2PNode {
         {
             Ok(Ok(peer)) => {
                 let connected_peer_id = ant_peer_id_to_string(&peer);
-                info!("Successfully connected to peer: {}", connected_peer_id);
+                info!(
+                    "CONNECT_DEBUG: connect_happy_eyeballs succeeded, got peer_id: {}",
+                    connected_peer_id
+                );
 
                 // Prevent self-connections by checking if remote peer_id matches our own
                 if connected_peer_id == self.peer_id {
@@ -1780,7 +1802,10 @@ impl P2PNode {
                 connected_peer_id
             }
             Ok(Err(e)) => {
-                warn!("Failed to connect to peer at {}: {}", address, e);
+                warn!(
+                    "CONNECT_DEBUG: connect_happy_eyeballs failed for {}: {}",
+                    address, e
+                );
                 return Err(P2PError::Transport(
                     crate::error::TransportError::ConnectionFailed {
                         addr: normalized_addr,
@@ -1790,14 +1815,19 @@ impl P2PNode {
             }
             Err(_) => {
                 warn!(
-                    "Timed out connecting to peer at {} after {:?}",
+                    "CONNECT_DEBUG: connect_happy_eyeballs TIMED OUT for {} after {:?}",
                     address, self.config.connection_timeout
                 );
                 return Err(P2PError::Timeout(self.config.connection_timeout));
             }
         };
+        info!(
+            "CONNECT_DEBUG: Connection established, peer_id: {}",
+            peer_id
+        );
 
         // Create peer info with connection details
+        info!("CONNECT_DEBUG: Creating peer_info for {}", peer_id);
         let peer_info = PeerInfo {
             peer_id: peer_id.clone(),
             addresses: vec![address.to_string()],
@@ -1809,19 +1839,34 @@ impl P2PNode {
         };
 
         // Store peer information
+        info!(
+            "CONNECT_DEBUG: About to acquire peers write lock to store peer_info for {}",
+            peer_id
+        );
         self.peers.write().await.insert(peer_id.clone(), peer_info);
+        info!("CONNECT_DEBUG: Stored peer_info for {}", peer_id);
 
         // Add to active connections tracking
         // This is critical for is_connection_active() to work correctly
+        info!(
+            "CONNECT_DEBUG: About to acquire active_connections write lock for {}",
+            peer_id
+        );
         self.active_connections
             .write()
             .await
             .insert(peer_id.clone());
+        info!("CONNECT_DEBUG: Added {} to active_connections", peer_id);
 
         // Record bandwidth usage if resource manager is enabled
         if let Some(ref resource_manager) = self.resource_manager {
+            info!("CONNECT_DEBUG: Recording bandwidth for {}", peer_id);
             resource_manager.record_bandwidth(0, 0); // Placeholder for handshake data
         }
+        info!(
+            "CONNECT_DEBUG: connect_peer exit, returning peer_id: {}",
+            peer_id
+        );
 
         // Emit connection event
         self.send_event(P2PEvent::PeerConnected(peer_id.clone()));
@@ -2718,11 +2763,30 @@ impl P2PNode {
         let mut successful_connections = 0;
         let mut connected_peer_ids: Vec<PeerId> = Vec::new();
 
-        for contact in bootstrap_contacts {
-            for addr in &contact.addresses {
+        info!(
+            "CONNECT_DEBUG: Starting bootstrap connection loop with {} contacts",
+            bootstrap_contacts.len()
+        );
+        for (contact_idx, contact) in bootstrap_contacts.iter().enumerate() {
+            info!(
+                "CONNECT_DEBUG: Processing contact {}/{} with {} addresses",
+                contact_idx + 1,
+                bootstrap_contacts.len(),
+                contact.addresses.len()
+            );
+            for (addr_idx, addr) in contact.addresses.iter().enumerate() {
+                info!(
+                    "CONNECT_DEBUG: Attempting connection {}/{} to bootstrap peer at {}",
+                    addr_idx + 1,
+                    contact.addresses.len(),
+                    addr
+                );
                 match self.connect_peer(&addr.to_string()).await {
                     Ok(peer_id) => {
-                        info!("Connected to bootstrap peer: {} ({})", peer_id, addr);
+                        info!(
+                            "CONNECT_DEBUG: Successfully connected to bootstrap peer: {} ({})",
+                            peer_id, addr
+                        );
                         successful_connections += 1;
                         connected_peer_ids.push(peer_id.clone());
 
