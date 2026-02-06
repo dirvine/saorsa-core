@@ -192,9 +192,18 @@ async fn test_direct_connection_address_propagation() -> Result<()> {
     let peers_from_b = manager_b.get_connected_peers().await;
     info!("Node B sees {} connected peers", peers_from_b.len());
 
+    // Get Node A's transport peer ID (cryptographic ID used on the wire)
+    let transport_peer_id_a = manager_a
+        .transport_peer_id()
+        .ok_or_else(|| anyhow::anyhow!("Node A has no transport peer ID"))?;
+    info!(
+        "Looking for Node A's transport_peer_id: {}",
+        transport_peer_id_a
+    );
+
     let peer_a_in_b = peers_from_b
         .iter()
-        .find(|p| p.peer_id == *manager_a.peer_id());
+        .find(|p| p.peer_id == transport_peer_id_a);
 
     match peer_a_in_b {
         Some(peer_info) => {

@@ -2362,9 +2362,17 @@ impl DhtNetworkManager {
         0
     }
 
-    /// Get this node's peer ID
+    /// Get this node's peer ID (the config name, e.g. "my_node")
     pub fn peer_id(&self) -> &PeerId {
         &self.config.local_peer_id
+    }
+
+    /// Get this node's transport-level peer ID (cryptographic hex ID).
+    ///
+    /// This is the ID used in P2P communication and stored in `dht_peers`.
+    /// It differs from `peer_id()` which returns the human-readable config name.
+    pub fn transport_peer_id(&self) -> Option<String> {
+        self.node.transport_peer_id()
     }
 
     /// Get the local listen address of this node's P2P network
