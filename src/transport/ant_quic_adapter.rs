@@ -76,6 +76,7 @@ use ant_quic::{LinkConn, LinkEvent, LinkTransport, P2pConfig, P2pLinkTransport, 
 // Import saorsa-transport types for SharedTransport integration
 use ant_quic::SharedTransport;
 use ant_quic::link_transport::StreamType;
+use futures::StreamExt;
 
 /// Protocol identifier for saorsa DHT overlay
 ///
@@ -455,31 +456,32 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         Ok(peer_id)
     }
 
-    /// Accept incoming connections (waits for the next connection)
+    /// Try to accept one incoming connection.
+    ///
+    /// Returns `Some(...)` on success, `None` when the endpoint has shut
+    /// down. A `None` return is terminal — the caller should exit its
+    /// accept loop.
     ///
     /// **NOTE**: Protocol-based filtering is not yet implemented in ant-quic's `accept()` method.
     /// This method accepts connections for ANY protocol, not just `SAORSA_DHT_PROTOCOL`.
     /// Applications must validate that incoming connections are using the expected protocol.
-    pub async fn accept_connection(&self) -> Result<(PeerId, SocketAddr)> {
+    pub async fn accept_connection(&self) -> Option<(PeerId, SocketAddr)> {
         let mut incoming = self.transport.accept(SAORSA_DHT_PROTOCOL);
-
-        use futures::StreamExt;
-        if let Some(conn_result) = incoming.next().await {
-            let conn = conn_result.map_err(|e| anyhow::anyhow!("Failed to accept: {}", e))?;
-            let peer_id = conn.peer();
-            let addr = conn.remote_addr();
-
-            // Register the peer with geographic validation
-            self.add_peer(peer_id, addr).await;
-
-            // Note: ConnectionEvent is broadcast by event forwarder
-            // to avoid duplicate events
-
-            tracing::info!("Accepted connection from peer {} at {}", peer_id, addr);
-            Ok((peer_id, addr))
-        } else {
-            Err(anyhow::anyhow!("Accept stream closed"))
+        while let Some(conn_result) = incoming.next().await {
+            match conn_result {
+                Ok(conn) => {
+                    let peer_id = conn.peer();
+                    let addr = conn.remote_addr();
+                    self.add_peer(peer_id, addr).await;
+                    tracing::info!("Accepted connection from peer {} at {}", peer_id, addr);
+                    return Some((peer_id, addr));
+                }
+                Err(e) => {
+                    tracing::debug!("Accept stream error: {}", e);
+                }
+            }
         }
+        None
     }
 
     /// Static helper for region lookup (used in spawned tasks)
@@ -1070,18 +1072,20 @@ impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
         Ok(out)
     }
 
-    /// Accept the next incoming connection from either stack
-    pub async fn accept_any(&self) -> Result<(PeerId, SocketAddr)> {
+    /// Accept the next incoming connection from either stack.
+    ///
+    /// Returns `None` when shutdown is signalled or no stacks are available.
+    pub async fn accept_any(&self) -> Option<(PeerId, SocketAddr)> {
         match (&self.v6, &self.v4) {
             (Some(v6), Some(v4)) => {
                 tokio::select! {
-                    res6 = v6.accept_connection() => res6,
-                    res4 = v4.accept_connection() => res4,
+                    res = v6.accept_connection() => res,
+                    res = v4.accept_connection() => res,
                 }
             }
             (Some(v6), None) => v6.accept_connection().await,
             (None, Some(v4)) => v4.accept_connection().await,
-            (None, None) => Err(anyhow::anyhow!("no listening nodes available")),
+            (None, None) => None,
         }
     }
 

@@ -1415,35 +1415,28 @@ impl P2PNode {
         let active_connections = self.active_connections.clone();
         let rate_limiter = self.rate_limiter.clone();
         let dual = self.dual_node.clone();
-        let shutdown = Arc::clone(&self.shutdown);
         let handle = tokio::spawn(async move {
             loop {
-                if shutdown.load(Ordering::Relaxed) {
+                let Some((ant_peer_id, remote_sock)) = dual.accept_any().await else {
+                    // Transport shut down — exit the accept loop.
                     break;
-                }
-                match dual.accept_any().await {
-                    Ok((ant_peer_id, remote_sock)) => {
-                        // Enforce rate limiting
-                        if let Err(e) = rate_limiter.check_ip(&remote_sock.ip()) {
-                            warn!(
-                                "Rate-limited incoming connection from {}: {}",
-                                remote_sock, e
-                            );
-                            continue;
-                        }
+                };
 
-                        let peer_id =
-                            crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
-                        let remote_addr = NetworkAddress::from(remote_sock);
-                        broadcast_event(&event_tx, P2PEvent::PeerConnected(peer_id.clone()));
-                        register_new_peer(&peers, &peer_id, &remote_addr).await;
-                        active_connections.write().await.insert(peer_id);
-                    }
-                    Err(e) => {
-                        warn!("Accept failed: {}", e);
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    }
+                // Enforce rate limiting
+                if let Err(e) = rate_limiter.check_ip(&remote_sock.ip()) {
+                    warn!(
+                        "Rate-limited incoming connection from {}: {}",
+                        remote_sock, e
+                    );
+                    continue;
                 }
+
+                let peer_id =
+                    crate::transport::ant_quic_adapter::ant_peer_id_to_string(&ant_peer_id);
+                let remote_addr = NetworkAddress::from(remote_sock);
+                broadcast_event(&event_tx, P2PEvent::PeerConnected(peer_id.clone()));
+                register_new_peer(&peers, &peer_id, &remote_addr).await;
+                active_connections.write().await.insert(peer_id);
             }
         });
         *self.listener_handle.write().await = Some(handle);
@@ -1540,6 +1533,8 @@ impl P2PNode {
 
         // Signal all background tasks to stop
         self.shutdown.store(true, Ordering::Relaxed);
+        // signal_shutdown() removed: shutdown is fully handled by
+        // the CancellationToken via shutdown_endpoints() below.
 
         // Set running state to false
         *self.running.write().await = false;
