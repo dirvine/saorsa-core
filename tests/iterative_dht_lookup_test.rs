@@ -698,7 +698,7 @@ async fn test_iterative_lookup_ring_topology() -> Result<()> {
         let manager_d = create_test_manager("ring_d").await?;
         let manager_e = create_test_manager("ring_e").await?;
 
-        // Form ring: A ← B ← C ← D ← E ← A
+        // Form ring: A ←→ B ←→ C ←→ D ←→ E ←→ A
         connect_managers(&manager_a, &manager_b).await?;
         connect_managers(&manager_b, &manager_c).await?;
         connect_managers(&manager_c, &manager_d).await?;
