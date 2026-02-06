@@ -1259,9 +1259,12 @@ impl DhtNetworkManager {
                             {
                                 continue;
                             }
+                            // A node is "dominated" if it is not closer than any of the current best nodes.
                             let dominated = best_nodes.iter().any(|best| {
-                                Self::compare_node_distance(&node, best, key)
-                                    != std::cmp::Ordering::Less
+                                matches!(
+                                    Self::compare_node_distance(&node, best, key),
+                                    std::cmp::Ordering::Equal | std::cmp::Ordering::Greater
+                                )
                             });
                             if !dominated || best_nodes.len() < count {
                                 if candidates.len() >= MAX_CANDIDATE_NODES {
