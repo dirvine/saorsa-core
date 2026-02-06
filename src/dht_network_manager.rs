@@ -37,6 +37,10 @@ use uuid::Uuid;
 /// Minimum concurrent operations for semaphore backpressure
 const MIN_CONCURRENT_OPERATIONS: usize = 10;
 
+/// Timeout for opportunistic connections made during iterative lookup.
+/// Needs to be short so failed hops don't stall lookups.
+const ITERATIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Maximum candidate nodes queue size to prevent memory exhaustion attacks
 /// This bounds the candidate queue in iterative lookup to prevent unbounded growth
 const MAX_CANDIDATE_NODES: usize = 200;
@@ -811,31 +815,7 @@ impl DhtNetworkManager {
                     let address = node.address.clone();
                     let op = DhtNetworkOperation::FindValue { key: *key };
                     async move {
-                        // Try to connect to the node first if we have an address
-                        // This is needed for nodes returned by remote peers that we're not yet connected to
-                        // IMPORTANT: Only connect if not already connected to avoid disrupting existing connections
-                        let already_connected = self.node.is_peer_connected(&peer_id).await;
-                        if already_connected {
-                            debug!("Node {peer_id} already connected, skipping connect_peer");
-                        } else if address.is_empty() {
-                            debug!("Node {peer_id} has empty address, cannot connect");
-                        } else {
-                            // Parse the socket address from the full address string
-                            // Address format may be "ip:port" or "ip:port (four-word-name)"
-                            // Strip human-readable suffix like " (raccoon-accurate-a-kenneth)"
-                            let socket_addr = address
-                                .split(" (")
-                                .next()
-                                .unwrap_or(address.as_str());
-                            debug!("Attempting to connect to {peer_id} at {socket_addr}");
-                            if let Err(e) = self.node.connect_peer(socket_addr).await {
-                                debug!(
-                                    "Could not connect to {peer_id} at {socket_addr}: {e}, will try direct send"
-                                );
-                            } else {
-                                debug!("Successfully connected to {peer_id} at {socket_addr}");
-                            }
-                        }
+                        self.dial_candidate(&peer_id, &address).await;
                         (peer_id.clone(), self.send_dht_request(&peer_id, op).await)
                     }
                 })
@@ -890,7 +870,8 @@ impl DhtNetworkManager {
                                 ))
                                 .collect::<Vec<_>>()
                         );
-                        for node in nodes {
+                        for mut node in nodes {
+                            Self::ensure_cached_dht_key(&mut node);
                             if !queried_nodes.contains(&node.peer_id) {
                                 // SEC-003: Enforce queue bounds check before every insertion.
                                 // Single-threaded async guarantees atomic check-and-insert per iteration.
@@ -946,6 +927,11 @@ impl DhtNetworkManager {
             queried_nodes.len()
         );
         Ok(DhtNetworkResult::GetNotFound { key: *key })
+    }
+
+    /// Backwards-compatible API that performs a full iterative lookup.
+    pub async fn find_closest_nodes(&self, key: &Key, count: usize) -> Result<Vec<DHTNode>> {
+        self.find_closest_nodes_network(key, count).await
     }
 
     /// Find nodes closest to a key using iterative network lookup
@@ -1127,6 +1113,7 @@ impl DhtNetworkManager {
                             address: node.address,
                             distance: None,
                             reliability: node.capacity.reliability_score,
+                            cached_dht_key: Some(DhtKey::from_bytes(*node.id.as_bytes())),
                         });
                     }
                 }
@@ -1152,6 +1139,7 @@ impl DhtNetworkManager {
                     address,
                     distance: Some(peer_info.dht_key.to_vec()),
                     reliability: peer_info.reliability_score,
+                    cached_dht_key: Some(DhtKey::from_bytes(peer_info.dht_key)),
                 });
             }
         }
@@ -1232,10 +1220,7 @@ impl DhtNetworkManager {
                     let address = node.address.clone();
                     let op = DhtNetworkOperation::FindNode { key: *key };
                     async move {
-                        // Connect if needed
-                        if !self.node.is_peer_connected(&peer_id).await && !address.is_empty() {
-                            let _ = self.node.connect_peer(&address).await;
-                        }
+                        self.dial_candidate(&peer_id, &address).await;
                         (peer_id.clone(), self.send_dht_request(&peer_id, op).await)
                     }
                 })
@@ -1248,7 +1233,8 @@ impl DhtNetworkManager {
                 queried_nodes.insert(peer_id.clone());
 
                 if let Ok(DhtNetworkResult::NodesFound { nodes, .. }) = result {
-                    for node in nodes {
+                    for mut node in nodes {
+                        Self::ensure_cached_dht_key(&mut node);
                         // Skip already queried nodes
                         if queried_nodes.contains(&node.peer_id) {
                             continue;
@@ -1309,10 +1295,16 @@ impl DhtNetworkManager {
     /// This prevents malformed peer IDs from being incorrectly treated as close to the target.
     fn compare_node_distance(a: &DHTNode, b: &DHTNode, key: &Key) -> std::cmp::Ordering {
         // Use cached keys if available, fallback to parsing if not
-        let a_key = a.cached_dht_key.as_ref().or_else(|| Self::parse_peer_id_to_key(&a.peer_id).as_ref());
-        let b_key = b.cached_dht_key.as_ref().or_else(|| Self::parse_peer_id_to_key(&b.peer_id).as_ref());
+        let a_key_owned = a
+            .cached_dht_key
+            .clone()
+            .or_else(|| Self::parse_peer_id_to_key(&a.peer_id));
+        let b_key_owned = b
+            .cached_dht_key
+            .clone()
+            .or_else(|| Self::parse_peer_id_to_key(&b.peer_id));
 
-        match (a_key, b_key) {
+        match (a_key_owned.as_ref(), b_key_owned.as_ref()) {
             (Some(a_key), Some(b_key)) => {
                 let target_key = DhtKey::from_bytes(*key);
                 a_key
@@ -1324,6 +1316,24 @@ impl DhtNetworkManager {
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         }
+    }
+
+    /// Ensure a DHT node has a cached DHT key available for distance comparisons.
+    fn ensure_cached_dht_key(node: &mut DHTNode) {
+        if node.cached_dht_key.is_some() {
+            return;
+        }
+
+        if let Some(distance) = node.distance.as_ref()
+            && distance.len() == 32
+        {
+            let mut key_bytes = [0u8; 32];
+            key_bytes.copy_from_slice(&distance[..32]);
+            node.cached_dht_key = Some(DhtKey::from_bytes(key_bytes));
+            return;
+        }
+
+        node.cached_dht_key = Self::parse_peer_id_to_key(&node.peer_id);
     }
 
     /// Parse a peer ID string to a DhtKey, returning None for invalid IDs
@@ -1448,6 +1458,38 @@ impl DhtNetworkManager {
                 warn!("[STEP 1 FAILED] Failed to send DHT request to {peer_id}: {e}");
                 // _guard will clean up active_operations on drop
                 Err(e)
+            }
+        }
+    }
+
+    /// Attempt to connect to a candidate peer with a short timeout.
+    async fn dial_candidate(&self, peer_id: &PeerId, address: &str) {
+        if address.is_empty() {
+            debug!("dial_candidate: peer {peer_id} missing address");
+            return;
+        }
+
+        if self.node.is_peer_connected(peer_id).await {
+            debug!("dial_candidate: peer {peer_id} already connected");
+            return;
+        }
+
+        let socket_addr = address.split(" (").next().unwrap_or(address);
+        match tokio::time::timeout(
+            ITERATIVE_CONNECT_TIMEOUT,
+            self.node.connect_peer(socket_addr),
+        )
+        .await
+        {
+            Ok(Ok(_)) => debug!("dial_candidate: connected to {peer_id} at {socket_addr}"),
+            Ok(Err(e)) => {
+                debug!("dial_candidate: failed to connect to {peer_id} at {socket_addr}: {e}")
+            }
+            Err(_) => {
+                debug!(
+                    "dial_candidate: timeout connecting to {peer_id} at {socket_addr} (>{:?})",
+                    ITERATIVE_CONNECT_TIMEOUT
+                )
             }
         }
     }
@@ -1717,6 +1759,7 @@ impl DhtNetworkManager {
                     address: String::new(),
                     distance: Some(dht_key.to_vec()),
                     reliability: 1.0,
+                    cached_dht_key: Some(DhtKey::from_bytes(dht_key)),
                 };
 
                 // Node will be added to routing table through normal DHT operations
@@ -2121,8 +2164,10 @@ impl DhtNetworkManager {
                                 // This ensures permits are released even if a handler gets stuck
                                 match tokio::time::timeout(
                                     REQUEST_TIMEOUT,
-                                    manager_clone.handle_dht_message(&data, &source_clone)
-                                ).await {
+                                    manager_clone.handle_dht_message(&data, &source_clone),
+                                )
+                                .await
+                                {
                                     Ok(Ok(Some(response))) => {
                                         // Send response back to the source peer
                                         if let Err(e) = manager_clone

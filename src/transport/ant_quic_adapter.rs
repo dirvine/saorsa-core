@@ -665,8 +665,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         // Perform geographic validation if configured
         if let Some(ref config) = self.geo_config {
             match self.validate_geographic_diversity(&addr, config).await {
-                Ok(()) => {
-                }
+                Ok(()) => {}
                 Err(err) => match config.enforcement_mode {
                     GeoEnforcementMode::Strict => {
                         tracing::warn!("REJECTED peer {} from {} - {}", peer_id, addr, err);

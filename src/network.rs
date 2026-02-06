@@ -1772,10 +1772,7 @@ impl P2PNode {
                 connected_peer_id
             }
             Ok(Err(e)) => {
-                warn!(
-                    "connect_happy_eyeballs failed for {}: {}",
-                    address, e
-                );
+                warn!("connect_happy_eyeballs failed for {}: {}", address, e);
                 return Err(P2PError::Transport(
                     crate::error::TransportError::ConnectionFailed {
                         addr: normalized_addr,
@@ -2713,8 +2710,8 @@ impl P2PNode {
         let mut successful_connections = 0;
         let mut connected_peer_ids: Vec<PeerId> = Vec::new();
 
-        for (contact_idx, contact) in bootstrap_contacts.iter().enumerate() {
-            for (addr_idx, addr) in contact.addresses.iter().enumerate() {
+        for contact in bootstrap_contacts.iter() {
+            for addr in &contact.addresses {
                 match self.connect_peer(&addr.to_string()).await {
                     Ok(peer_id) => {
                         successful_connections += 1;
