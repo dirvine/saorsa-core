@@ -153,7 +153,7 @@ async fn test_five_node_chain_iterative_lookup() -> Result<()> {
 
         info!("Created 5 nodes: A, B, C, D, E");
 
-        // Connect chain: A ← →B ←→ C ←→ D ←→ E
+        // Connect chain: A ←→ B ←→ C ←→ D ←→ E
         connect_managers(&manager_a, &manager_b).await?;
         connect_managers(&manager_b, &manager_c).await?;
         connect_managers(&manager_c, &manager_d).await?;
