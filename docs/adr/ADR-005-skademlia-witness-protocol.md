@@ -279,6 +279,10 @@ To keep iterative lookups aligned with the multi-layer architecture, the DHT net
 
 These safeguards ensure the DHT layer respects EigenTrust scoring, geographic awareness (enforced by the transport layer), and the architectural STOP conditions described in ADR-001.
 
+Implementation reference: `DhtNetworkManager::get` and `DhtNetworkManager::find_closest_nodes_network`
+(in `src/dht_network_manager.rs`) enforce the queue window, duplicate suppression, stagnation check,
+and EigenTrust feedback loop described above.
+
 ## Alternatives Considered
 
 ### Pure Kademlia
