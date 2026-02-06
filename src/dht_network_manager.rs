@@ -43,8 +43,8 @@ const MIN_CONCURRENT_OPERATIONS: usize = 10;
 /// and simply drop newer candidates once the queue is full.
 const MAX_CANDIDATE_NODES: usize = 200;
 
-/// Maximum size for DHT PUT values (1MB) to prevent memory exhaustion DoS
-const MAX_VALUE_SIZE: usize = 1_048_576;
+/// Maximum size for DHT PUT values (512 bytes) to prevent memory exhaustion DoS
+const MAX_VALUE_SIZE: usize = 512;
 
 /// Request timeout for DHT message handlers (30 seconds)
 /// Prevents long-running handlers from starving the semaphore permit pool
