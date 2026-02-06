@@ -59,7 +59,19 @@ pub struct DHTNode {
     pub distance: Option<Vec<u8>>,
     pub reliability: f64,
     /// Cached DHT key to avoid repeated SHA-256 hashing during distance comparisons.
-    /// This is computed once when the node is created and reused for all subsequent distance calculations.
+    ///
+    /// Lifecycle / invariants:
+    /// - This cache is **lazily populated** via `ensure_cached_dht_key` the first time a
+    ///   distance calculation requires it, not eagerly at node creation.
+    /// - The field starts as `None` and may remain `None` until `ensure_cached_dht_key`
+    ///   (or an equivalent helper) is called.
+    /// - The value, once computed, is reused for all subsequent distance calculations and
+    ///   is not expected to change for the lifetime of this `DHTNode`.
+    /// - `#[serde(skip)]` means this cache is not serialized; after deserialization it will
+    ///   again be `None` until `ensure_cached_dht_key` is invoked.
+    ///
+    /// Callers should treat this as an internal implementation detail and rely on
+    /// `ensure_cached_dht_key` (or similar) rather than accessing `cached_dht_key` directly.
     /// PERF-001: Critical performance optimization - prevents O(N*log(N)*hash_cost) in sorts
     #[serde(skip)]
     pub cached_dht_key: Option<DhtKey>,
