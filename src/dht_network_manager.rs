@@ -28,6 +28,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{RwLock, Semaphore, broadcast, oneshot};
@@ -37,12 +38,9 @@ use uuid::Uuid;
 /// Minimum concurrent operations for semaphore backpressure
 const MIN_CONCURRENT_OPERATIONS: usize = 10;
 
-/// Timeout for opportunistic connections made during iterative lookup.
-/// Needs to be short so failed hops don't stall lookups.
-const ITERATIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-
-/// Maximum candidate nodes queue size to prevent memory exhaustion attacks
-/// This bounds the candidate queue in iterative lookup to prevent unbounded growth
+/// Maximum candidate nodes queue size to prevent memory exhaustion attacks.
+/// We keep this as a FIFO so the oldest (K-bucket-style) entries remain preferred
+/// and simply drop newer candidates once the queue is full.
 const MAX_CANDIDATE_NODES: usize = 200;
 
 /// Maximum size for DHT PUT values (1MB) to prevent memory exhaustion DoS
@@ -757,6 +755,7 @@ impl DhtNetworkManager {
 
         let mut queried_nodes = HashSet::new();
         let mut candidate_nodes = VecDeque::new();
+        let mut queued_peer_ids: HashSet<String> = HashSet::new();
 
         // Get initial candidates from local routing table and connected peers
         // IMPORTANT: Use find_closest_nodes_local to avoid making network requests
@@ -764,8 +763,11 @@ impl DhtNetworkManager {
         let initial = self.find_closest_nodes_local(key, ALPHA * 2).await;
 
         for node in initial {
+            queued_peer_ids.insert(node.peer_id.clone());
             candidate_nodes.push_back(node);
         }
+
+        let mut previous_candidate_snapshot: Option<Vec<String>> = None;
 
         // Iterative lookup loop
         for iteration in 0..MAX_ITERATIONS {
@@ -779,10 +781,11 @@ impl DhtNetworkManager {
             // when the first ALPHA drained nodes are all already queried.
             let mut batch = Vec::new();
             while batch.len() < ALPHA && !candidate_nodes.is_empty() {
-                if let Some(node) = candidate_nodes.pop_front()
-                    && !queried_nodes.contains(&node.peer_id)
-                {
-                    batch.push(node);
+                if let Some(node) = candidate_nodes.pop_front() {
+                    queued_peer_ids.remove(&node.peer_id);
+                    if !queried_nodes.contains(&node.peer_id) {
+                        batch.push(node);
+                    }
                 }
                 // If already queried, discard and continue draining
             }
@@ -808,6 +811,8 @@ impl DhtNetworkManager {
 
             // Query batch in parallel using FindValue operation
             // For each node, ensure we're connected before querying
+            // ant-quic multiplexes streams on a single socket, so issuing ALPHA
+            // parallel queries here does not consume extra listening ports.
             let query_futures: Vec<_> = batch
                 .iter()
                 .map(|node| {
@@ -836,6 +841,7 @@ impl DhtNetworkManager {
                 match result {
                     Ok(DhtNetworkResult::ValueFound { value, source, .. })
                     | Ok(DhtNetworkResult::GetSuccess { value, source, .. }) => {
+                        self.record_peer_success(&peer_id).await;
                         // FOUND IT!
                         info!("Found value via iterative lookup from {}", source);
 
@@ -855,6 +861,7 @@ impl DhtNetworkManager {
                         });
                     }
                     Ok(DhtNetworkResult::NodesFound { nodes, .. }) => {
+                        self.record_peer_success(&peer_id).await;
                         // Got closer nodes - add them to candidates with bounds checking
                         info!(
                             "[ITERATIVE LOOKUP] {}: Peer {} returned {} closer nodes: {:?}",
@@ -872,52 +879,52 @@ impl DhtNetworkManager {
                         );
                         for mut node in nodes {
                             Self::ensure_cached_dht_key(&mut node);
-                            if !queried_nodes.contains(&node.peer_id) {
-                                // SEC-003: Enforce queue bounds check before every insertion.
-                                // Single-threaded async guarantees atomic check-and-insert per iteration.
-                                // No race condition exists - each node processed sequentially.
-                                if candidate_nodes.len() >= MAX_CANDIDATE_NODES {
-                                    // Queue at limit - only add if this node is closer than the farthest candidate
-                                    // Get the farthest node in queue (last element since queue should be roughly ordered)
-                                    if let Some(farthest) = candidate_nodes.back() {
-                                        // Compare distances to target key
-                                        let node_distance =
-                                            Self::compare_node_distance(&node, farthest, key);
-                                        if node_distance == std::cmp::Ordering::Less {
-                                            // New node is closer - remove farthest and add this one
-                                            candidate_nodes.pop_back();
-                                            candidate_nodes.push_back(node);
-                                            warn!(
-                                                "Candidate queue at capacity ({}), replaced farthest node with closer candidate",
-                                                MAX_CANDIDATE_NODES
-                                            );
-                                        } else {
-                                            // New node is farther - drop it
-                                            warn!(
-                                                "Candidate queue at capacity ({}), dropped farther node",
-                                                MAX_CANDIDATE_NODES
-                                            );
-                                        }
-                                    }
-                                } else {
-                                    // Queue not at limit - add normally
-                                    candidate_nodes.push_back(node);
-                                }
+                            if queried_nodes.contains(&node.peer_id)
+                                || queued_peer_ids.contains(&node.peer_id)
+                            {
+                                continue;
                             }
+                            if candidate_nodes.len() >= MAX_CANDIDATE_NODES {
+                                trace!(
+                                    "Candidate queue at capacity ({}), preserving oldest entries and dropping {}",
+                                    MAX_CANDIDATE_NODES,
+                                    &node.peer_id[..8.min(node.peer_id.len())]
+                                );
+                                continue;
+                            }
+                            queued_peer_ids.insert(node.peer_id.clone());
+                            candidate_nodes.push_back(node);
                         }
                     }
                     Ok(DhtNetworkResult::GetNotFound { .. }) => {
+                        self.record_peer_success(&peer_id).await;
                         // This peer doesn't have it, continue
                         debug!("Peer {} does not have value", peer_id);
                     }
                     Err(e) => {
                         debug!("Query to {} failed: {}", peer_id, e);
+                        self.record_peer_failure(&peer_id).await;
                     }
                     Ok(other) => {
                         debug!("Unexpected result from {}: {:?}", peer_id, other);
+                        self.record_peer_failure(&peer_id).await;
                     }
                 }
             }
+            let mut snapshot: Vec<String> = queued_peer_ids.iter().cloned().collect();
+            snapshot.sort();
+            if let Some(previous) = &previous_candidate_snapshot
+                && !snapshot.is_empty()
+                && *previous == snapshot
+            {
+                info!(
+                    "[ITERATIVE LOOKUP] {}: Candidate set stagnated after {} iterations, stopping",
+                    self.config.local_peer_id,
+                    iteration + 1
+                );
+                break;
+            }
+            previous_candidate_snapshot = Some(snapshot);
         }
 
         // Not found after exhausting all paths
@@ -1155,7 +1162,7 @@ impl DhtNetworkManager {
     /// 1. Start with nodes from local address book
     /// 2. Query those nodes for their closest nodes to the key
     /// 3. Query the returned nodes, repeat
-    /// 4. Stop when converged (getting same/worse answers)
+    /// 4. Stop when converged (same or worse answers)
     ///
     /// This makes network requests and should NOT be called from request handlers.
     pub async fn find_closest_nodes_network(
@@ -1174,10 +1181,16 @@ impl DhtNetworkManager {
 
         let mut queried_nodes: HashSet<String> = HashSet::new();
         let mut best_nodes: Vec<DHTNode> = Vec::new();
+        let mut queued_peer_ids: HashSet<String> = HashSet::new();
 
         // Start with local knowledge
         let initial = self.find_closest_nodes_local(key, count).await;
-        let mut candidates: VecDeque<DHTNode> = initial.into_iter().collect();
+        let mut candidates: VecDeque<DHTNode> = VecDeque::new();
+        for node in initial {
+            queued_peer_ids.insert(node.peer_id.clone());
+            candidates.push_back(node);
+        }
+        let mut previous_candidate_snapshot: Option<Vec<String>> = None;
 
         for iteration in 0..MAX_ITERATIONS {
             if candidates.is_empty() {
@@ -1191,10 +1204,11 @@ impl DhtNetworkManager {
             // Select up to ALPHA unqueried nodes to query
             let mut batch: Vec<DHTNode> = Vec::new();
             while batch.len() < ALPHA && !candidates.is_empty() {
-                if let Some(node) = candidates.pop_front()
-                    && !queried_nodes.contains(&node.peer_id)
-                {
-                    batch.push(node);
+                if let Some(node) = candidates.pop_front() {
+                    queued_peer_ids.remove(&node.peer_id);
+                    if !queried_nodes.contains(&node.peer_id) {
+                        batch.push(node);
+                    }
                 }
             }
 
@@ -1213,6 +1227,8 @@ impl DhtNetworkManager {
             );
 
             // Query nodes in parallel
+            // ant-quic connection multiplexing lets us keep a single transport socket
+            // while still querying multiple peers concurrently.
             let query_futures: Vec<_> = batch
                 .iter()
                 .map(|node| {
@@ -1232,30 +1248,45 @@ impl DhtNetworkManager {
             for (peer_id, result) in results {
                 queried_nodes.insert(peer_id.clone());
 
-                if let Ok(DhtNetworkResult::NodesFound { nodes, .. }) = result {
-                    for mut node in nodes {
-                        Self::ensure_cached_dht_key(&mut node);
-                        // Skip already queried nodes
-                        if queried_nodes.contains(&node.peer_id) {
-                            continue;
+                match result {
+                    Ok(DhtNetworkResult::NodesFound { nodes, .. }) => {
+                        self.record_peer_success(&peer_id).await;
+                        for mut node in nodes {
+                            Self::ensure_cached_dht_key(&mut node);
+                            if queried_nodes.contains(&node.peer_id)
+                                || queued_peer_ids.contains(&node.peer_id)
+                                || node.peer_id == self.config.local_peer_id
+                            {
+                                continue;
+                            }
+                            let dominated = best_nodes.iter().any(|best| {
+                                Self::compare_node_distance(&node, best, key)
+                                    != std::cmp::Ordering::Less
+                            });
+                            if !dominated || best_nodes.len() < count {
+                                if candidates.len() >= MAX_CANDIDATE_NODES {
+                                    trace!(
+                                        "[NETWORK] Candidate queue at capacity ({}), dropping {}",
+                                        MAX_CANDIDATE_NODES,
+                                        &node.peer_id[..8.min(node.peer_id.len())]
+                                    );
+                                    continue;
+                                }
+                                queued_peer_ids.insert(node.peer_id.clone());
+                                candidates.push_back(node);
+                                found_new_closer = true;
+                            }
                         }
-                        // Skip self
-                        if node.peer_id == self.config.local_peer_id {
-                            continue;
-                        }
-                        // Check if this node is closer than our current best
-                        let dominated = best_nodes.iter().any(|best| {
-                            Self::compare_node_distance(&node, best, key)
-                                != std::cmp::Ordering::Less
-                        });
-                        if !dominated || best_nodes.len() < count {
-                            candidates.push_back(node);
-                            found_new_closer = true;
-                        }
+                    }
+                    Ok(_) => {
+                        self.record_peer_success(&peer_id).await;
+                    }
+                    Err(e) => {
+                        trace!("[NETWORK] Query to {} failed: {}", peer_id, e);
+                        self.record_peer_failure(&peer_id).await;
                     }
                 }
 
-                // Add queried node to best_nodes if it's among the closest
                 if let Some(queried_node) = batch.iter().find(|n| n.peer_id == peer_id) {
                     best_nodes.push(queried_node.clone());
                     best_nodes.sort_by(|a, b| Self::compare_node_distance(a, b, key));
@@ -1263,14 +1294,27 @@ impl DhtNetworkManager {
                 }
             }
 
-            // Convergence check: no new closer nodes found
             if !found_new_closer {
                 info!("[NETWORK] Converged after {} iterations", iteration + 1);
                 break;
             }
+
+            let mut snapshot: Vec<String> = queued_peer_ids.iter().cloned().collect();
+            snapshot.sort();
+            if let Some(previous) = &previous_candidate_snapshot
+                && !snapshot.is_empty()
+                && *previous == snapshot
+            {
+                info!(
+                    "[NETWORK] {}: Candidate set stagnated after {} iterations, stopping",
+                    self.config.local_peer_id,
+                    iteration + 1
+                );
+                break;
+            }
+            previous_candidate_snapshot = Some(snapshot);
         }
 
-        // Sort and return the best nodes found
         best_nodes.sort_by(|a, b| Self::compare_node_distance(a, b, key));
         best_nodes.truncate(count);
 
@@ -1362,6 +1406,77 @@ impl DhtNetworkManager {
         let mut key = [0u8; 32];
         key.copy_from_slice(&hash_result);
         Some(DhtKey::from_bytes(key))
+    }
+
+    /// Convert peer addresses reported by the transport into multiaddresses the DHT understands.
+    fn parse_peer_addresses(addresses: &[String]) -> Vec<Multiaddr> {
+        addresses
+            .iter()
+            .filter_map(|addr| Self::multiaddr_from_address(addr))
+            .collect()
+    }
+
+    /// Convert a human friendly socket string (possibly with a four-word suffix) into a Multiaddr.
+    fn multiaddr_from_address(address: &str) -> Option<Multiaddr> {
+        let clean_addr = address.split(" (").next().unwrap_or(address);
+        match clean_addr.parse::<SocketAddr>() {
+            Ok(socket_addr) => Self::socket_addr_to_multiaddr(&socket_addr),
+            Err(e) => {
+                warn!("Failed to parse '{}' as SocketAddr: {}", clean_addr, e);
+                None
+            }
+        }
+    }
+
+    /// Render a SocketAddr as a Multiaddr, preserving IPv4/IPv6 protocol tags.
+    fn socket_addr_to_multiaddr(socket_addr: &SocketAddr) -> Option<Multiaddr> {
+        let ip_protocol = if socket_addr.ip().is_ipv4() {
+            "ip4"
+        } else {
+            "ip6"
+        };
+        let multiaddr_string = format!(
+            "/{}/{}/tcp/{}",
+            ip_protocol,
+            socket_addr.ip(),
+            socket_addr.port()
+        );
+        match multiaddr_string.parse::<Multiaddr>() {
+            Ok(addr) => Some(addr),
+            Err(e) => {
+                warn!(
+                    "Failed to convert socket address {} to multiaddr: {}",
+                    socket_addr, e
+                );
+                None
+            }
+        }
+    }
+
+    async fn record_peer_success(&self, peer_id: &str) {
+        #[cfg(feature = "adaptive-ml")]
+        {
+            if let Err(e) = self.node.report_peer_success(peer_id).await {
+                trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust success");
+            }
+        }
+        #[cfg(not(feature = "adaptive-ml"))]
+        {
+            let _ = peer_id;
+        }
+    }
+
+    async fn record_peer_failure(&self, peer_id: &str) {
+        #[cfg(feature = "adaptive-ml")]
+        {
+            if let Err(e) = self.node.report_peer_failure(peer_id).await {
+                trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust failure");
+            }
+        }
+        #[cfg(not(feature = "adaptive-ml"))]
+        {
+            let _ = peer_id;
+        }
     }
 
     /// Send a DHT request to a specific peer
@@ -1462,7 +1577,11 @@ impl DhtNetworkManager {
         }
     }
 
-    /// Attempt to connect to a candidate peer with a short timeout.
+    /// Attempt to connect to a candidate peer with a timeout derived from the node config.
+    ///
+    /// All iterative lookups share the same ant-quic connection pool, so reusing the node's
+    /// connection timeout keeps behavior consistent with the transport while still letting
+    /// us parallelize lookups safely.
     async fn dial_candidate(&self, peer_id: &PeerId, address: &str) {
         if address.is_empty() {
             debug!("dial_candidate: peer {peer_id} missing address");
@@ -1475,12 +1594,12 @@ impl DhtNetworkManager {
         }
 
         let socket_addr = address.split(" (").next().unwrap_or(address);
-        match tokio::time::timeout(
-            ITERATIVE_CONNECT_TIMEOUT,
-            self.node.connect_peer(socket_addr),
-        )
-        .await
-        {
+        let dial_timeout = self
+            .node
+            .config()
+            .connection_timeout
+            .min(self.config.request_timeout);
+        match tokio::time::timeout(dial_timeout, self.node.connect_peer(socket_addr)).await {
             Ok(Ok(_)) => debug!("dial_candidate: connected to {peer_id} at {socket_addr}"),
             Ok(Err(e)) => {
                 debug!("dial_candidate: failed to connect to {peer_id} at {socket_addr}: {e}")
@@ -1488,7 +1607,7 @@ impl DhtNetworkManager {
             Err(_) => {
                 debug!(
                     "dial_candidate: timeout connecting to {peer_id} at {socket_addr} (>{:?})",
-                    ITERATIVE_CONNECT_TIMEOUT
+                    dial_timeout
                 )
             }
         }
@@ -1935,65 +2054,12 @@ impl DhtNetworkManager {
         dht_key[..len].copy_from_slice(&peer_bytes[..len]);
 
         // Get peer addresses from P2P node
-        debug!(
-            "DEBUG_AGENT2: update_peer_info - About to query peer_info for peer_id: {}",
-            peer_id
-        );
-
         let addresses = if let Some(peer_info) = self.node.peer_info(&peer_id).await {
-            debug!(
-                "DEBUG_AGENT2: update_peer_info - peer_info returned Some - peer_id: {}, addresses: {:?}, status: {:?}",
-                peer_info.peer_id, peer_info.addresses, peer_info.status
-            );
-            peer_info
-                .addresses
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, addr)| {
-                    debug!("DEBUG_AGENT2: update_peer_info - [{}] Attempting to parse address: {}", idx, addr);
-
-                    // Strip human-readable suffix like " (raccoon-accurate-a-kenneth)"
-                    let clean_addr = addr
-                        .split(" (")
-                        .next()
-                        .unwrap_or(addr.as_str());
-
-                    debug!("DEBUG_AGENT2: update_peer_info - [{}] Cleaned address: {}", idx, clean_addr);
-
-                    // Try parsing as SocketAddr first, then convert to Multiaddr
-                    match clean_addr.parse::<std::net::SocketAddr>() {
-                        Ok(socket_addr) => {
-                            let multiaddr_string = format!("/ip4/{}/tcp/{}", socket_addr.ip(), socket_addr.port());
-                            match multiaddr_string.parse::<Multiaddr>() {
-                                Ok(ma) => {
-                                    debug!("DEBUG_AGENT2: update_peer_info - [{}] Successfully converted to Multiaddr: {}", idx, ma);
-                                    Some(ma)
-                                }
-                                Err(e) => {
-                                    warn!("DEBUG_AGENT2: update_peer_info - [{}] Failed to convert SocketAddr to Multiaddr: {}", idx, e);
-                                    None
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!("DEBUG_AGENT2: update_peer_info - [{}] Failed to parse '{}' as SocketAddr: {}", idx, clean_addr, e);
-                            None
-                        }
-                    }
-                })
-                .collect()
+            Self::parse_peer_addresses(&peer_info.addresses)
         } else {
-            warn!(
-                "DEBUG_AGENT2: update_peer_info - peer_info returned None for peer_id: {}",
-                peer_id
-            );
-            vec![]
+            warn!("peer_info unavailable for peer_id: {}", peer_id);
+            Vec::new()
         };
-
-        debug!(
-            "DEBUG_AGENT2: update_peer_info - Final addresses vec length: {}",
-            addresses.len()
-        );
 
         let mut peers = self.dht_peers.write().await;
         let peer_info = peers.entry(peer_id.clone()).or_insert_with(|| DhtPeerInfo {
@@ -2041,65 +2107,12 @@ impl DhtNetworkManager {
                         dht_key[..len].copy_from_slice(&peer_bytes[..len]);
 
                         // Get peer addresses from P2P node
-                        debug!(
-                            "DEBUG_AGENT2: About to query peer_info for peer_id: {}",
-                            peer_id
-                        );
-
                         let addresses = if let Some(peer_info) = node.peer_info(&peer_id).await {
-                            debug!(
-                                "DEBUG_AGENT2: peer_info returned Some - peer_id: {}, addresses: {:?}, status: {:?}",
-                                peer_info.peer_id, peer_info.addresses, peer_info.status
-                            );
-                            peer_info
-                                .addresses
-                                .iter()
-                                .enumerate()
-                                .filter_map(|(idx, addr)| {
-                                    debug!("DEBUG_AGENT2: [{}] Attempting to parse address: {}", idx, addr);
-
-                                    // Strip human-readable suffix like " (raccoon-accurate-a-kenneth)"
-                                    let clean_addr = addr
-                                        .split(" (")
-                                        .next()
-                                        .unwrap_or(addr.as_str());
-
-                                    debug!("DEBUG_AGENT2: [{}] Cleaned address: {}", idx, clean_addr);
-
-                                    // Try parsing as SocketAddr first, then convert to Multiaddr
-                                    match clean_addr.parse::<std::net::SocketAddr>() {
-                                        Ok(socket_addr) => {
-                                            let multiaddr_string = format!("/ip4/{}/tcp/{}", socket_addr.ip(), socket_addr.port());
-                                            match multiaddr_string.parse::<Multiaddr>() {
-                                                Ok(ma) => {
-                                                    debug!("DEBUG_AGENT2: [{}] Successfully converted to Multiaddr: {}", idx, ma);
-                                                    Some(ma)
-                                                }
-                                                Err(e) => {
-                                                    warn!("DEBUG_AGENT2: [{}] Failed to convert SocketAddr to Multiaddr: {}", idx, e);
-                                                    None
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            warn!("DEBUG_AGENT2: [{}] Failed to parse '{}' as SocketAddr: {}", idx, clean_addr, e);
-                                            None
-                                        }
-                                    }
-                                })
-                                .collect()
+                            DhtNetworkManager::parse_peer_addresses(&peer_info.addresses)
                         } else {
-                            warn!(
-                                "DEBUG_AGENT2: peer_info returned None for peer_id: {}",
-                                peer_id
-                            );
-                            vec![]
+                            warn!("peer_info unavailable for peer_id: {}", peer_id);
+                            Vec::new()
                         };
-
-                        debug!(
-                            "DEBUG_AGENT2: Final addresses vec length: {}",
-                            addresses.len()
-                        );
 
                         // Add to DHT peers
                         {
