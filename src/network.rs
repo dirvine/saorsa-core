@@ -1723,8 +1723,6 @@ impl P2PNode {
 
     /// Connect to a peer
     pub async fn connect_peer(&self, address: &str) -> Result<PeerId> {
-        info!("Connecting to peer at: {}", address);
-
         // Check production limits if resource manager is enabled
         let _connection_guard = if let Some(ref resource_manager) = self.resource_manager {
             Some(resource_manager.acquire_connection().await?)
@@ -1742,12 +1740,6 @@ impl P2PNode {
         // Normalize wildcard addresses to loopback for local connections
         // This converts [::]:port → ::1:port and 0.0.0.0:port → 127.0.0.1:port
         let normalized_addr = normalize_wildcard_to_loopback(socket_addr);
-        if normalized_addr != socket_addr {
-            info!(
-                "Normalized wildcard address {} to loopback {}",
-                socket_addr, normalized_addr
-            );
-        }
 
         // Establish a real connection via dual-stack Happy Eyeballs, but cap the wait
         let addr_list = vec![normalized_addr];
@@ -1759,7 +1751,6 @@ impl P2PNode {
         {
             Ok(Ok(peer)) => {
                 let connected_peer_id = ant_peer_id_to_string(&peer);
-                info!("Successfully connected to peer: {}", connected_peer_id);
 
                 // Prevent self-connections by checking if remote peer_id matches our own
                 if connected_peer_id == self.peer_id {
@@ -1777,10 +1768,11 @@ impl P2PNode {
                     ));
                 }
 
+                info!("Successfully connected to peer: {}", connected_peer_id);
                 connected_peer_id
             }
             Ok(Err(e)) => {
-                warn!("Failed to connect to peer at {}: {}", address, e);
+                warn!("connect_happy_eyeballs failed for {}: {}", address, e);
                 return Err(P2PError::Transport(
                     crate::error::TransportError::ConnectionFailed {
                         addr: normalized_addr,
@@ -1790,7 +1782,7 @@ impl P2PNode {
             }
             Err(_) => {
                 warn!(
-                    "Timed out connecting to peer at {} after {:?}",
+                    "connect_happy_eyeballs timed out for {} after {:?}",
                     address, self.config.connection_timeout
                 );
                 return Err(P2PError::Timeout(self.config.connection_timeout));
@@ -1826,7 +1818,7 @@ impl P2PNode {
         // Emit connection event
         self.send_event(P2PEvent::PeerConnected(peer_id.clone()));
 
-        info!("Connected to peer: {}", peer_id);
+        info!("Successfully connected to peer: {}", peer_id);
         Ok(peer_id)
     }
 
@@ -2718,11 +2710,10 @@ impl P2PNode {
         let mut successful_connections = 0;
         let mut connected_peer_ids: Vec<PeerId> = Vec::new();
 
-        for contact in bootstrap_contacts {
+        for contact in bootstrap_contacts.iter() {
             for addr in &contact.addresses {
                 match self.connect_peer(&addr.to_string()).await {
                     Ok(peer_id) => {
-                        info!("Connected to bootstrap peer: {} ({})", peer_id, addr);
                         successful_connections += 1;
                         connected_peer_ids.push(peer_id.clone());
 

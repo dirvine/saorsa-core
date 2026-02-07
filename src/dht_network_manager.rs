@@ -25,9 +25,10 @@ use crate::{
     error::{DhtError, NetworkError},
     network::{NodeConfig, P2PNode},
 };
-use futures::stream::{FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{RwLock, Semaphore, broadcast, oneshot};
@@ -37,8 +38,18 @@ use uuid::Uuid;
 /// Minimum concurrent operations for semaphore backpressure
 const MIN_CONCURRENT_OPERATIONS: usize = 10;
 
-/// Number of peers to query for iterative node lookups
-const ITERATIVE_LOOKUP_PEERS: usize = 3;
+/// Maximum candidate nodes queue size to prevent memory exhaustion attacks.
+/// We keep this as a FIFO so the oldest (K-bucket-style) entries remain preferred
+/// and simply drop newer candidates once the queue is full.
+const MAX_CANDIDATE_NODES: usize = 200;
+
+/// Maximum size for DHT PUT values (512 bytes) to prevent memory exhaustion DoS
+const MAX_VALUE_SIZE: usize = 512;
+
+/// Request timeout for DHT message handlers (30 seconds)
+/// Prevents long-running handlers from starving the semaphore permit pool
+/// SEC-001: DoS mitigation via timeout enforcement on concurrent operations
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// DHT node representation for network operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +58,23 @@ pub struct DHTNode {
     pub address: String,
     pub distance: Option<Vec<u8>>,
     pub reliability: f64,
+    /// Cached DHT key to avoid repeated SHA-256 hashing during distance comparisons.
+    ///
+    /// Lifecycle / invariants:
+    /// - This cache is **lazily populated** via `ensure_cached_dht_key` the first time a
+    ///   distance calculation requires it, not eagerly at node creation.
+    /// - The field starts as `None` and may remain `None` until `ensure_cached_dht_key`
+    ///   (or an equivalent helper) is called.
+    /// - The value, once computed, is reused for all subsequent distance calculations and
+    ///   is not expected to change for the lifetime of this `DHTNode`.
+    /// - `#[serde(skip)]` means this cache is not serialized; after deserialization it will
+    ///   again be `None` until `ensure_cached_dht_key` is invoked.
+    ///
+    /// Callers should treat this as an internal implementation detail and rely on
+    /// `ensure_cached_dht_key` (or similar) rather than accessing `cached_dht_key` directly.
+    /// PERF-001: Critical performance optimization - prevents O(N*log(N)*hash_cost) in sorts
+    #[serde(skip)]
+    pub cached_dht_key: Option<DhtKey>,
 }
 
 /// Alias for serialization compatibility
@@ -447,13 +475,14 @@ impl DhtNetworkManager {
     pub async fn start(self: &Arc<Self>) -> Result<()> {
         info!("Starting DHT Network Manager...");
 
+        // Subscribe to network events FIRST (before any connections)
+        // This ensures we don't miss PeerConnected events
+        self.start_network_event_handler(Arc::clone(self)).await?;
+
         // Start the P2P node if we own lifecycle or it is not running yet
         if self.manage_node_lifecycle || !self.node.is_running().await {
             self.node.start().await?;
         }
-
-        // Subscribe to network events
-        self.start_network_event_handler(Arc::clone(self)).await?;
 
         // Connect to bootstrap nodes
         self.connect_to_bootstrap_nodes().await?;
@@ -492,14 +521,31 @@ impl DhtNetworkManager {
             value.len()
         );
 
+        // SEC-003 + SEC-006: Validate value size to prevent memory exhaustion DoS
+        if value.len() > MAX_VALUE_SIZE {
+            warn!(
+                "Rejecting PUT with oversized value: {} bytes (max: {} bytes)",
+                value.len(),
+                MAX_VALUE_SIZE
+            );
+            return Err(P2PError::Validation(
+                format!(
+                    "Value size {} bytes exceeds maximum allowed size of {} bytes",
+                    value.len(),
+                    MAX_VALUE_SIZE
+                )
+                .into(),
+            ));
+        }
+
         let operation = DhtNetworkOperation::Put {
             key,
             value: value.clone(),
         };
 
-        // Find closest nodes for replication
+        // Find closest nodes for replication using network lookup
         let closest_nodes = self
-            .find_closest_nodes(&key, self.config.replication_factor)
+            .find_closest_nodes_network(&key, self.config.replication_factor)
             .await?;
 
         debug!(
@@ -636,6 +682,23 @@ impl DhtNetworkManager {
         value: Vec<u8>,
         targets: &[PeerId],
     ) -> Result<DhtNetworkResult> {
+        // SEC-003 + SEC-006: Validate value size to prevent memory exhaustion DoS
+        if value.len() > MAX_VALUE_SIZE {
+            warn!(
+                "Rejecting PUT with oversized value: {} bytes (max: {} bytes)",
+                value.len(),
+                MAX_VALUE_SIZE
+            );
+            return Err(P2PError::Validation(
+                format!(
+                    "Value size {} bytes exceeds maximum allowed size of {} bytes",
+                    value.len(),
+                    MAX_VALUE_SIZE
+                )
+                .into(),
+            ));
+        }
+
         let operation = DhtNetworkOperation::Put {
             key,
             value: value.clone(),
@@ -672,7 +735,10 @@ impl DhtNetworkManager {
         })
     }
 
-    /// Get a value from the DHT.
+    /// Get a value from the DHT with iterative (recursive) lookup.
+    ///
+    /// This implements Kademlia-style iterative lookup to discover data beyond
+    /// directly connected nodes by recursively querying closer nodes.
     ///
     /// Reserved for potential future use beyond peer phonebook/routing.
     #[allow(dead_code)]
@@ -695,76 +761,204 @@ impl DhtNetworkManager {
             });
         }
 
-        // Query remote nodes
-        let operation = DhtNetworkOperation::Get { key: *key };
-        let closest_nodes = self
-            .find_closest_nodes(key, self.config.replication_factor)
-            .await?;
+        // Iterative lookup parameters
+        const MAX_ITERATIONS: usize = 20;
+        const ALPHA: usize = 3; // Parallel queries per iteration
 
-        if closest_nodes.is_empty() {
-            return Ok(DhtNetworkResult::GetNotFound { key: *key });
+        let mut queried_nodes = HashSet::new();
+        let mut candidate_nodes = VecDeque::new();
+        let mut queued_peer_ids: HashSet<String> = HashSet::new();
+
+        // Get initial candidates from local routing table and connected peers
+        // IMPORTANT: Use find_closest_nodes_local to avoid making network requests
+        // before the iterative lookup loop starts - we want to start with only nodes we know about
+        let initial = self.find_closest_nodes_local(key, ALPHA * 2).await;
+
+        for node in initial {
+            queued_peer_ids.insert(node.peer_id.clone());
+            candidate_nodes.push_back(node);
         }
 
-        // Query nodes in parallel, return on first success
-        let mut futures: FuturesUnordered<_> = closest_nodes
-            .iter()
-            .map(|node| {
-                let peer_id = node.peer_id.clone();
-                let op = operation.clone();
-                async move { (peer_id.clone(), self.send_dht_request(&peer_id, op).await) }
-            })
-            .collect();
+        let mut previous_candidate_snapshot: Option<Vec<String>> = None;
 
-        while let Some((peer_id, result)) = futures.next().await {
-            match result {
-                Ok(DhtNetworkResult::GetSuccess { value, source, .. }) => {
-                    info!(
-                        "Found value for key {} from peer: {}",
-                        hex::encode(key),
-                        source
-                    );
+        // Iterative lookup loop
+        for iteration in 0..MAX_ITERATIONS {
+            if candidate_nodes.is_empty() {
+                debug!("No more candidates after {} iterations", iteration);
+                break;
+            }
 
-                    // Cache locally for future requests
-                    let mut dht_guard = self.dht.write().await;
-                    if let Err(e) = dht_guard
-                        .store(&DhtKey::from_bytes(*key), value.clone())
-                        .await
-                    {
-                        warn!("Failed to cache retrieved value: {}", e);
+            // Build batch by draining nodes until we have ALPHA unqueried nodes
+            // or exhaust the candidate queue. This prevents premature termination
+            // when the first ALPHA drained nodes are all already queried.
+            let mut batch = Vec::new();
+            while batch.len() < ALPHA && !candidate_nodes.is_empty() {
+                if let Some(node) = candidate_nodes.pop_front() {
+                    queued_peer_ids.remove(&node.peer_id);
+                    if !queried_nodes.contains(&node.peer_id) {
+                        batch.push(node);
                     }
+                }
+                // If already queried, discard and continue draining
+            }
 
-                    return Ok(DhtNetworkResult::GetSuccess {
-                        key: *key,
-                        value,
-                        source,
-                    });
-                }
-                Ok(DhtNetworkResult::GetNotFound { .. }) => {
-                    debug!(
-                        "Peer {} does not have value for key {}",
-                        peer_id,
-                        hex::encode(key)
-                    );
-                }
-                Ok(result) => {
-                    warn!("Unexpected result from peer {}: {:?}", peer_id, result);
-                }
-                Err(e) => {
-                    warn!("Failed to query peer {}: {}", peer_id, e);
+            if batch.is_empty() {
+                debug!(
+                    "All candidates already queried after {} iterations",
+                    iteration
+                );
+                break;
+            }
+
+            info!(
+                "[ITERATIVE LOOKUP] {}: Iteration {}, querying {} nodes: {:?}",
+                self.config.local_peer_id,
+                iteration,
+                batch.len(),
+                batch
+                    .iter()
+                    .map(|n| format!("{}@{}", &n.peer_id[..8.min(n.peer_id.len())], &n.address))
+                    .collect::<Vec<_>>()
+            );
+
+            // Query batch in parallel using FindValue operation
+            // For each node, ensure we're connected before querying
+            // ant-quic multiplexes streams on a single socket, so issuing ALPHA
+            // parallel queries here does not consume extra listening ports.
+            let query_futures: Vec<_> = batch
+                .iter()
+                .map(|node| {
+                    let peer_id = node.peer_id.clone();
+                    let address = node.address.clone();
+                    let op = DhtNetworkOperation::FindValue { key: *key };
+                    async move {
+                        self.dial_candidate(&peer_id, &address).await;
+                        (peer_id.clone(), self.send_dht_request(&peer_id, op).await)
+                    }
+                })
+                .collect();
+
+            let results = futures::future::join_all(query_futures).await;
+
+            // Process results
+            for (peer_id, result) in results {
+                queried_nodes.insert(peer_id.clone());
+                info!(
+                    "[ITERATIVE LOOKUP] {}: Got result from {}: {:?}",
+                    self.config.local_peer_id,
+                    &peer_id[..8.min(peer_id.len())],
+                    result.as_ref().map(std::mem::discriminant)
+                );
+
+                match result {
+                    Ok(DhtNetworkResult::ValueFound { value, source, .. })
+                    | Ok(DhtNetworkResult::GetSuccess { value, source, .. }) => {
+                        self.record_peer_success(&peer_id).await;
+                        // FOUND IT!
+                        info!("Found value via iterative lookup from {}", source);
+
+                        // Cache locally
+                        let mut dht_guard = self.dht.write().await;
+                        if let Err(e) = dht_guard
+                            .store(&DhtKey::from_bytes(*key), value.clone())
+                            .await
+                        {
+                            warn!("Failed to cache retrieved value: {}", e);
+                        }
+
+                        return Ok(DhtNetworkResult::GetSuccess {
+                            key: *key,
+                            value,
+                            source,
+                        });
+                    }
+                    Ok(DhtNetworkResult::NodesFound { nodes, .. }) => {
+                        self.record_peer_success(&peer_id).await;
+                        // Got closer nodes - add them to candidates with bounds checking
+                        info!(
+                            "[ITERATIVE LOOKUP] {}: Peer {} returned {} closer nodes: {:?}",
+                            self.config.local_peer_id,
+                            &peer_id[..8.min(peer_id.len())],
+                            nodes.len(),
+                            nodes
+                                .iter()
+                                .map(|n| format!(
+                                    "{}@{}",
+                                    &n.peer_id[..8.min(n.peer_id.len())],
+                                    &n.address
+                                ))
+                                .collect::<Vec<_>>()
+                        );
+                        for mut node in nodes {
+                            Self::ensure_cached_dht_key(&mut node);
+                            if queried_nodes.contains(&node.peer_id)
+                                || queued_peer_ids.contains(&node.peer_id)
+                            {
+                                continue;
+                            }
+                            if candidate_nodes.len() >= MAX_CANDIDATE_NODES {
+                                trace!(
+                                    "Candidate queue at capacity ({}), preserving oldest entries and dropping {}",
+                                    MAX_CANDIDATE_NODES,
+                                    &node.peer_id[..8.min(node.peer_id.len())]
+                                );
+                                continue;
+                            }
+                            queued_peer_ids.insert(node.peer_id.clone());
+                            candidate_nodes.push_back(node);
+                        }
+                    }
+                    Ok(DhtNetworkResult::GetNotFound { .. }) => {
+                        self.record_peer_success(&peer_id).await;
+                        // This peer doesn't have it, continue
+                        debug!("Peer {} does not have value", peer_id);
+                    }
+                    Err(e) => {
+                        debug!("Query to {} failed: {}", peer_id, e);
+                        self.record_peer_failure(&peer_id).await;
+                    }
+                    Ok(other) => {
+                        debug!("Unexpected result from {}: {:?}", peer_id, other);
+                        self.record_peer_failure(&peer_id).await;
+                    }
                 }
             }
+            let mut snapshot: Vec<String> = queued_peer_ids.iter().cloned().collect();
+            snapshot.sort();
+            if let Some(previous) = &previous_candidate_snapshot
+                && !snapshot.is_empty()
+                && *previous == snapshot
+            {
+                info!(
+                    "[ITERATIVE LOOKUP] {}: Candidate set stagnated after {} iterations, stopping",
+                    self.config.local_peer_id,
+                    iteration + 1
+                );
+                break;
+            }
+            previous_candidate_snapshot = Some(snapshot);
         }
 
-        info!("Value not found for key: {}", hex::encode(key));
+        // Not found after exhausting all paths
+        info!(
+            "Value not found for key {} after iterative lookup ({} nodes queried)",
+            hex::encode(key),
+            queried_nodes.len()
+        );
         Ok(DhtNetworkResult::GetNotFound { key: *key })
     }
 
-    /// Find nodes closest to a key
+    /// Backwards-compatible API that performs a full iterative lookup.
+    pub async fn find_closest_nodes(&self, key: &Key, count: usize) -> Result<Vec<DHTNode>> {
+        self.find_closest_nodes_network(key, count).await
+    }
+
+    /// Find nodes closest to a key using iterative network lookup
     pub async fn find_node(&self, key: &Key) -> Result<DhtNetworkResult> {
         info!("Finding nodes closest to key: {}", hex::encode(key));
 
         let closest_nodes = self
-            .find_closest_nodes(key, self.config.replication_factor * 2)
+            .find_closest_nodes_network(key, self.config.replication_factor * 2)
             .await?;
         let serializable_nodes: Vec<SerializableDHTNode> = closest_nodes.into_iter().collect();
 
@@ -888,133 +1082,288 @@ impl DhtNetworkManager {
         Ok(())
     }
 
-    /// Find closest nodes to a key using local routing table and connected peers
-    pub async fn find_closest_nodes(&self, key: &Key, count: usize) -> Result<Vec<DHTNode>> {
+    // =========================================================================
+    // FIND CLOSEST NODES API
+    // =========================================================================
+    //
+    // Two functions for finding closest nodes to a key:
+    //
+    // 1. find_closest_nodes_local() - Instant address book check
+    //    - Only checks local routing table + connected peers
+    //    - No network requests, safe to call from request handlers
+    //    - Returns nodes we already know about
+    //
+    // 2. find_closest_nodes_network() - Iterative network lookup
+    //    - Starts with local knowledge, then queries the network
+    //    - Asks known nodes for their closest nodes, then queries those
+    //    - Continues until convergence (same answers or worse quality)
+    //    - Full Kademlia-style iterative lookup
+    // =========================================================================
+
+    /// Find closest nodes to a key using ONLY local knowledge.
+    ///
+    /// This is an instant address book check - no network requests are made.
+    /// Safe to call from request handlers without risk of deadlock.
+    ///
+    /// Returns nodes from:
+    /// - Local routing table
+    /// - Currently connected peers
+    ///
+    /// Results are sorted by XOR distance to the key.
+    pub async fn find_closest_nodes_local(&self, key: &Key, count: usize) -> Vec<DHTNode> {
         debug!(
-            "Finding {} closest nodes to key: {}",
+            "[LOCAL] Finding {} closest nodes to key: {}",
             count,
             hex::encode(key)
         );
 
-        // Use HashSet for O(1) duplicate checking instead of O(n) linear search
         let mut seen_peer_ids: HashSet<String> = HashSet::new();
+        let mut all_nodes: Vec<DHTNode> = Vec::new();
 
-        // Start with local routing table
-        let local_nodes = {
+        // 1. Check local routing table
+        {
             let dht_guard = self.dht.read().await;
-            match dht_guard.find_nodes(&DhtKey::from_bytes(*key), 8).await {
-                Ok(nodes) => nodes,
-                Err(e) => {
-                    warn!("DHT find_nodes failed: {e}");
-                    Vec::new()
+            if let Ok(nodes) = dht_guard.find_nodes(&DhtKey::from_bytes(*key), count).await {
+                for node in nodes {
+                    let id = node.id.to_string();
+                    if seen_peer_ids.insert(id.clone()) {
+                        all_nodes.push(DHTNode {
+                            peer_id: id,
+                            address: node.address,
+                            distance: None,
+                            reliability: node.capacity.reliability_score,
+                            cached_dht_key: Some(DhtKey::from_bytes(*node.id.as_bytes())),
+                        });
+                    }
                 }
             }
-        };
+        }
 
-        // Convert local nodes to DHTNode format
-        let mut all_nodes: Vec<DHTNode> = local_nodes
-            .into_iter()
-            .filter_map(|node| {
-                let id = node.id.to_string();
-                if seen_peer_ids.insert(id.clone()) {
-                    Some(DHTNode {
-                        peer_id: id,
-                        address: node.address,
-                        distance: None,
-                        reliability: node.capacity.reliability_score,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // CRITICAL: Add connected peers as candidate nodes for replication
-        // These are peers we're directly connected to and can replicate data to
+        // 2. Add connected peers
         {
             let peers = self.dht_peers.read().await;
             for (peer_id, peer_info) in peers.iter() {
-                // Skip if not connected
                 if !peer_info.is_connected {
                     continue;
                 }
-                // O(1) duplicate check via HashSet
                 if !seen_peer_ids.insert(peer_id.clone()) {
                     continue;
                 }
-                // Add connected peer as a replication candidate
-                // Log warning if no address available instead of silent empty string
                 let address = match peer_info.addresses.first() {
                     Some(a) => a.to_string(),
-                    None => {
-                        trace!("Peer {} has no addresses, using placeholder", peer_id);
-                        "127.0.0.1:0".to_string()
-                    }
+                    None => continue,
                 };
                 all_nodes.push(DHTNode {
                     peer_id: peer_id.clone(),
                     address,
                     distance: Some(peer_info.dht_key.to_vec()),
                     reliability: peer_info.reliability_score,
+                    cached_dht_key: Some(DhtKey::from_bytes(peer_info.dht_key)),
                 });
             }
         }
 
-        // If we have enough nodes from local + connected peers, return early
-        if all_nodes.len() >= count {
-            // Sort by distance first
-            all_nodes.sort_by(|a, b| Self::compare_node_distance(a, b, key));
-            return Ok(all_nodes.into_iter().take(count).collect());
+        // Sort by XOR distance and return closest
+        all_nodes.sort_by(|a, b| Self::compare_node_distance(a, b, key));
+        all_nodes.into_iter().take(count).collect()
+    }
+
+    /// Find closest nodes to a key using iterative network lookup.
+    ///
+    /// This implements Kademlia-style iterative lookup:
+    /// 1. Start with nodes from local address book
+    /// 2. Query those nodes for their closest nodes to the key
+    /// 3. Query the returned nodes, repeat
+    /// 4. Stop when converged (same or worse answers)
+    ///
+    /// This makes network requests and should NOT be called from request handlers.
+    pub async fn find_closest_nodes_network(
+        &self,
+        key: &Key,
+        count: usize,
+    ) -> Result<Vec<DHTNode>> {
+        const MAX_ITERATIONS: usize = 20;
+        const ALPHA: usize = 3; // Parallel queries per iteration
+
+        debug!(
+            "[NETWORK] Finding {} closest nodes to key: {}",
+            count,
+            hex::encode(key)
+        );
+
+        let mut queried_nodes: HashSet<String> = HashSet::new();
+        let mut best_nodes: Vec<DHTNode> = Vec::new();
+        let mut queued_peer_ids: HashSet<String> = HashSet::new();
+
+        // Start with local knowledge
+        let initial = self.find_closest_nodes_local(key, count).await;
+        let mut candidates: VecDeque<DHTNode> = VecDeque::new();
+        for node in initial {
+            queued_peer_ids.insert(node.peer_id.clone());
+            candidates.push_back(node);
         }
+        let mut previous_candidate_snapshot: Option<Vec<String>> = None;
 
-        // Optionally query known peers for additional nodes (Kademlia iterative lookup)
-        // This is useful for finding nodes we're not directly connected to
-        let find_operation = DhtNetworkOperation::FindNode { key: *key };
-        let known_peers: Vec<PeerId> = {
-            let peers = self.dht_peers.read().await;
-            peers.keys().cloned().collect()
-        };
+        for iteration in 0..MAX_ITERATIONS {
+            if candidates.is_empty() {
+                debug!(
+                    "[NETWORK] No more candidates after {} iterations",
+                    iteration
+                );
+                break;
+            }
 
-        for peer_id in known_peers.iter().take(ITERATIVE_LOOKUP_PEERS) {
-            match self.send_dht_request(peer_id, find_operation.clone()).await {
-                Ok(DhtNetworkResult::NodesFound { nodes, .. }) => {
-                    for serializable_node in nodes {
-                        // O(1) duplicate check via HashSet
-                        if !seen_peer_ids.insert(serializable_node.peer_id.clone()) {
-                            continue;
-                        }
-                        all_nodes.push(DHTNode {
-                            peer_id: serializable_node.peer_id,
-                            address: serializable_node.address,
-                            distance: serializable_node.distance,
-                            reliability: serializable_node.reliability,
-                        });
+            // Select up to ALPHA unqueried nodes to query
+            let mut batch: Vec<DHTNode> = Vec::new();
+            while batch.len() < ALPHA && !candidates.is_empty() {
+                if let Some(node) = candidates.pop_front() {
+                    queued_peer_ids.remove(&node.peer_id);
+                    if !queried_nodes.contains(&node.peer_id) {
+                        batch.push(node);
                     }
                 }
-                Ok(result) => {
-                    debug!("Unexpected find_node result from {}: {:?}", peer_id, result);
+            }
+
+            if batch.is_empty() {
+                debug!(
+                    "[NETWORK] All candidates queried after {} iterations",
+                    iteration
+                );
+                break;
+            }
+
+            info!(
+                "[NETWORK] Iteration {}: querying {} nodes",
+                iteration,
+                batch.len()
+            );
+
+            // Query nodes in parallel
+            // ant-quic connection multiplexing lets us keep a single transport socket
+            // while still querying multiple peers concurrently.
+            let query_futures: Vec<_> = batch
+                .iter()
+                .map(|node| {
+                    let peer_id = node.peer_id.clone();
+                    let address = node.address.clone();
+                    let op = DhtNetworkOperation::FindNode { key: *key };
+                    async move {
+                        self.dial_candidate(&peer_id, &address).await;
+                        (peer_id.clone(), self.send_dht_request(&peer_id, op).await)
+                    }
+                })
+                .collect();
+
+            let results = futures::future::join_all(query_futures).await;
+
+            let mut found_new_closer = false;
+            for (peer_id, result) in results {
+                queried_nodes.insert(peer_id.clone());
+
+                match result {
+                    Ok(DhtNetworkResult::NodesFound { nodes, .. }) => {
+                        self.record_peer_success(&peer_id).await;
+                        for mut node in nodes {
+                            Self::ensure_cached_dht_key(&mut node);
+                            if queried_nodes.contains(&node.peer_id)
+                                || queued_peer_ids.contains(&node.peer_id)
+                                || node.peer_id == self.config.local_peer_id
+                            {
+                                continue;
+                            }
+                            // A node is "dominated" if it is not closer than any of the current best nodes.
+                            let dominated = best_nodes.iter().any(|best| {
+                                matches!(
+                                    Self::compare_node_distance(&node, best, key),
+                                    std::cmp::Ordering::Equal | std::cmp::Ordering::Greater
+                                )
+                            });
+                            if !dominated || best_nodes.len() < count {
+                                if candidates.len() >= MAX_CANDIDATE_NODES {
+                                    trace!(
+                                        "[NETWORK] Candidate queue at capacity ({}), dropping {}",
+                                        MAX_CANDIDATE_NODES,
+                                        &node.peer_id[..8.min(node.peer_id.len())]
+                                    );
+                                    continue;
+                                }
+                                queued_peer_ids.insert(node.peer_id.clone());
+                                candidates.push_back(node);
+                                found_new_closer = true;
+                            }
+                        }
+                    }
+                    Ok(_) => {
+                        self.record_peer_success(&peer_id).await;
+                    }
+                    Err(e) => {
+                        trace!("[NETWORK] Query to {} failed: {}", peer_id, e);
+                        self.record_peer_failure(&peer_id).await;
+                    }
                 }
-                Err(e) => {
-                    debug!("Failed to query peer {} for nodes: {}", peer_id, e);
+
+                if let Some(queried_node) = batch.iter().find(|n| n.peer_id == peer_id) {
+                    best_nodes.push(queried_node.clone());
+                    best_nodes.sort_by(|a, b| Self::compare_node_distance(a, b, key));
+                    best_nodes.truncate(count);
                 }
             }
+
+            if !found_new_closer {
+                info!("[NETWORK] Converged after {} iterations", iteration + 1);
+                break;
+            }
+
+            let mut snapshot: Vec<String> = queued_peer_ids.iter().cloned().collect();
+            snapshot.sort();
+            if let Some(previous) = &previous_candidate_snapshot
+                && !snapshot.is_empty()
+                && *previous == snapshot
+            {
+                info!(
+                    "[NETWORK] {}: Candidate set stagnated after {} iterations, stopping",
+                    self.config.local_peer_id,
+                    iteration + 1
+                );
+                break;
+            }
+            previous_candidate_snapshot = Some(snapshot);
         }
 
-        // Sort by XOR distance from the target key and return closest
-        all_nodes.sort_by(|a, b| Self::compare_node_distance(a, b, key));
-        Ok(all_nodes.into_iter().take(count).collect())
+        best_nodes.sort_by(|a, b| Self::compare_node_distance(a, b, key));
+        best_nodes.truncate(count);
+
+        info!(
+            "[NETWORK] Found {} closest nodes: {:?}",
+            best_nodes.len(),
+            best_nodes
+                .iter()
+                .map(|n| &n.peer_id[..8.min(n.peer_id.len())])
+                .collect::<Vec<_>>()
+        );
+
+        Ok(best_nodes)
     }
 
     /// Compare two nodes by their XOR distance to a target key
     ///
+    /// PERF-001: Uses cached DHT keys to avoid repeated SHA-256 hashing.
+    /// Falls back to parse_peer_id_to_key only if cached key is missing.
+    ///
     /// If a peer ID cannot be decoded, it is placed at the end (treated as maximum distance).
     /// This prevents malformed peer IDs from being incorrectly treated as close to the target.
     fn compare_node_distance(a: &DHTNode, b: &DHTNode, key: &Key) -> std::cmp::Ordering {
-        // Parse peer IDs - invalid ones get None and are sorted to the end
-        let a_parsed = Self::parse_peer_id_to_key(&a.peer_id);
-        let b_parsed = Self::parse_peer_id_to_key(&b.peer_id);
+        // Use cached keys if available, fallback to parsing if not
+        let a_key_owned = a
+            .cached_dht_key
+            .clone()
+            .or_else(|| Self::parse_peer_id_to_key(&a.peer_id));
+        let b_key_owned = b
+            .cached_dht_key
+            .clone()
+            .or_else(|| Self::parse_peer_id_to_key(&b.peer_id));
 
-        match (a_parsed, b_parsed) {
+        match (a_key_owned.as_ref(), b_key_owned.as_ref()) {
             (Some(a_key), Some(b_key)) => {
                 let target_key = DhtKey::from_bytes(*key);
                 a_key
@@ -1028,32 +1377,120 @@ impl DhtNetworkManager {
         }
     }
 
+    /// Ensure a DHT node has a cached DHT key available for distance comparisons.
+    fn ensure_cached_dht_key(node: &mut DHTNode) {
+        if node.cached_dht_key.is_some() {
+            return;
+        }
+
+        if let Some(distance) = node.distance.as_ref()
+            && distance.len() == 32
+        {
+            let mut key_bytes = [0u8; 32];
+            key_bytes.copy_from_slice(&distance[..32]);
+            node.cached_dht_key = Some(DhtKey::from_bytes(key_bytes));
+            return;
+        }
+
+        node.cached_dht_key = Self::parse_peer_id_to_key(&node.peer_id);
+    }
+
     /// Parse a peer ID string to a DhtKey, returning None for invalid IDs
     fn parse_peer_id_to_key(peer_id: &str) -> Option<DhtKey> {
-        match hex::decode(peer_id) {
-            Ok(bytes) if bytes.len() >= 32 => {
-                let mut key = [0u8; 32];
-                key.copy_from_slice(&bytes[..32]);
-                Some(DhtKey::from_bytes(key))
+        // FIX LOG-002: Use peer_id.as_bytes() instead of hex::decode
+        // to support arbitrary peer ID strings like "iterative_chain_a"
+        let bytes = peer_id.as_bytes();
+
+        if bytes.is_empty() {
+            warn!("Empty peer ID");
+            return None;
+        }
+
+        // If exactly 32 bytes, use directly
+        if bytes.len() == 32 {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(bytes);
+            return Some(DhtKey::from_bytes(key));
+        }
+
+        // Otherwise hash to 32 bytes using SHA-256
+        // This ensures uniform distribution in DHT key space
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let hash_result = hasher.finalize();
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&hash_result);
+        Some(DhtKey::from_bytes(key))
+    }
+
+    /// Convert peer addresses reported by the transport into multiaddresses the DHT understands.
+    fn parse_peer_addresses(addresses: &[String]) -> Vec<Multiaddr> {
+        addresses
+            .iter()
+            .filter_map(|addr| Self::multiaddr_from_address(addr))
+            .collect()
+    }
+
+    /// Convert a human friendly socket string (possibly with a four-word suffix) into a Multiaddr.
+    fn multiaddr_from_address(address: &str) -> Option<Multiaddr> {
+        let clean_addr = address.split(" (").next().unwrap_or(address);
+        match clean_addr.parse::<SocketAddr>() {
+            Ok(socket_addr) => Self::socket_addr_to_multiaddr(&socket_addr),
+            Err(e) => {
+                warn!("Failed to parse '{}' as SocketAddr: {}", clean_addr, e);
+                None
             }
-            Ok(bytes) if !bytes.is_empty() => {
-                // Short peer IDs must be rejected: zero-padding would cluster them
-                // near the zero key, violating Kademlia XOR distance assumptions
+        }
+    }
+
+    /// Render a SocketAddr as a Multiaddr, preserving IPv4/IPv6 protocol tags.
+    fn socket_addr_to_multiaddr(socket_addr: &SocketAddr) -> Option<Multiaddr> {
+        let ip_protocol = if socket_addr.ip().is_ipv4() {
+            "ip4"
+        } else {
+            "ip6"
+        };
+        let multiaddr_string = format!(
+            "/{}/{}/tcp/{}",
+            ip_protocol,
+            socket_addr.ip(),
+            socket_addr.port()
+        );
+        match multiaddr_string.parse::<Multiaddr>() {
+            Ok(addr) => Some(addr),
+            Err(e) => {
                 warn!(
-                    "Peer ID hex '{}' decoded to {} bytes, shorter than required 32 bytes",
-                    peer_id,
-                    bytes.len()
+                    "Failed to convert socket address {} to multiaddr: {}",
+                    socket_addr, e
                 );
                 None
             }
-            Ok(_) => {
-                warn!("Empty peer ID bytes");
-                None
+        }
+    }
+
+    async fn record_peer_success(&self, peer_id: &str) {
+        #[cfg(feature = "adaptive-ml")]
+        {
+            if let Err(e) = self.node.report_peer_success(peer_id).await {
+                trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust success");
             }
-            Err(e) => {
-                warn!("Invalid peer ID hex encoding '{}': {}", peer_id, e);
-                None
+        }
+        #[cfg(not(feature = "adaptive-ml"))]
+        {
+            let _ = peer_id;
+        }
+    }
+
+    async fn record_peer_failure(&self, peer_id: &str) {
+        #[cfg(feature = "adaptive-ml")]
+        {
+            if let Err(e) = self.node.report_peer_failure(peer_id).await {
+                trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust failure");
             }
+        }
+        #[cfg(not(feature = "adaptive-ml"))]
+        {
+            let _ = peer_id;
         }
     }
 
@@ -1115,22 +1552,78 @@ impl DhtNetworkManager {
         };
 
         // Send message via network layer
+        info!(
+            "[STEP 1] {} -> {}: Sending {:?} request (msg_id: {})",
+            self.config.local_peer_id, peer_id, message.payload, message_id
+        );
         match self
             .node
             .send_message(peer_id, "/dht/1.0.0", message_data)
             .await
         {
             Ok(_) => {
-                debug!("Sent DHT request {message_id} to peer: {peer_id}");
+                info!(
+                    "[STEP 2] {} -> {}: Message sent successfully, waiting for response...",
+                    self.config.local_peer_id, peer_id
+                );
 
                 // Wait for response via oneshot channel with timeout
                 // Cleanup is handled by _guard on drop
-                self.wait_for_response(&message_id, response_rx).await
+                let result = self.wait_for_response(&message_id, response_rx).await;
+                match &result {
+                    Ok(r) => info!(
+                        "[STEP 6] {} <- {}: Got response: {:?}",
+                        self.config.local_peer_id,
+                        peer_id,
+                        std::mem::discriminant(r)
+                    ),
+                    Err(e) => warn!(
+                        "[STEP 6 FAILED] {} <- {}: Response error: {}",
+                        self.config.local_peer_id, peer_id, e
+                    ),
+                }
+                result
             }
             Err(e) => {
-                warn!("Failed to send DHT request to {peer_id}: {e}");
+                warn!("[STEP 1 FAILED] Failed to send DHT request to {peer_id}: {e}");
                 // _guard will clean up active_operations on drop
                 Err(e)
+            }
+        }
+    }
+
+    /// Attempt to connect to a candidate peer with a timeout derived from the node config.
+    ///
+    /// All iterative lookups share the same ant-quic connection pool, so reusing the node's
+    /// connection timeout keeps behavior consistent with the transport while still letting
+    /// us parallelize lookups safely.
+    async fn dial_candidate(&self, peer_id: &PeerId, address: &str) {
+        if address.is_empty() {
+            debug!("dial_candidate: peer {peer_id} missing address");
+            return;
+        }
+
+        if self.node.is_peer_connected(peer_id).await {
+            debug!("dial_candidate: peer {peer_id} already connected");
+            return;
+        }
+
+        let socket_addr = address.split(" (").next().unwrap_or(address);
+        let dial_timeout = self
+            .node
+            .config()
+            .connection_timeout
+            .min(self.config.request_timeout);
+        match tokio::time::timeout(dial_timeout, self.node.connect_peer(socket_addr)).await {
+            Ok(Ok(_)) => debug!("dial_candidate: connected to {peer_id} at {socket_addr}"),
+            Ok(Err(e)) => {
+                debug!("dial_candidate: failed to connect to {peer_id} at {socket_addr}: {e}")
+            }
+            Err(_) => {
+                debug!(
+                    "dial_candidate: timeout connecting to {peer_id} at {socket_addr} (>{:?})",
+                    dial_timeout
+                )
             }
         }
     }
@@ -1193,9 +1686,9 @@ impl DhtNetworkManager {
         let message: DhtNetworkMessage = serde_json::from_slice(data)
             .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
 
-        debug!(
-            "Received DHT message {} from {}: {:?}",
-            message.message_id, sender, message.message_type
+        info!(
+            "[STEP 3] {}: Received {:?} from {} (msg_id: {})",
+            self.config.local_peer_id, message.message_type, sender, message.message_id
         );
 
         // Update peer info
@@ -1203,11 +1696,26 @@ impl DhtNetworkManager {
 
         match message.message_type {
             DhtMessageType::Request => {
+                info!(
+                    "[STEP 3a] {}: Processing {:?} request from {}",
+                    self.config.local_peer_id, message.payload, sender
+                );
                 let result = self.handle_dht_request(&message).await?;
+                info!(
+                    "[STEP 4] {}: Sending response {:?} back to {} (msg_id: {})",
+                    self.config.local_peer_id,
+                    std::mem::discriminant(&result),
+                    sender,
+                    message.message_id
+                );
                 let response = self.create_response_message(&message, result)?;
                 Ok(Some(serde_json::to_vec(&response)?))
             }
             DhtMessageType::Response => {
+                info!(
+                    "[STEP 5] {}: Received response from {} (msg_id: {})",
+                    self.config.local_peer_id, sender, message.message_id
+                );
                 self.handle_dht_response(&message, sender).await?;
                 Ok(None)
             }
@@ -1231,6 +1739,24 @@ impl DhtNetworkManager {
                     hex::encode(key),
                     value.len()
                 );
+
+                // SEC-003 + SEC-006: Validate value size to prevent memory exhaustion DoS
+                if value.len() > MAX_VALUE_SIZE {
+                    warn!(
+                        "Rejecting PUT request with oversized value from remote peer: {} bytes (max: {} bytes)",
+                        value.len(),
+                        MAX_VALUE_SIZE
+                    );
+                    return Err(P2PError::Validation(
+                        format!(
+                            "Value size {} bytes exceeds maximum allowed size of {} bytes",
+                            value.len(),
+                            MAX_VALUE_SIZE
+                        )
+                        .into(),
+                    ));
+                }
+
                 self.dht
                     .write()
                     .await
@@ -1261,36 +1787,47 @@ impl DhtNetworkManager {
                         source: self.config.local_peer_id.clone(),
                     })
                 } else {
-                    Ok(DhtNetworkResult::GetNotFound { key: *key })
+                    // Value not found - return closer nodes for iterative lookup
+                    // This enables multi-hop DHT discovery (Kademlia-style)
+                    // IMPORTANT: Use find_closest_nodes_local to avoid making network requests
+                    // within a request handler, which can cause deadlocks
+                    let closer_nodes = self.find_closest_nodes_local(key, 8).await;
+                    // Filter out the requesting node - don't tell them to query themselves!
+                    let closer_nodes: Vec<_> = closer_nodes
+                        .into_iter()
+                        .filter(|n| n.peer_id != message.source)
+                        .collect();
+                    debug!(
+                        "GET: value not found, returning {} closer nodes (filtered out requester)",
+                        closer_nodes.len()
+                    );
+                    Ok(DhtNetworkResult::NodesFound {
+                        key: *key,
+                        nodes: closer_nodes,
+                    })
                 }
             }
             DhtNetworkOperation::FindNode { key } => {
                 info!("Handling FIND_NODE request for key: {}", hex::encode(key));
-                let dht_guard = self.dht.read().await;
-                let nodes = match dht_guard.find_nodes(&DhtKey::from_bytes(*key), 8).await {
-                    Ok(nodes) => nodes,
-                    Err(e) => {
-                        warn!("FIND_NODE lookup failed: {e}");
-                        Vec::new()
-                    }
-                };
-                let serializable_nodes: Vec<SerializableDHTNode> = nodes
+                // IMPORTANT: Use find_closest_nodes_local to avoid making network requests
+                // within a request handler, which can cause deadlocks
+                let closer_nodes = self.find_closest_nodes_local(key, 8).await;
+                // Filter out the requesting node - don't tell them to query themselves!
+                let closer_nodes: Vec<_> = closer_nodes
                     .into_iter()
-                    .take(8)
-                    .map(|node| DHTNode {
-                        peer_id: node.id.to_string(),
-                        address: node.address,
-                        distance: None,
-                        reliability: node.capacity.reliability_score,
-                    })
+                    .filter(|n| n.peer_id != message.source)
                     .collect();
                 Ok(DhtNetworkResult::NodesFound {
                     key: *key,
-                    nodes: serializable_nodes,
+                    nodes: closer_nodes,
                 })
             }
             DhtNetworkOperation::FindValue { key } => {
-                info!("Handling FIND_VALUE request for key: {}", hex::encode(key));
+                info!(
+                    "[STEP 3b] {}: Handling FIND_VALUE for key {}",
+                    self.config.local_peer_id,
+                    hex::encode(key)
+                );
                 if let Ok(Some(record)) = self
                     .dht
                     .read()
@@ -1298,33 +1835,39 @@ impl DhtNetworkManager {
                     .retrieve(&DhtKey::from_bytes(*key))
                     .await
                 {
+                    info!(
+                        "[STEP 3b] {}: Found value locally! Returning ValueFound",
+                        self.config.local_peer_id
+                    );
                     Ok(DhtNetworkResult::ValueFound {
                         key: *key,
                         value: record,
                         source: self.config.local_peer_id.clone(),
                     })
                 } else {
-                    let dht_guard = self.dht.read().await;
-                    let nodes = match dht_guard.find_nodes(&DhtKey::from_bytes(*key), 8).await {
-                        Ok(nodes) => nodes,
-                        Err(e) => {
-                            warn!("FIND_VALUE node lookup failed: {e}");
-                            Vec::new()
-                        }
-                    };
-                    let serializable_nodes: Vec<SerializableDHTNode> = nodes
+                    // Value not found - return closer nodes
+                    // IMPORTANT: Use find_closest_nodes_local (not find_closest_nodes) to avoid
+                    // making network requests within a request handler, which can cause deadlocks
+                    info!(
+                        "[STEP 3b] {}: Value not found locally, finding closer nodes...",
+                        self.config.local_peer_id
+                    );
+                    let closer_nodes = self.find_closest_nodes_local(key, 8).await;
+                    // Filter out the requesting node - don't tell them to query themselves!
+                    let closer_nodes: Vec<_> = closer_nodes
                         .into_iter()
-                        .take(8)
-                        .map(|node| DHTNode {
-                            peer_id: node.id.to_string(),
-                            address: node.address,
-                            distance: None,
-                            reliability: node.capacity.reliability_score,
-                        })
+                        .filter(|n| n.peer_id != message.source)
                         .collect();
+                    info!(
+                        "[STEP 3b] {}: Returning {} closer nodes (filtered out requester {}): {:?}",
+                        self.config.local_peer_id,
+                        closer_nodes.len(),
+                        message.source,
+                        closer_nodes.iter().map(|n| &n.peer_id).collect::<Vec<_>>()
+                    );
                     Ok(DhtNetworkResult::NodesFound {
                         key: *key,
-                        nodes: serializable_nodes,
+                        nodes: closer_nodes,
                     })
                 }
             }
@@ -1350,6 +1893,7 @@ impl DhtNetworkManager {
                     address: String::new(),
                     distance: Some(dht_key.to_vec()),
                     reliability: 1.0,
+                    cached_dht_key: Some(DhtKey::from_bytes(dht_key)),
                 };
 
                 // Node will be added to routing table through normal DHT operations
@@ -1435,14 +1979,15 @@ impl DhtNetworkManager {
 
             // Take the sender out of the context (can only send once)
             if let Some(tx) = context.response_tx.take() {
-                debug!(
-                    "Delivering response for message_id: {message_id} from {}",
-                    message.source
+                info!(
+                    "[STEP 5a] {}: Delivering response for msg_id {} to waiting request",
+                    self.config.local_peer_id, message_id
                 );
                 // Send response - if receiver dropped (timeout), log it
                 if tx.send((message.source.clone(), result)).is_err() {
-                    debug!(
-                        "Response channel closed for message_id: {message_id} (receiver likely timed out)"
+                    warn!(
+                        "[STEP 5a FAILED] {}: Response channel closed for msg_id {} (receiver timed out)",
+                        self.config.local_peer_id, message_id
                     );
                 }
             } else {
@@ -1451,7 +1996,10 @@ impl DhtNetworkManager {
                 );
             }
         } else {
-            debug!("No active operation found for message_id: {message_id} (may have timed out)");
+            warn!(
+                "[STEP 5 FAILED] {}: No active operation found for msg_id {} (may have timed out)",
+                self.config.local_peer_id, message_id
+            );
         }
 
         Ok(())
@@ -1520,35 +2068,37 @@ impl DhtNetworkManager {
         let len = peer_bytes.len().min(32);
         dht_key[..len].copy_from_slice(&peer_bytes[..len]);
 
+        // Get peer addresses from P2P node
+        let addresses = if let Some(peer_info) = self.node.peer_info(&peer_id).await {
+            Self::parse_peer_addresses(&peer_info.addresses)
+        } else {
+            warn!("peer_info unavailable for peer_id: {}", peer_id);
+            Vec::new()
+        };
+
         let mut peers = self.dht_peers.write().await;
-        let peer_info = peers.entry(peer_id.clone()).or_insert_with(|| {
-            DhtPeerInfo {
-                peer_id: peer_id.clone(),
-                dht_key,
-                addresses: vec![], // Would be populated from network layer
-                last_seen: Instant::now(),
-                is_connected: true,
-                avg_latency: Duration::from_millis(50),
-                reliability_score: 1.0,
-            }
+        let peer_info = peers.entry(peer_id.clone()).or_insert_with(|| DhtPeerInfo {
+            peer_id: peer_id.clone(),
+            dht_key,
+            addresses: addresses.clone(),
+            last_seen: Instant::now(),
+            is_connected: true,
+            avg_latency: Duration::from_millis(50),
+            reliability_score: 1.0,
         });
 
         peer_info.last_seen = Instant::now();
         peer_info.is_connected = true;
+        // Update addresses if we have new ones
+        if !addresses.is_empty() {
+            peer_info.addresses = addresses;
+        }
 
-        // Update DHT routing table
-        let _node = DHTNode {
-            peer_id: peer_id.clone(),
-            address: peer_info
-                .addresses
-                .first()
-                .map(|addr| addr.to_string())
-                .unwrap_or_else(|| "127.0.0.1:0".to_string()),
-            distance: Some(dht_key.to_vec()),
-            reliability: 1.0,
-        };
-        // Node info will be updated through normal DHT operations
-        debug!("Updated peer info for {}", peer_id);
+        debug!(
+            "Updated peer info for {} with {} addresses",
+            peer_id,
+            peer_info.addresses.len()
+        );
     }
 
     /// Start network event handler
@@ -1559,6 +2109,7 @@ impl DhtNetworkManager {
         let mut events = self.node.subscribe_events();
         let dht_peers = Arc::clone(&self.dht_peers);
         let event_tx = self.event_tx.clone();
+        let node = Arc::clone(&self_arc.node);
 
         tokio::spawn(async move {
             while let Ok(event) = events.recv().await {
@@ -1570,6 +2121,14 @@ impl DhtNetworkManager {
                         let len = peer_bytes.len().min(32);
                         dht_key[..len].copy_from_slice(&peer_bytes[..len]);
 
+                        // Get peer addresses from P2P node
+                        let addresses = if let Some(peer_info) = node.peer_info(&peer_id).await {
+                            DhtNetworkManager::parse_peer_addresses(&peer_info.addresses)
+                        } else {
+                            warn!("peer_info unavailable for peer_id: {}", peer_id);
+                            Vec::new()
+                        };
+
                         // Add to DHT peers
                         {
                             let mut peers = dht_peers.write().await;
@@ -1578,7 +2137,7 @@ impl DhtNetworkManager {
                                 DhtPeerInfo {
                                     peer_id: peer_id.clone(),
                                     dht_key,
-                                    addresses: vec![],
+                                    addresses,
                                     last_seen: Instant::now(),
                                     is_connected: true,
                                     avg_latency: Duration::from_millis(50),
@@ -1629,8 +2188,15 @@ impl DhtNetworkManager {
                                     }
                                 };
 
-                                match manager_clone.handle_dht_message(&data, &source_clone).await {
-                                    Ok(Some(response)) => {
+                                // SEC-001: Wrap handle_dht_message with timeout to prevent DoS via long-running handlers
+                                // This ensures permits are released even if a handler gets stuck
+                                match tokio::time::timeout(
+                                    REQUEST_TIMEOUT,
+                                    manager_clone.handle_dht_message(&data, &source_clone),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(Some(response))) => {
                                         // Send response back to the source peer
                                         if let Err(e) = manager_clone
                                             .node
@@ -1643,13 +2209,20 @@ impl DhtNetworkManager {
                                             );
                                         }
                                     }
-                                    Ok(None) => {
+                                    Ok(Ok(None)) => {
                                         // No response needed (e.g., for response messages)
                                     }
-                                    Err(e) => {
+                                    Ok(Err(e)) => {
                                         warn!(
                                             "Failed to handle DHT message from {}: {}",
                                             source_clone, e
+                                        );
+                                    }
+                                    Err(_) => {
+                                        // Timeout occurred - log warning and release permit
+                                        warn!(
+                                            "DHT message handler timed out after {:?} for peer {}: potential DoS attempt or slow processing",
+                                            REQUEST_TIMEOUT, source_clone
                                         );
                                     }
                                 }
@@ -1889,9 +2462,17 @@ impl DhtNetworkManager {
         0
     }
 
-    /// Get this node's peer ID
+    /// Get this node's peer ID (the config name, e.g. "my_node")
     pub fn peer_id(&self) -> &PeerId {
         &self.config.local_peer_id
+    }
+
+    /// Get this node's transport-level peer ID (cryptographic hex ID).
+    ///
+    /// This is the ID used in P2P communication and stored in `dht_peers`.
+    /// It differs from `peer_id()` which returns the human-readable config name.
+    pub fn transport_peer_id(&self) -> Option<String> {
+        self.node.transport_peer_id()
     }
 
     /// Get the local listen address of this node's P2P network

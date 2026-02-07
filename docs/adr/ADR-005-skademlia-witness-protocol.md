@@ -268,6 +268,21 @@ pub enum ConsistencyLevel {
 }
 ```
 
+## Iterative Lookup Safeguards
+
+To keep iterative lookups aligned with the multi-layer architecture, the DHT network manager now enforces:
+
+- **FIFO candidate queues**: new nodes are appended to a bounded queue (Kademlia-style K-buckets) and duplicates are ignored. When the queue hits `MAX_CANDIDATE_NODES` we drop the newest entrants, preserving the oldest, better-observed peers.
+- **Stagnation detection**: each iteration snapshots the candidate set; if the next iteration would query the identical peer set, the lookup terminates early instead of looping forever.
+- **Trust feedback hooks**: every successful response (value or closer nodes) reports a positive event to EigenTrust, while failures/timeouts register negative events. This keeps the trust layer informed without leaking panic paths.
+- **Single-socket parallelism**: all ALPHA-parallel queries share the same ant-quic connection pool, so we retain the geo-aware transport guarantees while still querying multiple peers concurrently.
+
+These safeguards ensure the DHT layer respects EigenTrust scoring, geographic awareness (enforced by the transport layer), and the architectural STOP conditions described in ADR-001.
+
+Implementation reference: `DhtNetworkManager::get` and `DhtNetworkManager::find_closest_nodes_network`
+(in `src/dht_network_manager.rs`) enforce the queue window, duplicate suppression, stagnation check,
+and EigenTrust feedback loop described above.
+
 ## Alternatives Considered
 
 ### Pure Kademlia

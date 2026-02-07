@@ -68,6 +68,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::sleep;
+use tracing::info;
 
 // Import ant-quic types using the new LinkTransport API (0.14+)
 use ant_quic::nat_traversal_api::PeerId;
@@ -204,11 +205,29 @@ impl P2PNetworkNode<P2pLinkTransport> {
     /// P2pEndpoint's send() method which corresponds with recv() for proper
     /// bidirectional communication.
     pub async fn send_to_peer_optimized(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
-        self.transport
-            .endpoint()
-            .send(peer_id, data)
-            .await
-            .map_err(|e| anyhow::anyhow!("Send failed: {e}"))
+        let peer_id_short = hex::encode(&peer_id.0[..8]);
+        info!(
+            "[QUIC SEND] Calling endpoint().send() to {} ({} bytes)",
+            peer_id_short,
+            data.len()
+        );
+        let result = self.transport.endpoint().send(peer_id, data).await;
+        match &result {
+            Ok(()) => {
+                info!(
+                    "[QUIC SEND] endpoint().send() returned Ok to {} ({} bytes)",
+                    peer_id_short,
+                    data.len()
+                );
+            }
+            Err(e) => {
+                info!(
+                    "[QUIC SEND] endpoint().send() returned Err to {}: {}",
+                    peer_id_short, e
+                );
+            }
+        }
+        result.map_err(|e| anyhow::anyhow!("Send failed: {e}"))
     }
 
     /// Disconnect a specific peer, closing the underlying QUIC connection.
@@ -436,13 +455,22 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
 
     /// Connect to a peer by address
     pub async fn connect_to_peer(&self, peer_addr: SocketAddr) -> Result<PeerId> {
-        tracing::info!("Connecting to peer at {}", peer_addr);
+        // Add timeout to prevent indefinite hanging during NAT traversal/QUIC handshake
+        const DIAL_TIMEOUT: Duration = Duration::from_secs(30);
 
-        let conn = self
-            .transport
-            .dial_addr(peer_addr, SAORSA_DHT_PROTOCOL)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to connect to peer: {}", e))?;
+        let conn = tokio::time::timeout(
+            DIAL_TIMEOUT,
+            self.transport.dial_addr(peer_addr, SAORSA_DHT_PROTOCOL),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "Connection timeout after {:?} to {}",
+                DIAL_TIMEOUT,
+                peer_addr
+            )
+        })?
+        .map_err(|e| anyhow::anyhow!("Failed to connect to peer {}: {}", peer_addr, e))?;
 
         let peer_id = conn.peer();
 
@@ -452,7 +480,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         // Note: ConnectionEvent is broadcast by event forwarder
         // to avoid duplicate events
 
-        tracing::info!("Connected to peer {} at {}", peer_id, peer_addr);
+        info!("Connected to peer {} at {}", peer_id, peer_addr);
         Ok(peer_id)
     }
 
@@ -656,6 +684,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         }
 
         let mut peers = self.peers.write().await;
+
         if !peers.iter().any(|(p, _)| *p == peer_id) {
             peers.push((peer_id, addr));
 
@@ -919,15 +948,46 @@ impl DualStackNetworkNode<P2pLinkTransport> {
     /// Uses P2pEndpoint::send() which corresponds with recv() for proper
     /// bidirectional communication. Tries IPv6 first, then IPv4.
     pub async fn send_to_peer_optimized(&self, peer_id: &PeerId, data: &[u8]) -> Result<()> {
-        if let Some(v6) = &self.v6
-            && v6.send_to_peer_optimized(peer_id, data).await.is_ok()
-        {
-            return Ok(());
+        let peer_id_short = hex::encode(&peer_id.0[..8]);
+        if let Some(v6) = &self.v6 {
+            info!(
+                "[DUAL SEND] Attempting IPv6 send to {} ({} bytes)",
+                peer_id_short,
+                data.len()
+            );
+            match v6.send_to_peer_optimized(peer_id, data).await {
+                Ok(()) => {
+                    info!(
+                        "[DUAL SEND] IPv6 send SUCCESS to {} ({} bytes)",
+                        peer_id_short,
+                        data.len()
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    info!("[DUAL SEND] IPv6 send FAILED to {}: {}", peer_id_short, e);
+                }
+            }
         }
-        if let Some(v4) = &self.v4
-            && v4.send_to_peer_optimized(peer_id, data).await.is_ok()
-        {
-            return Ok(());
+        if let Some(v4) = &self.v4 {
+            info!(
+                "[DUAL SEND] Attempting IPv4 send to {} ({} bytes)",
+                peer_id_short,
+                data.len()
+            );
+            match v4.send_to_peer_optimized(peer_id, data).await {
+                Ok(()) => {
+                    info!(
+                        "[DUAL SEND] IPv4 send SUCCESS to {} ({} bytes)",
+                        peer_id_short,
+                        data.len()
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    info!("[DUAL SEND] IPv4 send FAILED to {}: {}", peer_id_short, e);
+                }
+            }
         }
         Err(anyhow::anyhow!(
             "send_to_peer_optimized failed on both stacks"
