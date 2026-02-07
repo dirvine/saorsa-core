@@ -184,6 +184,7 @@ async fn test_replication_count_isolated_node() -> Result<()> {
         DhtNetworkResult::PutSuccess {
             replicated_to,
             key: result_key,
+            ..
         } => {
             assert_eq!(result_key, key, "Returned key should match");
             assert_eq!(
@@ -198,7 +199,8 @@ async fn test_replication_count_isolated_node() -> Result<()> {
     Ok(())
 }
 
-/// Stress test: 50 values of varying sizes (1KB–10KB), all stored and retrieved.
+/// Stress test: 50 values of varying sizes (10–500 bytes), all stored and retrieved.
+/// Values stay within the 512-byte DHT value size limit.
 #[tokio::test]
 async fn test_stress_50_values() -> Result<()> {
     let config = create_test_dht_config("stress_node", 0, 8);
@@ -209,7 +211,8 @@ async fn test_stress_50_values() -> Result<()> {
 
     for i in 0..50 {
         let key = key_from_str(&format!("stress_key_{}", i));
-        let value_size = 1024 * (i % 10 + 1);
+        // Vary sizes from 10 to 500 bytes (within 512-byte limit)
+        let value_size = 10 + (i % 10) * 50;
         let value = vec![i as u8; value_size];
 
         match manager.put(key, value).await {
@@ -223,7 +226,7 @@ async fn test_stress_50_values() -> Result<()> {
 
     for i in 0..50 {
         let key = key_from_str(&format!("stress_key_{}", i));
-        let expected_size = 1024 * (i % 10 + 1);
+        let expected_size = 10 + (i % 10) * 50;
 
         match manager.get(&key).await {
             Ok(DhtNetworkResult::GetSuccess { value, .. }) => {
