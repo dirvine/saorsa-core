@@ -18,7 +18,6 @@ documentation = "https://docs.rs/saorsa-core"
 
 # Docs.rs configuration to handle build script issues
 [package.metadata.docs.rs]
-features = ["metrics"]
 no-default-features = false
 default-target = "x86_64-unknown-linux-gnu"
 

@@ -65,8 +65,8 @@ fn placement_module_accessible() {
 
 #[test]
 fn geographic_module_accessible() {
-    let _ = std::any::type_name::<GeographicNetworkConfig>();
-    assert!(!std::any::type_name::<GeographicNetworkConfig>().is_empty());
+    let type_name = std::any::type_name::<GeographicNetworkConfig>();
+    assert!(!type_name.is_empty());
 }
 
 #[test]

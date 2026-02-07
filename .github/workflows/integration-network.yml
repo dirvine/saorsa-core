@@ -58,7 +58,7 @@ jobs:
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
       - name: Build tests
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils"
+        run: cargo build --tests --features "mocks,h2_greedy,test-utils"
 
       - name: Clean incremental artifacts
         run: |
@@ -67,7 +67,7 @@ jobs:
 
       - name: QUIC Integration
         # Run sequentially to avoid port binding conflicts
-        run: cargo nextest run --test ant_quic_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast --test-threads=1
+        run: cargo nextest run --test ant_quic_integration_test --features "mocks,h2_greedy,test-utils" --no-fail-fast --test-threads=1
 
       - name: Wait for socket cleanup
         run: sleep 5
@@ -75,7 +75,7 @@ jobs:
       - name: Connection Lifecycle
         # Run sequentially to avoid port binding conflicts
         # These tests are flaky due to dual-stack socket binding issues - continue on error for now
-        run: cargo nextest run --test connection_lifecycle_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast --test-threads=1
+        run: cargo nextest run --test connection_lifecycle_integration_test --features "mocks,h2_greedy,test-utils" --no-fail-fast --test-threads=1
         continue-on-error: true
 
       - name: Wait for socket cleanup
@@ -83,7 +83,7 @@ jobs:
 
       - name: Network Error Tests
         # Run sequentially to avoid port binding conflicts
-        run: cargo nextest run --test network_error_tests --features "default,mocks,h2_greedy,test-utils" --no-fail-fast --test-threads=1
+        run: cargo nextest run --test network_error_tests --features "mocks,h2_greedy,test-utils" --no-fail-fast --test-threads=1
 
   integration-protocols:
     name: Protocol Tests
@@ -133,7 +133,7 @@ jobs:
       # Note: Using specific features instead of --all-features to avoid sp1-sdk
       # build issues (linker OOM on Linux, C++20 on Windows).
       - name: Build tests (default features)
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils"
+        run: cargo build --tests --features "mocks,h2_greedy,test-utils"
 
       - name: Clean incremental artifacts
         run: |
@@ -141,16 +141,16 @@ jobs:
           df -h
 
       - name: Four Word Integration
-        run: cargo nextest run --test four_word_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test four_word_integration_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Health Integration
-        run: cargo nextest run --test health_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test health_integration_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Build test dependencies
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils"
+        run: cargo build --tests --features "mocks,h2_greedy,test-utils"
 
       - name: Gossipsub
-        run: cargo nextest run --test gossipsub_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test gossipsub_integration_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Coordinator Integration
-        run: cargo nextest run --test coordinator_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test coordinator_integration_test --features "mocks,h2_greedy,test-utils" --no-fail-fast

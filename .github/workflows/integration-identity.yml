@@ -64,7 +64,7 @@ jobs:
       # build issues (linker OOM on Linux, C++20 on Windows).
       # Using -j2 to reduce parallel linking and avoid linker memory exhaustion.
       - name: Build tests
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils" -j2
+        run: cargo build --tests --features "mocks,h2_greedy,test-utils" -j2
 
       - name: Clean incremental artifacts
         run: |
@@ -72,10 +72,10 @@ jobs:
           df -h
 
       - name: Node Identity Crypto
-        run: cargo nextest run --test node_identity_crypto_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test node_identity_crypto_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Node Identity
-        run: cargo nextest run --test node_identity_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test node_identity_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
 
   integration-security:
     name: Security Tests
@@ -130,7 +130,7 @@ jobs:
       # build issues (linker OOM on Linux, C++20 on Windows).
       # Using -j2 to reduce parallel linking and avoid linker memory exhaustion.
       - name: Build tests (default features)
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils" -j2
+        run: cargo build --tests --features "mocks,h2_greedy,test-utils" -j2
 
       - name: Clean incremental artifacts
         run: |
@@ -138,16 +138,16 @@ jobs:
           df -h
 
       - name: Security Comprehensive
-        run: cargo nextest run --test security_comprehensive_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test security_comprehensive_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Validation Security
-        run: cargo nextest run --test validation_security_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test validation_security_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Validation Tests
-        run: cargo nextest run --test validation_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test validation_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Build EigenTrust test
-        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils" -j2
+        run: cargo build --tests --features "mocks,h2_greedy,test-utils" -j2
 
       - name: EigenTrust
-        run: cargo nextest run --test eigentrust_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test eigentrust_integration_test --features "mocks,h2_greedy,test-utils" --no-fail-fast
