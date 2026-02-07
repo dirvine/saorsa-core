@@ -676,6 +676,7 @@ impl AdaptiveDHT {
                 .map(|_| DhtNetworkResult::PutSuccess {
                     key,
                     replicated_to: 1,
+                    peer_outcomes: Vec::new(),
                 })
                 .map_err(|e| AdaptiveNetworkError::Other(e.to_string())),
             AdaptiveDhtBackend::Network { manager } => {

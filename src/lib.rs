@@ -173,13 +173,13 @@ pub use bootstrap::{BootstrapConfig, BootstrapManager, CacheConfig, ContactEntry
 pub use dht::{Key, Record};
 pub use dht_network_manager::{
     BootstrapNode, DhtNetworkConfig, DhtNetworkEvent, DhtNetworkManager, DhtNetworkOperation,
-    DhtNetworkResult, DhtPeerInfo,
+    DhtNetworkResult, DhtPeerInfo, PeerStoreOutcome,
 };
 pub use encrypted_key_storage::{
     Argon2Config, DerivationPriority as KeyDerivationPriority, EncryptedKeyStorageManager,
     KeyMetadata, PasswordValidation, SecurityLevel, StorageStats,
 };
-pub use error::{P2PError, P2pResult as Result};
+pub use error::{P2PError, P2pResult as Result, PeerFailureReason};
 pub use events::{Subscription, TopologyEvent, device_subscribe, dht_watch, subscribe_topology};
 pub use fwid::{FourWordsV1, Key as FwKey, fw_check, fw_to_key};
 pub use health::{
@@ -196,6 +196,7 @@ pub use monotonic_counter::{
 };
 pub use network::{
     ConnectionStatus, NetworkSender, NodeBuilder, NodeConfig, P2PEvent, P2PNode, PeerInfo,
+    PeerResponse,
 };
 // Trust system exports for saorsa-node integration
 pub use adaptive::{EigenTrustEngine, NodeStatistics, NodeStatisticsUpdate, TrustProvider};
