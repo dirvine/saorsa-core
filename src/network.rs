@@ -63,6 +63,12 @@ const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 /// Capacity of the internal channel used by the message receiving system.
 const MESSAGE_RECV_CHANNEL_CAPACITY: usize = 256;
 
+/// Maximum number of concurrent in-flight request/response operations.
+const MAX_ACTIVE_REQUESTS: usize = 256;
+
+/// Maximum allowed timeout for a single request (5 minutes).
+const MAX_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -630,8 +636,13 @@ struct RequestResponseEnvelope {
     payload: Vec<u8>,
 }
 
-/// Oneshot sender for delivering a response to an in-flight request.
-type PendingRequest = tokio::sync::oneshot::Sender<Vec<u8>>;
+/// An in-flight request awaiting a response from a specific peer.
+struct PendingRequest {
+    /// Oneshot sender for delivering the response payload.
+    response_tx: tokio::sync::oneshot::Sender<Vec<u8>>,
+    /// The peer we expect the response from (for origin validation).
+    expected_peer: String,
+}
 
 /// Main P2P node structure
 /// Main P2P network node that manages connections, routing, and communication
@@ -1399,15 +1410,45 @@ impl P2PNode {
         data: Vec<u8>,
         timeout: Duration,
     ) -> Result<PeerResponse> {
+        // Cap timeout to prevent unbounded resource retention
+        let timeout = timeout.min(MAX_REQUEST_TIMEOUT);
+
+        // Validate protocol name
+        if protocol.is_empty() || protocol.contains(&['/', '\\', '\0'][..]) {
+            return Err(P2PError::Transport(
+                crate::error::TransportError::StreamError(
+                    format!("Invalid protocol name: {:?}", protocol).into(),
+                ),
+            ));
+        }
+
+        // Reject if at concurrency limit
+        {
+            let reqs = self.active_requests.read().await;
+            if reqs.len() >= MAX_ACTIVE_REQUESTS {
+                return Err(P2PError::Transport(
+                    crate::error::TransportError::StreamError(
+                        format!(
+                            "Too many active requests ({MAX_ACTIVE_REQUESTS}); try again later"
+                        )
+                        .into(),
+                    ),
+                ));
+            }
+        }
+
         let message_id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = tokio::sync::oneshot::channel();
         let started_at = tokio::time::Instant::now();
 
-        // Register the pending request
-        self.active_requests
-            .write()
-            .await
-            .insert(message_id.clone(), tx);
+        // Register the pending request with the expected peer for origin validation
+        self.active_requests.write().await.insert(
+            message_id.clone(),
+            PendingRequest {
+                response_tx: tx,
+                expected_peer: peer_id.to_string(),
+            },
+        );
 
         // Wrap in envelope
         let envelope = RequestResponseEnvelope {
@@ -1757,10 +1798,20 @@ impl P2PNode {
                                 postcard::from_bytes::<RequestResponseEnvelope>(data)
                             && envelope.is_response
                         {
-                            // Route response to waiting caller
+                            // Route response to waiting caller with origin validation
                             let mut reqs = active_requests.write().await;
                             if let Some(pending) = reqs.remove(&envelope.message_id) {
-                                if pending.send(envelope.payload).is_err() {
+                                if pending.expected_peer != transport_peer_id {
+                                    warn!(
+                                        message_id = %envelope.message_id,
+                                        expected = %pending.expected_peer,
+                                        actual = %transport_peer_id,
+                                        "Response origin mismatch — ignoring"
+                                    );
+                                    // Don't deliver; don't broadcast
+                                    continue;
+                                }
+                                if pending.response_tx.send(envelope.payload).is_err() {
                                     warn!(
                                         message_id = %envelope.message_id,
                                         "Response receiver dropped before delivery"

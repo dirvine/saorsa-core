@@ -203,6 +203,21 @@ pub enum DhtNetworkResult {
     Error { operation: String, error: String },
 }
 
+/// Returns the variant name of a [`DhtNetworkResult`] without exposing internal data.
+fn dht_network_result_variant_name(result: &DhtNetworkResult) -> &'static str {
+    match result {
+        DhtNetworkResult::PutSuccess { .. } => "PutSuccess",
+        DhtNetworkResult::GetSuccess { .. } => "GetSuccess",
+        DhtNetworkResult::GetNotFound { .. } => "GetNotFound",
+        DhtNetworkResult::NodesFound { .. } => "NodesFound",
+        DhtNetworkResult::ValueFound { .. } => "ValueFound",
+        DhtNetworkResult::PongReceived { .. } => "PongReceived",
+        DhtNetworkResult::JoinSuccess { .. } => "JoinSuccess",
+        DhtNetworkResult::LeaveSuccess => "LeaveSuccess",
+        DhtNetworkResult::Error { .. } => "Error",
+    }
+}
+
 /// DHT message envelope for network transmission
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DhtNetworkMessage {
@@ -1533,8 +1548,11 @@ impl DhtNetworkManager {
                 }
                 Ok(other) => {
                     self.record_peer_failure(&peer_id).await;
-                    let err_msg = format!("Unexpected result: {:?}", other);
-                    debug!("Unexpected result from peer {}: {:?}", peer_id, other);
+                    let err_msg = format!(
+                        "Unexpected result variant: {}",
+                        dht_network_result_variant_name(&other)
+                    );
+                    debug!("Unexpected result from peer {}: {}", peer_id, err_msg);
                     outcomes.push(PeerStoreOutcome {
                         peer_id,
                         success: false,
