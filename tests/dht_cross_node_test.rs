@@ -348,8 +348,8 @@ async fn test_dht_put_large_value() -> Result<()> {
     );
     let err_msg = format!("{}", oversized_result.unwrap_err());
     assert!(
-        err_msg.contains("exceeds maximum"),
-        "Error should mention size limit, got: {}",
+        err_msg.contains("513") && err_msg.contains("512"),
+        "Error should mention both actual (513) and max (512) sizes, got: {}",
         err_msg
     );
 
