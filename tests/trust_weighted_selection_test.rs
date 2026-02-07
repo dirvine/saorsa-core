@@ -12,7 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 //! Integration tests for trust-weighted peer selection in DHT operations
-#![cfg(feature = "adaptive-ml")]
 
 use saorsa_core::adaptive::{EigenTrustEngine, NodeStatisticsUpdate};
 use saorsa_core::dht::{DhtCoreEngine, DhtKey, DhtNodeId, TrustSelectionConfig};

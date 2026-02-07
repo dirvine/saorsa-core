@@ -2,7 +2,6 @@
 //!
 //! Provides the main DHT functionality with k=8 replication, load balancing, and fault tolerance.
 
-#[cfg(feature = "adaptive-ml")]
 use crate::adaptive::EigenTrustEngine;
 use crate::dht::geographic_routing::GeographicRegion;
 use crate::dht::metrics::SecurityMetricsCollector;
@@ -13,7 +12,6 @@ use crate::dht::routing_maintenance::close_group_validator::{
 use crate::dht::routing_maintenance::{
     BucketRefreshManager, EvictionManager, EvictionReason, MaintenanceConfig,
 };
-#[cfg(feature = "adaptive-ml")]
 use crate::dht::trust_peer_selector::{TrustAwarePeerSelector, TrustSelectionConfig};
 use crate::network::NetworkSender;
 use crate::security::{IPDiversityConfig, IPDiversityEnforcer};
@@ -519,8 +517,7 @@ pub struct DhtCoreEngine {
     /// Pending requests waiting for responses (request_id -> response sender)
     pending_requests: Arc<RwLock<HashMap<String, oneshot::Sender<DhtResponse>>>>,
 
-    // Trust-weighted peer selection (requires adaptive-ml feature)
-    #[cfg(feature = "adaptive-ml")]
+    // Trust-weighted peer selection
     /// Optional trust-aware peer selector for combining distance with trust scores
     trust_peer_selector: Option<TrustAwarePeerSelector<EigenTrustEngine>>,
 }
@@ -584,7 +581,6 @@ impl DhtCoreEngine {
             geographic_diversity_enforcer,
             transport: None,
             pending_requests: Arc::new(RwLock::new(HashMap::new())),
-            #[cfg(feature = "adaptive-ml")]
             trust_peer_selector: None,
         })
     }
@@ -608,9 +604,8 @@ impl DhtCoreEngine {
         &self.node_id
     }
 
-    // ===== Trust-weighted peer selection methods (requires adaptive-ml feature) =====
+    // ===== Trust-weighted peer selection methods =====
 
-    #[cfg(feature = "adaptive-ml")]
     /// Enable trust-weighted peer selection
     ///
     /// When enabled, peer selection for DHT operations will combine XOR distance
@@ -628,7 +623,6 @@ impl DhtCoreEngine {
         tracing::info!("DHT trust-weighted peer selection enabled");
     }
 
-    #[cfg(feature = "adaptive-ml")]
     /// Enable trust-weighted peer selection with separate configs for queries and storage
     ///
     /// Storage operations use stricter trust requirements since data persistence
@@ -647,7 +641,6 @@ impl DhtCoreEngine {
         tracing::info!("DHT trust-weighted peer selection enabled with separate storage config");
     }
 
-    #[cfg(feature = "adaptive-ml")]
     /// Disable trust-weighted peer selection
     ///
     /// Falls back to pure distance-based selection.
@@ -656,14 +649,12 @@ impl DhtCoreEngine {
         tracing::info!("DHT trust-weighted peer selection disabled");
     }
 
-    #[cfg(feature = "adaptive-ml")]
     /// Check if trust-weighted peer selection is enabled
     #[must_use]
     pub fn has_trust_selection(&self) -> bool {
         self.trust_peer_selector.is_some()
     }
 
-    #[cfg(feature = "adaptive-ml")]
     /// Select peers for a query operation, considering trust if enabled
     ///
     /// If trust selection is enabled, combines XOR distance with trust scores.
@@ -682,7 +673,6 @@ impl DhtCoreEngine {
         }
     }
 
-    #[cfg(feature = "adaptive-ml")]
     /// Select peers for a storage operation, considering trust if enabled
     ///
     /// Storage operations use stricter trust requirements when trust selection
@@ -699,33 +689,6 @@ impl DhtCoreEngine {
             // Fallback: take closest by distance
             candidates.into_iter().take(count).collect()
         }
-    }
-
-    // ===== Fallback methods when adaptive-ml feature is disabled =====
-
-    #[cfg(not(feature = "adaptive-ml"))]
-    /// Check if trust-weighted peer selection is enabled (always false without adaptive-ml feature)
-    #[must_use]
-    pub fn has_trust_selection(&self) -> bool {
-        false
-    }
-
-    #[cfg(not(feature = "adaptive-ml"))]
-    /// Select peers for a query operation (distance-only when adaptive-ml is disabled)
-    async fn select_query_peers(&self, key: &DhtKey, count: usize) -> Vec<NodeInfo> {
-        let routing = self.routing_table.read().await;
-        let candidates = routing.find_closest_nodes(key, count);
-        drop(routing);
-        candidates
-    }
-
-    #[cfg(not(feature = "adaptive-ml"))]
-    /// Select peers for a storage operation (distance-only when adaptive-ml is disabled)
-    async fn select_storage_peers(&self, key: &DhtKey, count: usize) -> Vec<NodeInfo> {
-        let routing = self.routing_table.read().await;
-        let candidates = routing.find_closest_nodes(key, count);
-        drop(routing);
-        candidates
     }
 
     /// Start background maintenance tasks for security and health

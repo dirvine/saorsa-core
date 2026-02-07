@@ -1,4 +1,3 @@
-#![cfg(feature = "adaptive-ml")]
 #![allow(dead_code, unused_variables, unused_imports)]
 //! Chaos engineering tests for adaptive network resilience
 //!

@@ -16,7 +16,6 @@
 //! This module provides core networking functionality for the P2P Foundation.
 //! It handles peer connections, network events, and node lifecycle management.
 
-#[cfg(feature = "adaptive-ml")]
 use crate::adaptive::{EigenTrustEngine, NodeId as AdaptiveNodeId, NodeStatisticsUpdate};
 use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
@@ -687,7 +686,6 @@ pub struct P2PNode {
     /// Used to track peer reliability based on data availability outcomes.
     /// Consumers (like saorsa-node) should report successes and failures
     /// via `report_peer_success()` and `report_peer_failure()` methods.
-    #[cfg(feature = "adaptive-ml")]
     trust_engine: Option<Arc<EigenTrustEngine>>,
 }
 
@@ -787,7 +785,6 @@ impl P2PNode {
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
             is_bootstrapped: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "adaptive-ml")]
             trust_engine: None,
         })
     }
@@ -906,9 +903,8 @@ impl P2PNode {
             }
         };
 
-        // Initialize EigenTrust engine for reputation management (only with adaptive-ml feature)
+        // Initialize EigenTrust engine for reputation management
         // Pre-trusted nodes are the bootstrap nodes (they start with high trust)
-        #[cfg(feature = "adaptive-ml")]
         let trust_engine = {
             use crate::adaptive::NodeId;
             use std::collections::HashSet;
@@ -1078,7 +1074,6 @@ impl P2PNode {
             listener_handle: Arc::new(RwLock::new(None)),
             geo_provider,
             is_bootstrapped: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "adaptive-ml")]
             trust_engine,
         };
         info!(
@@ -1140,7 +1135,7 @@ impl P2PNode {
     }
 
     // =========================================================================
-    // Trust API - EigenTrust Reputation System (requires adaptive-ml feature)
+    // Trust API - EigenTrust Reputation System
     // =========================================================================
 
     /// Get the EigenTrust engine for direct trust operations
@@ -1149,7 +1144,6 @@ impl P2PNode {
     /// For simple success/failure reporting, prefer `report_peer_success()` and
     /// `report_peer_failure()`.
     ///
-    /// Requires the `adaptive-ml` feature to be enabled.
     ///
     /// # Example
     ///
@@ -1162,7 +1156,6 @@ impl P2PNode {
     ///     let scores = engine.compute_global_trust().await;
     /// }
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub fn trust_engine(&self) -> Option<Arc<EigenTrustEngine>> {
         self.trust_engine.clone()
     }
@@ -1172,7 +1165,6 @@ impl P2PNode {
     /// PeerId strings are hex-encoded 32-byte identifiers. This decodes them
     /// back to raw bytes, matching the DHT NodeId representation used by
     /// `trust_peer_selector`. Falls back to blake3 hash for non-hex IDs.
-    #[cfg(feature = "adaptive-ml")]
     fn peer_id_to_trust_node_id(peer_id: &str) -> AdaptiveNodeId {
         if let Ok(bytes) = hex::decode(peer_id)
             && bytes.len() == 32
@@ -1191,7 +1183,6 @@ impl P2PNode {
     /// Call this after successful data operations to increase the peer's trust score.
     /// This is the primary method for saorsa-node to report positive outcomes.
     ///
-    /// Requires the `adaptive-ml` feature to be enabled.
     ///
     /// # Arguments
     ///
@@ -1205,7 +1196,6 @@ impl P2PNode {
     ///     node.report_peer_success(&peer_id).await?;
     /// }
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub async fn report_peer_success(&self, peer_id: &str) -> Result<()> {
         if let Some(ref engine) = self.trust_engine {
             let node_id = Self::peer_id_to_trust_node_id(peer_id);
@@ -1225,7 +1215,6 @@ impl P2PNode {
     /// Call this after failed data operations to decrease the peer's trust score.
     /// This includes timeouts, corrupted data, or refused connections.
     ///
-    /// Requires the `adaptive-ml` feature to be enabled.
     ///
     /// # Arguments
     ///
@@ -1240,7 +1229,6 @@ impl P2PNode {
     ///     Err(_) => node.report_peer_failure(&peer_id).await?,
     /// }
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub async fn report_peer_failure(&self, peer_id: &str) -> Result<()> {
         if let Some(ref engine) = self.trust_engine {
             let node_id = Self::peer_id_to_trust_node_id(peer_id);
@@ -1260,7 +1248,6 @@ impl P2PNode {
     /// Returns a value between 0.0 (untrusted) and 1.0 (fully trusted).
     /// Unknown peers return 0.0 by default.
     ///
-    /// Requires the `adaptive-ml` feature to be enabled.
     ///
     /// # Arguments
     ///
@@ -1274,7 +1261,6 @@ impl P2PNode {
     ///     tracing::warn!("Low trust peer: {}", peer_id);
     /// }
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub fn peer_trust(&self, peer_id: &str) -> f64 {
         if let Some(ref engine) = self.trust_engine {
             let node_id = Self::peer_id_to_trust_node_id(peer_id);

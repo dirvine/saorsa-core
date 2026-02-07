@@ -1,6 +1,5 @@
 // Copyright 2024 Saorsa Labs Limited
 //
-#![cfg(feature = "adaptive-ml")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // This software is dual-licensed under:
 // - GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
