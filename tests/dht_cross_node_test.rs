@@ -329,7 +329,10 @@ async fn test_dht_put_large_value() -> Result<()> {
                 value.len(),
                 "Retrieved value size should match"
             );
-            assert_eq!(retrieved_value, value, "Retrieved value content should match");
+            assert_eq!(
+                retrieved_value, value,
+                "Retrieved value content should match"
+            );
         }
         _ => panic!("Get for max-size value should succeed"),
     }

@@ -134,7 +134,7 @@ pub enum DhtNetworkOperation {
 /// Per-peer outcome from a DHT PUT replication attempt.
 ///
 /// Captures whether each target peer successfully stored the value,
-/// along with optional error details and latency measurements.
+/// along with optional error details.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerStoreOutcome {
     /// The peer that was targeted for replication.

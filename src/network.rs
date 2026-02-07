@@ -1415,14 +1415,25 @@ impl P2PNode {
             is_response: false,
             payload: data,
         };
-        let envelope_bytes = postcard::to_allocvec(&envelope).map_err(|e| {
-            P2PError::Serialization(format!("Failed to serialize request envelope: {e}").into())
-        })?;
+        let envelope_bytes = match postcard::to_allocvec(&envelope) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.active_requests.write().await.remove(&message_id);
+                return Err(P2PError::Serialization(
+                    format!("Failed to serialize request envelope: {e}").into(),
+                ));
+            }
+        };
 
         // Send on /rr/<protocol> prefix
         let wire_protocol = format!("/rr/{}", protocol);
-        self.send_message(peer_id, &wire_protocol, envelope_bytes)
-            .await?;
+        if let Err(e) = self
+            .send_message(peer_id, &wire_protocol, envelope_bytes)
+            .await
+        {
+            self.active_requests.write().await.remove(&message_id);
+            return Err(e);
+        }
 
         // Wait for response with timeout
         let result = match tokio::time::timeout(timeout, rx).await {
@@ -1749,7 +1760,12 @@ impl P2PNode {
                             // Route response to waiting caller
                             let mut reqs = active_requests.write().await;
                             if let Some(pending) = reqs.remove(&envelope.message_id) {
-                                let _ = pending.send(envelope.payload);
+                                if pending.send(envelope.payload).is_err() {
+                                    warn!(
+                                        message_id = %envelope.message_id,
+                                        "Response receiver dropped before delivery"
+                                    );
+                                }
                                 continue; // Don't broadcast responses
                             }
                             // No matching request — fall through to broadcast
