@@ -156,7 +156,6 @@ fn test_peer_store_outcome_serde_default_fields() {
     assert_eq!(outcome.peer_id, "peer_old");
     assert!(outcome.success);
     assert!(outcome.error.is_none());
-    assert!(outcome.error.is_none());
 }
 
 // ---- Enriched DhtNetworkResult tests ----
