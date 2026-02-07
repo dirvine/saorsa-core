@@ -272,16 +272,19 @@ pub enum ConsistencyLevel {
 
 To keep iterative lookups aligned with the multi-layer architecture, the DHT network manager now enforces:
 
-- **FIFO candidate queues**: new nodes are appended to a bounded queue (Kademlia-style K-buckets) and duplicates are ignored. When the queue hits `MAX_CANDIDATE_NODES` we drop the newest entrants, preserving the oldest, better-observed peers.
-- **Stagnation detection**: each iteration snapshots the candidate set; if the next iteration would query the identical peer set, the lookup terminates early instead of looping forever.
-- **Trust feedback hooks**: every successful response (value or closer nodes) reports a positive event to EigenTrust, while failures/timeouts register negative events. This keeps the trust layer informed without leaking panic paths.
+- **Sorted shortlist**: candidates are maintained in a `BTreeMap` keyed by XOR distance to the target, ensuring the closest unqueried nodes are always selected first. This replaces the earlier FIFO queue approach and matches the standard Kademlia algorithm.
+- **Convergence detection**: each iteration checks whether any newly discovered candidate is closer to the target than the previous best. Lookups terminate when no progress is being made, rather than relying solely on stagnation snapshots.
+- **Unified SHA-256 key derivation**: all peer ID to DHT key conversions use a single canonical `peer_id_to_dht_key()` function (SHA-256 hash). This eliminates inconsistent distance calculations that previously arose from mixed zero-padded and hashed key derivation paths.
+- **Bounded candidate set**: the shortlist is capped at `MAX_CANDIDATE_NODES` (200) to prevent memory exhaustion. New candidates beyond the limit are dropped.
+- **Trust feedback hooks**: successful responses (value or closer nodes) report positive events to EigenTrust, while failures/timeouts register negative events. `GetNotFound` responses are treated as neutral (the peer responded correctly but had no data).
 - **Single-socket parallelism**: all ALPHA-parallel queries share the same ant-quic connection pool, so we retain the geo-aware transport guarantees while still querying multiple peers concurrently.
+- **Lookup-specific dial timeout**: a dedicated `LOOKUP_DIAL_TIMEOUT` (5s) prevents individual unreachable nodes from blocking the entire lookup.
 
 These safeguards ensure the DHT layer respects EigenTrust scoring, geographic awareness (enforced by the transport layer), and the architectural STOP conditions described in ADR-001.
 
 Implementation reference: `DhtNetworkManager::get` and `DhtNetworkManager::find_closest_nodes_network`
-(in `src/dht_network_manager.rs`) enforce the queue window, duplicate suppression, stagnation check,
-and EigenTrust feedback loop described above.
+(in `src/dht_network_manager.rs`) use a shared `IterativeLookup` struct that encapsulates sorted
+candidate management, convergence detection, and bounded queue enforcement.
 
 ## Alternatives Considered
 

@@ -198,7 +198,7 @@ async fn test_replication_count_isolated_node() -> Result<()> {
     Ok(())
 }
 
-/// Stress test: 50 values of varying sizes (1KB–10KB), all stored and retrieved.
+/// Stress test: 50 values of varying sizes (up to 512 bytes), all stored and retrieved.
 #[tokio::test]
 async fn test_stress_50_values() -> Result<()> {
     let config = create_test_dht_config("stress_node", 0, 8);
@@ -207,9 +207,11 @@ async fn test_stress_50_values() -> Result<()> {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
+    // MAX_VALUE_SIZE is 512 bytes; vary sizes from 10 to 512
     for i in 0..50 {
         let key = key_from_str(&format!("stress_key_{}", i));
-        let value_size = 1024 * (i % 10 + 1);
+        let value_size = 10 + (i % 50) * 10; // 10..500 bytes
+        let value_size = value_size.min(512);
         let value = vec![i as u8; value_size];
 
         match manager.put(key, value).await {
@@ -223,7 +225,7 @@ async fn test_stress_50_values() -> Result<()> {
 
     for i in 0..50 {
         let key = key_from_str(&format!("stress_key_{}", i));
-        let expected_size = 1024 * (i % 10 + 1);
+        let expected_size = (10 + (i % 50) * 10).min(512);
 
         match manager.get(&key).await {
             Ok(DhtNetworkResult::GetSuccess { value, .. }) => {

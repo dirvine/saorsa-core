@@ -300,39 +300,35 @@ async fn test_concurrent_dht_operations() -> Result<()> {
     Ok(())
 }
 
-/// Test DHT put with timeout (large value)
+/// Test DHT put rejects oversized values and accepts values at the limit
 #[tokio::test]
 async fn test_dht_put_large_value() -> Result<()> {
     let config = create_test_dht_config("large_value_test_node", 0);
     let manager = Arc::new(DhtNetworkManager::new(config).await?);
     manager.start().await?;
 
-    // Create a large value (1MB)
+    // Oversized value (1MB) must be rejected (MAX_VALUE_SIZE is 512 bytes)
     let key = key_from_str("large_value_key");
-    let value = vec![0u8; 1024 * 1024];
+    let oversized_value = vec![0u8; 1024 * 1024];
 
-    // Put should complete within timeout
-    let put_result = timeout(Duration::from_secs(30), manager.put(key, value.clone())).await??;
+    let put_result = manager.put(key, oversized_value).await;
     assert!(
-        matches!(put_result, DhtNetworkResult::PutSuccess { .. }),
-        "Large value put should succeed"
+        put_result.is_err(),
+        "Oversized value put should be rejected"
     );
 
-    // Get should return the large value
-    let get_result = timeout(Duration::from_secs(30), manager.get(&key)).await??;
-    match get_result {
-        DhtNetworkResult::GetSuccess {
-            value: retrieved_value,
-            ..
-        } => {
-            assert_eq!(
-                retrieved_value.len(),
-                value.len(),
-                "Retrieved value size should match"
-            );
-        }
-        _ => panic!("Get for large value should succeed"),
-    }
+    // Value at exactly 512 bytes should succeed
+    let key2 = key_from_str("max_size_value_key");
+    let max_value = vec![42u8; 512];
+    let put_result = timeout(
+        Duration::from_secs(30),
+        manager.put(key2, max_value.clone()),
+    )
+    .await??;
+    assert!(
+        matches!(put_result, DhtNetworkResult::PutSuccess { .. }),
+        "Value at max size should succeed"
+    );
 
     manager.stop().await?;
     Ok(())
