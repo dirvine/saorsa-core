@@ -3,7 +3,8 @@ name = "saorsa-core"
 # 0.10.3: postcard serialization migration (PR #14)
 # 0.10.4: refocus on phonebook + trust signals, remove user-facing APIs (PR #15)
 # 0.10.5: replica planner helper for storage orchestration
-version = "0.10.5"
+# 0.11.0: remove feature gates — adaptive/trust/placement always compiled
+version = "0.11.0"
 edition = "2024"
 authors = ["Saorsa Labs Limited <david@saorsalabs.com>"]
 license = "AGPL-3.0"
@@ -17,8 +18,8 @@ documentation = "https://docs.rs/saorsa-core"
 
 # Docs.rs configuration to handle build script issues
 [package.metadata.docs.rs]
-features = []
-no-default-features = true
+features = ["metrics"]
+no-default-features = false
 default-target = "x86_64-unknown-linux-gnu"
 
 [features]
@@ -30,51 +31,6 @@ mocks = []
 h2_greedy = []
 # Test utilities including mock DHT for integration tests
 test-utils = []
-
-# ============================================================================
-# Optional Features (production-ready with fallbacks)
-# ============================================================================
-#
-# These features enhance functionality but are NOT required for core operation.
-# All code paths have fallback implementations when these features are disabled.
-# Enable them for enhanced trust-weighted routing and ML-based optimization.
-
-# Machine learning components: Thompson Sampling, Q-Learning, EigenTrust, LSTM
-# Enables trust-weighted peer selection, EigenTrust reputation tracking, and ML-based optimization.
-# When disabled: DHT uses standard Kademlia routing without trust weighting.
-adaptive-ml = []
-
-# Trust-weighted peer selection using EigenTrust in routing decisions
-trust-routing = []
-
-# Region-aware routing and geographic peer selection
-geographic = []
-
-# Sybil attack detection for DHT protection
-sybil-detection = []
-
-# Collusion detection for witness validation
-collusion-detection = []
-
-# S/Kademlia security extensions (requires trust-routing)
-skademlia = ["trust-routing"]
-
-# Storage orchestration and placement engine (requires adaptive-ml)
-placement = ["adaptive-ml"]
-
-# Enable all experimental features
-experimental = [
-    "adaptive-ml",
-    "trust-routing",
-    "geographic",
-    "sybil-detection",
-    "collusion-detection",
-    "skademlia",
-    "placement",
-]
-
-# Backwards compatibility alias
-full = ["experimental"]
 
 [dependencies]
 # Core async and serialization
@@ -204,14 +160,11 @@ path = "tests/eigentrust_integration_test.rs"
 name = "gossipsub_integration_test"
 path = "tests/gossipsub_integration_test.rs"
 
-# Examples requiring adaptive-ml feature
 [[example]]
 name = "security_example"
-required-features = ["adaptive-ml"]
 
 [[example]]
 name = "adaptive_network_monitor"
-required-features = ["adaptive-ml"]
 
 # Platform-specific dependencies for secure memory management
 [target.'cfg(unix)'.dependencies]

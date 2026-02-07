@@ -1469,28 +1469,14 @@ impl DhtNetworkManager {
     }
 
     async fn record_peer_success(&self, peer_id: &str) {
-        #[cfg(feature = "adaptive-ml")]
-        {
-            if let Err(e) = self.node.report_peer_success(peer_id).await {
-                trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust success");
-            }
-        }
-        #[cfg(not(feature = "adaptive-ml"))]
-        {
-            let _ = peer_id;
+        if let Err(e) = self.node.report_peer_success(peer_id).await {
+            trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust success");
         }
     }
 
     async fn record_peer_failure(&self, peer_id: &str) {
-        #[cfg(feature = "adaptive-ml")]
-        {
-            if let Err(e) = self.node.report_peer_failure(peer_id).await {
-                trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust failure");
-            }
-        }
-        #[cfg(not(feature = "adaptive-ml"))]
-        {
-            let _ = peer_id;
+        if let Err(e) = self.node.report_peer_failure(peer_id).await {
+            trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust failure");
         }
     }
 

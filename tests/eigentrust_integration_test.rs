@@ -11,7 +11,6 @@
 // distributed under these licenses is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
-#![cfg(feature = "adaptive-ml")]
 //! Comprehensive integration tests for EigenTrust++ implementation
 //!
 //! Tests cover:

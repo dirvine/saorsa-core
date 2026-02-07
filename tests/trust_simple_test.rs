@@ -1,5 +1,4 @@
 //! Simple test to verify EigenTrust functionality
-#![cfg(feature = "adaptive-ml")]
 
 #[cfg(test)]
 mod tests {

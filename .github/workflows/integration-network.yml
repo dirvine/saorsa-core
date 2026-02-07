@@ -146,12 +146,11 @@ jobs:
       - name: Health Integration
         run: cargo nextest run --test health_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
-      # adaptive-ml is only required for gossipsub and coordinator tests
-      - name: Build adaptive-ml tests
-        run: cargo build --tests --features "default,adaptive-ml,mocks,h2_greedy,test-utils"
+      - name: Build test dependencies
+        run: cargo build --tests --features "default,mocks,h2_greedy,test-utils"
 
       - name: Gossipsub
-        run: cargo nextest run --test gossipsub_integration_test --features "default,adaptive-ml,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test gossipsub_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast
 
       - name: Coordinator Integration
-        run: cargo nextest run --test coordinator_integration_test --features "default,adaptive-ml,mocks,h2_greedy,test-utils" --no-fail-fast
+        run: cargo nextest run --test coordinator_integration_test --features "default,mocks,h2_greedy,test-utils" --no-fail-fast

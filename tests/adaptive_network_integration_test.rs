@@ -1,5 +1,4 @@
 #![allow(unused_variables, unused_mut, unused_imports)]
-#![cfg(feature = "adaptive-ml")]
 //! Comprehensive integration tests for the adaptive network components
 //! Tests all adaptive features including Thompson Sampling, MAB routing,
 //! Q-Learning cache, LSTM churn prediction, and more.
