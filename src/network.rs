@@ -1422,9 +1422,13 @@ impl P2PNode {
             ));
         }
 
-        // Reject if at concurrency limit
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let started_at = tokio::time::Instant::now();
+
+        // Atomic check-and-insert under a single write lock to prevent TOCTOU races
         {
-            let reqs = self.active_requests.read().await;
+            let mut reqs = self.active_requests.write().await;
             if reqs.len() >= MAX_ACTIVE_REQUESTS {
                 return Err(P2PError::Transport(
                     crate::error::TransportError::StreamError(
@@ -1435,20 +1439,14 @@ impl P2PNode {
                     ),
                 ));
             }
+            reqs.insert(
+                message_id.clone(),
+                PendingRequest {
+                    response_tx: tx,
+                    expected_peer: peer_id.to_string(),
+                },
+            );
         }
-
-        let message_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let started_at = tokio::time::Instant::now();
-
-        // Register the pending request with the expected peer for origin validation
-        self.active_requests.write().await.insert(
-            message_id.clone(),
-            PendingRequest {
-                response_tx: tx,
-                expected_peer: peer_id.to_string(),
-            },
-        );
 
         // Wrap in envelope
         let envelope = RequestResponseEnvelope {
@@ -1473,6 +1471,18 @@ impl P2PNode {
             .await
         {
             self.active_requests.write().await.remove(&message_id);
+
+            // Report trust failure for send errors (connection refused, etc.)
+            #[cfg(feature = "adaptive-ml")]
+            {
+                let _ = self
+                    .report_peer_failure_with_reason(
+                        peer_id,
+                        crate::error::PeerFailureReason::ConnectionFailed,
+                    )
+                    .await;
+            }
+
             return Err(e);
         }
 
@@ -1559,6 +1569,15 @@ impl P2PNode {
         message_id: &str,
         data: Vec<u8>,
     ) -> Result<()> {
+        // Validate protocol name (same rules as send_request)
+        if protocol.is_empty() || protocol.contains(&['/', '\\', '\0'][..]) {
+            return Err(P2PError::Transport(
+                crate::error::TransportError::StreamError(
+                    format!("Invalid protocol name: {:?}", protocol).into(),
+                ),
+            ));
+        }
+
         let envelope = RequestResponseEnvelope {
             message_id: message_id.to_string(),
             is_response: true,
@@ -1819,7 +1838,12 @@ impl P2PNode {
                                 }
                                 continue; // Don't broadcast responses
                             }
-                            // No matching request — fall through to broadcast
+                            // No matching request — suppress internal /rr/ traffic
+                            trace!(
+                                message_id = %envelope.message_id,
+                                "Unmatched /rr/ response (likely timed out) — suppressing"
+                            );
+                            continue;
                         }
                         broadcast_event(&event_tx, event);
                     }
