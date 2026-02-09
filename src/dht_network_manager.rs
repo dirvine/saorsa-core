@@ -26,7 +26,6 @@ use crate::{
     network::{NodeConfig, P2PNode},
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -370,7 +369,7 @@ impl DhtNetworkManager {
         );
 
         // Create DHT instance using canonical SHA-256 key derivation
-        let dht_key = Self::peer_id_to_dht_key_bytes(&config.local_peer_id);
+        let dht_key = crate::dht::derive_dht_key_from_peer_id(&config.local_peer_id);
         let node_id = DhtNodeId::from_bytes(dht_key);
         let dht = Arc::new(RwLock::new(DhtCoreEngine::new(node_id).map_err(|e| {
             P2PError::Dht(DhtError::StorageFailed(e.to_string().into()))
@@ -437,7 +436,7 @@ impl DhtNetworkManager {
         );
 
         // Create DHT instance using canonical SHA-256 key derivation
-        let dht_key = Self::peer_id_to_dht_key_bytes(&config.local_peer_id);
+        let dht_key = crate::dht::derive_dht_key_from_peer_id(&config.local_peer_id);
         let node_id = DhtNodeId::from_bytes(dht_key);
         let dht = Arc::new(RwLock::new(DhtCoreEngine::new(node_id).map_err(|e| {
             P2PError::Dht(DhtError::StorageFailed(e.to_string().into()))
@@ -1022,7 +1021,7 @@ impl DhtNetworkManager {
     async fn join_network(&self) -> Result<()> {
         info!("Joining DHT network...");
 
-        let _local_key = Self::peer_id_to_dht_key_bytes(&self.config.local_peer_id);
+        let _local_key = crate::dht::derive_dht_key_from_peer_id(&self.config.local_peer_id);
         let join_operation = DhtNetworkOperation::Join;
 
         let mut bootstrap_peers = 0;
@@ -1281,6 +1280,10 @@ impl DhtNetworkManager {
                 match result {
                     Ok(DhtNetworkResult::SuggestCloserNodes { nodes, .. }) => {
                         self.record_peer_success(&peer_id).await;
+                        // Add successful node to best_nodes
+                        if let Some(queried_node) = batch.iter().find(|n| n.peer_id == peer_id) {
+                            best_nodes.push(queried_node.clone());
+                        }
                         for mut node in nodes {
                             Self::ensure_cached_dht_key(&mut node);
                             if queried_nodes.contains(&node.peer_id)
@@ -1313,15 +1316,16 @@ impl DhtNetworkManager {
                     }
                     Ok(_) => {
                         self.record_peer_success(&peer_id).await;
+                        // Add successful node to best_nodes
+                        if let Some(queried_node) = batch.iter().find(|n| n.peer_id == peer_id) {
+                            best_nodes.push(queried_node.clone());
+                        }
                     }
                     Err(e) => {
                         trace!("[NETWORK] Query to {} failed: {}", peer_id, e);
                         self.record_peer_failure(&peer_id).await;
+                        // Don't add failed nodes to best_nodes - they can't be used for replication
                     }
-                }
-
-                if let Some(queried_node) = batch.iter().find(|n| n.peer_id == peer_id) {
-                    best_nodes.push(queried_node.clone());
                 }
             }
 
@@ -1457,52 +1461,19 @@ impl DhtNetworkManager {
         node.cached_dht_key = Self::parse_peer_id_to_key(&node.peer_id);
     }
 
-    /// Derive a 32-byte DHT key from a peer ID string.
+    /// Parse a peer ID string to a DhtKey, returning None for invalid IDs.
     ///
-    /// Uses SHA-256 for uniform distribution in the DHT key space.
-    /// This is the canonical key derivation — all call sites should use this
-    /// to ensure consistent distance calculations.
-    fn peer_id_to_dht_key_bytes(peer_id: &str) -> Key {
-        let bytes = peer_id.as_bytes();
-        if bytes.len() == 32 {
-            let mut key = [0u8; 32];
-            key.copy_from_slice(bytes);
-            return key;
-        }
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        let hash_result = hasher.finalize();
-        let mut key = [0u8; 32];
-        key.copy_from_slice(&hash_result);
-        key
-    }
-
-    /// Parse a peer ID string to a DhtKey, returning None for invalid IDs
+    /// Uses the canonical `derive_dht_key_from_peer_id()` to ensure consistent
+    /// DHT positioning across all nodes in the network.
     fn parse_peer_id_to_key(peer_id: &str) -> Option<DhtKey> {
-        // FIX LOG-002: Use peer_id.as_bytes() instead of hex::decode
-        // to support arbitrary peer ID strings like "iterative_chain_a"
-        let bytes = peer_id.as_bytes();
-
-        if bytes.is_empty() {
+        if peer_id.is_empty() {
             warn!("Empty peer ID");
             return None;
         }
 
-        // If exactly 32 bytes, use directly
-        if bytes.len() == 32 {
-            let mut key = [0u8; 32];
-            key.copy_from_slice(bytes);
-            return Some(DhtKey::from_bytes(key));
-        }
-
-        // Otherwise hash to 32 bytes using SHA-256
-        // This ensures uniform distribution in DHT key space
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        let hash_result = hasher.finalize();
-        let mut key = [0u8; 32];
-        key.copy_from_slice(&hash_result);
-        Some(DhtKey::from_bytes(key))
+        Some(DhtKey::from_bytes(crate::dht::derive_dht_key_from_peer_id(
+            peer_id,
+        )))
     }
 
     /// Convert peer addresses reported by the transport into multiaddresses the DHT understands.
@@ -2053,7 +2024,7 @@ impl DhtNetworkManager {
             DhtNetworkOperation::Join => {
                 info!("Handling JOIN request from: {}", message.source);
                 // Add the joining node to our routing table
-                let dht_key = Self::peer_id_to_dht_key_bytes(&message.source);
+                let dht_key = crate::dht::derive_dht_key_from_peer_id(&message.source);
                 let _node = DHTNode {
                     peer_id: message.source.clone(),
                     address: String::new(),
@@ -2231,7 +2202,7 @@ impl DhtNetworkManager {
 
     /// Update peer information
     async fn update_peer_info(&self, peer_id: PeerId, _message: &DhtNetworkMessage) {
-        let dht_key = Self::peer_id_to_dht_key_bytes(&peer_id);
+        let dht_key = crate::dht::derive_dht_key_from_peer_id(&peer_id);
 
         // Get peer addresses from P2P node
         let addresses = if let Some(peer_info) = self.node.peer_info(&peer_id).await {
@@ -2281,7 +2252,7 @@ impl DhtNetworkManager {
                 match event {
                     crate::network::P2PEvent::PeerConnected(peer_id) => {
                         info!("DHT peer connected: {}", peer_id);
-                        let dht_key = DhtNetworkManager::peer_id_to_dht_key_bytes(&peer_id);
+                        let dht_key = crate::dht::derive_dht_key_from_peer_id(&peer_id);
 
                         // Get peer addresses from P2P node
                         let addresses = if let Some(peer_info) = node.peer_info(&peer_id).await {
@@ -2314,11 +2285,8 @@ impl DhtNetworkManager {
                                     },
                                 );
 
-                                if let Err(e) = event_tx
-                                    .send(DhtNetworkEvent::PeerDiscovered { peer_id, dht_key })
-                                {
-                                    warn!("Failed to send PeerDiscovered event: {}", e);
-                                }
+                                // Don't emit PeerDiscovered for address-less peers - consumers can't route to them
+                                // They'll be promoted to the routing table once addresses become available
                                 continue;
                             }
                         };
@@ -2475,7 +2443,9 @@ impl DhtNetworkManager {
 
                         // Add to DHT peers
                         let dht_key = bootstrap_node.dht_key.unwrap_or_else(|| {
-                            Self::peer_id_to_dht_key_bytes(&bootstrap_node.peer_id.to_string())
+                            crate::dht::derive_dht_key_from_peer_id(
+                                &bootstrap_node.peer_id.to_string(),
+                            )
                         });
 
                         let mut peers = self.dht_peers.write().await;
