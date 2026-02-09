@@ -207,7 +207,7 @@ async fn test_handler_suggests_closer_nodes() -> Result<()> {
 
         // With iterative lookup, we expect GetNotFound after exhausting all nodes
         match get_result {
-            DhtNetworkResult::GetNotFound { key } => {
+            DhtNetworkResult::GetNotFound { key, .. } => {
                 info!("✅ Got GetNotFound after iterative lookup exhausted all nodes");
                 assert_eq!(key, test_key, "Key should match");
             }
@@ -264,7 +264,7 @@ async fn test_handler_closest_node_returns_not_found() -> Result<()> {
 
         // Verify: GetNotFound
         match get_result {
-            DhtNetworkResult::GetNotFound { key } => {
+            DhtNetworkResult::GetNotFound { key, .. } => {
                 info!("✅ SUCCESS! Got GetNotFound from closest node (authority)");
                 assert_eq!(key, test_key, "Key should match");
             }
@@ -314,7 +314,7 @@ async fn test_isolated_handler_returns_not_found() -> Result<()> {
 
         // Verify: GetNotFound
         match get_result {
-            DhtNetworkResult::GetNotFound { key } => {
+            DhtNetworkResult::GetNotFound { key, .. } => {
                 info!("✅ SUCCESS! Isolated node returned GetNotFound");
                 assert_eq!(key, test_key, "Key should match");
             }
@@ -372,7 +372,7 @@ async fn test_handler_filters_out_requester() -> Result<()> {
         // With iterative lookup, eventually GetNotFound after exhausting nodes
         // The important part is that during the process, A never suggests B to B
         match get_result {
-            DhtNetworkResult::GetNotFound { key } => {
+            DhtNetworkResult::GetNotFound { key, .. } => {
                 info!("✅ SUCCESS! Got GetNotFound (never suggested requester to itself)");
                 assert_eq!(key, test_key, "Key should match");
             }
@@ -435,7 +435,7 @@ async fn test_handler_only_suggests_closer_nodes() -> Result<()> {
         // With iterative lookup, eventually GetNotFound
         // The handler logic ensures only closer nodes are suggested during lookup
         match get_result {
-            DhtNetworkResult::GetNotFound { key } => {
+            DhtNetworkResult::GetNotFound { key, .. } => {
                 info!("✅ SUCCESS! Got GetNotFound (only closer nodes suggested during lookup)");
                 assert_eq!(key, test_key, "Key should match");
             }
@@ -573,7 +573,7 @@ async fn test_multi_hop_exhausted_lookup() -> Result<()> {
 
         // Verify: GetNotFound after exhausting all nodes
         match get_result {
-            DhtNetworkResult::GetNotFound { key } => {
+            DhtNetworkResult::GetNotFound { key, .. } => {
                 info!("✅ SUCCESS! Got GetNotFound after exhausting all nodes");
                 assert_eq!(key, test_key, "Key should match");
             }
@@ -638,7 +638,7 @@ async fn test_all_closer_nodes_already_queried() -> Result<()> {
 
         // Verify: GetNotFound after all nodes queried
         match get_result {
-            DhtNetworkResult::GetNotFound { key } => {
+            DhtNetworkResult::GetNotFound { key, .. } => {
                 info!("✅ SUCCESS! Got GetNotFound after querying all nodes");
                 assert_eq!(key, test_key, "Key should match");
             }

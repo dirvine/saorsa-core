@@ -210,11 +210,9 @@ pub mod routing_maintenance;
 pub mod metrics;
 
 /// Trust-aware peer selection combining XOR distance with EigenTrust scores
-#[cfg(feature = "adaptive-ml")]
 pub mod trust_peer_selector;
 
 // Re-export trust peer selector types
-#[cfg(feature = "adaptive-ml")]
 pub use trust_peer_selector::{
     TrustAwarePeerSelector, TrustSelectionConfig, adaptive_id_to_dht_node, dht_node_to_adaptive_id,
 };

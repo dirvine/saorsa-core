@@ -85,11 +85,25 @@ pub struct NodeStatistics {
 /// Statistics update type
 #[derive(Debug, Clone)]
 pub enum NodeStatisticsUpdate {
+    /// Node uptime increased by the given number of seconds.
     Uptime(u64),
+    /// Peer provided a correct response.
     CorrectResponse,
+    /// Peer failed to provide a response (generic failure).
     FailedResponse,
+    /// Peer did not have the requested data.
+    DataUnavailable,
+    /// Peer returned data that failed integrity verification.
+    /// Counts as 2 failures due to severity.
+    CorruptedData,
+    /// Peer violated the expected wire protocol.
+    /// Counts as 2 failures due to severity.
+    ProtocolViolation,
+    /// Storage contributed (in GB).
     StorageContributed(u64),
+    /// Bandwidth contributed (in GB).
     BandwidthContributed(u64),
+    /// Compute cycles contributed.
     ComputeContributed(u64),
 }
 
@@ -155,6 +169,15 @@ impl EigenTrustEngine {
             NodeStatisticsUpdate::Uptime(seconds) => node_stats.uptime += seconds,
             NodeStatisticsUpdate::CorrectResponse => node_stats.correct_responses += 1,
             NodeStatisticsUpdate::FailedResponse => node_stats.failed_responses += 1,
+            NodeStatisticsUpdate::DataUnavailable => node_stats.failed_responses += 1,
+            NodeStatisticsUpdate::CorruptedData => {
+                // Corrupted data is a severe violation — counts as 2 failures
+                node_stats.failed_responses += 2;
+            }
+            NodeStatisticsUpdate::ProtocolViolation => {
+                // Protocol violations are severe — counts as 2 failures
+                node_stats.failed_responses += 2;
+            }
             NodeStatisticsUpdate::StorageContributed(gb) => node_stats.storage_contributed += gb,
             NodeStatisticsUpdate::BandwidthContributed(gb) => {
                 node_stats.bandwidth_contributed += gb

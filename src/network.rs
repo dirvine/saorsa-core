@@ -16,13 +16,12 @@
 //! This module provides core networking functionality for the P2P Foundation.
 //! It handles peer connections, network events, and node lifecycle management.
 
-#[cfg(feature = "adaptive-ml")]
 use crate::adaptive::{EigenTrustEngine, NodeId as AdaptiveNodeId, NodeStatisticsUpdate};
 use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
 use crate::dht::DHT;
-use crate::error::{NetworkError, P2PError, P2pResult as Result};
+use crate::error::{NetworkError, P2PError, P2pResult as Result, PeerFailureReason};
 use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
@@ -61,6 +60,12 @@ const KEEPALIVE_PAYLOAD: &[u8] = b"keepalive";
 
 /// Capacity of the internal channel used by the message receiving system.
 const MESSAGE_RECV_CHANNEL_CAPACITY: usize = 256;
+
+/// Maximum number of concurrent in-flight request/response operations.
+const MAX_ACTIVE_REQUESTS: usize = 256;
+
+/// Maximum allowed timeout for a single request (5 minutes).
+const MAX_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Configuration for a P2P node
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -601,6 +606,42 @@ pub enum P2PEvent {
     PeerDisconnected(PeerId),
 }
 
+/// Response from a peer to a request sent via [`P2PNode::send_request`].
+///
+/// Contains the response payload along with metadata about the responder
+/// and round-trip latency.
+#[derive(Debug, Clone)]
+pub struct PeerResponse {
+    /// The peer that sent the response.
+    pub peer_id: PeerId,
+    /// Raw response payload bytes.
+    pub data: Vec<u8>,
+    /// Round-trip latency from request to response.
+    pub latency: Duration,
+}
+
+/// Wire format for request/response correlation.
+///
+/// Wraps application payloads with a message ID and direction flag
+/// so the receive loop can route responses back to waiting callers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RequestResponseEnvelope {
+    /// Unique identifier to correlate request ↔ response.
+    message_id: String,
+    /// `false` for requests, `true` for responses.
+    is_response: bool,
+    /// Application payload.
+    payload: Vec<u8>,
+}
+
+/// An in-flight request awaiting a response from a specific peer.
+struct PendingRequest {
+    /// Oneshot sender for delivering the response payload.
+    response_tx: tokio::sync::oneshot::Sender<Vec<u8>>,
+    /// The peer we expect the response from (for origin validation).
+    expected_peer: String,
+}
+
 /// Main P2P node structure
 /// Main P2P network node that manages connections, routing, and communication
 ///
@@ -687,8 +728,13 @@ pub struct P2PNode {
     /// Used to track peer reliability based on data availability outcomes.
     /// Consumers (like saorsa-node) should report successes and failures
     /// via `report_peer_success()` and `report_peer_failure()` methods.
-    #[cfg(feature = "adaptive-ml")]
     trust_engine: Option<Arc<EigenTrustEngine>>,
+
+    /// Active request/response operations awaiting a response from a peer.
+    ///
+    /// Keyed by message ID (UUID). Entries are added by `send_request()` and
+    /// consumed by the message receive loop when a response envelope arrives.
+    active_requests: Arc<RwLock<HashMap<String, PendingRequest>>>,
 }
 
 /// Normalize wildcard bind addresses to localhost loopback addresses
@@ -787,8 +833,8 @@ impl P2PNode {
             geo_provider: Arc::new(BgpGeoProvider::new()),
             security_dashboard: None,
             is_bootstrapped: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "adaptive-ml")]
             trust_engine: None,
+            active_requests: Arc::new(RwLock::new(HashMap::new())),
         })
     }
     /// Create a new P2P node with the given configuration
@@ -899,9 +945,8 @@ impl P2PNode {
             }
         };
 
-        // Initialize EigenTrust engine for reputation management (only with adaptive-ml feature)
+        // Initialize EigenTrust engine for reputation management
         // Pre-trusted nodes are the bootstrap nodes (they start with high trust)
-        #[cfg(feature = "adaptive-ml")]
         let trust_engine = {
             use crate::adaptive::NodeId;
             use std::collections::HashSet;
@@ -1069,8 +1114,8 @@ impl P2PNode {
             listener_handle: Arc::new(RwLock::new(None)),
             geo_provider,
             is_bootstrapped: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "adaptive-ml")]
             trust_engine,
+            active_requests: Arc::new(RwLock::new(HashMap::new())),
         };
         info!(
             "Created P2P node with peer ID: {} (call start() to begin networking)",
@@ -1131,7 +1176,7 @@ impl P2PNode {
     }
 
     // =========================================================================
-    // Trust API - EigenTrust Reputation System (requires adaptive-ml feature)
+    // Trust API - EigenTrust Reputation System
     // =========================================================================
 
     /// Get the EigenTrust engine for direct trust operations
@@ -1140,7 +1185,6 @@ impl P2PNode {
     /// For simple success/failure reporting, prefer `report_peer_success()` and
     /// `report_peer_failure()`.
     ///
-    /// Requires the `adaptive-ml` feature to be enabled.
     ///
     /// # Example
     ///
@@ -1153,7 +1197,6 @@ impl P2PNode {
     ///     let scores = engine.compute_global_trust().await;
     /// }
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub fn trust_engine(&self) -> Option<Arc<EigenTrustEngine>> {
         self.trust_engine.clone()
     }
@@ -1163,7 +1206,6 @@ impl P2PNode {
     /// PeerId strings are hex-encoded 32-byte identifiers. This decodes them
     /// back to raw bytes, matching the DHT NodeId representation used by
     /// `trust_peer_selector`. Falls back to blake3 hash for non-hex IDs.
-    #[cfg(feature = "adaptive-ml")]
     fn peer_id_to_trust_node_id(peer_id: &str) -> AdaptiveNodeId {
         if let Ok(bytes) = hex::decode(peer_id)
             && bytes.len() == 32
@@ -1182,7 +1224,6 @@ impl P2PNode {
     /// Call this after successful data operations to increase the peer's trust score.
     /// This is the primary method for saorsa-node to report positive outcomes.
     ///
-    /// Requires the `adaptive-ml` feature to be enabled.
     ///
     /// # Arguments
     ///
@@ -1196,7 +1237,6 @@ impl P2PNode {
     ///     node.report_peer_success(&peer_id).await?;
     /// }
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub async fn report_peer_success(&self, peer_id: &str) -> Result<()> {
         if let Some(ref engine) = self.trust_engine {
             let node_id = Self::peer_id_to_trust_node_id(peer_id);
@@ -1216,7 +1256,6 @@ impl P2PNode {
     /// Call this after failed data operations to decrease the peer's trust score.
     /// This includes timeouts, corrupted data, or refused connections.
     ///
-    /// Requires the `adaptive-ml` feature to be enabled.
     ///
     /// # Arguments
     ///
@@ -1231,14 +1270,58 @@ impl P2PNode {
     ///     Err(_) => node.report_peer_failure(&peer_id).await?,
     /// }
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub async fn report_peer_failure(&self, peer_id: &str) -> Result<()> {
+        // Delegate to the enriched version with a generic transport-level reason
+        self.report_peer_failure_with_reason(peer_id, PeerFailureReason::ConnectionFailed)
+            .await
+    }
+
+    /// Report a failed interaction with a peer, providing a specific failure reason.
+    ///
+    /// This is the enriched version of [`P2PNode::report_peer_failure`] that maps the failure
+    /// reason to the appropriate trust penalty. Use this when you know *why* the
+    /// interaction failed to give the trust engine more accurate data.
+    ///
+    /// - Transport-level failures (`Timeout`, `ConnectionFailed`) map to `FailedResponse`
+    /// - `DataUnavailable` maps to `DataUnavailable`
+    /// - `CorruptedData` maps to `CorruptedData` (counts as 2 failures)
+    /// - `ProtocolError` maps to `ProtocolViolation` (counts as 2 failures)
+    /// - `Refused` maps to `FailedResponse`
+    ///
+    /// Requires the `adaptive-ml` feature to be enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `peer_id` - The peer ID of the node that failed
+    /// * `reason` - Why the interaction failed
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use saorsa_core::error::PeerFailureReason;
+    ///
+    /// // After a chunk retrieval returns corrupted data
+    /// node.report_peer_failure_with_reason(&peer_id, PeerFailureReason::CorruptedData).await?;
+    /// ```
+    pub async fn report_peer_failure_with_reason(
+        &self,
+        peer_id: &str,
+        reason: PeerFailureReason,
+    ) -> Result<()> {
         if let Some(ref engine) = self.trust_engine {
             let node_id = Self::peer_id_to_trust_node_id(peer_id);
 
-            engine
-                .update_node_stats(&node_id, NodeStatisticsUpdate::FailedResponse)
-                .await;
+            let update = match reason {
+                PeerFailureReason::Timeout | PeerFailureReason::ConnectionFailed => {
+                    NodeStatisticsUpdate::FailedResponse
+                }
+                PeerFailureReason::DataUnavailable => NodeStatisticsUpdate::DataUnavailable,
+                PeerFailureReason::CorruptedData => NodeStatisticsUpdate::CorruptedData,
+                PeerFailureReason::ProtocolError => NodeStatisticsUpdate::ProtocolViolation,
+                PeerFailureReason::Refused => NodeStatisticsUpdate::FailedResponse,
+            };
+
+            engine.update_node_stats(&node_id, update).await;
             Ok(())
         } else {
             // Trust engine not initialized - this is not an error, just a no-op
@@ -1251,7 +1334,6 @@ impl P2PNode {
     /// Returns a value between 0.0 (untrusted) and 1.0 (fully trusted).
     /// Unknown peers return 0.0 by default.
     ///
-    /// Requires the `adaptive-ml` feature to be enabled.
     ///
     /// # Arguments
     ///
@@ -1265,7 +1347,6 @@ impl P2PNode {
     ///     tracing::warn!("Low trust peer: {}", peer_id);
     /// }
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub fn peer_trust(&self, peer_id: &str) -> f64 {
         if let Some(ref engine) = self.trust_engine {
             let node_id = Self::peer_id_to_trust_node_id(peer_id);
@@ -1276,6 +1357,216 @@ impl P2PNode {
             // Trust engine not initialized - return neutral trust
             0.5
         }
+    }
+
+    // =========================================================================
+    // Request/Response API — Automatic Trust Feedback
+    // =========================================================================
+
+    /// Send a request to a peer and wait for a response with automatic trust reporting.
+    ///
+    /// Unlike fire-and-forget `send_message()`, this method:
+    /// 1. Wraps the payload in a `RequestResponseEnvelope` with a unique message ID
+    /// 2. Sends it on the `/rr/<protocol>` protocol prefix
+    /// 3. Waits for a matching response (or timeout)
+    /// 4. Automatically reports success or failure to the trust engine
+    ///
+    /// The remote peer's handler should call `send_response()` with the
+    /// incoming message ID to route the response back.
+    ///
+    /// # Arguments
+    ///
+    /// * `peer_id` - Target peer
+    /// * `protocol` - Application protocol name (e.g. `"chunk_fetch"`)
+    /// * `data` - Request payload bytes
+    /// * `timeout` - Maximum time to wait for a response
+    ///
+    /// # Returns
+    ///
+    /// A [`PeerResponse`] on success, or an error on timeout / connection failure.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let response = node.send_request(&peer_id, "chunk_fetch", chunk_id.to_vec(), Duration::from_secs(10)).await?;
+    /// println!("Got {} bytes from {}", response.data.len(), response.peer_id);
+    /// ```
+    pub async fn send_request(
+        &self,
+        peer_id: &PeerId,
+        protocol: &str,
+        data: Vec<u8>,
+        timeout: Duration,
+    ) -> Result<PeerResponse> {
+        // Cap timeout to prevent unbounded resource retention
+        let timeout = timeout.min(MAX_REQUEST_TIMEOUT);
+
+        // Validate protocol name
+        if protocol.is_empty() || protocol.contains(&['/', '\\', '\0'][..]) {
+            return Err(P2PError::Transport(
+                crate::error::TransportError::StreamError(
+                    format!("Invalid protocol name: {:?}", protocol).into(),
+                ),
+            ));
+        }
+
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let started_at = tokio::time::Instant::now();
+
+        // Atomic check-and-insert under a single write lock to prevent TOCTOU races
+        {
+            let mut reqs = self.active_requests.write().await;
+            if reqs.len() >= MAX_ACTIVE_REQUESTS {
+                return Err(P2PError::Transport(
+                    crate::error::TransportError::StreamError(
+                        format!(
+                            "Too many active requests ({MAX_ACTIVE_REQUESTS}); try again later"
+                        )
+                        .into(),
+                    ),
+                ));
+            }
+            reqs.insert(
+                message_id.clone(),
+                PendingRequest {
+                    response_tx: tx,
+                    expected_peer: peer_id.to_string(),
+                },
+            );
+        }
+
+        // Wrap in envelope
+        let envelope = RequestResponseEnvelope {
+            message_id: message_id.clone(),
+            is_response: false,
+            payload: data,
+        };
+        let envelope_bytes = match postcard::to_allocvec(&envelope) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.active_requests.write().await.remove(&message_id);
+                return Err(P2PError::Serialization(
+                    format!("Failed to serialize request envelope: {e}").into(),
+                ));
+            }
+        };
+
+        // Send on /rr/<protocol> prefix
+        let wire_protocol = format!("/rr/{}", protocol);
+        if let Err(e) = self
+            .send_message(peer_id, &wire_protocol, envelope_bytes)
+            .await
+        {
+            self.active_requests.write().await.remove(&message_id);
+
+            // Report trust failure for send errors (connection refused, etc.)
+            let _ = self
+                .report_peer_failure_with_reason(peer_id, PeerFailureReason::ConnectionFailed)
+                .await;
+
+            return Err(e);
+        }
+
+        // Wait for response with timeout
+        let result = match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(response_bytes)) => {
+                let latency = started_at.elapsed();
+
+                // Auto-report success to trust engine
+                let _ = self.report_peer_success(peer_id).await;
+
+                Ok(PeerResponse {
+                    peer_id: peer_id.clone(),
+                    data: response_bytes,
+                    latency,
+                })
+            }
+            Ok(Err(_)) => {
+                // Channel closed — peer disconnected or request was cancelled
+                let _ = self
+                    .report_peer_failure_with_reason(peer_id, PeerFailureReason::ConnectionFailed)
+                    .await;
+
+                Err(P2PError::Network(NetworkError::ConnectionClosed {
+                    peer_id: peer_id.to_string().into(),
+                }))
+            }
+            Err(_) => {
+                // Timeout
+                let _ = self
+                    .report_peer_failure_with_reason(peer_id, PeerFailureReason::Timeout)
+                    .await;
+
+                Err(P2PError::Transport(
+                    crate::error::TransportError::StreamError(
+                        format!(
+                            "Request to {} on {} timed out after {:?}",
+                            peer_id, protocol, timeout
+                        )
+                        .into(),
+                    ),
+                ))
+            }
+        };
+
+        // Clean up the pending request entry (receive loop may have already
+        // removed it on the happy path, but remove is idempotent).
+        self.active_requests.write().await.remove(&message_id);
+
+        result
+    }
+
+    /// Send a response to a previously received request.
+    ///
+    /// This should be called by the consumer's message handler when it receives
+    /// a request on a `/rr/<protocol>` topic. The `message_id` should be extracted
+    /// from the incoming `RequestResponseEnvelope`.
+    ///
+    /// # Arguments
+    ///
+    /// * `peer_id` - The peer that sent the original request
+    /// * `protocol` - The application protocol (without `/rr/` prefix)
+    /// * `message_id` - The message ID from the incoming request envelope
+    /// * `data` - Response payload bytes
+    pub async fn send_response(
+        &self,
+        peer_id: &PeerId,
+        protocol: &str,
+        message_id: &str,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        // Validate protocol name (same rules as send_request)
+        if protocol.is_empty() || protocol.contains(&['/', '\\', '\0'][..]) {
+            return Err(P2PError::Transport(
+                crate::error::TransportError::StreamError(
+                    format!("Invalid protocol name: {:?}", protocol).into(),
+                ),
+            ));
+        }
+
+        let envelope = RequestResponseEnvelope {
+            message_id: message_id.to_string(),
+            is_response: true,
+            payload: data,
+        };
+        let envelope_bytes = postcard::to_allocvec(&envelope).map_err(|e| {
+            P2PError::Serialization(format!("Failed to serialize response envelope: {e}").into())
+        })?;
+
+        let wire_protocol = format!("/rr/{}", protocol);
+        self.send_message(peer_id, &wire_protocol, envelope_bytes)
+            .await
+    }
+
+    /// Parse a request/response envelope from incoming message bytes.
+    ///
+    /// Returns `None` if the bytes are not a valid envelope. Consumers should
+    /// call this when they receive a message on a `/rr/` protocol to extract
+    /// the message ID and payload.
+    pub fn parse_request_envelope(data: &[u8]) -> Option<(String, bool, Vec<u8>)> {
+        let envelope: RequestResponseEnvelope = postcard::from_bytes(data).ok()?;
+        Some((envelope.message_id, envelope.is_response, envelope.payload))
     }
 
     pub async fn subscribe(&self, topic: &str) -> Result<()> {
@@ -1462,6 +1753,7 @@ impl P2PNode {
         drop(tx); // drop original sender so rx closes when all tasks exit
 
         let event_tx = self.event_tx.clone();
+        let active_requests = Arc::clone(&self.active_requests);
         handles.push(tokio::spawn(async move {
             info!("Message receive loop started");
             while let Some((peer_id, bytes)) = rx.recv().await {
@@ -1479,7 +1771,60 @@ impl P2PNode {
                 }
 
                 match parse_protocol_message(&bytes, &transport_peer_id) {
-                    Some(event) => broadcast_event(&event_tx, event),
+                    Some(event) => {
+                        // Check if this is a /rr/ response that should be routed
+                        // to a waiting send_request() caller
+                        if let P2PEvent::Message {
+                            ref topic,
+                            ref data,
+                            ..
+                        } = event
+                            && topic.starts_with("/rr/")
+                            && let Ok(envelope) =
+                                postcard::from_bytes::<RequestResponseEnvelope>(data)
+                            && envelope.is_response
+                        {
+                            // Route response to waiting caller with origin validation
+                            let mut reqs = active_requests.write().await;
+                            let expected_peer = match reqs.get(&envelope.message_id) {
+                                Some(pending) => pending.expected_peer.clone(),
+                                None => {
+                                    // No matching request — suppress internal /rr/ traffic
+                                    trace!(
+                                        message_id = %envelope.message_id,
+                                        "Unmatched /rr/ response (likely timed out) — suppressing"
+                                    );
+                                    continue;
+                                }
+                            };
+                            if expected_peer != transport_peer_id {
+                                warn!(
+                                    message_id = %envelope.message_id,
+                                    expected = %expected_peer,
+                                    actual = %transport_peer_id,
+                                    "Response origin mismatch — ignoring"
+                                );
+                                // Don't deliver; don't broadcast
+                                continue;
+                            }
+                            if let Some(pending) = reqs.remove(&envelope.message_id) {
+                                if pending.response_tx.send(envelope.payload).is_err() {
+                                    warn!(
+                                        message_id = %envelope.message_id,
+                                        "Response receiver dropped before delivery"
+                                    );
+                                }
+                                continue; // Don't broadcast responses
+                            }
+                            // No matching request — suppress internal /rr/ traffic
+                            trace!(
+                                message_id = %envelope.message_id,
+                                "Unmatched /rr/ response (likely timed out) — suppressing"
+                            );
+                            continue;
+                        }
+                        broadcast_event(&event_tx, event);
+                    }
                     None => {
                         warn!("Failed to parse protocol message ({} bytes)", bytes.len());
                     }
