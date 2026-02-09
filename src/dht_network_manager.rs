@@ -131,11 +131,32 @@ pub enum DhtNetworkOperation {
     Leave,
 }
 
+/// Per-peer outcome from a DHT PUT replication attempt.
+///
+/// Captures whether each target peer successfully stored the value,
+/// along with optional error details.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerStoreOutcome {
+    /// The peer that was targeted for replication.
+    pub peer_id: PeerId,
+    /// Whether the store operation succeeded on this peer.
+    pub success: bool,
+    /// Error description if the operation failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// DHT network operation result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DhtNetworkResult {
     /// Successful PUT operation
-    PutSuccess { key: Key, replicated_to: usize },
+    PutSuccess {
+        key: Key,
+        replicated_to: usize,
+        /// Per-peer replication outcomes (empty for remote handlers).
+        #[serde(default)]
+        peer_outcomes: Vec<PeerStoreOutcome>,
+    },
     /// Successful GET operation
     GetSuccess {
         key: Key,
@@ -143,7 +164,18 @@ pub enum DhtNetworkResult {
         source: PeerId,
     },
     /// GET operation found no value
-    GetNotFound { key: Key },
+    GetNotFound {
+        key: Key,
+        /// Number of peers queried during the lookup.
+        #[serde(default)]
+        peers_queried: usize,
+        /// Number of peers that returned errors during the lookup.
+        #[serde(default)]
+        peers_failed: usize,
+        /// Last error encountered during the lookup, if any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_error: Option<String>,
+    },
     /// Nodes found for FIND_NODE
     NodesFound {
         key: Key,
@@ -169,6 +201,21 @@ pub enum DhtNetworkResult {
     LeaveSuccess,
     /// Operation failed
     Error { operation: String, error: String },
+}
+
+/// Returns the variant name of a [`DhtNetworkResult`] without exposing internal data.
+fn dht_network_result_variant_name(result: &DhtNetworkResult) -> &'static str {
+    match result {
+        DhtNetworkResult::PutSuccess { .. } => "PutSuccess",
+        DhtNetworkResult::GetSuccess { .. } => "GetSuccess",
+        DhtNetworkResult::GetNotFound { .. } => "GetNotFound",
+        DhtNetworkResult::NodesFound { .. } => "NodesFound",
+        DhtNetworkResult::ValueFound { .. } => "ValueFound",
+        DhtNetworkResult::PongReceived { .. } => "PongReceived",
+        DhtNetworkResult::JoinSuccess { .. } => "JoinSuccess",
+        DhtNetworkResult::LeaveSuccess => "LeaveSuccess",
+        DhtNetworkResult::Error { .. } => "Error",
+    }
 }
 
 /// DHT message envelope for network transmission
@@ -326,6 +373,17 @@ pub enum DhtNetworkEvent {
     },
     /// Error occurred
     Error { error: String },
+    /// Replication result for a PUT operation with per-peer details
+    ReplicationResult {
+        /// The key being replicated
+        key: Key,
+        /// Total number of peers targeted
+        total_peers: usize,
+        /// Number of peers that successfully stored the value
+        successful_peers: usize,
+        /// Per-peer outcomes
+        outcomes: Vec<PeerStoreOutcome>,
+    },
 }
 
 /// DHT network statistics
@@ -577,6 +635,7 @@ impl DhtNetworkManager {
             return Ok(DhtNetworkResult::PutSuccess {
                 key,
                 replicated_to: 1,
+                peer_outcomes: Vec::new(),
             });
         }
 
@@ -608,21 +667,18 @@ impl DhtNetworkManager {
         // Execute all replication requests in parallel
         let results = futures::future::join_all(replication_futures).await;
 
-        // Count successful replications
-        for (peer_id, result) in results {
-            match result {
-                Ok(DhtNetworkResult::PutSuccess { .. }) => {
-                    replicated_count += 1;
-                    debug!("Replicated to peer: {}", peer_id);
-                }
-                Ok(result) => {
-                    debug!("Unexpected result from peer {}: {:?}", peer_id, result);
-                }
-                Err(e) => {
-                    debug!("Failed to replicate to peer {}: {}", peer_id, e);
-                }
-            }
-        }
+        let (remote_successes, peer_outcomes) = self.collect_replication_outcomes(results).await;
+        replicated_count += remote_successes;
+
+        // Emit replication result event
+        let total_peers = peer_outcomes.len();
+        let successful_peers = peer_outcomes.iter().filter(|o| o.success).count();
+        let _ = self.event_tx.send(DhtNetworkEvent::ReplicationResult {
+            key,
+            total_peers,
+            successful_peers,
+            outcomes: peer_outcomes.clone(),
+        });
 
         info!(
             "PUT operation completed: key={}, replicated_to={}/{}",
@@ -634,6 +690,7 @@ impl DhtNetworkManager {
         Ok(DhtNetworkResult::PutSuccess {
             key,
             replicated_to: replicated_count,
+            peer_outcomes,
         })
     }
 
@@ -714,24 +771,13 @@ impl DhtNetworkManager {
         });
 
         let results = futures::future::join_all(replication_futures).await;
-        for (peer_id, result) in results {
-            match result {
-                Ok(DhtNetworkResult::PutSuccess { .. }) => {
-                    replicated_count += 1;
-                    debug!("Replicated to peer: {}", peer_id);
-                }
-                Ok(other) => {
-                    debug!("Unexpected result from peer {}: {:?}", peer_id, other);
-                }
-                Err(e) => {
-                    debug!("Failed to replicate to peer {}: {}", peer_id, e);
-                }
-            }
-        }
+        let (remote_successes, peer_outcomes) = self.collect_replication_outcomes(results).await;
+        replicated_count += remote_successes;
 
         Ok(DhtNetworkResult::PutSuccess {
             key,
             replicated_to: replicated_count,
+            peer_outcomes,
         })
     }
 
@@ -768,6 +814,8 @@ impl DhtNetworkManager {
         let mut queried_nodes = HashSet::new();
         let mut candidate_nodes = VecDeque::new();
         let mut queued_peer_ids: HashSet<String> = HashSet::new();
+        let mut peers_failed: usize = 0;
+        let mut last_error: Option<String> = None;
 
         // Get initial candidates from local routing table and connected peers
         // IMPORTANT: Use find_closest_nodes_local to avoid making network requests
@@ -915,10 +963,14 @@ impl DhtNetworkManager {
                     }
                     Err(e) => {
                         debug!("Query to {} failed: {}", peer_id, e);
+                        peers_failed += 1;
+                        last_error = Some(e.to_string());
                         self.record_peer_failure(&peer_id).await;
                     }
                     Ok(other) => {
                         debug!("Unexpected result from {}: {:?}", peer_id, other);
+                        peers_failed += 1;
+                        last_error = Some(format!("Unexpected result: {:?}", other));
                         self.record_peer_failure(&peer_id).await;
                     }
                 }
@@ -945,7 +997,12 @@ impl DhtNetworkManager {
             hex::encode(key),
             queried_nodes.len()
         );
-        Ok(DhtNetworkResult::GetNotFound { key: *key })
+        Ok(DhtNetworkResult::GetNotFound {
+            key: *key,
+            peers_queried: queried_nodes.len(),
+            peers_failed,
+            last_error,
+        })
     }
 
     /// Backwards-compatible API that performs a full iterative lookup.
@@ -1468,6 +1525,55 @@ impl DhtNetworkManager {
         }
     }
 
+    /// Process replication results from parallel PUT requests.
+    ///
+    /// Returns the number of successful replications and the per-peer outcomes.
+    async fn collect_replication_outcomes(
+        &self,
+        results: Vec<(PeerId, Result<DhtNetworkResult>)>,
+    ) -> (usize, Vec<PeerStoreOutcome>) {
+        let mut successes = 0usize;
+        let mut outcomes = Vec::with_capacity(results.len());
+        for (peer_id, result) in results {
+            match result {
+                Ok(DhtNetworkResult::PutSuccess { .. }) => {
+                    successes += 1;
+                    self.record_peer_success(&peer_id).await;
+                    debug!("Replicated to peer: {}", peer_id);
+                    outcomes.push(PeerStoreOutcome {
+                        peer_id,
+                        success: true,
+                        error: None,
+                    });
+                }
+                Ok(other) => {
+                    self.record_peer_failure(&peer_id).await;
+                    let err_msg = format!(
+                        "Unexpected result variant: {}",
+                        dht_network_result_variant_name(&other)
+                    );
+                    debug!("Unexpected result from peer {}: {}", peer_id, err_msg);
+                    outcomes.push(PeerStoreOutcome {
+                        peer_id,
+                        success: false,
+                        error: Some(err_msg),
+                    });
+                }
+                Err(e) => {
+                    self.record_peer_failure(&peer_id).await;
+                    let err_msg = e.to_string();
+                    debug!("Failed to replicate to peer {}: {}", peer_id, err_msg);
+                    outcomes.push(PeerStoreOutcome {
+                        peer_id,
+                        success: false,
+                        error: Some(err_msg),
+                    });
+                }
+            }
+        }
+        (successes, outcomes)
+    }
+
     async fn record_peer_success(&self, peer_id: &str) {
         if let Err(e) = self.node.report_peer_success(peer_id).await {
             trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust success");
@@ -1756,6 +1862,7 @@ impl DhtNetworkManager {
                 Ok(DhtNetworkResult::PutSuccess {
                     key: *key,
                     replicated_to: 1,
+                    peer_outcomes: Vec::new(),
                 })
             }
             DhtNetworkOperation::Get { key } => {
@@ -2012,7 +2119,7 @@ impl DhtNetworkManager {
                 value: vec![],
             },
             DhtNetworkResult::GetSuccess { key, .. } => DhtNetworkOperation::Get { key: *key },
-            DhtNetworkResult::GetNotFound { key } => DhtNetworkOperation::Get { key: *key },
+            DhtNetworkResult::GetNotFound { key, .. } => DhtNetworkOperation::Get { key: *key },
             DhtNetworkResult::NodesFound { key, .. } => DhtNetworkOperation::FindNode { key: *key },
             DhtNetworkResult::ValueFound { key, .. } => {
                 DhtNetworkOperation::FindValue { key: *key }

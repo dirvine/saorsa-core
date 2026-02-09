@@ -300,25 +300,24 @@ async fn test_concurrent_dht_operations() -> Result<()> {
     Ok(())
 }
 
-/// Test DHT put with timeout (large value)
+/// Test DHT put at the maximum allowed value size (512 bytes) succeeds,
+/// and that oversized values are correctly rejected with a validation error.
 #[tokio::test]
 async fn test_dht_put_large_value() -> Result<()> {
     let config = create_test_dht_config("large_value_test_node", 0);
     let manager = Arc::new(DhtNetworkManager::new(config).await?);
     manager.start().await?;
 
-    // Create a large value (1MB)
-    let key = key_from_str("large_value_key");
-    let value = vec![0u8; 1024 * 1024];
+    // A value at exactly the 512-byte limit should succeed
+    let key = key_from_str("max_size_value_key");
+    let value = vec![0xABu8; 512];
 
-    // Put should complete within timeout
     let put_result = timeout(Duration::from_secs(30), manager.put(key, value.clone())).await??;
     assert!(
         matches!(put_result, DhtNetworkResult::PutSuccess { .. }),
-        "Large value put should succeed"
+        "Value at max size should succeed"
     );
 
-    // Get should return the large value
     let get_result = timeout(Duration::from_secs(30), manager.get(&key)).await??;
     match get_result {
         DhtNetworkResult::GetSuccess {
@@ -330,9 +329,29 @@ async fn test_dht_put_large_value() -> Result<()> {
                 value.len(),
                 "Retrieved value size should match"
             );
+            assert_eq!(
+                retrieved_value, value,
+                "Retrieved value content should match"
+            );
         }
-        _ => panic!("Get for large value should succeed"),
+        _ => panic!("Get for max-size value should succeed"),
     }
+
+    // A value exceeding the 512-byte limit should be rejected
+    let oversized_key = key_from_str("oversized_value_key");
+    let oversized_value = vec![0xFFu8; 513];
+
+    let oversized_result = manager.put(oversized_key, oversized_value).await;
+    assert!(
+        oversized_result.is_err(),
+        "Oversized value should be rejected with a validation error"
+    );
+    let err_msg = format!("{}", oversized_result.unwrap_err());
+    assert!(
+        err_msg.contains("513") && err_msg.contains("512"),
+        "Error should mention both actual (513) and max (512) sizes, got: {}",
+        err_msg
+    );
 
     manager.stop().await?;
     Ok(())
