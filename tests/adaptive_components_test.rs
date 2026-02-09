@@ -1,6 +1,5 @@
 //! Simple integration tests for adaptive network components
 //! Tests only the publicly exported adaptive features
-#![cfg(feature = "adaptive-ml")]
 
 use saorsa_core::adaptive::{
     ContentHash, NodeId,

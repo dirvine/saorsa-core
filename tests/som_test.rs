@@ -16,8 +16,6 @@
 // Copyright 2024 P2P Foundation
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-#![cfg(feature = "adaptive-ml")]
-
 use proptest::prelude::*;
 use saorsa_core::adaptive::NodeId;
 use saorsa_core::adaptive::som::{GridSize, NodeFeatures, SelfOrganizingMap, SomConfig};
