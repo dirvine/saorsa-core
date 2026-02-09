@@ -21,9 +21,7 @@ use crate::bgp_geo_provider::BgpGeoProvider;
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
 use crate::dht::DHT;
-#[cfg(feature = "adaptive-ml")]
-use crate::error::PeerFailureReason;
-use crate::error::{NetworkError, P2PError, P2pResult as Result};
+use crate::error::{NetworkError, P2PError, P2pResult as Result, PeerFailureReason};
 use crate::security::GeoProvider;
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
@@ -1314,7 +1312,6 @@ impl P2PNode {
     /// // After a chunk retrieval returns corrupted data
     /// node.report_peer_failure_with_reason(&peer_id, PeerFailureReason::CorruptedData).await?;
     /// ```
-    #[cfg(feature = "adaptive-ml")]
     pub async fn report_peer_failure_with_reason(
         &self,
         peer_id: &str,
@@ -1473,15 +1470,9 @@ impl P2PNode {
             self.active_requests.write().await.remove(&message_id);
 
             // Report trust failure for send errors (connection refused, etc.)
-            #[cfg(feature = "adaptive-ml")]
-            {
-                let _ = self
-                    .report_peer_failure_with_reason(
-                        peer_id,
-                        crate::error::PeerFailureReason::ConnectionFailed,
-                    )
-                    .await;
-            }
+            let _ = self
+                .report_peer_failure_with_reason(peer_id, PeerFailureReason::ConnectionFailed)
+                .await;
 
             return Err(e);
         }
@@ -1492,10 +1483,7 @@ impl P2PNode {
                 let latency = started_at.elapsed();
 
                 // Auto-report success to trust engine
-                #[cfg(feature = "adaptive-ml")]
-                {
-                    let _ = self.report_peer_success(peer_id).await;
-                }
+                let _ = self.report_peer_success(peer_id).await;
 
                 Ok(PeerResponse {
                     peer_id: peer_id.clone(),
@@ -1505,15 +1493,9 @@ impl P2PNode {
             }
             Ok(Err(_)) => {
                 // Channel closed — peer disconnected or request was cancelled
-                #[cfg(feature = "adaptive-ml")]
-                {
-                    let _ = self
-                        .report_peer_failure_with_reason(
-                            peer_id,
-                            crate::error::PeerFailureReason::ConnectionFailed,
-                        )
-                        .await;
-                }
+                let _ = self
+                    .report_peer_failure_with_reason(peer_id, PeerFailureReason::ConnectionFailed)
+                    .await;
 
                 Err(P2PError::Network(NetworkError::ConnectionClosed {
                     peer_id: peer_id.to_string().into(),
@@ -1521,15 +1503,9 @@ impl P2PNode {
             }
             Err(_) => {
                 // Timeout
-                #[cfg(feature = "adaptive-ml")]
-                {
-                    let _ = self
-                        .report_peer_failure_with_reason(
-                            peer_id,
-                            crate::error::PeerFailureReason::Timeout,
-                        )
-                        .await;
-                }
+                let _ = self
+                    .report_peer_failure_with_reason(peer_id, PeerFailureReason::Timeout)
+                    .await;
 
                 Err(P2PError::Transport(
                     crate::error::TransportError::StreamError(
