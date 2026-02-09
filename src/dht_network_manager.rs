@@ -50,6 +50,9 @@ const MAX_VALUE_SIZE: usize = 512;
 /// Messages larger than this are rejected before deserialization
 const MAX_MESSAGE_SIZE: usize = 64 * 1024;
 
+/// Number of closest nodes to return in DHT lookups (Kademlia K parameter)
+const DHT_CLOSEST_NODES_COUNT: usize = 8;
+
 /// Request timeout for DHT message handlers (30 seconds)
 /// Prevents long-running handlers from starving the semaphore permit pool
 /// SEC-001: DoS mitigation via timeout enforcement on concurrent operations
@@ -148,8 +151,9 @@ pub enum DhtNetworkResult {
     },
     /// GET operation found no value
     GetNotFound { key: Key },
-    /// Nodes found for FIND_NODE
-    NodesFound {
+    /// Handler suggests closer nodes for iterative lookup
+    /// Returned when handler doesn't have the value but knows nodes closer to the key
+    SuggestCloserNodes {
         key: Key,
         nodes: Vec<SerializableDHTNode>,
     },
@@ -235,6 +239,9 @@ pub struct DhtNetworkManager {
     message_handler_semaphore: Arc<Semaphore>,
     /// Whether this manager owns the P2P node lifecycle
     manage_node_lifecycle: bool,
+    /// Cached local DHT key to avoid repeated SHA-256 hashing
+    /// PERF-001: Eliminates redundant computation in message handlers
+    local_dht_key: DhtKey,
 }
 
 /// DHT operation context
@@ -369,6 +376,9 @@ impl DhtNetworkManager {
             P2PError::Dht(DhtError::StorageFailed(e.to_string().into()))
         })?));
 
+        // Cache local DHT key to avoid repeated computation (PERF-001)
+        let local_dht_key = DhtKey::from_bytes(dht_key);
+
         // Create P2P node
         let node = Arc::new(P2PNode::new(config.node_config.clone()).await?);
 
@@ -399,6 +409,7 @@ impl DhtNetworkManager {
             maintenance_scheduler,
             message_handler_semaphore,
             manage_node_lifecycle: true,
+            local_dht_key,
         };
 
         info!("DHT Network Manager created successfully");
@@ -432,6 +443,9 @@ impl DhtNetworkManager {
             P2PError::Dht(DhtError::StorageFailed(e.to_string().into()))
         })?));
 
+        // Cache local DHT key to avoid repeated computation (PERF-001)
+        let local_dht_key = DhtKey::from_bytes(dht_key);
+
         let (event_tx, _) = broadcast::channel(1000);
         let maintenance_config = MaintenanceConfig::from(&config.dht_config);
         let maintenance_scheduler =
@@ -453,6 +467,7 @@ impl DhtNetworkManager {
             maintenance_scheduler,
             message_handler_semaphore,
             manage_node_lifecycle: false,
+            local_dht_key,
         };
 
         info!("Attached DHT Network Manager created successfully");
@@ -877,7 +892,7 @@ impl DhtNetworkManager {
                             source,
                         });
                     }
-                    Ok(DhtNetworkResult::NodesFound { nodes, .. }) => {
+                    Ok(DhtNetworkResult::SuggestCloserNodes { nodes, .. }) => {
                         self.record_peer_success(&peer_id).await;
                         // Got closer nodes - add them to candidates with bounds checking
                         info!(
@@ -971,7 +986,7 @@ impl DhtNetworkManager {
             serializable_nodes.len(),
             hex::encode(key)
         );
-        Ok(DhtNetworkResult::NodesFound {
+        Ok(DhtNetworkResult::SuggestCloserNodes {
             key: *key,
             nodes: serializable_nodes,
         })
@@ -1264,7 +1279,7 @@ impl DhtNetworkManager {
                 queried_nodes.insert(peer_id.clone());
 
                 match result {
-                    Ok(DhtNetworkResult::NodesFound { nodes, .. }) => {
+                    Ok(DhtNetworkResult::SuggestCloserNodes { nodes, .. }) => {
                         self.record_peer_success(&peer_id).await;
                         for mut node in nodes {
                             Self::ensure_cached_dht_key(&mut node);
@@ -1387,6 +1402,41 @@ impl DhtNetworkManager {
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         }
+    }
+
+    /// Filters candidate nodes to only those closer to target than this node.
+    ///
+    /// Returns nodes that are:
+    /// - Not the requester (avoids routing loops)
+    /// - Closer to the target key than this node (by XOR distance)
+    /// - Have a cached DHT key (nodes without keys are skipped)
+    fn filter_closer_nodes(
+        &self,
+        candidate_nodes: Vec<DHTNode>,
+        target_key: &Key,
+        requester_peer_id: &PeerId,
+        my_distance: [u8; 32],
+    ) -> Vec<DHTNode> {
+        let target_dht_key = DhtKey::from_bytes(*target_key);
+
+        candidate_nodes
+            .into_iter()
+            .filter(|node| {
+                // Don't suggest requester
+                if node.peer_id == *requester_peer_id {
+                    return false;
+                }
+
+                // Only suggest if closer than us
+                if let Some(ref node_dht_key) = node.cached_dht_key {
+                    let node_distance = node_dht_key.distance(&target_dht_key);
+                    node_distance < my_distance
+                } else {
+                    // No cached DHT key, can't compute distance, skip
+                    false
+                }
+            })
+            .collect()
     }
 
     /// Ensure a DHT node has a cached DHT key available for distance comparisons.
@@ -1838,6 +1888,8 @@ impl DhtNetworkManager {
             }
             DhtNetworkOperation::Get { key } => {
                 info!("Handling GET request for key: {}", hex::encode(key));
+
+                // Check 1: Do we have the value locally?
                 match self
                     .dht
                     .read()
@@ -1857,38 +1909,65 @@ impl DhtNetworkManager {
                         warn!("GET retrieve failed for key {}: {e}", hex::encode(key));
                     }
                 }
-                {
-                    // Value not found - return closer nodes for iterative lookup
-                    // This enables multi-hop DHT discovery (Kademlia-style)
-                    // IMPORTANT: Use find_closest_nodes_local to avoid making network requests
-                    // within a request handler, which can cause deadlocks
-                    let closer_nodes = self.find_closest_nodes_local(key, 8).await;
-                    // Filter out the requesting node - don't tell them to query themselves!
-                    let closer_nodes: Vec<_> = closer_nodes
-                        .into_iter()
-                        .filter(|n| n.peer_id != message.source)
-                        .collect();
+
+                // Check 2: Find nodes closer to the key than we are
+                let candidate_nodes = self
+                    .find_closest_nodes_local(key, DHT_CLOSEST_NODES_COUNT)
+                    .await;
+
+                // Calculate our distance to the key and filter to closer nodes
+                let my_distance = self.local_dht_key.distance(&DhtKey::from_bytes(*key));
+                let closer_nodes =
+                    self.filter_closer_nodes(candidate_nodes, key, &message.source, my_distance);
+
+                // Check 3: Do we have any closer nodes?
+                if closer_nodes.is_empty() {
+                    // We are the closest node (or have no peers)
+                    // Value doesn't exist
                     debug!(
-                        "GET: value not found, returning {} closer nodes (filtered out requester)",
-                        closer_nodes.len()
+                        "GET: No closer nodes available, returning GetNotFound (we are closest or isolated)"
                     );
-                    Ok(DhtNetworkResult::NodesFound {
-                        key: *key,
-                        nodes: closer_nodes,
-                    })
+                    return Ok(DhtNetworkResult::GetNotFound { key: *key });
                 }
+
+                // Return closer nodes for iterative lookup
+                debug!(
+                    "GET: value not found, returning {} closer nodes (filtered out requester and farther nodes)",
+                    closer_nodes.len()
+                );
+                Ok(DhtNetworkResult::SuggestCloserNodes {
+                    key: *key,
+                    nodes: closer_nodes,
+                })
             }
             DhtNetworkOperation::FindNode { key } => {
                 info!("Handling FIND_NODE request for key: {}", hex::encode(key));
-                // IMPORTANT: Use find_closest_nodes_local to avoid making network requests
-                // within a request handler, which can cause deadlocks
-                let closer_nodes = self.find_closest_nodes_local(key, 8).await;
-                // Filter out the requesting node - don't tell them to query themselves!
-                let closer_nodes: Vec<_> = closer_nodes
-                    .into_iter()
-                    .filter(|n| n.peer_id != message.source)
-                    .collect();
-                Ok(DhtNetworkResult::NodesFound {
+
+                // Find candidate nodes
+                let candidate_nodes = self
+                    .find_closest_nodes_local(key, DHT_CLOSEST_NODES_COUNT)
+                    .await;
+
+                // Calculate our distance to the key and filter to closer nodes
+                let my_distance = self.local_dht_key.distance(&DhtKey::from_bytes(*key));
+                let closer_nodes =
+                    self.filter_closer_nodes(candidate_nodes, key, &message.source, my_distance);
+
+                // Check 3: Do we have any closer nodes?
+                if closer_nodes.is_empty() {
+                    // We are the closest node (or have no peers)
+                    debug!(
+                        "FIND_NODE: No closer nodes available, returning GetNotFound (we are closest or isolated)"
+                    );
+                    return Ok(DhtNetworkResult::GetNotFound { key: *key });
+                }
+
+                debug!(
+                    "FIND_NODE: returning {} closer nodes (filtered out requester and farther nodes)",
+                    closer_nodes.len()
+                );
+
+                Ok(DhtNetworkResult::SuggestCloserNodes {
                     key: *key,
                     nodes: closer_nodes,
                 })
@@ -1899,6 +1978,8 @@ impl DhtNetworkManager {
                     self.config.local_peer_id,
                     hex::encode(key)
                 );
+
+                // Check 1: Do we have the value locally?
                 match self
                     .dht
                     .read()
@@ -1925,32 +2006,42 @@ impl DhtNetworkManager {
                         );
                     }
                 }
-                {
-                    // Value not found - return closer nodes
-                    // IMPORTANT: Use find_closest_nodes_local (not find_closest_nodes) to avoid
-                    // making network requests within a request handler, which can cause deadlocks
+
+                // Check 2: Find nodes closer to the key than we are
+                info!(
+                    "[STEP 3b] {}: Value not found locally, finding closer nodes...",
+                    self.config.local_peer_id
+                );
+                let candidate_nodes = self.find_closest_nodes_local(key, 8).await;
+
+                // Calculate our distance to the key and filter to closer nodes
+                let my_distance = self.local_dht_key.distance(&DhtKey::from_bytes(*key));
+                let closer_nodes =
+                    self.filter_closer_nodes(candidate_nodes, key, &message.source, my_distance);
+
+                // Check 3: Do we have any closer nodes?
+                if closer_nodes.is_empty() {
+                    // We are the closest node (or have no peers)
+                    // Value doesn't exist
                     info!(
-                        "[STEP 3b] {}: Value not found locally, finding closer nodes...",
+                        "[STEP 3b] {}: No closer nodes available, returning GetNotFound (we are closest or isolated)",
                         self.config.local_peer_id
                     );
-                    let closer_nodes = self.find_closest_nodes_local(key, 8).await;
-                    // Filter out the requesting node - don't tell them to query themselves!
-                    let closer_nodes: Vec<_> = closer_nodes
-                        .into_iter()
-                        .filter(|n| n.peer_id != message.source)
-                        .collect();
-                    info!(
-                        "[STEP 3b] {}: Returning {} closer nodes (filtered out requester {}): {:?}",
-                        self.config.local_peer_id,
-                        closer_nodes.len(),
-                        message.source,
-                        closer_nodes.iter().map(|n| &n.peer_id).collect::<Vec<_>>()
-                    );
-                    Ok(DhtNetworkResult::NodesFound {
-                        key: *key,
-                        nodes: closer_nodes,
-                    })
+                    return Ok(DhtNetworkResult::GetNotFound { key: *key });
                 }
+
+                info!(
+                    "[STEP 3b] {}: Returning {} closer nodes (filtered out requester {} and farther nodes): {:?}",
+                    self.config.local_peer_id,
+                    closer_nodes.len(),
+                    message.source,
+                    closer_nodes.iter().map(|n| &n.peer_id).collect::<Vec<_>>()
+                );
+
+                Ok(DhtNetworkResult::SuggestCloserNodes {
+                    key: *key,
+                    nodes: closer_nodes,
+                })
             }
             DhtNetworkOperation::Ping => {
                 info!("Handling PING request from: {}", message.source);
@@ -2102,7 +2193,9 @@ impl DhtNetworkManager {
             },
             DhtNetworkResult::GetSuccess { key, .. } => DhtNetworkOperation::Get { key: *key },
             DhtNetworkResult::GetNotFound { key } => DhtNetworkOperation::Get { key: *key },
-            DhtNetworkResult::NodesFound { key, .. } => DhtNetworkOperation::FindNode { key: *key },
+            DhtNetworkResult::SuggestCloserNodes { key, .. } => {
+                DhtNetworkOperation::FindNode { key: *key }
+            }
             DhtNetworkResult::ValueFound { key, .. } => {
                 DhtNetworkOperation::FindValue { key: *key }
             }
