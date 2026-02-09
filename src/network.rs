@@ -851,12 +851,7 @@ impl P2PNode {
         // Initialize and register a TrustWeightedKademlia DHT for the global API
         // Use a deterministic local NodeId derived from the peer_id
         {
-            use blake3::Hasher;
-            let mut hasher = Hasher::new();
-            hasher.update(peer_id.as_bytes());
-            let digest = hasher.finalize();
-            let mut nid = [0u8; 32];
-            nid.copy_from_slice(digest.as_bytes());
+            let nid = crate::dht::derive_dht_key_from_peer_id(&peer_id);
             let _twdht = std::sync::Arc::new(crate::dht::TrustWeightedKademlia::new(
                 crate::identity::node_identity::NodeId::from_bytes(nid),
             ));
@@ -876,11 +871,9 @@ impl P2PNode {
                 republish_interval: config.dht_config.refresh_interval,
                 max_distance: 160,
             };
-            // Convert peer_id String to NodeId
-            let peer_bytes = peer_id.as_bytes();
-            let mut node_id_bytes = [0u8; 32];
-            let len = peer_bytes.len().min(32);
-            node_id_bytes[..len].copy_from_slice(&peer_bytes[..len]);
+            // Convert peer_id String to NodeId using canonical derivation
+            // CRITICAL: Must use same algorithm as DhtNetworkManager
+            let node_id_bytes = crate::dht::derive_dht_key_from_peer_id(&peer_id);
             let node_id = crate::dht::core_engine::NodeId::from_bytes(node_id_bytes);
             let dht_instance = DHT::new(node_id).map_err(|e| {
                 crate::error::P2PError::Dht(crate::error::DhtError::StoreFailed(
@@ -966,10 +959,8 @@ impl P2PNode {
             // layer, which needs architectural changes.
             let mut pre_trusted = HashSet::new();
             for bootstrap_peer in &config.bootstrap_peers_str {
-                // Hash the bootstrap peer address to create a placeholder NodeId
-                let hash = blake3::hash(bootstrap_peer.as_bytes());
-                let mut node_id_bytes = [0u8; 32];
-                node_id_bytes.copy_from_slice(hash.as_bytes());
+                // Use canonical derivation to create NodeId from bootstrap peer address
+                let node_id_bytes = crate::dht::derive_dht_key_from_peer_id(bootstrap_peer);
                 pre_trusted.insert(NodeId::from_bytes(node_id_bytes));
             }
 
@@ -1223,9 +1214,9 @@ impl P2PNode {
             arr.copy_from_slice(&bytes);
             return AdaptiveNodeId::from_bytes(arr);
         }
-        // Non-hex or wrong length: hash to 32 bytes as fallback
-        let hash = blake3::hash(peer_id.as_bytes());
-        AdaptiveNodeId::from_bytes(*hash.as_bytes())
+        // Non-hex or wrong length: use canonical derivation
+        let hash = crate::dht::derive_dht_key_from_peer_id(peer_id);
+        AdaptiveNodeId::from_bytes(hash)
     }
 
     /// Report a successful interaction with a peer
@@ -2925,15 +2916,7 @@ impl P2PNode {
 
         // Create our node ID as a DhtKey for the FIND_NODE query
         // We query for ourselves to find nodes closest to us
-        let our_id_bytes = {
-            use blake3::Hasher;
-            let mut hasher = Hasher::new();
-            hasher.update(self.peer_id.as_bytes());
-            let digest = hasher.finalize();
-            let mut bytes = [0u8; 32];
-            bytes.copy_from_slice(digest.as_bytes());
-            bytes
-        };
+        let our_id_bytes = crate::dht::derive_dht_key_from_peer_id(&self.peer_id);
         let target_key = crate::dht::DhtKey::from_bytes(our_id_bytes);
 
         // Create FIND_NODE message
