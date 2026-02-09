@@ -1795,17 +1795,28 @@ impl P2PNode {
                         {
                             // Route response to waiting caller with origin validation
                             let mut reqs = active_requests.write().await;
-                            if let Some(pending) = reqs.remove(&envelope.message_id) {
-                                if pending.expected_peer != transport_peer_id {
-                                    warn!(
+                            let expected_peer = match reqs.get(&envelope.message_id) {
+                                Some(pending) => pending.expected_peer.clone(),
+                                None => {
+                                    // No matching request — suppress internal /rr/ traffic
+                                    trace!(
                                         message_id = %envelope.message_id,
-                                        expected = %pending.expected_peer,
-                                        actual = %transport_peer_id,
-                                        "Response origin mismatch — ignoring"
+                                        "Unmatched /rr/ response (likely timed out) — suppressing"
                                     );
-                                    // Don't deliver; don't broadcast
                                     continue;
                                 }
+                            };
+                            if expected_peer != transport_peer_id {
+                                warn!(
+                                    message_id = %envelope.message_id,
+                                    expected = %expected_peer,
+                                    actual = %transport_peer_id,
+                                    "Response origin mismatch — ignoring"
+                                );
+                                // Don't deliver; don't broadcast
+                                continue;
+                            }
+                            if let Some(pending) = reqs.remove(&envelope.message_id) {
                                 if pending.response_tx.send(envelope.payload).is_err() {
                                     warn!(
                                         message_id = %envelope.message_id,
