@@ -21,8 +21,8 @@ use crate::adaptive::{
 };
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
-use crate::dht::DHT;
 use crate::dht::network_integration::DhtMessage;
+use crate::dht_network_manager::{DhtNetworkConfig, DhtNetworkManager};
 use crate::error::{NetworkError, P2PError, P2pResult as Result, PeerFailureReason};
 
 use crate::production::{ProductionConfig, ResourceManager, ResourceMetrics};
@@ -703,8 +703,8 @@ pub struct P2PNode {
     /// Running state
     running: RwLock<bool>,
 
-    /// DHT instance (optional)
-    dht: Option<Arc<RwLock<DHT>>>,
+    /// DHT manager (optional)
+    dht_manager: Option<Arc<DhtNetworkManager>>,
 
     /// Production resource manager (optional)
     resource_manager: Option<Arc<ResourceManager>>,
@@ -767,7 +767,7 @@ impl P2PNode {
             transport,
             start_time: Instant::now(),
             running: RwLock::new(false),
-            dht: None,
+            dht_manager: None,
             resource_manager: None,
             bootstrap_manager: None,
             security_dashboard: None,
@@ -794,42 +794,6 @@ impl P2PNode {
             // TODO: Update to use new clean API
             // let _ = crate::api::set_dht_instance(twdht);
         }
-
-        // Initialize DHT if needed
-        let (dht, security_dashboard) = if true {
-            let _dht_config = crate::dht::DHTConfig {
-                replication_factor: config.dht_config.k_value,
-                bucket_size: config.dht_config.k_value,
-                alpha: config.dht_config.alpha_value,
-                record_ttl: config.dht_config.record_ttl,
-                bucket_refresh_interval: config.dht_config.refresh_interval,
-                republish_interval: config.dht_config.refresh_interval,
-                max_distance: DHT_MAX_DISTANCE,
-            };
-            let node_id_bytes = crate::dht::derive_dht_key_from_peer_id(&peer_id);
-            let node_id = crate::dht::core_engine::NodeId::from_bytes(node_id_bytes);
-            let dht_instance = DHT::new(node_id).map_err(|e| {
-                crate::error::P2PError::Dht(crate::error::DhtError::StoreFailed(
-                    e.to_string().into(),
-                ))
-            })?;
-            dht_instance.start_maintenance_tasks();
-
-            let security_metrics = dht_instance.security_metrics();
-            let dashboard = crate::dht::metrics::SecurityDashboard::new(
-                security_metrics,
-                Arc::new(crate::dht::metrics::DhtMetricsCollector::new()),
-                Arc::new(crate::dht::metrics::TrustMetricsCollector::new()),
-                Arc::new(crate::dht::metrics::PlacementMetricsCollector::new()),
-            );
-
-            (
-                Some(Arc::new(RwLock::new(dht_instance))),
-                Some(Arc::new(dashboard)),
-            )
-        } else {
-            (None, None)
-        };
 
         // Initialize production resource manager if configured
         let resource_manager = config
@@ -902,13 +866,50 @@ impl P2PNode {
         let transport =
             Arc::new(crate::transport_handle::TransportHandle::new(transport_config).await?);
 
+        // Initialize DHT manager (owns local DHT core and network DHT behavior)
+        let manager_dht_config = crate::dht::DHTConfig {
+            replication_factor: config.dht_config.k_value,
+            bucket_size: config.dht_config.k_value,
+            alpha: config.dht_config.alpha_value,
+            record_ttl: config.dht_config.record_ttl,
+            bucket_refresh_interval: config.dht_config.refresh_interval,
+            republish_interval: config.dht_config.refresh_interval,
+            max_distance: DHT_MAX_DISTANCE,
+        };
+        let dht_manager_config = DhtNetworkConfig {
+            local_peer_id: peer_id.clone(),
+            dht_config: manager_dht_config,
+            node_config: config.clone(),
+            bootstrap_nodes: Vec::new(),
+            request_timeout: config.connection_timeout,
+            max_concurrent_operations: MAX_ACTIVE_REQUESTS,
+            replication_factor: config.dht_config.k_value,
+            enable_security: true,
+        };
+        let dht_manager = Arc::new(
+            DhtNetworkManager::new_with_transport(
+                transport.clone(),
+                trust_engine.clone(),
+                dht_manager_config,
+            )
+            .await?,
+        );
+
+        let security_metrics = dht_manager.security_metrics().await;
+        let security_dashboard = Some(Arc::new(crate::dht::metrics::SecurityDashboard::new(
+            security_metrics,
+            Arc::new(crate::dht::metrics::DhtMetricsCollector::new()),
+            Arc::new(crate::dht::metrics::TrustMetricsCollector::new()),
+            Arc::new(crate::dht::metrics::PlacementMetricsCollector::new()),
+        )));
+
         let node = Self {
             config,
             peer_id,
             transport,
             start_time: Instant::now(),
             running: RwLock::new(false),
-            dht,
+            dht_manager: Some(dht_manager),
             resource_manager,
             bootstrap_manager,
             security_dashboard,
@@ -1255,6 +1256,11 @@ impl P2PNode {
         // Start transport listeners and message receiving
         self.transport.start_network_listeners().await?;
 
+        // Start the attached DHT manager now that transport listeners are active.
+        if let Some(ref dht_manager) = self.dht_manager {
+            Arc::clone(dht_manager).start().await?;
+        }
+
         // Log current listen addresses
         let listen_addrs = self.transport.listen_addrs().await;
         info!("P2P node started on addresses: {:?}", listen_addrs);
@@ -1303,6 +1309,11 @@ impl P2PNode {
 
         // Set running state to false
         *self.running.write().await = false;
+
+        // Stop DHT manager first so leave messages can be sent while transport is still active.
+        if let Some(ref dht_manager) = self.dht_manager {
+            dht_manager.stop().await?;
+        }
 
         // Stop the transport layer (shutdown endpoints, join tasks, disconnect peers)
         self.transport.stop().await?;
@@ -1553,27 +1564,23 @@ impl P2PNode {
         self.resource_manager.is_some()
     }
 
-    /// Get DHT reference
-    pub fn dht(&self) -> Option<&Arc<RwLock<DHT>>> {
-        self.dht.as_ref()
+    /// Get the attached DHT manager.
+    pub fn dht_manager(&self) -> Option<&Arc<DhtNetworkManager>> {
+        self.dht_manager.as_ref()
+    }
+
+    /// Backwards-compatible alias for `dht_manager()`.
+    pub fn dht(&self) -> Option<&Arc<DhtNetworkManager>> {
+        self.dht_manager()
     }
 
     /// Store a value in the local DHT
     ///
-    /// This method stores data in the local DHT instance only. For network-wide
-    /// replication across multiple nodes, use `DhtNetworkManager` instead,
-    /// which owns a P2PNode for transport and coordinates replication.
+    /// This method stores data in the local DHT core through the attached manager.
+    /// For network-wide replication across multiple nodes, use `DhtNetworkManager::put`.
     pub async fn dht_put(&self, key: crate::dht::Key, value: Vec<u8>) -> Result<()> {
-        if let Some(ref dht) = self.dht {
-            let mut dht_instance = dht.write().await;
-            let dht_key = crate::dht::DhtKey::from_bytes(key);
-            dht_instance.store(&dht_key, value).await.map_err(|e| {
-                P2PError::Dht(crate::error::DhtError::StoreFailed(
-                    format!("{:?}: {e}", key).into(),
-                ))
-            })?;
-
-            Ok(())
+        if let Some(ref dht_manager) = self.dht_manager {
+            dht_manager.store_local(key, value).await
         } else {
             Err(P2PError::Dht(crate::error::DhtError::RoutingError(
                 "DHT not enabled".to_string().into(),
@@ -1583,20 +1590,11 @@ impl P2PNode {
 
     /// Retrieve a value from the local DHT
     ///
-    /// This method retrieves data from the local DHT instance only. For network-wide
-    /// lookups across multiple nodes, use `DhtNetworkManager` instead,
-    /// which owns a P2PNode for transport and coordinates distributed queries.
+    /// This method retrieves data from the local DHT core through the attached manager.
+    /// For network-wide lookups across multiple nodes, use `DhtNetworkManager::get`.
     pub async fn dht_get(&self, key: crate::dht::Key) -> Result<Option<Vec<u8>>> {
-        if let Some(ref dht) = self.dht {
-            let dht_instance = dht.read().await;
-            let dht_key = crate::dht::DhtKey::from_bytes(key);
-            let record_result = dht_instance.retrieve(&dht_key).await.map_err(|e| {
-                P2PError::Dht(crate::error::DhtError::StoreFailed(
-                    format!("Retrieve failed: {e}").into(),
-                ))
-            })?;
-
-            Ok(record_result)
+        if let Some(ref dht_manager) = self.dht_manager {
+            dht_manager.get_local(&key).await
         } else {
             Err(P2PError::Dht(crate::error::DhtError::RoutingError(
                 "DHT not enabled".to_string().into(),

@@ -20,10 +20,11 @@
 
 use crate::{
     Multiaddr, P2PError, PeerId, Result,
+    adaptive::{EigenTrustEngine, NodeId as AdaptiveNodeId},
     dht::routing_maintenance::{MaintenanceConfig, MaintenanceScheduler, MaintenanceTask},
     dht::{DHTConfig, DhtCoreEngine, DhtKey, DhtNodeId, Key},
     error::{DhtError, NetworkError},
-    network::{NodeConfig, P2PNode},
+    network::NodeConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -269,9 +270,7 @@ pub struct DhtNetworkManager {
     /// Transport handle for QUIC connections, peer registry, and message I/O
     transport: Arc<crate::transport_handle::TransportHandle>,
     /// EigenTrust engine for reputation management (optional)
-    trust_engine: Option<Arc<crate::adaptive::EigenTrustEngine>>,
-    /// P2P network node (kept for lifecycle management and backward compatibility)
-    node: Arc<P2PNode>,
+    trust_engine: Option<Arc<EigenTrustEngine>>,
     /// Configuration
     config: DhtNetworkConfig,
     /// Active DHT operations
@@ -286,8 +285,8 @@ pub struct DhtNetworkManager {
     maintenance_scheduler: Arc<RwLock<MaintenanceScheduler>>,
     /// Semaphore for limiting concurrent message handlers (backpressure)
     message_handler_semaphore: Arc<Semaphore>,
-    /// Whether this manager owns the P2P node lifecycle
-    manage_node_lifecycle: bool,
+    /// Whether this manager owns the transport lifecycle
+    manage_transport_lifecycle: bool,
     /// Cached local DHT key to avoid repeated SHA-256 hashing
     /// PERF-001: Eliminates redundant computation in message handlers
     local_dht_key: DhtKey,
@@ -431,21 +430,49 @@ impl DhtNetworkManager {
     fn init_dht_core(local_peer_id: &PeerId) -> Result<(Arc<RwLock<DhtCoreEngine>>, DhtKey)> {
         let dht_key = crate::dht::derive_dht_key_from_peer_id(local_peer_id);
         let node_id = DhtNodeId::from_bytes(dht_key);
-        let dht = Arc::new(RwLock::new(DhtCoreEngine::new(node_id).map_err(|e| {
-            P2PError::Dht(DhtError::StorageFailed(e.to_string().into()))
-        })?));
+        let dht_instance = DhtCoreEngine::new(node_id)
+            .map_err(|e| P2PError::Dht(DhtError::StorageFailed(e.to_string().into())))?;
+        dht_instance.start_maintenance_tasks();
+        let dht = Arc::new(RwLock::new(dht_instance));
         Ok((dht, DhtKey::from_bytes(dht_key)))
     }
 
+    fn build_transport_config(
+        config: &DhtNetworkConfig,
+    ) -> crate::transport_handle::TransportConfig {
+        crate::transport_handle::TransportConfig {
+            peer_id: config.local_peer_id.clone(),
+            listen_addr: config.node_config.listen_addr,
+            enable_ipv6: config.node_config.enable_ipv6,
+            connection_timeout: config.node_config.connection_timeout,
+            stale_peer_threshold: config.node_config.stale_peer_threshold,
+            max_connections: config.node_config.max_connections,
+            production_config: config.node_config.production_config.clone(),
+            event_channel_capacity: 1000,
+        }
+    }
+
+    fn init_trust_engine(config: &DhtNetworkConfig) -> Arc<EigenTrustEngine> {
+        let mut pre_trusted = HashSet::new();
+        for bootstrap_node in &config.bootstrap_nodes {
+            let dht_key = bootstrap_node.dht_key.unwrap_or_else(|| {
+                crate::dht::derive_dht_key_from_peer_id(&bootstrap_node.peer_id)
+            });
+            pre_trusted.insert(AdaptiveNodeId::from_bytes(dht_key));
+        }
+
+        let trust_engine = Arc::new(EigenTrustEngine::new(pre_trusted));
+        trust_engine.clone().start_background_updates();
+        trust_engine
+    }
+
     fn new_from_components(
-        node: Arc<P2PNode>,
+        transport: Arc<crate::transport_handle::TransportHandle>,
+        trust_engine: Option<Arc<EigenTrustEngine>>,
         config: DhtNetworkConfig,
-        manage_node_lifecycle: bool,
+        manage_transport_lifecycle: bool,
     ) -> Result<Self> {
         let (dht, local_dht_key) = Self::init_dht_core(&config.local_peer_id)?;
-
-        let transport = node.transport().clone();
-        let trust_engine = node.trust_engine();
 
         let (event_tx, _) = broadcast::channel(1000);
         let maintenance_config = MaintenanceConfig::from(&config.dht_config);
@@ -461,7 +488,6 @@ impl DhtNetworkManager {
             dht,
             transport,
             trust_engine,
-            node,
             config,
             active_operations: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
@@ -469,7 +495,7 @@ impl DhtNetworkManager {
             stats: Arc::new(RwLock::new(DhtNetworkStats::default())),
             maintenance_scheduler,
             message_handler_semaphore,
-            manage_node_lifecycle,
+            manage_transport_lifecycle,
             local_dht_key,
         })
     }
@@ -592,32 +618,47 @@ impl DhtNetworkManager {
 
     #[allow(dead_code)]
     /// Create a new DHT Network Manager
-    pub async fn new(config: DhtNetworkConfig) -> Result<Self> {
+    pub async fn new(mut config: DhtNetworkConfig) -> Result<Self> {
+        if config.local_peer_id.is_empty() {
+            config.local_peer_id = config
+                .node_config
+                .peer_id
+                .clone()
+                .unwrap_or_else(|| "default_peer".to_string());
+        }
+
         info!(
             "Creating DHT Network Manager for peer: {}",
             config.local_peer_id
         );
 
-        // Create P2P node
-        let node = Arc::new(P2PNode::new(config.node_config.clone()).await?);
-        let manager = Self::new_from_components(node, config, true)?;
+        let transport = Arc::new(
+            crate::transport_handle::TransportHandle::new(Self::build_transport_config(&config))
+                .await?,
+        );
+        let trust_engine = Some(Self::init_trust_engine(&config));
+        let manager = Self::new_from_components(transport, trust_engine, config, true)?;
 
         info!("DHT Network Manager created successfully");
         Ok(manager)
     }
 
-    /// Create a DHT Network Manager attached to an existing P2P node.
+    /// Create a DHT Network Manager attached to an existing transport handle.
     ///
-    /// This variant does not assume ownership of the node lifecycle and will
-    /// avoid stopping the node when the manager shuts down.
-    pub async fn new_with_node(node: Arc<P2PNode>, mut config: DhtNetworkConfig) -> Result<Self> {
-        let node_peer_id = node.peer_id().clone();
+    /// This variant does not assume ownership of the transport lifecycle and will
+    /// avoid stopping the transport when the manager shuts down.
+    pub async fn new_with_transport(
+        transport: Arc<crate::transport_handle::TransportHandle>,
+        trust_engine: Option<Arc<EigenTrustEngine>>,
+        mut config: DhtNetworkConfig,
+    ) -> Result<Self> {
+        let local_transport_peer_id = transport.peer_id().clone();
         if config.local_peer_id.is_empty() {
-            config.local_peer_id = node_peer_id.clone();
-        } else if config.local_peer_id != node_peer_id {
+            config.local_peer_id = local_transport_peer_id.clone();
+        } else if config.local_peer_id != local_transport_peer_id {
             warn!(
-                "DHT config peer_id ({}) differs from node peer_id ({}); using config value",
-                config.local_peer_id, node_peer_id
+                "DHT config peer_id ({}) differs from transport peer_id ({}); using config value",
+                config.local_peer_id, local_transport_peer_id
             );
         }
 
@@ -625,7 +666,7 @@ impl DhtNetworkManager {
             "Creating attached DHT Network Manager for peer: {}",
             config.local_peer_id
         );
-        let manager = Self::new_from_components(node, config, false)?;
+        let manager = Self::new_from_components(transport, trust_engine, config, false)?;
 
         info!("Attached DHT Network Manager created successfully");
         Ok(manager)
@@ -642,9 +683,9 @@ impl DhtNetworkManager {
         // This ensures we don't miss PeerConnected events
         self.start_network_event_handler(Arc::clone(self)).await?;
 
-        // Start the P2P node if we own lifecycle or it is not running yet
-        if self.manage_node_lifecycle || !self.node.is_running().await {
-            self.node.start().await?;
+        // Start transport listeners when this manager owns transport lifecycle.
+        if self.manage_transport_lifecycle {
+            self.transport.start_network_listeners().await?;
         }
 
         // Connect to bootstrap nodes
@@ -664,9 +705,9 @@ impl DhtNetworkManager {
         // Send leave messages to connected peers
         self.leave_network().await?;
 
-        // Stop the P2P node only if we own its lifecycle
-        if self.manage_node_lifecycle {
-            self.node.stop().await?;
+        // Stop transport listeners only if we own lifecycle
+        if self.manage_transport_lifecycle {
+            self.transport.stop().await?;
         }
 
         info!("DHT Network Manager stopped");
@@ -2683,11 +2724,14 @@ impl DhtNetworkManager {
         &self.transport
     }
 
-    /// Get the underlying P2P node reference
-    ///
-    /// This provides access to higher-level node operations (lifecycle, DHT, trust).
-    pub fn node(&self) -> &Arc<P2PNode> {
-        &self.node
+    /// Get the optional trust engine used by this manager.
+    pub fn trust_engine(&self) -> Option<Arc<EigenTrustEngine>> {
+        self.trust_engine.clone()
+    }
+
+    /// Get the security metrics collector from the local DHT core.
+    pub async fn security_metrics(&self) -> Arc<crate::dht::metrics::SecurityMetricsCollector> {
+        self.dht.read().await.security_metrics()
     }
 }
 
