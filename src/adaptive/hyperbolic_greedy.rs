@@ -619,7 +619,7 @@ pub async fn embed_snapshot(peers: &[PeerId]) -> Result<Embedding> {
     // Create a temporary router for embedding
     let local_id = peers
         .first()
-        .map(|p| p.clone())
+        .cloned()
         .unwrap_or_else(|| format!("peer_{}", rand::random::<u64>()));
 
     let router = HyperbolicGreedyRouter::new(local_id);

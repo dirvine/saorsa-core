@@ -597,12 +597,7 @@ pub struct IPDiversityEnforcer {
 impl IPDiversityEnforcer {
     /// Create a new IP diversity enforcer
     pub fn new(config: IPDiversityConfig) -> Self {
-        // SAFETY: MAX_SUBNET_TRACKING is a non-zero const (50_000), so this always succeeds
-        // We use match to avoid clippy::unwrap_used in production code
-        let cache_size = match NonZeroUsize::new(MAX_SUBNET_TRACKING) {
-            Some(size) => size,
-            None => unsafe { std::hint::unreachable_unchecked() },
-        };
+        let cache_size = NonZeroUsize::new(MAX_SUBNET_TRACKING).unwrap_or(NonZeroUsize::MIN);
         Self {
             config,
             // IPv6 (LRU caches with bounded size)
@@ -788,21 +783,21 @@ impl IPDiversityEnforcer {
             }
         }
 
-        if let Some(asn) = ip_analysis.asn {
-            if let Some(count) = self.asn_counts.pop(&asn) {
-                let new_count = count.saturating_sub(1);
-                if new_count > 0 {
-                    self.asn_counts.put(asn, new_count);
-                }
+        if let Some(asn) = ip_analysis.asn
+            && let Some(count) = self.asn_counts.pop(&asn)
+        {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.asn_counts.put(asn, new_count);
             }
         }
 
-        if let Some(ref country) = ip_analysis.country {
-            if let Some(count) = self.country_counts.pop(country) {
-                let new_count = count.saturating_sub(1);
-                if new_count > 0 {
-                    self.country_counts.put(country.clone(), new_count);
-                }
+        if let Some(ref country) = ip_analysis.country
+            && let Some(count) = self.country_counts.pop(country)
+        {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.country_counts.put(country.clone(), new_count);
             }
         }
     }
@@ -1115,21 +1110,21 @@ impl IPDiversityEnforcer {
             }
         }
 
-        if let Some(asn) = analysis.asn {
-            if let Some(count) = self.asn_counts.pop(&asn) {
-                let new_count = count.saturating_sub(1);
-                if new_count > 0 {
-                    self.asn_counts.put(asn, new_count);
-                }
+        if let Some(asn) = analysis.asn
+            && let Some(count) = self.asn_counts.pop(&asn)
+        {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.asn_counts.put(asn, new_count);
             }
         }
 
-        if let Some(ref country) = analysis.country {
-            if let Some(count) = self.country_counts.pop(country) {
-                let new_count = count.saturating_sub(1);
-                if new_count > 0 {
-                    self.country_counts.put(country.clone(), new_count);
-                }
+        if let Some(ref country) = analysis.country
+            && let Some(count) = self.country_counts.pop(country)
+        {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.country_counts.put(country.clone(), new_count);
             }
         }
     }

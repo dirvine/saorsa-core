@@ -102,8 +102,7 @@ impl TcpTransport {
     pub fn new() -> Self {
         Self {
             connections: Arc::new(RwLock::new(LruCache::new(
-                // SAFETY: MAX_TCP_CONNECTIONS is a compile-time constant (1_000) which is non-zero
-                unsafe { NonZeroUsize::new_unchecked(MAX_TCP_CONNECTIONS) },
+                NonZeroUsize::new(MAX_TCP_CONNECTIONS).unwrap_or(NonZeroUsize::MIN),
             ))),
         }
     }

@@ -47,6 +47,11 @@ fn generate_test_keypair() -> (MlDsaPublicKey, MlDsaSecretKey) {
     generate_ml_dsa_keypair().expect("Failed to generate test keypair")
 }
 
+/// Convert Vec<u8> to MlDsaSignature
+fn signature_from_bytes(bytes: &[u8]) -> Result<MlDsaSignature, String> {
+    MlDsaSignature::from_bytes(bytes).map_err(|e| format!("Failed to parse signature: {e:?}"))
+}
+
 /// Sign binary data with ML-DSA-65
 fn sign_binary(binary: &[u8], secret_key: &MlDsaSecretKey) -> MlDsaSignature {
     ml_dsa_sign(secret_key, binary).expect("Failed to sign binary")
@@ -62,10 +67,11 @@ fn verify_binary_signature(
 }
 
 /// Corrupt a signature by flipping bits
-fn corrupt_signature(signature: &mut MlDsaSignature) -> MlDsaSignature {
+fn corrupt_signature(signature: &MlDsaSignature) -> MlDsaSignature {
     let mut bytes = signature.as_bytes().to_vec();
-    if !bytes.is_empty() {
-        bytes[0] ^= 0xFF;
+    // Flip multiple bytes to ensure corruption
+    for i in 0..bytes.len().min(10) {
+        bytes[i] ^= 0xFF;
     }
     MlDsaSignature::from_bytes(&bytes).unwrap_or_else(|_| signature.clone())
 }
@@ -97,7 +103,7 @@ fn create_test_manifest(
     version: &str,
     channel: ReleaseChannel,
     is_critical: bool,
-    public_key: &MlDsaPublicKey,
+    _public_key: &MlDsaPublicKey,
     secret_key: &MlDsaSecretKey,
 ) -> UpdateManifest {
     let binary_content = format!("Binary content for version {}", version);
@@ -360,7 +366,7 @@ async fn test_hash_mismatch_detection() {
     // Try to verify with wrong checksum
     let wrong_checksum = "0000000000000000000000000000000000000000000000000000000000000000";
     let signature_b64 =
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &[0u8; 64]);
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 64]);
 
     let result = verifier
         .verify_file(&file_path, wrong_checksum, "test-key", &signature_b64)
@@ -821,7 +827,10 @@ async fn test_expired_key_rejection() {
     // Create a key that has expired
     let expired_key = PinnedKey {
         key_id: "expired-key".to_string(),
-        public_key: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &public_key),
+        public_key: base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            public_key.as_bytes(),
+        ),
         valid_from: 0,
         valid_until: 1, // Expired timestamp
     };
@@ -923,7 +932,9 @@ async fn test_manifest_signature_verification() {
     )
     .expect("Failed to decode signature");
 
-    let result = verify_binary_signature(&canonical_bytes, &signature_bytes, &public_key);
+    let signature = signature_from_bytes(&signature_bytes).expect("Failed to parse signature");
+
+    let result = verify_binary_signature(&canonical_bytes, &signature, &public_key);
     assert!(result, "Manifest signature should verify successfully");
 }
 
@@ -1001,12 +1012,17 @@ async fn test_verify_file_integration() {
 
     let checksum = calculate_sha256(test_content);
     let signature = sign_binary(test_content, &secret_key);
-    let signature_b64 =
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &signature);
+    let signature_b64 = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        signature.as_bytes(),
+    );
 
     let pinned_key = PinnedKey::new(
         "test-key",
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &public_key),
+        base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            public_key.as_bytes(),
+        ),
     );
     let verifier = SignatureVerifier::new(vec![pinned_key]);
 
