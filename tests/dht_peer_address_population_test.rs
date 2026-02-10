@@ -420,7 +420,7 @@ async fn test_address_consistency_with_p2p_layer() -> Result<()> {
 
     // Query P2P layer for peer B's info
     info!("Querying P2P layer for peer B's info...");
-    let p2p_peer_info = manager_a.node().peer_info(&peer_id_b).await;
+    let p2p_peer_info = manager_a.transport().peer_info(&peer_id_b).await;
 
     let p2p_addresses = match p2p_peer_info {
         Some(info) => {

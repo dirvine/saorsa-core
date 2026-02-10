@@ -73,6 +73,9 @@ pub mod dht;
 /// DHT Network Integration Manager
 pub mod dht_network_manager;
 
+/// Transport handle: shared QUIC + peer + event state
+pub mod transport_handle;
+
 /// Transport layer (QUIC, TCP)
 pub mod transport;
 
@@ -198,6 +201,7 @@ pub use network::{
     ConnectionStatus, NetworkSender, NodeBuilder, NodeConfig, P2PEvent, P2PNode, PeerInfo,
     PeerResponse,
 };
+pub use transport_handle::TransportHandle;
 // Trust system exports for saorsa-node integration
 pub use adaptive::{EigenTrustEngine, NodeStatistics, NodeStatisticsUpdate, TrustProvider};
 pub use telemetry::{Metrics, StreamClass, record_lookup, record_timeout, telemetry};

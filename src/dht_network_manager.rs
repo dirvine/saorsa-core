@@ -266,7 +266,11 @@ pub enum DhtMessageType {
 pub struct DhtNetworkManager {
     /// DHT instance
     dht: Arc<RwLock<DhtCoreEngine>>,
-    /// P2P network node
+    /// Transport handle for QUIC connections, peer registry, and message I/O
+    transport: Arc<crate::transport_handle::TransportHandle>,
+    /// EigenTrust engine for reputation management (optional)
+    trust_engine: Option<Arc<crate::adaptive::EigenTrustEngine>>,
+    /// P2P network node (kept for lifecycle management and backward compatibility)
     node: Arc<P2PNode>,
     /// Configuration
     config: DhtNetworkConfig,
@@ -440,6 +444,9 @@ impl DhtNetworkManager {
     ) -> Result<Self> {
         let (dht, local_dht_key) = Self::init_dht_core(&config.local_peer_id)?;
 
+        let transport = node.transport().clone();
+        let trust_engine = node.trust_engine();
+
         let (event_tx, _) = broadcast::channel(1000);
         let maintenance_config = MaintenanceConfig::from(&config.dht_config);
         let maintenance_scheduler =
@@ -452,6 +459,8 @@ impl DhtNetworkManager {
 
         Ok(Self {
             dht,
+            transport,
+            trust_engine,
             node,
             config,
             active_operations: Arc::new(RwLock::new(HashMap::new())),
@@ -1662,14 +1671,26 @@ impl DhtNetworkManager {
     }
 
     async fn record_peer_success(&self, peer_id: &str) {
-        if let Err(e) = self.node.report_peer_success(peer_id).await {
-            trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust success");
+        if let Some(ref engine) = self.trust_engine {
+            let node_id = crate::network::peer_id_to_trust_node_id(peer_id);
+            engine
+                .update_node_stats(
+                    &node_id,
+                    crate::adaptive::NodeStatisticsUpdate::CorrectResponse,
+                )
+                .await;
         }
     }
 
     async fn record_peer_failure(&self, peer_id: &str) {
-        if let Err(e) = self.node.report_peer_failure(peer_id).await {
-            trace!(peer_id = peer_id, error = %e, "Failed to record EigenTrust failure");
+        if let Some(ref engine) = self.trust_engine {
+            let node_id = crate::network::peer_id_to_trust_node_id(peer_id);
+            engine
+                .update_node_stats(
+                    &node_id,
+                    crate::adaptive::NodeStatisticsUpdate::FailedResponse,
+                )
+                .await;
         }
     }
 
@@ -1736,7 +1757,7 @@ impl DhtNetworkManager {
             self.config.local_peer_id, peer_id, message.payload, message_id
         );
         match self
-            .node
+            .transport
             .send_message(peer_id, "/dht/1.0.0", message_data)
             .await
         {
@@ -1782,7 +1803,7 @@ impl DhtNetworkManager {
             return;
         }
 
-        if self.node.is_peer_connected(peer_id).await {
+        if self.transport.is_peer_connected(peer_id).await {
             debug!("dial_candidate: peer {peer_id} already connected");
             return;
         }
@@ -1796,11 +1817,10 @@ impl DhtNetworkManager {
             return;
         }
         let dial_timeout = self
-            .node
-            .config()
-            .connection_timeout
+            .transport
+            .connection_timeout()
             .min(self.config.request_timeout);
-        match tokio::time::timeout(dial_timeout, self.node.connect_peer(socket_addr)).await {
+        match tokio::time::timeout(dial_timeout, self.transport.connect_peer(socket_addr)).await {
             Ok(Ok(_)) => debug!("dial_candidate: connected to {peer_id} at {socket_addr}"),
             Ok(Err(e)) => {
                 debug!("dial_candidate: failed to connect to {peer_id} at {socket_addr}: {e}")
@@ -2157,8 +2177,8 @@ impl DhtNetworkManager {
     async fn update_peer_info(&self, peer_id: PeerId, _message: &DhtNetworkMessage) {
         let dht_key = crate::dht::derive_dht_key_from_peer_id(&peer_id);
 
-        // Get peer addresses from P2P node
-        let addresses = if let Some(peer_info) = self.node.peer_info(&peer_id).await {
+        // Get peer addresses from transport layer
+        let addresses = if let Some(peer_info) = self.transport.peer_info(&peer_id).await {
             Self::parse_peer_addresses(&peer_info.addresses)
         } else {
             warn!("peer_info unavailable for peer_id: {}", peer_id);
@@ -2194,11 +2214,11 @@ impl DhtNetworkManager {
     async fn start_network_event_handler(&self, self_arc: Arc<Self>) -> Result<()> {
         info!("Starting network event handler...");
 
-        // Subscribe to network events from P2P node
-        let mut events = self.node.subscribe_events();
+        // Subscribe to network events from transport layer
+        let mut events = self.transport.subscribe_events();
         let dht_peers = Arc::clone(&self.dht_peers);
         let event_tx = self.event_tx.clone();
-        let node = Arc::clone(&self_arc.node);
+        let transport = Arc::clone(&self_arc.transport);
 
         tokio::spawn(async move {
             while let Ok(event) = events.recv().await {
@@ -2207,8 +2227,9 @@ impl DhtNetworkManager {
                         info!("DHT peer connected: {}", peer_id);
                         let dht_key = crate::dht::derive_dht_key_from_peer_id(&peer_id);
 
-                        // Get peer addresses from P2P node
-                        let addresses = if let Some(peer_info) = node.peer_info(&peer_id).await {
+                        // Get peer addresses from transport layer
+                        let addresses = if let Some(peer_info) = transport.peer_info(&peer_id).await
+                        {
                             DhtNetworkManager::parse_peer_addresses(&peer_info.addresses)
                         } else {
                             warn!("peer_info unavailable for peer_id: {}", peer_id);
@@ -2340,7 +2361,7 @@ impl DhtNetworkManager {
                                     Ok(Ok(Some(response))) => {
                                         // Send response back to the source peer
                                         if let Err(e) = manager_clone
-                                            .node
+                                            .transport
                                             .send_message(&source_clone, "/dht/1.0.0", response)
                                             .await
                                         {
@@ -2389,7 +2410,7 @@ impl DhtNetworkManager {
 
         for bootstrap_node in &self.config.bootstrap_nodes {
             for address in &bootstrap_node.addresses {
-                match self.node.connect_peer(&address.to_string()).await {
+                match self.transport.connect_peer(&address.to_string()).await {
                     Ok(peer_id) => {
                         info!("Connected to bootstrap node: {} at {}", peer_id, address);
                         connected_count += 1;
@@ -2615,14 +2636,14 @@ impl DhtNetworkManager {
     /// This is the ID used in P2P communication and stored in `dht_peers`.
     /// It differs from `peer_id()` which returns the human-readable config name.
     pub fn transport_peer_id(&self) -> Option<String> {
-        self.node.transport_peer_id()
+        self.transport.transport_peer_id()
     }
 
     /// Get the local listen address of this node's P2P network
     ///
     /// Returns the address other nodes can use to connect to this node.
     pub fn local_addr(&self) -> Option<String> {
-        self.node.local_addr()
+        self.transport.local_addr()
     }
 
     /// Check if a key exists in local storage only (no network query)
@@ -2654,12 +2675,17 @@ impl DhtNetworkManager {
     ///
     /// This is useful for manually building network topology in tests.
     pub async fn connect_to_peer(&self, address: &str) -> Result<PeerId> {
-        self.node.connect_peer(address).await
+        self.transport.connect_peer(address).await
+    }
+
+    /// Get the transport handle for direct transport-level operations.
+    pub fn transport(&self) -> &Arc<crate::transport_handle::TransportHandle> {
+        &self.transport
     }
 
     /// Get the underlying P2P node reference
     ///
-    /// This provides access to lower-level network operations.
+    /// This provides access to higher-level node operations (lifecycle, DHT, trust).
     pub fn node(&self) -> &Arc<P2PNode> {
         &self.node
     }

@@ -176,7 +176,7 @@ async fn assert_not_directly_connected(
     manager: &Arc<DhtNetworkManager>,
     other_peer_id: &str,
 ) -> Result<()> {
-    let connected_peers = manager.node().connected_peers().await;
+    let connected_peers = manager.transport().connected_peers().await;
     let is_connected = connected_peers.iter().any(|p| p == other_peer_id);
 
     if is_connected {
