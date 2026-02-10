@@ -818,14 +818,17 @@ async fn test_update_config_builder() {
 
 #[tokio::test]
 async fn test_downgrade_prevention() {
+    use semver::Version;
+
     // In a real implementation, the update manager would check versions
-    // For now, test that version comparison works correctly
-    let current_version = "0.11.0";
-    let downgrade_version = "0.10.0";
+    // For now, test that version comparison works correctly using semantic versioning
+    // (lexicographic comparison would fail for versions like 0.9.0 vs 0.10.0)
+    let current_version = Version::parse("0.11.0").expect("Failed to parse current version");
+    let downgrade_version = Version::parse("0.10.0").expect("Failed to parse downgrade version");
 
     assert!(
         downgrade_version < current_version,
-        "Downgrade should be detected by version comparison"
+        "Downgrade should be detected by semantic version comparison"
     );
 }
 
