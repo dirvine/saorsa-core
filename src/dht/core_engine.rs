@@ -981,9 +981,15 @@ impl DhtCoreEngine {
         // Create response channel
         let (tx, rx) = oneshot::channel();
 
-        // Register pending request (LRU automatically evicts oldest if at capacity)
+        // Register pending request - reject if at capacity to avoid evicting in-flight requests
         {
             let mut pending = self.pending_requests.write().await;
+            if pending.len() >= MAX_PENDING_DHT_REQUESTS {
+                return Err(anyhow!(
+                    "DHT request capacity exceeded ({} pending requests). Too many concurrent requests.",
+                    MAX_PENDING_DHT_REQUESTS
+                ));
+            }
             pending.put(request_id.clone(), tx);
         }
 
