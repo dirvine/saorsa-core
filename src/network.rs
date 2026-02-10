@@ -21,7 +21,6 @@ use crate::adaptive::{
 };
 use crate::bootstrap::{BootstrapManager, ContactEntry, QualityMetrics};
 use crate::config::Config;
-use crate::dht::network_integration::DhtMessage;
 use crate::dht_network_manager::{DhtNetworkConfig, DhtNetworkManager};
 use crate::error::{NetworkError, P2PError, P2pResult as Result, PeerFailureReason};
 
@@ -85,9 +84,6 @@ const BOOTSTRAP_FAILURE_PENALTY_HOURS: i64 = 1;
 
 /// Default neutral trust score when trust engine is unavailable.
 const DEFAULT_NEUTRAL_TRUST: f64 = 0.5;
-
-/// Number of peers to request in FIND_NODE queries.
-const FIND_NODE_PEER_COUNT: usize = 20;
 
 /// Number of cached bootstrap peers to retrieve.
 const BOOTSTRAP_PEER_BATCH_SIZE: usize = 20;
@@ -863,7 +859,6 @@ impl P2PNode {
             local_peer_id: peer_id.clone(),
             dht_config: manager_dht_config,
             node_config: config.clone(),
-            bootstrap_nodes: Vec::new(),
             request_timeout: config.connection_timeout,
             max_concurrent_operations: MAX_ACTIVE_REQUESTS,
             replication_factor: config.dht_config.k_value,
@@ -1646,45 +1641,6 @@ impl P2PNode {
         0
     }
 
-    /// Discover peers from a connected bootstrap peer using FIND_NODE
-    ///
-    /// Sends a FIND_NODE request for our own peer ID to discover nearby peers
-    /// and populate the routing table. This is the core of Kademlia peer discovery.
-    async fn discover_peers_from(&self, peer_id: &PeerId) -> Result<usize> {
-        info!("Discovering peers from bootstrap peer: {}", peer_id);
-
-        // Create our node ID as a DhtKey for the FIND_NODE query
-        // We query for ourselves to find nodes closest to us
-        let our_id_bytes = crate::dht::derive_dht_key_from_peer_id(&self.peer_id);
-        let target_key = crate::dht::DhtKey::from_bytes(our_id_bytes);
-
-        // Create FIND_NODE message
-        let find_node_msg = DhtMessage::FindNode {
-            target: target_key,
-            count: FIND_NODE_PEER_COUNT,
-        };
-
-        // Serialize the message
-        let message_bytes = postcard::to_allocvec(&find_node_msg)
-            .map_err(|e| protocol_error(format!("Failed to serialize FIND_NODE message: {e}")))?;
-
-        // Send the FIND_NODE request
-        self.send_message(peer_id, "/dht/1.0.0", message_bytes)
-            .await?;
-
-        // Note: Response handling is asynchronous through the message handler.
-        // For now, we log the request and let the response handler populate
-        // the routing table when it receives FindNodeReply.
-        //
-        // TODO: Implement request-response correlation with a timeout to get
-        // actual discovered peer count. For now, return 0 to indicate we sent
-        // the request but don't have immediate response data.
-
-        info!("Sent FIND_NODE request to {} for peer discovery", peer_id);
-
-        Ok(0) // Actual count would require awaiting the response
-    }
-
     /// Connect to bootstrap peers and perform initial peer discovery
     async fn connect_bootstrap_peers(&self) -> Result<()> {
         let mut bootstrap_contacts = Vec::new();
@@ -1833,17 +1789,15 @@ impl P2PNode {
             successful_connections
         );
 
-        // Perform peer discovery from connected bootstrap peers
-        // Send FIND_NODE(self) to discover nearby peers and populate routing table
-        for peer_id in &connected_peer_ids {
-            match self.discover_peers_from(peer_id).await {
-                Ok(_) => {
-                    info!("Peer discovery initiated from bootstrap peer: {}", peer_id);
-                }
-                Err(e) => {
-                    warn!("Failed to discover peers from {}: {}", peer_id, e);
-                }
-            }
+        // Perform DHT peer discovery from connected bootstrap peers
+        // Uses the DHT manager's JSON protocol (not raw postcard) for correct deserialization
+        match self
+            .dht_manager
+            .bootstrap_from_peers(&connected_peer_ids)
+            .await
+        {
+            Ok(count) => info!("DHT peer discovery found {} peers", count),
+            Err(e) => warn!("DHT peer discovery failed: {}", e),
         }
 
         // Mark node as bootstrapped - we have connected to bootstrap peers

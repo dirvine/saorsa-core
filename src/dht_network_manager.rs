@@ -20,7 +20,7 @@
 
 use crate::{
     Multiaddr, P2PError, PeerId, Result,
-    adaptive::{EigenTrustEngine, NodeId as AdaptiveNodeId},
+    adaptive::EigenTrustEngine,
     dht::routing_maintenance::{MaintenanceConfig, MaintenanceScheduler, MaintenanceTask},
     dht::{DHTConfig, DhtCoreEngine, DhtKey, DhtNodeId, Key},
     error::{DhtError, NetworkError},
@@ -96,8 +96,6 @@ pub struct DhtNetworkConfig {
     pub dht_config: DHTConfig,
     /// Network node configuration
     pub node_config: NodeConfig,
-    /// Bootstrap nodes for initial network connection
-    pub bootstrap_nodes: Vec<BootstrapNode>,
     /// Request timeout for DHT operations
     pub request_timeout: Duration,
     /// Maximum concurrent operations
@@ -452,15 +450,8 @@ impl DhtNetworkManager {
         }
     }
 
-    fn init_trust_engine(config: &DhtNetworkConfig) -> Arc<EigenTrustEngine> {
-        let mut pre_trusted = HashSet::new();
-        for bootstrap_node in &config.bootstrap_nodes {
-            let dht_key = bootstrap_node.dht_key.unwrap_or_else(|| {
-                crate::dht::derive_dht_key_from_peer_id(&bootstrap_node.peer_id)
-            });
-            pre_trusted.insert(AdaptiveNodeId::from_bytes(dht_key));
-        }
-
+    fn init_trust_engine(_config: &DhtNetworkConfig) -> Arc<EigenTrustEngine> {
+        let pre_trusted = HashSet::new();
         let trust_engine = Arc::new(EigenTrustEngine::new(pre_trusted));
         trust_engine.clone().start_background_updates();
         trust_engine
@@ -688,14 +679,37 @@ impl DhtNetworkManager {
             self.transport.start_network_listeners().await?;
         }
 
-        // Connect to bootstrap nodes
-        self.connect_to_bootstrap_nodes().await?;
-
         // Start DHT maintenance tasks
         self.start_maintenance_tasks().await?;
 
         info!("DHT Network Manager started successfully");
         Ok(())
+    }
+
+    /// Perform DHT peer discovery from already-connected bootstrap peers.
+    ///
+    /// Sends FIND_NODE(self) to each peer using the proper DHT JSON protocol,
+    /// then dials any newly-discovered candidates. Returns the total number
+    /// of new peers discovered.
+    pub async fn bootstrap_from_peers(&self, peers: &[PeerId]) -> Result<usize> {
+        let key = *self.local_dht_key.as_bytes();
+        let mut discovered = 0;
+        for peer_id in peers {
+            let op = DhtNetworkOperation::FindNode { key };
+            match self.send_dht_request(peer_id, op).await {
+                Ok(DhtNetworkResult::NodesFound { nodes, .. }) => {
+                    for node in &nodes {
+                        self.dial_candidate(&node.peer_id, &node.address).await;
+                        discovered += 1;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("Bootstrap FIND_NODE to {} failed: {}", peer_id, e);
+                }
+            }
+        }
+        Ok(discovered)
     }
 
     /// Stop the DHT network manager
@@ -1146,54 +1160,6 @@ impl DhtNetworkManager {
                 Err(e)
             }
         }
-    }
-
-    /// Join the DHT network
-    async fn join_network(&self) -> Result<()> {
-        info!("Joining DHT network...");
-
-        let _local_key = crate::dht::derive_dht_key_from_peer_id(&self.config.local_peer_id);
-        let join_operation = DhtNetworkOperation::Join;
-
-        let mut bootstrap_peers = 0;
-
-        // Send join requests to bootstrap nodes
-        for bootstrap_node in &self.config.bootstrap_nodes {
-            match self
-                .send_dht_request(&bootstrap_node.peer_id.to_string(), join_operation.clone())
-                .await
-            {
-                Ok(DhtNetworkResult::JoinSuccess { .. }) => {
-                    bootstrap_peers += 1;
-                    info!(
-                        "Successfully joined via bootstrap node: {}",
-                        bootstrap_node.peer_id.to_string()
-                    );
-                }
-                Ok(result) => {
-                    warn!(
-                        "Unexpected join result from {}: {:?}",
-                        bootstrap_node.peer_id.to_string(),
-                        result
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to join via bootstrap node {}: {}",
-                        bootstrap_node.peer_id.to_string(),
-                        e
-                    );
-                }
-            }
-        }
-
-        if bootstrap_peers == 0 {
-            warn!("Failed to join via any bootstrap nodes");
-        } else {
-            info!("Joined DHT network via {} bootstrap peers", bootstrap_peers);
-        }
-
-        Ok(())
     }
 
     /// Leave the DHT network gracefully
@@ -2440,68 +2406,6 @@ impl DhtNetworkManager {
         Ok(())
     }
 
-    /// Connect to bootstrap nodes
-    async fn connect_to_bootstrap_nodes(&self) -> Result<()> {
-        info!(
-            "Connecting to {} bootstrap nodes...",
-            self.config.bootstrap_nodes.len()
-        );
-
-        let mut connected_count = 0;
-
-        for bootstrap_node in &self.config.bootstrap_nodes {
-            for address in &bootstrap_node.addresses {
-                match self.transport.connect_peer(&address.to_string()).await {
-                    Ok(peer_id) => {
-                        info!("Connected to bootstrap node: {} at {}", peer_id, address);
-                        connected_count += 1;
-
-                        // Add to DHT peers
-                        let dht_key = bootstrap_node.dht_key.unwrap_or_else(|| {
-                            crate::dht::derive_dht_key_from_peer_id(
-                                &bootstrap_node.peer_id.to_string(),
-                            )
-                        });
-
-                        let mut peers = self.dht_peers.write().await;
-                        peers.insert(
-                            bootstrap_node.peer_id.to_string().clone(),
-                            DhtPeerInfo {
-                                peer_id: bootstrap_node.peer_id.to_string().clone(),
-                                dht_key,
-                                addresses: bootstrap_node.addresses.clone(),
-                                last_seen: Instant::now(),
-                                is_connected: true,
-                                avg_latency: Duration::from_millis(50),
-                                reliability_score: 1.0,
-                            },
-                        );
-
-                        break; // Successfully connected, try next bootstrap node
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to connect to bootstrap node {} at {}: {}",
-                            bootstrap_node.peer_id.to_string(),
-                            address,
-                            e
-                        );
-                    }
-                }
-            }
-        }
-
-        if connected_count == 0 {
-            warn!("Failed to connect to any bootstrap nodes");
-        } else {
-            info!("Connected to {} bootstrap nodes", connected_count);
-            // Join the DHT network
-            self.join_network().await?;
-        }
-
-        Ok(())
-    }
-
     /// Start maintenance tasks using the MaintenanceScheduler
     async fn start_maintenance_tasks(&self) -> Result<()> {
         info!("Starting DHT maintenance tasks with scheduler...");
@@ -2741,7 +2645,6 @@ impl Default for DhtNetworkConfig {
             local_peer_id: "default_peer".to_string(),
             dht_config: DHTConfig::default(),
             node_config: NodeConfig::default(),
-            bootstrap_nodes: Vec::new(),
             request_timeout: Duration::from_secs(30),
             max_concurrent_operations: 100,
             replication_factor: 8, // K=8 replication

@@ -175,8 +175,8 @@ pub use auth::{
 pub use bootstrap::{BootstrapConfig, BootstrapManager, CacheConfig, ContactEntry, QualityMetrics};
 pub use dht::{Key, Record};
 pub use dht_network_manager::{
-    BootstrapNode, DhtNetworkConfig, DhtNetworkEvent, DhtNetworkManager, DhtNetworkOperation,
-    DhtNetworkResult, DhtPeerInfo, PeerStoreOutcome,
+    DhtNetworkConfig, DhtNetworkEvent, DhtNetworkManager, DhtNetworkOperation, DhtNetworkResult,
+    DhtPeerInfo, PeerStoreOutcome,
 };
 pub use encrypted_key_storage::{
     Argon2Config, DerivationPriority as KeyDerivationPriority, EncryptedKeyStorageManager,

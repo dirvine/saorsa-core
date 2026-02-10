@@ -74,7 +74,6 @@ fn create_test_dht_config(peer_id: &str) -> Result<DhtNetworkConfig> {
         local_peer_id: peer_id.to_string(),
         dht_config: DHTConfig::default(),
         node_config,
-        bootstrap_nodes: vec![],
         request_timeout: Duration::from_secs(10),
         max_concurrent_operations: 10,
         replication_factor: 3,
