@@ -703,8 +703,8 @@ pub struct P2PNode {
     /// Running state
     running: RwLock<bool>,
 
-    /// DHT manager (optional)
-    dht_manager: Option<Arc<DhtNetworkManager>>,
+    /// DHT manager for distributed hash table operations (peer discovery, routing, storage)
+    dht_manager: Arc<DhtNetworkManager>,
 
     /// Production resource manager (optional)
     resource_manager: Option<Arc<ResourceManager>>,
@@ -758,23 +758,6 @@ pub(crate) fn normalize_wildcard_to_loopback(addr: std::net::SocketAddr) -> std:
 }
 
 impl P2PNode {
-    /// Minimal constructor for tests that avoids real networking
-    pub fn new_for_tests() -> Result<Self> {
-        let transport = Arc::new(crate::transport_handle::TransportHandle::new_for_tests()?);
-        Ok(Self {
-            config: NodeConfig::default(),
-            peer_id: "test_peer".to_string(),
-            transport,
-            start_time: Instant::now(),
-            running: RwLock::new(false),
-            dht_manager: None,
-            resource_manager: None,
-            bootstrap_manager: None,
-            security_dashboard: None,
-            is_bootstrapped: Arc::new(AtomicBool::new(false)),
-            trust_engine: None,
-        })
-    }
     /// Create a new P2P node with the given configuration
     pub async fn new(config: NodeConfig) -> Result<Self> {
         let peer_id = config.peer_id.clone().unwrap_or_else(|| {
@@ -909,7 +892,7 @@ impl P2PNode {
             transport,
             start_time: Instant::now(),
             running: RwLock::new(false),
-            dht_manager: Some(dht_manager),
+            dht_manager,
             resource_manager,
             bootstrap_manager,
             security_dashboard,
@@ -1257,9 +1240,7 @@ impl P2PNode {
         self.transport.start_network_listeners().await?;
 
         // Start the attached DHT manager now that transport listeners are active.
-        if let Some(ref dht_manager) = self.dht_manager {
-            Arc::clone(dht_manager).start().await?;
-        }
+        Arc::clone(&self.dht_manager).start().await?;
 
         // Log current listen addresses
         let listen_addrs = self.transport.listen_addrs().await;
@@ -1311,9 +1292,7 @@ impl P2PNode {
         *self.running.write().await = false;
 
         // Stop DHT manager first so leave messages can be sent while transport is still active.
-        if let Some(ref dht_manager) = self.dht_manager {
-            dht_manager.stop().await?;
-        }
+        self.dht_manager.stop().await?;
 
         // Stop the transport layer (shutdown endpoints, join tasks, disconnect peers)
         self.transport.stop().await?;
@@ -1565,12 +1544,12 @@ impl P2PNode {
     }
 
     /// Get the attached DHT manager.
-    pub fn dht_manager(&self) -> Option<&Arc<DhtNetworkManager>> {
-        self.dht_manager.as_ref()
+    pub fn dht_manager(&self) -> &Arc<DhtNetworkManager> {
+        &self.dht_manager
     }
 
     /// Backwards-compatible alias for `dht_manager()`.
-    pub fn dht(&self) -> Option<&Arc<DhtNetworkManager>> {
+    pub fn dht(&self) -> &Arc<DhtNetworkManager> {
         self.dht_manager()
     }
 
@@ -1579,13 +1558,7 @@ impl P2PNode {
     /// This method stores data in the local DHT core through the attached manager.
     /// For network-wide replication across multiple nodes, use `DhtNetworkManager::put`.
     pub async fn dht_put(&self, key: crate::dht::Key, value: Vec<u8>) -> Result<()> {
-        if let Some(ref dht_manager) = self.dht_manager {
-            dht_manager.store_local(key, value).await
-        } else {
-            Err(P2PError::Dht(crate::error::DhtError::RoutingError(
-                "DHT not enabled".to_string().into(),
-            )))
-        }
+        self.dht_manager.store_local(key, value).await
     }
 
     /// Retrieve a value from the local DHT
@@ -1593,13 +1566,7 @@ impl P2PNode {
     /// This method retrieves data from the local DHT core through the attached manager.
     /// For network-wide lookups across multiple nodes, use `DhtNetworkManager::get`.
     pub async fn dht_get(&self, key: crate::dht::Key) -> Result<Option<Vec<u8>>> {
-        if let Some(ref dht_manager) = self.dht_manager {
-            dht_manager.get_local(&key).await
-        } else {
-            Err(P2PError::Dht(crate::error::DhtError::RoutingError(
-                "DHT not enabled".to_string().into(),
-            )))
-        }
+        self.dht_manager.get_local(&key).await
     }
 
     /// Add a discovered peer to the bootstrap cache
@@ -2515,8 +2482,8 @@ mod tests {
         let config = create_test_node_config();
         let node = P2PNode::new(config).await?;
 
-        // Should have DHT
-        assert!(node.dht().is_some());
+        // DHT is always available
+        let _dht = node.dht();
 
         Ok(())
     }
