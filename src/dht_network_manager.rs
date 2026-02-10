@@ -147,7 +147,6 @@ pub struct PeerStoreOutcome {
     /// Whether the store operation succeeded on this peer.
     pub success: bool,
     /// Error description if the operation failed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -159,7 +158,6 @@ pub enum DhtNetworkResult {
         key: Key,
         replicated_to: usize,
         /// Per-peer replication outcomes (empty for remote handlers).
-        #[serde(default)]
         peer_outcomes: Vec<PeerStoreOutcome>,
     },
     /// Successful GET operation
@@ -172,13 +170,10 @@ pub enum DhtNetworkResult {
     GetNotFound {
         key: Key,
         /// Number of peers queried during the lookup.
-        #[serde(default)]
         peers_queried: usize,
         /// Number of peers that returned errors during the lookup.
-        #[serde(default)]
         peers_failed: usize,
         /// Last error encountered during the lookup, if any.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         last_error: Option<String>,
     },
     /// Nodes found for FIND_NODE or iterative lookup
@@ -237,8 +232,6 @@ pub struct DhtNetworkMessage {
     /// DHT operation payload (for requests)
     pub payload: DhtNetworkOperation,
     /// DHT operation result (for responses)
-    /// Note: Uses default for backward compatibility with older nodes that don't send this field
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub result: Option<DhtNetworkResult>,
     /// Timestamp when message was created
     pub timestamp: u64,
@@ -1729,7 +1722,7 @@ impl DhtNetworkManager {
         };
 
         // Serialize message
-        let message_data = serde_json::to_vec(&message)
+        let message_data = postcard::to_stdvec(&message)
             .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
 
         // Create oneshot channel for response delivery
@@ -1911,7 +1904,7 @@ impl DhtNetworkManager {
         }
 
         // Deserialize message
-        let message: DhtNetworkMessage = serde_json::from_slice(data)
+        let message: DhtNetworkMessage = postcard::from_bytes(data)
             .map_err(|e| P2PError::Serialization(e.to_string().into()))?;
 
         info!(
@@ -1937,7 +1930,9 @@ impl DhtNetworkManager {
                     message.message_id
                 );
                 let response = self.create_response_message(&message, result)?;
-                Ok(Some(serde_json::to_vec(&response)?))
+                Ok(Some(postcard::to_stdvec(&response).map_err(|e| {
+                    P2PError::Serialization(e.to_string().into())
+                })?))
             }
             DhtMessageType::Response => {
                 info!(
