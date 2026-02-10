@@ -38,6 +38,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::ptr::{self, NonNull};
 use std::sync::Mutex;
+use subtle::ConstantTimeEq;
 
 #[cfg(unix)]
 use libc::{mlock, munlock};
@@ -250,16 +251,8 @@ impl SecureMemory {
             return false;
         }
 
-        let a = self.as_slice();
-        let b = other.as_slice();
-
-        // Constant-time comparison
-        let mut result = 0u8;
-        for i in 0..self.data_len {
-            result |= a[i] ^ b[i];
-        }
-
-        result == 0
+        // Use constant-time comparison from subtle crate
+        self.as_slice().ct_eq(other.as_slice()).into()
     }
 
     /// Lock memory to prevent it from being swapped to disk
@@ -523,12 +516,17 @@ impl SecureMemoryPool {
     pub fn allocate(&self, size: usize) -> Result<SecureMemory> {
         if size > self.chunk_size {
             // Large allocation - allocate directly
-            if let Ok(mut stats) = self.stats.lock() {
-                stats.pool_misses += 1;
-                stats.total_allocations += 1;
-                stats.active_allocations += 1;
-                stats.total_bytes_allocated += size as u64;
-                stats.current_bytes_in_use += size as u64;
+            match self.stats.lock() {
+                Ok(mut stats) => {
+                    stats.pool_misses += 1;
+                    stats.total_allocations += 1;
+                    stats.active_allocations += 1;
+                    stats.total_bytes_allocated += size as u64;
+                    stats.current_bytes_in_use += size as u64;
+                }
+                Err(e) => {
+                    tracing::warn!("Memory pool stats mutex poisoned in allocate: {}", e);
+                }
             }
             return SecureMemory::new(size);
         }
@@ -538,23 +536,33 @@ impl SecureMemoryPool {
             if let Ok(mut available) = self.available.lock()
                 && let Some(memory) = available.pop_front()
             {
-                if let Ok(mut stats) = self.stats.lock() {
-                    stats.pool_hits += 1;
-                    stats.total_allocations += 1;
-                    stats.active_allocations += 1;
-                    stats.current_bytes_in_use += memory.len() as u64;
+                match self.stats.lock() {
+                    Ok(mut stats) => {
+                        stats.pool_hits += 1;
+                        stats.total_allocations += 1;
+                        stats.active_allocations += 1;
+                        stats.current_bytes_in_use += memory.len() as u64;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Memory pool stats mutex poisoned in allocate: {}", e);
+                    }
                 }
                 return Ok(memory);
             }
         }
 
         // Pool empty - allocate new chunk
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.pool_misses += 1;
-            stats.total_allocations += 1;
-            stats.active_allocations += 1;
-            stats.total_bytes_allocated += self.chunk_size as u64;
-            stats.current_bytes_in_use += self.chunk_size as u64;
+        match self.stats.lock() {
+            Ok(mut stats) => {
+                stats.pool_misses += 1;
+                stats.total_allocations += 1;
+                stats.active_allocations += 1;
+                stats.total_bytes_allocated += self.chunk_size as u64;
+                stats.current_bytes_in_use += self.chunk_size as u64;
+            }
+            Err(e) => {
+                tracing::warn!("Memory pool stats mutex poisoned in allocate: {}", e);
+            }
         }
 
         SecureMemory::new(self.chunk_size)
@@ -569,31 +577,55 @@ impl SecureMemoryPool {
 
         if memory_size == self.chunk_size {
             // Return to pool
-            if let Ok(mut available) = self.available.lock() {
-                available.push_back(memory);
+            match self.available.lock() {
+                Ok(mut available) => {
+                    available.push_back(memory);
+                }
+                Err(e) => {
+                    tracing::warn!("Memory pool available mutex poisoned in deallocate: {}", e);
+                }
             }
         }
         // Large allocations are dropped automatically
 
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.total_deallocations += 1;
-            stats.active_allocations -= 1;
-            stats.current_bytes_in_use -= memory_size as u64;
+        match self.stats.lock() {
+            Ok(mut stats) => {
+                stats.total_deallocations += 1;
+                stats.active_allocations -= 1;
+                stats.current_bytes_in_use -= memory_size as u64;
+            }
+            Err(e) => {
+                tracing::warn!("Memory pool stats mutex poisoned in deallocate: {}", e);
+            }
         }
     }
 
     /// Get pool statistics
     pub fn stats(&self) -> PoolStats {
-        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
+        match self.stats.lock() {
+            Ok(s) => s.clone(),
+            Err(e) => {
+                tracing::warn!("Memory pool stats mutex poisoned: {}", e);
+                PoolStats::default()
+            }
+        }
     }
 
     /// Pre-allocate chunks for the pool
     fn preallocate_chunks(&self) -> Result<()> {
         let num_chunks = self.total_size / self.chunk_size;
-        if let Ok(mut available) = self.available.lock() {
-            for _ in 0..num_chunks {
-                let memory = SecureMemory::new(self.chunk_size)?;
-                available.push_back(memory);
+        match self.available.lock() {
+            Ok(mut available) => {
+                for _ in 0..num_chunks {
+                    let memory = SecureMemory::new(self.chunk_size)?;
+                    available.push_back(memory);
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Memory pool available mutex poisoned in preallocate_chunks: {}",
+                    e
+                );
             }
         }
 
@@ -687,6 +719,80 @@ mod tests {
 
         assert!(memory1.constant_time_eq(&memory2));
         assert!(!memory1.constant_time_eq(&memory3));
+    }
+
+    #[test]
+    fn test_constant_time_eq_comprehensive() {
+        // Test 1: Equal values should return true
+        let key1 = SecureMemory::from_slice(b"supersecretkey123456").unwrap();
+        let key2 = SecureMemory::from_slice(b"supersecretkey123456").unwrap();
+        assert!(key1.constant_time_eq(&key2), "Equal keys should match");
+
+        // Test 2: Different length keys should return false
+        let key_short = SecureMemory::from_slice(b"short").unwrap();
+        let key_long = SecureMemory::from_slice(b"muchlongerkey").unwrap();
+        assert!(
+            !key_short.constant_time_eq(&key_long),
+            "Different length keys should not match"
+        );
+
+        // Test 3: Keys differing in first byte should return false
+        let key_first_diff1 = SecureMemory::from_slice(b"Aello123456789012").unwrap();
+        let key_first_diff2 = SecureMemory::from_slice(b"Bello123456789012").unwrap();
+        assert!(
+            !key_first_diff1.constant_time_eq(&key_first_diff2),
+            "Keys differing in first byte should not match"
+        );
+
+        // Test 4: Keys differing in last byte should return false
+        let key_last_diff1 = SecureMemory::from_slice(b"hello12345678901A").unwrap();
+        let key_last_diff2 = SecureMemory::from_slice(b"hello12345678901B").unwrap();
+        assert!(
+            !key_last_diff1.constant_time_eq(&key_last_diff2),
+            "Keys differing in last byte should not match"
+        );
+
+        // Test 5: Keys differing in middle byte should return false
+        let key_mid_diff1 = SecureMemory::from_slice(b"hello1X3456789012").unwrap();
+        let key_mid_diff2 = SecureMemory::from_slice(b"hello1Y3456789012").unwrap();
+        assert!(
+            !key_mid_diff1.constant_time_eq(&key_mid_diff2),
+            "Keys differing in middle byte should not match"
+        );
+
+        // Test 6: Different length keys with one byte difference
+        let one_byte = SecureMemory::from_slice(b"a").unwrap();
+        let two_bytes = SecureMemory::from_slice(b"ab").unwrap();
+        assert!(
+            !one_byte.constant_time_eq(&two_bytes),
+            "Keys with length difference should not match"
+        );
+
+        // Test 7: Single byte keys
+        let single1 = SecureMemory::from_slice(b"A").unwrap();
+        let single2 = SecureMemory::from_slice(b"A").unwrap();
+        let single3 = SecureMemory::from_slice(b"B").unwrap();
+        assert!(
+            single1.constant_time_eq(&single2),
+            "Equal single byte keys should match"
+        );
+        assert!(
+            !single1.constant_time_eq(&single3),
+            "Different single byte keys should not match"
+        );
+
+        // Test 8: Large keys (32 bytes - typical cryptographic key size)
+        let large1 = SecureMemory::from_slice(b"12345678901234567890123456789012").unwrap();
+        let large2 = SecureMemory::from_slice(b"12345678901234567890123456789012").unwrap();
+        let large3 = SecureMemory::from_slice(b"12345678901234567890123456789013").unwrap();
+        assert!(
+            large1.constant_time_eq(&large2),
+            "Equal large keys should match"
+        );
+        assert!(
+            !large1.constant_time_eq(&large3),
+            "Different large keys should not match"
+        );
     }
 
     #[test]

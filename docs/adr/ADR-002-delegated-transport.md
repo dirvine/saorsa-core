@@ -132,9 +132,10 @@ We track ant-quic versions explicitly and test against specific releases:
 
 | saorsa-core | ant-quic | Features |
 |-------------|----------|----------|
+| 0.11.x      | 0.21.x   | Full PQC, placement system, threshold crypto |
+| 0.10.x      | 0.20.x   | Full PQC, unified config |
+| 0.5.x       | 0.14.x   | Unified config, PQC integration |
 | 0.3.x       | 0.10.x   | Basic QUIC, NAT traversal |
-| 0.4.x       | 0.14.x   | Unified config, PQC integration |
-| Future      | 0.15+    | Enhanced relay support |
 
 ## Consequences
 

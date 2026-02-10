@@ -1,8 +1,12 @@
+use lru::LruCache;
 use parking_lot::RwLock;
-use std::collections::HashMap;
 use std::hash::Hash;
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+/// Maximum rate limit keys before evicting oldest (prevents memory DoS from many IPs)
+const MAX_RATE_LIMIT_KEYS: usize = 100_000;
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -55,16 +59,19 @@ impl Bucket {
 pub struct Engine<K: Eq + Hash + Clone + ToString> {
     cfg: EngineConfig,
     global: Mutex<Bucket>,
-    keyed: RwLock<HashMap<K, Bucket>>,
+    /// LRU cache with max 100k entries to prevent memory DoS from many IPs
+    keyed: RwLock<LruCache<K, Bucket>>,
 }
 
 impl<K: Eq + Hash + Clone + ToString> Engine<K> {
     pub fn new(cfg: EngineConfig) -> Self {
         let burst_size = cfg.burst_size as f64;
+        // Safety: MAX_RATE_LIMIT_KEYS is a const > 0, so unwrap_or with MIN (=1) is safe
+        let cache_size = NonZeroUsize::new(MAX_RATE_LIMIT_KEYS).unwrap_or(NonZeroUsize::MIN);
         Self {
             cfg,
             global: Mutex::new(Bucket::new(burst_size)),
-            keyed: RwLock::new(HashMap::new()),
+            keyed: RwLock::new(LruCache::new(cache_size)),
         }
     }
 
@@ -81,10 +88,15 @@ impl<K: Eq + Hash + Clone + ToString> Engine<K> {
 
     pub fn try_consume_key(&self, key: &K) -> bool {
         let mut map = self.keyed.write();
-        let bucket = map
-            .entry(key.clone())
-            .or_insert_with(|| Bucket::new(self.cfg.burst_size as f64));
-        bucket.try_consume(&self.cfg)
+        // Get or insert with LRU cache (automatically evicts oldest if at capacity)
+        if let Some(bucket) = map.get_mut(key) {
+            bucket.try_consume(&self.cfg)
+        } else {
+            let mut bucket = Bucket::new(self.cfg.burst_size as f64);
+            let result = bucket.try_consume(&self.cfg);
+            map.put(key.clone(), bucket);
+            result
+        }
     }
 }
 

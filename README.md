@@ -34,7 +34,7 @@ Key design decisions are documented in [docs/adr/](docs/adr/):
 
 ## Features
 
-- **P2P NAT Traversal**: True peer-to-peer connectivity with automatic NAT traversal (ant-quic 0.10.0+)
+- **P2P NAT Traversal**: True peer-to-peer connectivity with automatic NAT traversal (ant-quic 0.21.x)
 - **DHT (Distributed Hash Table)**: Peer phonebook and routing with adaptive scoring and geographic awareness
 - **Placement System**: Intelligent shard placement with EigenTrust integration
 - **QUIC Transport**: High-performance networking with ant-quic
@@ -52,7 +52,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-saorsa-core = "0.5.0"
+saorsa-core = "0.11.0"
 ```
 
 ### Basic P2P Node
@@ -108,7 +108,7 @@ tokio::spawn(async move {
 
 ### Core Components
 
-1. **Network Layer**: QUIC-based P2P networking with automatic NAT traversal (ant-quic 0.10.0+)
+1. **Network Layer**: QUIC-based P2P networking with automatic NAT traversal (ant-quic 0.21.x)
 2. **DHT**: S/Kademlia-based peer phonebook with adaptive routing and geographic awareness
 3. **Placement System**: Intelligent shard placement with weighted selection algorithms
 4. **Identity**: Post‑quantum cryptographic identities with ML‑DSA‑65 signatures (no PoW; no embedded four‑word address)
@@ -387,7 +387,7 @@ For commercial licensing, contact: david@saorsalabs.com
 - `tracing` - Logging
 
 ### Networking
-- `ant-quic` (0.10.0+) - QUIC transport with P2P NAT traversal
+- `ant-quic` (0.21.x) - QUIC transport with P2P NAT traversal
 - `four-word-networking` - Human-readable addresses
 
 ### Cryptography

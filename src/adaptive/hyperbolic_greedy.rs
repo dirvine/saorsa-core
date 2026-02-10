@@ -617,12 +617,10 @@ fn deterministic_distance(peer1: &PeerId, peer2: &PeerId) -> f64 {
 /// It measures distances between peers and optimizes coordinates using gradient descent.
 pub async fn embed_snapshot(peers: &[PeerId]) -> Result<Embedding> {
     // Create a temporary router for embedding
-    let local_id = if !peers.is_empty() {
-        peers[0].clone()
-    } else {
-        // Generate a random PeerId
-        format!("peer_{}", rand::random::<u64>())
-    };
+    let local_id = peers
+        .first()
+        .map(|p| p.clone())
+        .unwrap_or_else(|| format!("peer_{}", rand::random::<u64>()));
 
     let router = HyperbolicGreedyRouter::new(local_id);
     router.embed_snapshot(peers).await

@@ -447,7 +447,11 @@ impl ChunkManager {
             return Err(anyhow::anyhow!("No chunks provided"));
         }
 
-        let total_chunks = sorted_chunks[0].metadata.total_chunks;
+        let total_chunks = sorted_chunks
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No chunks provided for reconstruction"))?
+            .metadata
+            .total_chunks;
         if sorted_chunks.len() != total_chunks as usize {
             return Err(anyhow::anyhow!(
                 "Missing chunks: have {}, need {}",

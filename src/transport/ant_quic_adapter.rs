@@ -237,7 +237,7 @@ impl P2PNetworkNode<P2pLinkTransport> {
     /// the local registry.
     pub async fn disconnect_peer_quic(&self, peer_id: &PeerId) {
         if let Err(e) = self.transport.endpoint().disconnect(peer_id).await {
-            tracing::debug!("QUIC disconnect for peer {}: {}", peer_id, e);
+            tracing::warn!("QUIC disconnect for peer {}: {}", peer_id, e);
         }
         // Also clean up from generic adapter state
         P2PNetworkNode::<P2pLinkTransport>::disconnect_peer_inner(
@@ -505,7 +505,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
                     return Some((peer_id, addr));
                 }
                 Err(e) => {
-                    tracing::debug!("Accept stream error: {}", e);
+                    tracing::warn!("Accept stream error: {}", e);
                 }
             }
         }

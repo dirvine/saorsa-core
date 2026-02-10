@@ -22,14 +22,19 @@ use crate::quantum_crypto::ant_quic_integration::{
     MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature, ml_dsa_sign, ml_dsa_verify,
 };
 use anyhow::{Result, anyhow};
+use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::num::NonZeroUsize;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use std::sync::Arc;
+
+/// Maximum subnet tracking entries before evicting oldest (prevents memory DoS)
+const MAX_SUBNET_TRACKING: usize = 50_000;
 
 // ============================================================================
 // Generic IP Address Trait
@@ -573,17 +578,17 @@ impl IPv4NodeID {
 #[derive(Debug)]
 pub struct IPDiversityEnforcer {
     config: IPDiversityConfig,
-    // IPv6 tracking
-    subnet_64_counts: HashMap<Ipv6Addr, usize>,
-    subnet_48_counts: HashMap<Ipv6Addr, usize>,
-    subnet_32_counts: HashMap<Ipv6Addr, usize>,
-    // IPv4 tracking (new)
-    ipv4_32_counts: HashMap<Ipv4Addr, usize>, // Per exact IP
-    ipv4_24_counts: HashMap<Ipv4Addr, usize>, // Per /24 subnet
-    ipv4_16_counts: HashMap<Ipv4Addr, usize>, // Per /16 subnet
-    // Shared tracking
-    asn_counts: HashMap<u32, usize>,
-    country_counts: HashMap<String, usize>,
+    // IPv6 tracking (LRU caches with max 50k entries to prevent memory DoS)
+    subnet_64_counts: LruCache<Ipv6Addr, usize>,
+    subnet_48_counts: LruCache<Ipv6Addr, usize>,
+    subnet_32_counts: LruCache<Ipv6Addr, usize>,
+    // IPv4 tracking (LRU caches with max 50k entries to prevent memory DoS)
+    ipv4_32_counts: LruCache<Ipv4Addr, usize>, // Per exact IP
+    ipv4_24_counts: LruCache<Ipv4Addr, usize>, // Per /24 subnet
+    ipv4_16_counts: LruCache<Ipv4Addr, usize>, // Per /16 subnet
+    // Shared tracking (LRU caches with max 50k entries to prevent memory DoS)
+    asn_counts: LruCache<u32, usize>,
+    country_counts: LruCache<String, usize>,
     geo_provider: Option<Arc<dyn GeoProvider + Send + Sync>>,
     // Network size for dynamic limits
     network_size: usize,
@@ -592,19 +597,25 @@ pub struct IPDiversityEnforcer {
 impl IPDiversityEnforcer {
     /// Create a new IP diversity enforcer
     pub fn new(config: IPDiversityConfig) -> Self {
+        // SAFETY: MAX_SUBNET_TRACKING is a non-zero const (50_000), so this always succeeds
+        // We use match to avoid clippy::unwrap_used in production code
+        let cache_size = match NonZeroUsize::new(MAX_SUBNET_TRACKING) {
+            Some(size) => size,
+            None => unsafe { std::hint::unreachable_unchecked() },
+        };
         Self {
             config,
-            // IPv6
-            subnet_64_counts: HashMap::new(),
-            subnet_48_counts: HashMap::new(),
-            subnet_32_counts: HashMap::new(),
-            // IPv4
-            ipv4_32_counts: HashMap::new(),
-            ipv4_24_counts: HashMap::new(),
-            ipv4_16_counts: HashMap::new(),
-            // Shared
-            asn_counts: HashMap::new(),
-            country_counts: HashMap::new(),
+            // IPv6 (LRU caches with bounded size)
+            subnet_64_counts: LruCache::new(cache_size),
+            subnet_48_counts: LruCache::new(cache_size),
+            subnet_32_counts: LruCache::new(cache_size),
+            // IPv4 (LRU caches with bounded size)
+            ipv4_32_counts: LruCache::new(cache_size),
+            ipv4_24_counts: LruCache::new(cache_size),
+            ipv4_16_counts: LruCache::new(cache_size),
+            // Shared (LRU caches with bounded size)
+            asn_counts: LruCache::new(cache_size),
+            country_counts: LruCache::new(cache_size),
             geo_provider: None,
             network_size: 0,
         }
@@ -677,30 +688,30 @@ impl IPDiversityEnforcer {
                 )
             };
 
-        // Check /64 subnet limit
-        if let Some(&count) = self.subnet_64_counts.get(&ip_analysis.subnet_64)
+        // Check /64 subnet limit (use peek() for read-only access)
+        if let Some(&count) = self.subnet_64_counts.peek(&ip_analysis.subnet_64)
             && count >= limit_64
         {
             return false;
         }
 
-        // Check /48 subnet limit
-        if let Some(&count) = self.subnet_48_counts.get(&ip_analysis.subnet_48)
+        // Check /48 subnet limit (use peek() for read-only access)
+        if let Some(&count) = self.subnet_48_counts.peek(&ip_analysis.subnet_48)
             && count >= limit_48
         {
             return false;
         }
 
-        // Check /32 subnet limit
-        if let Some(&count) = self.subnet_32_counts.get(&ip_analysis.subnet_32)
+        // Check /32 subnet limit (use peek() for read-only access)
+        if let Some(&count) = self.subnet_32_counts.peek(&ip_analysis.subnet_32)
             && count >= limit_32
         {
             return false;
         }
 
-        // Check ASN limit
+        // Check ASN limit (use peek() for read-only access)
         if let Some(asn) = ip_analysis.asn
-            && let Some(&count) = self.asn_counts.get(&asn)
+            && let Some(&count) = self.asn_counts.peek(&asn)
             && count >= limit_asn
         {
             return false;
@@ -715,26 +726,39 @@ impl IPDiversityEnforcer {
             return Err(anyhow!("IP diversity limits exceeded"));
         }
 
-        // Update counts
-        *self
+        // Update counts (optimized: single hash lookup per cache)
+        let count_64 = self
             .subnet_64_counts
-            .entry(ip_analysis.subnet_64)
-            .or_insert(0) += 1;
-        *self
+            .get(&ip_analysis.subnet_64)
+            .copied()
+            .unwrap_or(0)
+            + 1;
+        self.subnet_64_counts.put(ip_analysis.subnet_64, count_64);
+
+        let count_48 = self
             .subnet_48_counts
-            .entry(ip_analysis.subnet_48)
-            .or_insert(0) += 1;
-        *self
+            .get(&ip_analysis.subnet_48)
+            .copied()
+            .unwrap_or(0)
+            + 1;
+        self.subnet_48_counts.put(ip_analysis.subnet_48, count_48);
+
+        let count_32 = self
             .subnet_32_counts
-            .entry(ip_analysis.subnet_32)
-            .or_insert(0) += 1;
+            .get(&ip_analysis.subnet_32)
+            .copied()
+            .unwrap_or(0)
+            + 1;
+        self.subnet_32_counts.put(ip_analysis.subnet_32, count_32);
 
         if let Some(asn) = ip_analysis.asn {
-            *self.asn_counts.entry(asn).or_insert(0) += 1;
+            let count = self.asn_counts.get(&asn).copied().unwrap_or(0) + 1;
+            self.asn_counts.put(asn, count);
         }
 
         if let Some(ref country) = ip_analysis.country {
-            *self.country_counts.entry(country.clone()).or_insert(0) += 1;
+            let count = self.country_counts.get(country).copied().unwrap_or(0) + 1;
+            self.country_counts.put(country.clone(), count);
         }
 
         Ok(())
@@ -742,42 +766,43 @@ impl IPDiversityEnforcer {
 
     /// Remove a node from diversity tracking
     pub fn remove_node(&mut self, ip_analysis: &IPAnalysis) {
-        if let Some(count) = self.subnet_64_counts.get_mut(&ip_analysis.subnet_64) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.subnet_64_counts.remove(&ip_analysis.subnet_64);
+        // Optimized: pop removes and returns value in single hash operation
+        if let Some(count) = self.subnet_64_counts.pop(&ip_analysis.subnet_64) {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.subnet_64_counts.put(ip_analysis.subnet_64, new_count);
             }
         }
 
-        if let Some(count) = self.subnet_48_counts.get_mut(&ip_analysis.subnet_48) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.subnet_48_counts.remove(&ip_analysis.subnet_48);
+        if let Some(count) = self.subnet_48_counts.pop(&ip_analysis.subnet_48) {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.subnet_48_counts.put(ip_analysis.subnet_48, new_count);
             }
         }
 
-        if let Some(count) = self.subnet_32_counts.get_mut(&ip_analysis.subnet_32) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.subnet_32_counts.remove(&ip_analysis.subnet_32);
+        if let Some(count) = self.subnet_32_counts.pop(&ip_analysis.subnet_32) {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.subnet_32_counts.put(ip_analysis.subnet_32, new_count);
             }
         }
 
-        if let Some(asn) = ip_analysis.asn
-            && let Some(count) = self.asn_counts.get_mut(&asn)
-        {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.asn_counts.remove(&asn);
+        if let Some(asn) = ip_analysis.asn {
+            if let Some(count) = self.asn_counts.pop(&asn) {
+                let new_count = count.saturating_sub(1);
+                if new_count > 0 {
+                    self.asn_counts.put(asn, new_count);
+                }
             }
         }
 
-        if let Some(ref country) = ip_analysis.country
-            && let Some(count) = self.country_counts.get_mut(country)
-        {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.country_counts.remove(country);
+        if let Some(ref country) = ip_analysis.country {
+            if let Some(count) = self.country_counts.pop(country) {
+                let new_count = count.saturating_sub(1);
+                if new_count > 0 {
+                    self.country_counts.put(country.clone(), new_count);
+                }
             }
         }
     }
@@ -808,22 +833,60 @@ impl IPDiversityEnforcer {
 
     /// Get diversity statistics
     pub fn get_diversity_stats(&self) -> DiversityStats {
+        // LRU cache API: use iter() instead of values()
+        let max_nodes_per_64 = self
+            .subnet_64_counts
+            .iter()
+            .map(|(_, &v)| v)
+            .max()
+            .unwrap_or(0);
+        let max_nodes_per_48 = self
+            .subnet_48_counts
+            .iter()
+            .map(|(_, &v)| v)
+            .max()
+            .unwrap_or(0);
+        let max_nodes_per_32 = self
+            .subnet_32_counts
+            .iter()
+            .map(|(_, &v)| v)
+            .max()
+            .unwrap_or(0);
+        let max_nodes_per_ipv4_32 = self
+            .ipv4_32_counts
+            .iter()
+            .map(|(_, &v)| v)
+            .max()
+            .unwrap_or(0);
+        let max_nodes_per_ipv4_24 = self
+            .ipv4_24_counts
+            .iter()
+            .map(|(_, &v)| v)
+            .max()
+            .unwrap_or(0);
+        let max_nodes_per_ipv4_16 = self
+            .ipv4_16_counts
+            .iter()
+            .map(|(_, &v)| v)
+            .max()
+            .unwrap_or(0);
+
         DiversityStats {
             total_64_subnets: self.subnet_64_counts.len(),
             total_48_subnets: self.subnet_48_counts.len(),
             total_32_subnets: self.subnet_32_counts.len(),
             total_asns: self.asn_counts.len(),
             total_countries: self.country_counts.len(),
-            max_nodes_per_64: self.subnet_64_counts.values().max().copied().unwrap_or(0),
-            max_nodes_per_48: self.subnet_48_counts.values().max().copied().unwrap_or(0),
-            max_nodes_per_32: self.subnet_32_counts.values().max().copied().unwrap_or(0),
+            max_nodes_per_64,
+            max_nodes_per_48,
+            max_nodes_per_32,
             // IPv4 stats
             total_ipv4_32: self.ipv4_32_counts.len(),
             total_ipv4_24_subnets: self.ipv4_24_counts.len(),
             total_ipv4_16_subnets: self.ipv4_16_counts.len(),
-            max_nodes_per_ipv4_32: self.ipv4_32_counts.values().max().copied().unwrap_or(0),
-            max_nodes_per_ipv4_24: self.ipv4_24_counts.values().max().copied().unwrap_or(0),
-            max_nodes_per_ipv4_16: self.ipv4_16_counts.values().max().copied().unwrap_or(0),
+            max_nodes_per_ipv4_32,
+            max_nodes_per_ipv4_24,
+            max_nodes_per_ipv4_16,
         }
     }
 
@@ -936,30 +999,30 @@ impl IPDiversityEnforcer {
                 (limit_32, limit_24, limit_16)
             };
 
-        // Check /32 (exact IP) limit
-        if let Some(&count) = self.ipv4_32_counts.get(&analysis.ip_addr)
+        // Check /32 (exact IP) limit (use peek() for read-only access)
+        if let Some(&count) = self.ipv4_32_counts.peek(&analysis.ip_addr)
             && count >= limit_32
         {
             return false;
         }
 
-        // Check /24 subnet limit
-        if let Some(&count) = self.ipv4_24_counts.get(&analysis.subnet_24)
+        // Check /24 subnet limit (use peek() for read-only access)
+        if let Some(&count) = self.ipv4_24_counts.peek(&analysis.subnet_24)
             && count >= limit_24
         {
             return false;
         }
 
-        // Check /16 subnet limit
-        if let Some(&count) = self.ipv4_16_counts.get(&analysis.subnet_16)
+        // Check /16 subnet limit (use peek() for read-only access)
+        if let Some(&count) = self.ipv4_16_counts.peek(&analysis.subnet_16)
             && count >= limit_16
         {
             return false;
         }
 
-        // Check ASN limit (shared with IPv6)
+        // Check ASN limit (shared with IPv6, use peek() for read-only access)
         if let Some(asn) = analysis.asn
-            && let Some(&count) = self.asn_counts.get(&asn)
+            && let Some(&count) = self.asn_counts.peek(&asn)
             && count >= self.config.max_nodes_per_asn
         {
             return false;
@@ -982,17 +1045,39 @@ impl IPDiversityEnforcer {
             return Err(anyhow!("IPv4 diversity limits exceeded"));
         }
 
-        // Update counts
-        *self.ipv4_32_counts.entry(analysis.ip_addr).or_insert(0) += 1;
-        *self.ipv4_24_counts.entry(analysis.subnet_24).or_insert(0) += 1;
-        *self.ipv4_16_counts.entry(analysis.subnet_16).or_insert(0) += 1;
+        // Update counts (optimized: single hash lookup per cache)
+        let count_32 = self
+            .ipv4_32_counts
+            .get(&analysis.ip_addr)
+            .copied()
+            .unwrap_or(0)
+            + 1;
+        self.ipv4_32_counts.put(analysis.ip_addr, count_32);
+
+        let count_24 = self
+            .ipv4_24_counts
+            .get(&analysis.subnet_24)
+            .copied()
+            .unwrap_or(0)
+            + 1;
+        self.ipv4_24_counts.put(analysis.subnet_24, count_24);
+
+        let count_16 = self
+            .ipv4_16_counts
+            .get(&analysis.subnet_16)
+            .copied()
+            .unwrap_or(0)
+            + 1;
+        self.ipv4_16_counts.put(analysis.subnet_16, count_16);
 
         if let Some(asn) = analysis.asn {
-            *self.asn_counts.entry(asn).or_insert(0) += 1;
+            let count = self.asn_counts.get(&asn).copied().unwrap_or(0) + 1;
+            self.asn_counts.put(asn, count);
         }
 
         if let Some(ref country) = analysis.country {
-            *self.country_counts.entry(country.clone()).or_insert(0) += 1;
+            let count = self.country_counts.get(country).copied().unwrap_or(0) + 1;
+            self.country_counts.put(country.clone(), count);
         }
 
         Ok(())
@@ -1008,42 +1093,43 @@ impl IPDiversityEnforcer {
 
     /// Remove an IPv4 node from diversity tracking
     fn remove_ipv4(&mut self, analysis: &IPv4Analysis) {
-        if let Some(count) = self.ipv4_32_counts.get_mut(&analysis.ip_addr) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.ipv4_32_counts.remove(&analysis.ip_addr);
+        // Optimized: pop removes and returns value in single hash operation
+        if let Some(count) = self.ipv4_32_counts.pop(&analysis.ip_addr) {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.ipv4_32_counts.put(analysis.ip_addr, new_count);
             }
         }
 
-        if let Some(count) = self.ipv4_24_counts.get_mut(&analysis.subnet_24) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.ipv4_24_counts.remove(&analysis.subnet_24);
+        if let Some(count) = self.ipv4_24_counts.pop(&analysis.subnet_24) {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.ipv4_24_counts.put(analysis.subnet_24, new_count);
             }
         }
 
-        if let Some(count) = self.ipv4_16_counts.get_mut(&analysis.subnet_16) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.ipv4_16_counts.remove(&analysis.subnet_16);
+        if let Some(count) = self.ipv4_16_counts.pop(&analysis.subnet_16) {
+            let new_count = count.saturating_sub(1);
+            if new_count > 0 {
+                self.ipv4_16_counts.put(analysis.subnet_16, new_count);
             }
         }
 
-        if let Some(asn) = analysis.asn
-            && let Some(count) = self.asn_counts.get_mut(&asn)
-        {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.asn_counts.remove(&asn);
+        if let Some(asn) = analysis.asn {
+            if let Some(count) = self.asn_counts.pop(&asn) {
+                let new_count = count.saturating_sub(1);
+                if new_count > 0 {
+                    self.asn_counts.put(asn, new_count);
+                }
             }
         }
 
-        if let Some(ref country) = analysis.country
-            && let Some(count) = self.country_counts.get_mut(country)
-        {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.country_counts.remove(country);
+        if let Some(ref country) = analysis.country {
+            if let Some(count) = self.country_counts.pop(country) {
+                let new_count = count.saturating_sub(1);
+                if new_count > 0 {
+                    self.country_counts.put(country.clone(), new_count);
+                }
             }
         }
     }
@@ -1985,8 +2071,8 @@ mod tests {
 
         // Remove and check cleanup
         enforcer.remove_node(&analysis);
-        assert!(!enforcer.asn_counts.contains_key(&64512));
-        assert!(!enforcer.country_counts.contains_key("US"));
+        assert!(!enforcer.asn_counts.contains(&64512));
+        assert!(!enforcer.country_counts.contains("US"));
 
         Ok(())
     }
