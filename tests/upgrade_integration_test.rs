@@ -647,10 +647,36 @@ async fn test_invalid_manifest_rejection() {
 
 #[tokio::test]
 async fn test_version_comparison_logic() {
-    // Version comparisons using string comparison (lexicographic)
-    assert!("0.10.0" < "0.11.0");
-    assert!("0.11.0" < "0.11.1");
-    assert!("1.0.0" > "0.99.0");
+    use semver::Version;
+
+    // Test semantic version comparison
+    let v0_10 = Version::parse("0.10.0").expect("Failed to parse 0.10.0");
+    let v0_11 = Version::parse("0.11.0").expect("Failed to parse 0.11.0");
+    let v0_11_1 = Version::parse("0.11.1").expect("Failed to parse 0.11.1");
+    let v1_0 = Version::parse("1.0.0").expect("Failed to parse 1.0.0");
+    let v0_99 = Version::parse("0.99.0").expect("Failed to parse 0.99.0");
+    let v0_9 = Version::parse("0.9.0").expect("Failed to parse 0.9.0");
+
+    // Standard version comparisons
+    assert!(v0_10 < v0_11, "0.10.0 should be less than 0.11.0");
+    assert!(v0_11 < v0_11_1, "0.11.0 should be less than 0.11.1");
+    assert!(v1_0 > v0_99, "1.0.0 should be greater than 0.99.0");
+
+    // Edge case: This would fail with lexicographic comparison
+    // "0.9.0" > "0.10.0" lexicographically (incorrect)
+    // but semantically 0.9.0 < 0.10.0 (correct)
+    assert!(
+        v0_9 < v0_10,
+        "0.9.0 should be less than 0.10.0 (semantic versioning)"
+    );
+
+    // Additional edge cases
+    let v0_2 = Version::parse("0.2.0").expect("Failed to parse 0.2.0");
+    let v0_10_0 = Version::parse("0.10.0").expect("Failed to parse 0.10.0");
+    assert!(
+        v0_2 < v0_10_0,
+        "0.2.0 should be less than 0.10.0 (not lexicographic)"
+    );
 
     // Test manifest version finding
     let (public_key, secret_key) = generate_test_keypair();

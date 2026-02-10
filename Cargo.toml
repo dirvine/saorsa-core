@@ -140,6 +140,7 @@ quickcheck = "1.0"
 quickcheck_macros = "1.0"
 approx = "0.5"
 tokio-test = "0.4"
+semver = "1.0"
 
 # All features are now enabled by default - no feature flags needed
 
