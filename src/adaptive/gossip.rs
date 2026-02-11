@@ -369,10 +369,11 @@ impl ChurnDetector {
 
 impl AdaptiveGossipSub {
     /// Create a new adaptive gossipsub instance
+    ///
+    /// Control and message channels are not wired up yet — the `send_graft`/`send_prune`/
+    /// `send_ihave`/`send_iwant` methods are no-ops until a transport integration sets
+    /// concrete channels via a future `set_control_channel` API.
     pub fn new(local_id: NodeId, trust_provider: Arc<dyn TrustProvider>) -> Self {
-        let (control_tx, _control_rx) = mpsc::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
-        let (_message_tx, message_rx) = mpsc::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
-
         Self {
             _local_id: local_id,
             mesh: Arc::new(RwLock::new(HashMap::new())),
@@ -385,8 +386,8 @@ impl AdaptiveGossipSub {
             _heartbeat_interval: Duration::from_secs(1),
             message_validators: Arc::new(RwLock::new(HashMap::new())),
             trust_provider,
-            _message_rx: Arc::new(RwLock::new(Some(message_rx))),
-            control_tx: Arc::new(RwLock::new(Some(control_tx))),
+            _message_rx: Arc::new(RwLock::new(None)),
+            control_tx: Arc::new(RwLock::new(None)),
             churn_detector: Arc::new(RwLock::new(ChurnDetector::new())),
             stats: Arc::new(RwLock::new(GossipStats::default())),
         }

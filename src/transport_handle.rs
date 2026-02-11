@@ -1059,7 +1059,10 @@ impl TransportHandle {
                     tracing::error!("Connection monitor task panicked during shutdown: {:?}", e);
                 }
                 Err(e) => {
-                    tracing::warn!("Connection monitor task join error during shutdown: {:?}", e);
+                    tracing::warn!(
+                        "Connection monitor task join error during shutdown: {:?}",
+                        e
+                    );
                 }
             }
         }
@@ -1088,7 +1091,10 @@ impl TransportHandle {
                     tracing::debug!("Periodic maintenance task was cancelled during shutdown");
                 }
                 Err(e) if e.is_panic() => {
-                    tracing::error!("Periodic maintenance task panicked during shutdown: {:?}", e);
+                    tracing::error!(
+                        "Periodic maintenance task panicked during shutdown: {:?}",
+                        e
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(
