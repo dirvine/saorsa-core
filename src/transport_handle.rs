@@ -99,12 +99,8 @@ pub struct TransportHandle {
     resource_manager: Option<Arc<ResourceManager>>,
     connection_timeout: Duration,
     stale_peer_threshold: Duration,
-    // Retained to keep spawned tasks alive (dropping a JoinHandle detaches the task).
-    #[allow(dead_code)]
     connection_monitor_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
-    #[allow(dead_code)]
     keepalive_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
-    #[allow(dead_code)]
     periodic_tasks_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     recv_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     listener_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
@@ -1052,6 +1048,57 @@ impl TransportHandle {
             }
         }
 
+        // Await connection monitor task
+        if let Some(handle) = self.connection_monitor_handle.write().await.take() {
+            match handle.await {
+                Ok(()) => {}
+                Err(e) if e.is_cancelled() => {
+                    tracing::debug!("Connection monitor task was cancelled during shutdown");
+                }
+                Err(e) if e.is_panic() => {
+                    tracing::error!("Connection monitor task panicked during shutdown: {:?}", e);
+                }
+                Err(e) => {
+                    tracing::warn!("Connection monitor task join error during shutdown: {:?}", e);
+                }
+            }
+        }
+
+        // Await keepalive task
+        if let Some(handle) = self.keepalive_handle.write().await.take() {
+            match handle.await {
+                Ok(()) => {}
+                Err(e) if e.is_cancelled() => {
+                    tracing::debug!("Keepalive task was cancelled during shutdown");
+                }
+                Err(e) if e.is_panic() => {
+                    tracing::error!("Keepalive task panicked during shutdown: {:?}", e);
+                }
+                Err(e) => {
+                    tracing::warn!("Keepalive task join error during shutdown: {:?}", e);
+                }
+            }
+        }
+
+        // Await periodic maintenance task
+        if let Some(handle) = self.periodic_tasks_handle.write().await.take() {
+            match handle.await {
+                Ok(()) => {}
+                Err(e) if e.is_cancelled() => {
+                    tracing::debug!("Periodic maintenance task was cancelled during shutdown");
+                }
+                Err(e) if e.is_panic() => {
+                    tracing::error!("Periodic maintenance task panicked during shutdown: {:?}", e);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Periodic maintenance task join error during shutdown: {:?}",
+                        e
+                    );
+                }
+            }
+        }
+
         self.disconnect_all_peers().await?;
 
         info!("Transport stopped");
@@ -1283,7 +1330,7 @@ impl TransportHandle {
         loop {
             interval.tick().await;
 
-            if shutdown.load(Ordering::SeqCst) {
+            if shutdown.load(Ordering::Relaxed) {
                 break;
             }
 
