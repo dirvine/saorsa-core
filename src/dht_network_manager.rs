@@ -440,7 +440,7 @@ impl DhtNetworkManager {
     ) -> Result<Self> {
         let (dht, local_dht_key) = Self::init_dht_core(&config.local_peer_id)?;
 
-        let (event_tx, _) = broadcast::channel(1000);
+        let (event_tx, _) = broadcast::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
         let maintenance_config = MaintenanceConfig::from(&config.dht_config);
         let maintenance_scheduler =
             Arc::new(RwLock::new(MaintenanceScheduler::new(maintenance_config)));

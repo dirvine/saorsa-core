@@ -303,7 +303,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         // Register our protocol
         transport.register_protocol(SAORSA_DHT_PROTOCOL);
 
-        let (event_tx, _) = broadcast::channel(1000);
+        let (event_tx, _) = broadcast::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
 
         // Start event forwarder that maps LinkEvent to ConnectionEvent
@@ -1201,7 +1201,7 @@ impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
 
     /// Subscribe to connection lifecycle events from both stacks
     pub fn subscribe_connection_events(&self) -> broadcast::Receiver<ConnectionEvent> {
-        let (tx, rx) = broadcast::channel(1000);
+        let (tx, rx) = broadcast::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
 
         if let Some(v6) = &self.v6 {
             let mut v6_rx = v6.subscribe_connection_events();

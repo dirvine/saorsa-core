@@ -343,6 +343,9 @@ pub type Multiaddr = NetworkAddress;
 /// Saorsa Core version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Default capacity for broadcast and mpsc event channels throughout the system.
+pub const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 1000;
+
 // Upgrade system exports
 pub use upgrade::{
     ApplierConfig, ApplyResult, BackupMetadata, DownloadProgress, Downloader, DownloaderConfig,

@@ -51,7 +51,7 @@ async fn create_test_dht_config(
             stale_peer_threshold: node_config.stale_peer_threshold,
             max_connections: node_config.max_connections,
             production_config: node_config.production_config.clone(),
-            event_channel_capacity: 1000,
+            event_channel_capacity: saorsa_core::DEFAULT_EVENT_CHANNEL_CAPACITY,
         })
         .await?,
     );
@@ -209,7 +209,7 @@ async fn test_correct_architecture_dht_owns_transport() -> Result<()> {
             stale_peer_threshold: node_config.stale_peer_threshold,
             max_connections: node_config.max_connections,
             production_config: node_config.production_config.clone(),
-            event_channel_capacity: 1000,
+            event_channel_capacity: saorsa_core::DEFAULT_EVENT_CHANNEL_CAPACITY,
         })
         .await?,
     );

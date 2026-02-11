@@ -840,7 +840,7 @@ impl P2PNode {
             stale_peer_threshold: config.stale_peer_threshold,
             max_connections: config.max_connections,
             production_config: config.production_config.clone(),
-            event_channel_capacity: 1000,
+            event_channel_capacity: crate::DEFAULT_EVENT_CHANNEL_CAPACITY,
         };
         let transport =
             Arc::new(crate::transport_handle::TransportHandle::new(transport_config).await?);

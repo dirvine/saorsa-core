@@ -370,8 +370,8 @@ impl ChurnDetector {
 impl AdaptiveGossipSub {
     /// Create a new adaptive gossipsub instance
     pub fn new(local_id: NodeId, trust_provider: Arc<dyn TrustProvider>) -> Self {
-        let (control_tx, _control_rx) = mpsc::channel(1000);
-        let (_message_tx, message_rx) = mpsc::channel(1000);
+        let (control_tx, _control_rx) = mpsc::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
+        let (_message_tx, message_rx) = mpsc::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
 
         Self {
             _local_id: local_id,
