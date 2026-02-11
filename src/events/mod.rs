@@ -107,7 +107,7 @@ pub struct EventBus {
 impl EventBus {
     /// Create a new event bus
     pub fn new() -> Self {
-        let (topology_tx, _) = broadcast::channel(1000);
+        let (topology_tx, _) = broadcast::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
 
         Self {
             topology_tx,

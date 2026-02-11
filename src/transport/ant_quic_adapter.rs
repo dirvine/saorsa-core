@@ -303,7 +303,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         // Register our protocol
         transport.register_protocol(SAORSA_DHT_PROTOCOL);
 
-        let (event_tx, _) = broadcast::channel(1000);
+        let (event_tx, _) = broadcast::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
 
         // Start event forwarder that maps LinkEvent to ConnectionEvent
@@ -1201,15 +1201,26 @@ impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
 
     /// Subscribe to connection lifecycle events from both stacks
     pub fn subscribe_connection_events(&self) -> broadcast::Receiver<ConnectionEvent> {
-        let (tx, rx) = broadcast::channel(1000);
+        let (tx, rx) = broadcast::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
 
         if let Some(v6) = &self.v6 {
             let mut v6_rx = v6.subscribe_connection_events();
             let tx_clone = tx.clone();
             tokio::spawn(async move {
-                while let Ok(event) = v6_rx.recv().await {
-                    let _ = tx_clone.send(event);
+                loop {
+                    match v6_rx.recv().await {
+                        Ok(event) => {
+                            let _ = tx_clone.send(event);
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(
+                                "IPv6 connection event forwarder lagged, skipped {n} events"
+                            );
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
                 }
+                tracing::debug!("IPv6 connection event forwarder exited");
             });
         }
 
@@ -1217,12 +1228,25 @@ impl<T: LinkTransport + Send + Sync + 'static> DualStackNetworkNode<T> {
             let mut v4_rx = v4.subscribe_connection_events();
             let tx_clone = tx.clone();
             tokio::spawn(async move {
-                while let Ok(event) = v4_rx.recv().await {
-                    let _ = tx_clone.send(event);
+                loop {
+                    match v4_rx.recv().await {
+                        Ok(event) => {
+                            let _ = tx_clone.send(event);
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(
+                                "IPv4 connection event forwarder lagged, skipped {n} events"
+                            );
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
                 }
+                tracing::debug!("IPv4 connection event forwarder exited");
             });
         }
 
+        // Drop the original sender so channel lifetime is determined by forwarder tasks
+        drop(tx);
         rx
     }
 

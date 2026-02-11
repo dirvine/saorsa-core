@@ -73,6 +73,9 @@ pub mod dht;
 /// DHT Network Integration Manager
 pub mod dht_network_manager;
 
+/// Transport handle: shared QUIC + peer + event state
+pub mod transport_handle;
+
 /// Transport layer (QUIC, TCP)
 pub mod transport;
 
@@ -172,8 +175,8 @@ pub use auth::{
 pub use bootstrap::{BootstrapConfig, BootstrapManager, CacheConfig, ContactEntry, QualityMetrics};
 pub use dht::{Key, Record};
 pub use dht_network_manager::{
-    BootstrapNode, DhtNetworkConfig, DhtNetworkEvent, DhtNetworkManager, DhtNetworkOperation,
-    DhtNetworkResult, DhtPeerInfo, PeerStoreOutcome,
+    DhtNetworkConfig, DhtNetworkEvent, DhtNetworkManager, DhtNetworkOperation, DhtNetworkResult,
+    DhtPeerInfo, PeerStoreOutcome,
 };
 pub use encrypted_key_storage::{
     Argon2Config, DerivationPriority as KeyDerivationPriority, EncryptedKeyStorageManager,
@@ -198,6 +201,7 @@ pub use network::{
     ConnectionStatus, NetworkSender, NodeBuilder, NodeConfig, P2PEvent, P2PNode, PeerInfo,
     PeerResponse,
 };
+pub use transport_handle::TransportHandle;
 // Trust system exports for saorsa-node integration
 pub use adaptive::{EigenTrustEngine, NodeStatistics, NodeStatisticsUpdate, TrustProvider};
 pub use telemetry::{Metrics, StreamClass, record_lookup, record_timeout, telemetry};
@@ -338,6 +342,9 @@ pub type Multiaddr = NetworkAddress;
 
 /// Saorsa Core version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Default capacity for broadcast and mpsc event channels throughout the system.
+pub const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 1000;
 
 // Upgrade system exports
 pub use upgrade::{

@@ -16,6 +16,7 @@ use anyhow::Result;
 use saorsa_core::dht::{DHTConfig, Key};
 use saorsa_core::dht_network_manager::{DhtNetworkConfig, DhtNetworkManager, DhtNetworkResult};
 use saorsa_core::network::NodeConfig;
+use saorsa_core::transport_handle::{TransportConfig, TransportHandle};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -29,8 +30,12 @@ fn key_from_str(s: &str) -> Key {
     key
 }
 
-/// Helper to create a DhtNetworkConfig for testing
-fn create_test_dht_config(peer_id: &str, port: u16, replication_factor: usize) -> DhtNetworkConfig {
+/// Helper to create a TransportHandle and DhtNetworkConfig for testing
+async fn create_test_dht_config(
+    peer_id: &str,
+    port: u16,
+    replication_factor: usize,
+) -> Result<(Arc<TransportHandle>, DhtNetworkConfig)> {
     let node_config = NodeConfig::builder()
         .peer_id(peer_id.to_string())
         .listen_port(port)
@@ -38,24 +43,40 @@ fn create_test_dht_config(peer_id: &str, port: u16, replication_factor: usize) -
         .build()
         .expect("Failed to build NodeConfig");
 
-    DhtNetworkConfig {
+    let transport = Arc::new(
+        TransportHandle::new(TransportConfig {
+            peer_id: peer_id.to_string(),
+            listen_addr: node_config.listen_addr,
+            enable_ipv6: node_config.enable_ipv6,
+            connection_timeout: node_config.connection_timeout,
+            stale_peer_threshold: node_config.stale_peer_threshold,
+            max_connections: node_config.max_connections,
+            production_config: node_config.production_config.clone(),
+            event_channel_capacity: saorsa_core::DEFAULT_EVENT_CHANNEL_CAPACITY,
+        })
+        .await?,
+    );
+
+    let config = DhtNetworkConfig {
         local_peer_id: peer_id.to_string(),
         dht_config: DHTConfig::default(),
         node_config,
-        bootstrap_nodes: vec![],
         request_timeout: Duration::from_secs(10),
         max_concurrent_operations: 50,
         replication_factor,
         enable_security: false,
-    }
+    };
+
+    Ok((transport, config))
 }
 
 /// Verify single-node PUT stores locally and GET retrieves it.
 /// With no peers, replicated_to must be exactly 1 (local only).
 #[tokio::test]
 async fn test_single_node_put_get_roundtrip() -> Result<()> {
-    let config = create_test_dht_config("put_get_roundtrip_node", 0, 8);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("put_get_roundtrip_node", 0, 8).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -96,8 +117,9 @@ async fn test_single_node_put_get_roundtrip() -> Result<()> {
 /// Verify GET returns GetNotFound for keys that were never stored.
 #[tokio::test]
 async fn test_get_missing_key_returns_not_found() -> Result<()> {
-    let config = create_test_dht_config("missing_key_node", 0, 8);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("missing_key_node", 0, 8).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -118,8 +140,9 @@ async fn test_get_missing_key_returns_not_found() -> Result<()> {
 /// Verify 20 concurrent PUT operations all succeed and are retrievable.
 #[tokio::test]
 async fn test_concurrent_puts() -> Result<()> {
-    let config = create_test_dht_config("concurrent_puts_node", 0, 8);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("concurrent_puts_node", 0, 8).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -170,8 +193,9 @@ async fn test_concurrent_puts() -> Result<()> {
 /// Verify replication count is exactly 1 on isolated node with K=5.
 #[tokio::test]
 async fn test_replication_count_isolated_node() -> Result<()> {
-    let config = create_test_dht_config("replication_count_node", 0, 5);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("replication_count_node", 0, 5).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -203,8 +227,9 @@ async fn test_replication_count_isolated_node() -> Result<()> {
 /// Values stay within the 512-byte DHT value size limit.
 #[tokio::test]
 async fn test_stress_50_values() -> Result<()> {
-    let config = create_test_dht_config("stress_node", 0, 8);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("stress_node", 0, 8).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
 
     tokio::time::sleep(Duration::from_millis(100)).await;

@@ -36,6 +36,7 @@ use anyhow::Result;
 use saorsa_core::dht::{DHTConfig, Key};
 use saorsa_core::dht_network_manager::{DhtNetworkConfig, DhtNetworkManager, DhtNetworkResult};
 use saorsa_core::network::NodeConfig;
+use saorsa_core::transport_handle::{TransportConfig, TransportHandle};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -65,30 +66,46 @@ fn key_from_str(s: &str) -> Key {
     key
 }
 
-/// Creates a DhtNetworkConfig for testing with automatic port allocation
-fn create_test_dht_config(peer_id: &str) -> Result<DhtNetworkConfig> {
+/// Creates a DhtNetworkConfig and TransportHandle for testing with automatic port allocation
+async fn create_test_dht_config(peer_id: &str) -> Result<(Arc<TransportHandle>, DhtNetworkConfig)> {
     let node_config = NodeConfig::builder()
         .peer_id(peer_id.to_string())
         .listen_port(0) // Use 0 for automatic port allocation
         .ipv6(false)
         .build()?;
 
-    Ok(DhtNetworkConfig {
+    let transport = Arc::new(
+        TransportHandle::new(TransportConfig {
+            peer_id: peer_id.to_string(),
+            listen_addr: node_config.listen_addr,
+            enable_ipv6: node_config.enable_ipv6,
+            connection_timeout: node_config.connection_timeout,
+            stale_peer_threshold: node_config.stale_peer_threshold,
+            max_connections: node_config.max_connections,
+            production_config: node_config.production_config.clone(),
+            event_channel_capacity: saorsa_core::DEFAULT_EVENT_CHANNEL_CAPACITY,
+        })
+        .await?,
+    );
+
+    let config = DhtNetworkConfig {
         local_peer_id: peer_id.to_string(),
         dht_config: DHTConfig::default(),
         node_config,
-        bootstrap_nodes: vec![],
         request_timeout: Duration::from_secs(5),
         max_concurrent_operations: 10,
         replication_factor: 3,
         enable_security: false,
-    })
+    };
+
+    Ok((transport, config))
 }
 
 /// Creates and starts a DhtNetworkManager for testing
 async fn create_test_manager(name: &str) -> Result<Arc<DhtNetworkManager>> {
-    let config = create_test_dht_config(name)?;
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config(name).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
     sleep(NODE_STARTUP_DELAY).await;
     Ok(manager)
@@ -176,7 +193,7 @@ async fn assert_not_directly_connected(
     manager: &Arc<DhtNetworkManager>,
     other_peer_id: &str,
 ) -> Result<()> {
-    let connected_peers = manager.node().connected_peers().await;
+    let connected_peers = manager.transport().connected_peers().await;
     let is_connected = connected_peers.iter().any(|p| p == other_peer_id);
 
     if is_connected {

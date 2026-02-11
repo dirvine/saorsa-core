@@ -23,6 +23,7 @@ use anyhow::Result;
 use saorsa_core::dht::{DHTConfig, Key};
 use saorsa_core::dht_network_manager::{DhtNetworkConfig, DhtNetworkManager, DhtNetworkResult};
 use saorsa_core::network::NodeConfig;
+use saorsa_core::transport_handle::{TransportConfig, TransportHandle};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,25 +38,39 @@ fn key_from_str(s: &str) -> Key {
     key
 }
 
-/// Create a DhtNetworkConfig for testing
-fn create_node_config(peer_id: &str) -> DhtNetworkConfig {
+/// Create a DhtNetworkConfig and TransportHandle for testing
+async fn create_node_config(peer_id: &str) -> Result<(Arc<TransportHandle>, DhtNetworkConfig)> {
     let node_config = NodeConfig::builder()
         .peer_id(peer_id.to_string())
         .listen_port(0) // Ephemeral port
         .ipv6(false)
-        .build()
-        .expect("Failed to build NodeConfig");
+        .build()?;
 
-    DhtNetworkConfig {
+    let transport = Arc::new(
+        TransportHandle::new(TransportConfig {
+            peer_id: peer_id.to_string(),
+            listen_addr: node_config.listen_addr,
+            enable_ipv6: node_config.enable_ipv6,
+            connection_timeout: node_config.connection_timeout,
+            stale_peer_threshold: node_config.stale_peer_threshold,
+            max_connections: node_config.max_connections,
+            production_config: node_config.production_config.clone(),
+            event_channel_capacity: saorsa_core::DEFAULT_EVENT_CHANNEL_CAPACITY,
+        })
+        .await?,
+    );
+
+    let config = DhtNetworkConfig {
         local_peer_id: peer_id.to_string(),
         dht_config: DHTConfig::default(),
         node_config,
-        bootstrap_nodes: vec![],
         request_timeout: Duration::from_secs(10),
         max_concurrent_operations: 50,
         replication_factor: 8, // K=8 as per Kademlia standard
         enable_security: false,
-    }
+    };
+
+    Ok((transport, config))
 }
 
 /// Test structure to manage multiple DHT nodes
@@ -71,8 +86,9 @@ impl DhtTestCluster {
 
         for i in 0..node_count {
             let peer_id = format!("e2e_node_{}", i);
-            let config = create_node_config(&peer_id);
-            let manager = Arc::new(DhtNetworkManager::new(config).await?);
+            let (transport, config) = create_node_config(&peer_id).await?;
+            transport.start_network_listeners().await?;
+            let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
             nodes.push(manager);
         }
 

@@ -15,6 +15,7 @@ use anyhow::Result;
 use saorsa_core::dht::{DHTConfig, Key};
 use saorsa_core::dht_network_manager::{DhtNetworkConfig, DhtNetworkManager, DhtNetworkResult};
 use saorsa_core::network::{NodeConfig, P2PNode};
+use saorsa_core::transport_handle::{TransportConfig, TransportHandle};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -29,8 +30,11 @@ fn key_from_str(s: &str) -> Key {
     key
 }
 
-/// Helper to create a DhtNetworkConfig for testing with a unique port
-fn create_test_dht_config(peer_id: &str, port: u16) -> DhtNetworkConfig {
+/// Helper to create a DhtNetworkConfig and TransportHandle for testing with a unique port
+async fn create_test_dht_config(
+    peer_id: &str,
+    port: u16,
+) -> Result<(Arc<TransportHandle>, DhtNetworkConfig)> {
     let node_config = NodeConfig::builder()
         .peer_id(peer_id.to_string())
         .listen_port(port)
@@ -38,23 +42,39 @@ fn create_test_dht_config(peer_id: &str, port: u16) -> DhtNetworkConfig {
         .build()
         .expect("Failed to build NodeConfig");
 
-    DhtNetworkConfig {
+    let transport = Arc::new(
+        TransportHandle::new(TransportConfig {
+            peer_id: peer_id.to_string(),
+            listen_addr: node_config.listen_addr,
+            enable_ipv6: node_config.enable_ipv6,
+            connection_timeout: node_config.connection_timeout,
+            stale_peer_threshold: node_config.stale_peer_threshold,
+            max_connections: node_config.max_connections,
+            production_config: node_config.production_config.clone(),
+            event_channel_capacity: saorsa_core::DEFAULT_EVENT_CHANNEL_CAPACITY,
+        })
+        .await?,
+    );
+
+    let config = DhtNetworkConfig {
         local_peer_id: peer_id.to_string(),
         dht_config: DHTConfig::default(),
         node_config,
-        bootstrap_nodes: vec![],
         request_timeout: Duration::from_secs(5),
         max_concurrent_operations: 10,
         replication_factor: 3,
         enable_security: false,
-    }
+    };
+
+    Ok((transport, config))
 }
 
 /// Test that DhtNetworkManager can be created and started
 #[tokio::test]
 async fn test_dht_network_manager_creation() -> Result<()> {
-    let config = create_test_dht_config("test_node_1", 0);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("test_node_1", 0).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
 
     // Start the manager
     manager.start().await?;
@@ -72,8 +92,9 @@ async fn test_dht_network_manager_creation() -> Result<()> {
 /// Test local DHT put and get operations through the manager
 #[tokio::test]
 async fn test_dht_local_put_get() -> Result<()> {
-    let config = create_test_dht_config("test_local_node", 0);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("test_local_node", 0).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
 
     // Store a value
@@ -120,16 +141,18 @@ async fn test_dht_local_put_get() -> Result<()> {
 #[tokio::test]
 async fn test_cross_node_dht_store_retrieve() -> Result<()> {
     // Create node1 with DhtNetworkManager
-    let config1 = create_test_dht_config("cross_node_1", 0);
-    let manager1 = Arc::new(DhtNetworkManager::new(config1).await?);
+    let (transport1, config1) = create_test_dht_config("cross_node_1", 0).await?;
+    transport1.start_network_listeners().await?;
+    let manager1 = Arc::new(DhtNetworkManager::new(transport1, None, config1).await?);
     manager1.start().await?;
 
     // Give node1 time to start
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Create node2 with DhtNetworkManager
-    let config2 = create_test_dht_config("cross_node_2", 0);
-    let manager2 = Arc::new(DhtNetworkManager::new(config2).await?);
+    let (transport2, config2) = create_test_dht_config("cross_node_2", 0).await?;
+    transport2.start_network_listeners().await?;
+    let manager2 = Arc::new(DhtNetworkManager::new(transport2, None, config2).await?);
     manager2.start().await?;
 
     // Note: In a full implementation, we would connect node2 to node1 here
@@ -170,26 +193,40 @@ async fn test_cross_node_dht_store_retrieve() -> Result<()> {
 #[tokio::test]
 async fn test_correct_architecture_dht_owns_transport() -> Result<()> {
     // Create DhtNetworkManager (DHT layer)
-    // It internally creates and owns a P2PNode (transport layer)
+    // The caller creates a TransportHandle (transport layer) and passes it in
     let node_config = NodeConfig::builder()
         .peer_id("architecture_test_node".to_string())
         .listen_port(0)
         .ipv6(false)
         .build()?;
 
+    let transport = Arc::new(
+        TransportHandle::new(TransportConfig {
+            peer_id: "architecture_test_node".to_string(),
+            listen_addr: node_config.listen_addr,
+            enable_ipv6: node_config.enable_ipv6,
+            connection_timeout: node_config.connection_timeout,
+            stale_peer_threshold: node_config.stale_peer_threshold,
+            max_connections: node_config.max_connections,
+            production_config: node_config.production_config.clone(),
+            event_channel_capacity: saorsa_core::DEFAULT_EVENT_CHANNEL_CAPACITY,
+        })
+        .await?,
+    );
+
     let dht_config = DhtNetworkConfig {
         local_peer_id: "architecture_test_node".to_string(),
         dht_config: DHTConfig::default(),
         node_config,
-        bootstrap_nodes: vec![],
         request_timeout: Duration::from_secs(5),
         max_concurrent_operations: 10,
         replication_factor: 3,
         enable_security: false,
     };
 
-    // Correct pattern: Create DhtNetworkManager which owns P2PNode internally
-    let manager = Arc::new(DhtNetworkManager::new(dht_config).await?);
+    // Correct pattern: Create TransportHandle, start listeners, then create DhtNetworkManager
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, dht_config).await?);
     manager.start().await?;
 
     // Test DHT operations through the manager (correct layer)
@@ -258,8 +295,9 @@ async fn test_p2p_node_local_dht_only() -> Result<()> {
 /// Test concurrent DHT operations through the manager
 #[tokio::test]
 async fn test_concurrent_dht_operations() -> Result<()> {
-    let config = create_test_dht_config("concurrent_test_node", 0);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("concurrent_test_node", 0).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
 
     // Spawn multiple concurrent put operations
@@ -304,8 +342,9 @@ async fn test_concurrent_dht_operations() -> Result<()> {
 /// and that oversized values are correctly rejected with a validation error.
 #[tokio::test]
 async fn test_dht_put_large_value() -> Result<()> {
-    let config = create_test_dht_config("large_value_test_node", 0);
-    let manager = Arc::new(DhtNetworkManager::new(config).await?);
+    let (transport, config) = create_test_dht_config("large_value_test_node", 0).await?;
+    transport.start_network_listeners().await?;
+    let manager = Arc::new(DhtNetworkManager::new(transport, None, config).await?);
     manager.start().await?;
 
     // A value at exactly the 512-byte limit should succeed

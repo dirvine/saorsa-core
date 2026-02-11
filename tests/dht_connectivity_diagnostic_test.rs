@@ -9,11 +9,14 @@ use anyhow::Result;
 use saorsa_core::dht::DHTConfig;
 use saorsa_core::dht_network_manager::{DhtNetworkConfig, DhtNetworkManager, DhtNetworkResult};
 use saorsa_core::network::NodeConfig;
+use saorsa_core::transport_handle::{TransportConfig, TransportHandle};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
 
-fn create_node_config(peer_id: &str) -> DhtNetworkConfig {
+async fn create_node_with_transport(
+    peer_id: &str,
+) -> saorsa_core::Result<(Arc<TransportHandle>, DhtNetworkConfig)> {
     let node_config = NodeConfig::builder()
         .peer_id(peer_id.to_string())
         .listen_port(0)
@@ -21,16 +24,31 @@ fn create_node_config(peer_id: &str) -> DhtNetworkConfig {
         .build()
         .expect("Failed to build NodeConfig");
 
-    DhtNetworkConfig {
+    let transport = Arc::new(
+        TransportHandle::new(TransportConfig {
+            peer_id: peer_id.to_string(),
+            listen_addr: node_config.listen_addr,
+            enable_ipv6: node_config.enable_ipv6,
+            connection_timeout: node_config.connection_timeout,
+            stale_peer_threshold: node_config.stale_peer_threshold,
+            max_connections: node_config.max_connections,
+            production_config: node_config.production_config.clone(),
+            event_channel_capacity: saorsa_core::DEFAULT_EVENT_CHANNEL_CAPACITY,
+        })
+        .await?,
+    );
+
+    let config = DhtNetworkConfig {
         local_peer_id: peer_id.to_string(),
         dht_config: DHTConfig::default(),
         node_config,
-        bootstrap_nodes: vec![],
         request_timeout: Duration::from_secs(5),
         max_concurrent_operations: 10,
         replication_factor: 3,
         enable_security: false,
-    }
+    };
+
+    Ok((transport, config))
 }
 
 fn key_from_str(s: &str) -> [u8; 32] {
@@ -45,10 +63,11 @@ fn key_from_str(s: &str) -> [u8; 32] {
 async fn step1_create_single_manager() -> Result<()> {
     println!("STEP 1: Creating single DhtNetworkManager...");
 
-    let result = timeout(
-        Duration::from_secs(10),
-        DhtNetworkManager::new(create_node_config("diag_node_1")),
-    )
+    let result = timeout(Duration::from_secs(10), async {
+        let (transport, config) = create_node_with_transport("diag_node_1").await?;
+        transport.start_network_listeners().await?;
+        DhtNetworkManager::new(transport, None, config).await
+    })
     .await;
 
     match result {
@@ -75,10 +94,11 @@ async fn step2_start_manager() -> Result<()> {
     println!("STEP 2: Starting DhtNetworkManager...");
 
     let manager = Arc::new(
-        timeout(
-            Duration::from_secs(10),
-            DhtNetworkManager::new(create_node_config("diag_node_2")),
-        )
+        timeout(Duration::from_secs(10), async {
+            let (transport, config) = create_node_with_transport("diag_node_2").await?;
+            transport.start_network_listeners().await?;
+            DhtNetworkManager::new(transport, None, config).await
+        })
         .await??,
     );
     println!("  Manager created");
@@ -109,19 +129,21 @@ async fn step3_two_managers() -> Result<()> {
     println!("STEP 3: Creating two managers...");
 
     let manager1 = Arc::new(
-        timeout(
-            Duration::from_secs(10),
-            DhtNetworkManager::new(create_node_config("diag_node_3a")),
-        )
+        timeout(Duration::from_secs(10), async {
+            let (transport, config) = create_node_with_transport("diag_node_3a").await?;
+            transport.start_network_listeners().await?;
+            DhtNetworkManager::new(transport, None, config).await
+        })
         .await??,
     );
     println!("  Manager 1 created");
 
     let manager2 = Arc::new(
-        timeout(
-            Duration::from_secs(10),
-            DhtNetworkManager::new(create_node_config("diag_node_3b")),
-        )
+        timeout(Duration::from_secs(10), async {
+            let (transport, config) = create_node_with_transport("diag_node_3b").await?;
+            transport.start_network_listeners().await?;
+            DhtNetworkManager::new(transport, None, config).await
+        })
         .await??,
     );
     println!("  Manager 2 created");
@@ -145,17 +167,19 @@ async fn step4_connect_managers() -> Result<()> {
     println!("STEP 4: Connecting two managers...");
 
     let manager1 = Arc::new(
-        timeout(
-            Duration::from_secs(10),
-            DhtNetworkManager::new(create_node_config("diag_node_4a")),
-        )
+        timeout(Duration::from_secs(10), async {
+            let (transport, config) = create_node_with_transport("diag_node_4a").await?;
+            transport.start_network_listeners().await?;
+            DhtNetworkManager::new(transport, None, config).await
+        })
         .await??,
     );
     let manager2 = Arc::new(
-        timeout(
-            Duration::from_secs(10),
-            DhtNetworkManager::new(create_node_config("diag_node_4b")),
-        )
+        timeout(Duration::from_secs(10), async {
+            let (transport, config) = create_node_with_transport("diag_node_4b").await?;
+            transport.start_network_listeners().await?;
+            DhtNetworkManager::new(transport, None, config).await
+        })
         .await??,
     );
 
@@ -201,10 +225,11 @@ async fn step5_local_put_get() -> Result<()> {
     println!("STEP 5: Local put/get (single node)...");
 
     let manager = Arc::new(
-        timeout(
-            Duration::from_secs(10),
-            DhtNetworkManager::new(create_node_config("diag_node_5")),
-        )
+        timeout(Duration::from_secs(10), async {
+            let (transport, config) = create_node_with_transport("diag_node_5").await?;
+            transport.start_network_listeners().await?;
+            DhtNetworkManager::new(transport, None, config).await
+        })
         .await??,
     );
     timeout(Duration::from_secs(10), manager.start()).await??;
@@ -250,17 +275,19 @@ async fn step6_cross_node_replication() -> Result<()> {
 
     // Create and start two managers
     let manager1 = Arc::new(
-        timeout(
-            Duration::from_secs(10),
-            DhtNetworkManager::new(create_node_config("diag_node_6a")),
-        )
+        timeout(Duration::from_secs(10), async {
+            let (transport, config) = create_node_with_transport("diag_node_6a").await?;
+            transport.start_network_listeners().await?;
+            DhtNetworkManager::new(transport, None, config).await
+        })
         .await??,
     );
     let manager2 = Arc::new(
-        timeout(
-            Duration::from_secs(10),
-            DhtNetworkManager::new(create_node_config("diag_node_6b")),
-        )
+        timeout(Duration::from_secs(10), async {
+            let (transport, config) = create_node_with_transport("diag_node_6b").await?;
+            transport.start_network_listeners().await?;
+            DhtNetworkManager::new(transport, None, config).await
+        })
         .await??,
     );
 
