@@ -260,8 +260,8 @@ pub enum DhtMessageType {
 /// **not** own the transport lifecycle. The caller that supplies the
 /// [`TransportHandle`](crate::transport_handle::TransportHandle) is responsible for
 /// starting listeners and stopping the transport. For example, when `P2PNode` creates
-/// the manager it starts the transport before `DhtNetworkManager::start()` and stops
-/// it after `DhtNetworkManager::stop()`.
+/// the manager it starts transport listeners first, then starts this manager, and
+/// stops transport after `DhtNetworkManager::stop()`.
 pub struct DhtNetworkManager {
     /// DHT instance
     dht: Arc<RwLock<DhtCoreEngine>>,
@@ -563,9 +563,8 @@ impl DhtNetworkManager {
 
     /// Create a new DHT Network Manager using an existing transport handle.
     ///
-    /// The caller is responsible for the transport lifecycle — it must call
-    /// `transport.start_network_listeners()` before starting this manager and
-    /// `transport.stop()` after stopping it.
+    /// The caller is responsible for the transport lifecycle and must stop
+    /// transport after stopping this manager.
     pub async fn new(
         transport: Arc<crate::transport_handle::TransportHandle>,
         trust_engine: Option<Arc<EigenTrustEngine>>,
@@ -593,17 +592,20 @@ impl DhtNetworkManager {
 
     /// Start the DHT network manager.
     ///
-    /// The caller must ensure the transport is already listening before calling
-    /// this method — this manager does not manage the transport lifecycle.
+    /// This manager does not manage the transport lifecycle. If transport listeners
+    /// are already running, startup reconciles currently connected peers after event
+    /// subscription is established.
     ///
     /// Note: This method requires `self` to be wrapped in an `Arc` so that
     /// background tasks can hold references to the manager.
     pub async fn start(self: &Arc<Self>) -> Result<()> {
         info!("Starting DHT Network Manager...");
 
-        // Subscribe to network events FIRST (before any connections)
-        // This ensures we don't miss PeerConnected events
+        // Subscribe to transport events before DHT background work starts.
         self.start_network_event_handler(Arc::clone(self)).await?;
+
+        // Reconcile peers that may have connected before event subscription.
+        self.reconcile_connected_peers().await;
 
         // Start DHT maintenance tasks
         self.start_maintenance_tasks().await?;
@@ -2167,115 +2169,134 @@ impl DhtNetworkManager {
         );
     }
 
+    /// Reconcile already-connected peers into DHT bookkeeping/routing.
+    async fn reconcile_connected_peers(&self) {
+        let connected = self.transport.connected_peers().await;
+        if connected.is_empty() {
+            return;
+        }
+
+        info!(
+            "Reconciling {} already-connected peers for DHT state",
+            connected.len()
+        );
+        for peer_id in connected {
+            self.handle_peer_connected(peer_id).await;
+        }
+    }
+
+    /// Handle a connected peer event in an idempotent way.
+    async fn handle_peer_connected(&self, peer_id: PeerId) {
+        info!("DHT peer connected: {}", peer_id);
+        let dht_key = crate::dht::derive_dht_key_from_peer_id(&peer_id);
+
+        // Get peer addresses from transport layer
+        let addresses = if let Some(peer_info) = self.transport.peer_info(&peer_id).await {
+            Self::parse_peer_addresses(&peer_info.addresses)
+        } else {
+            warn!("peer_info unavailable for peer_id: {}", peer_id);
+            Vec::new()
+        };
+
+        // Track peer and decide whether it should be promoted to routing table.
+        let should_add_to_routing = {
+            let mut peers = self.dht_peers.write().await;
+            match peers.entry(peer_id.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let peer_info = entry.get_mut();
+                    let had_addresses = !peer_info.addresses.is_empty();
+                    peer_info.last_seen = Instant::now();
+                    peer_info.is_connected = true;
+                    if !addresses.is_empty() {
+                        peer_info.addresses = addresses.clone();
+                    }
+                    !addresses.is_empty() && !had_addresses
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(DhtPeerInfo {
+                        peer_id: peer_id.clone(),
+                        dht_key,
+                        addresses: addresses.clone(),
+                        last_seen: Instant::now(),
+                        is_connected: true,
+                        avg_latency: Duration::from_millis(50),
+                        reliability_score: 1.0,
+                    });
+                    !addresses.is_empty()
+                }
+            }
+        };
+
+        // Skip peers with no addresses - they cannot be used for DHT routing.
+        let address_str = match addresses.first() {
+            Some(addr) => addr.to_string(),
+            None => {
+                warn!(
+                    "Peer {} has no addresses, skipping DHT routing table addition",
+                    peer_id
+                );
+                return;
+            }
+        };
+
+        if !should_add_to_routing {
+            debug!("Peer {} already tracked in DHT routing state", peer_id);
+            return;
+        }
+
+        // Add to DHT routing table.
+        {
+            use crate::dht::core_engine::{NodeCapacity, NodeId, NodeInfo};
+
+            let node_info = NodeInfo {
+                id: NodeId::from_bytes(dht_key),
+                address: address_str,
+                last_seen: SystemTime::now(),
+                capacity: NodeCapacity::default(),
+            };
+
+            if let Err(e) = self.dht.write().await.add_node(node_info).await {
+                warn!("Failed to add peer {} to DHT routing table: {}", peer_id, e);
+            } else {
+                info!("Added peer {} to DHT routing table", peer_id);
+            }
+        }
+
+        if let Err(e) = self
+            .event_tx
+            .send(DhtNetworkEvent::PeerDiscovered { peer_id, dht_key })
+        {
+            warn!("Failed to send PeerDiscovered event: {}", e);
+        }
+    }
+
     /// Start network event handler
     async fn start_network_event_handler(&self, self_arc: Arc<Self>) -> Result<()> {
         info!("Starting network event handler...");
 
         // Subscribe to network events from transport layer
         let mut events = self.transport.subscribe_events();
-        let dht_peers = Arc::clone(&self.dht_peers);
-        let event_tx = self.event_tx.clone();
-        let transport = Arc::clone(&self_arc.transport);
 
         tokio::spawn(async move {
             while let Ok(event) = events.recv().await {
                 match event {
                     crate::network::P2PEvent::PeerConnected(peer_id) => {
-                        info!("DHT peer connected: {}", peer_id);
-                        let dht_key = crate::dht::derive_dht_key_from_peer_id(&peer_id);
-
-                        // Get peer addresses from transport layer
-                        let addresses = if let Some(peer_info) = transport.peer_info(&peer_id).await
-                        {
-                            DhtNetworkManager::parse_peer_addresses(&peer_info.addresses)
-                        } else {
-                            warn!("peer_info unavailable for peer_id: {}", peer_id);
-                            Vec::new()
-                        };
-
-                        // Skip peers with no addresses - they cannot be used for DHT routing
-                        let address_str = match addresses.first() {
-                            Some(addr) => addr.to_string(),
-                            None => {
-                                warn!(
-                                    "Peer {} has no addresses, skipping DHT routing table addition",
-                                    peer_id
-                                );
-                                // Still add to dht_peers for tracking, but don't add to routing table
-                                let mut peers = dht_peers.write().await;
-                                peers.insert(
-                                    peer_id.clone(),
-                                    DhtPeerInfo {
-                                        peer_id: peer_id.clone(),
-                                        dht_key,
-                                        addresses,
-                                        last_seen: Instant::now(),
-                                        is_connected: true,
-                                        avg_latency: Duration::from_millis(50),
-                                        reliability_score: 1.0,
-                                    },
-                                );
-
-                                // Don't emit PeerDiscovered for address-less peers - consumers can't route to them
-                                // They'll be promoted to the routing table once addresses become available
-                                continue;
-                            }
-                        };
-
-                        // Add to DHT peers
-                        {
-                            let mut peers = dht_peers.write().await;
-                            peers.insert(
-                                peer_id.clone(),
-                                DhtPeerInfo {
-                                    peer_id: peer_id.clone(),
-                                    dht_key,
-                                    addresses,
-                                    last_seen: Instant::now(),
-                                    is_connected: true,
-                                    avg_latency: Duration::from_millis(50),
-                                    reliability_score: 1.0,
-                                },
-                            );
-                        }
-
-                        // CRITICAL FIX: Add peer to DHT routing table
-                        // This enables cross-node replication to work correctly
-                        {
-                            use crate::dht::core_engine::{NodeCapacity, NodeId, NodeInfo};
-
-                            let node_info = NodeInfo {
-                                id: NodeId::from_bytes(dht_key),
-                                address: address_str,
-                                last_seen: SystemTime::now(),
-                                capacity: NodeCapacity::default(),
-                            };
-
-                            if let Err(e) = self_arc.dht.write().await.add_node(node_info).await {
-                                warn!("Failed to add peer {} to DHT routing table: {}", peer_id, e);
-                            } else {
-                                info!("Added peer {} to DHT routing table", peer_id);
-                            }
-                        }
-
-                        if let Err(e) =
-                            event_tx.send(DhtNetworkEvent::PeerDiscovered { peer_id, dht_key })
-                        {
-                            warn!("Failed to send PeerDiscovered event: {}", e);
-                        }
+                        self_arc.handle_peer_connected(peer_id).await;
                     }
                     crate::network::P2PEvent::PeerDisconnected(peer_id) => {
                         info!("DHT peer disconnected: {}", peer_id);
 
                         // Update peer status
                         {
-                            let mut peers = dht_peers.write().await;
+                            let mut peers = self_arc.dht_peers.write().await;
                             if let Some(peer_info) = peers.get_mut(&peer_id) {
                                 peer_info.is_connected = false;
                             }
                         }
 
-                        if let Err(e) = event_tx.send(DhtNetworkEvent::PeerDisconnected { peer_id })
+                        if let Err(e) = self_arc
+                            .event_tx
+                            .send(DhtNetworkEvent::PeerDisconnected { peer_id })
                         {
                             warn!("Failed to send PeerDisconnected event: {}", e);
                         }

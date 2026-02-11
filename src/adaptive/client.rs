@@ -337,7 +337,8 @@ impl Client {
         config: ClientConfig,
         enable_monitoring: bool,
     ) -> Result<Self> {
-        let (subscription_tx, subscription_rx) = mpsc::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
+        let (subscription_tx, subscription_rx) =
+            mpsc::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
 
         // Initialize network components based on profile
         let components =
@@ -800,7 +801,8 @@ mod tests {
 
     /// Create a minimal test client without any monitoring components
     pub async fn new_test_client(config: ClientConfig) -> Result<Client> {
-        let (subscription_tx, subscription_rx) = mpsc::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
+        let (subscription_tx, subscription_rx) =
+            mpsc::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
 
         // Create minimal components for testing
         let trust_provider = Arc::new(crate::adaptive::trust::MockTrustProvider::new());

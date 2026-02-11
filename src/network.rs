@@ -865,12 +865,8 @@ impl P2PNode {
             enable_security: true,
         };
         let dht_manager = Arc::new(
-            DhtNetworkManager::new(
-                transport.clone(),
-                trust_engine.clone(),
-                dht_manager_config,
-            )
-            .await?,
+            DhtNetworkManager::new(transport.clone(), trust_engine.clone(), dht_manager_config)
+                .await?,
         );
 
         let security_metrics = dht_manager.security_metrics().await;
@@ -1234,7 +1230,7 @@ impl P2PNode {
         // Start transport listeners and message receiving
         self.transport.start_network_listeners().await?;
 
-        // Start the attached DHT manager now that transport listeners are active.
+        // Start the attached DHT manager.
         Arc::clone(&self.dht_manager).start().await?;
 
         // Log current listen addresses
