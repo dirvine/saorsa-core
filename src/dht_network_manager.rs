@@ -255,6 +255,13 @@ pub enum DhtMessageType {
 }
 
 /// Main DHT Network Manager
+///
+/// This manager handles DHT operations (peer discovery, routing, storage) but does
+/// **not** own the transport lifecycle. The caller that supplies the
+/// [`TransportHandle`](crate::transport_handle::TransportHandle) is responsible for
+/// starting listeners and stopping the transport. For example, when `P2PNode` creates
+/// the manager it starts the transport before `DhtNetworkManager::start()` and stops
+/// it after `DhtNetworkManager::stop()`.
 pub struct DhtNetworkManager {
     /// DHT instance
     dht: Arc<RwLock<DhtCoreEngine>>,
@@ -276,8 +283,6 @@ pub struct DhtNetworkManager {
     maintenance_scheduler: Arc<RwLock<MaintenanceScheduler>>,
     /// Semaphore for limiting concurrent message handlers (backpressure)
     message_handler_semaphore: Arc<Semaphore>,
-    /// Whether this manager owns the transport lifecycle
-    manage_transport_lifecycle: bool,
     /// Cached local DHT key to avoid repeated SHA-256 hashing
     /// PERF-001: Eliminates redundant computation in message handlers
     local_dht_key: DhtKey,
@@ -428,33 +433,10 @@ impl DhtNetworkManager {
         Ok((dht, DhtKey::from_bytes(dht_key)))
     }
 
-    fn build_transport_config(
-        config: &DhtNetworkConfig,
-    ) -> crate::transport_handle::TransportConfig {
-        crate::transport_handle::TransportConfig {
-            peer_id: config.local_peer_id.clone(),
-            listen_addr: config.node_config.listen_addr,
-            enable_ipv6: config.node_config.enable_ipv6,
-            connection_timeout: config.node_config.connection_timeout,
-            stale_peer_threshold: config.node_config.stale_peer_threshold,
-            max_connections: config.node_config.max_connections,
-            production_config: config.node_config.production_config.clone(),
-            event_channel_capacity: 1000,
-        }
-    }
-
-    fn init_trust_engine(_config: &DhtNetworkConfig) -> Arc<EigenTrustEngine> {
-        let pre_trusted = HashSet::new();
-        let trust_engine = Arc::new(EigenTrustEngine::new(pre_trusted));
-        trust_engine.clone().start_background_updates();
-        trust_engine
-    }
-
     fn new_from_components(
         transport: Arc<crate::transport_handle::TransportHandle>,
         trust_engine: Option<Arc<EigenTrustEngine>>,
         config: DhtNetworkConfig,
-        manage_transport_lifecycle: bool,
     ) -> Result<Self> {
         let (dht, local_dht_key) = Self::init_dht_core(&config.local_peer_id)?;
 
@@ -479,7 +461,6 @@ impl DhtNetworkManager {
             stats: Arc::new(RwLock::new(DhtNetworkStats::default())),
             maintenance_scheduler,
             message_handler_semaphore,
-            manage_transport_lifecycle,
             local_dht_key,
         })
     }
@@ -600,38 +581,12 @@ impl DhtNetworkManager {
         })
     }
 
-    #[allow(dead_code)]
-    /// Create a new DHT Network Manager
-    pub async fn new(mut config: DhtNetworkConfig) -> Result<Self> {
-        if config.local_peer_id.is_empty() {
-            config.local_peer_id = config
-                .node_config
-                .peer_id
-                .clone()
-                .unwrap_or_else(|| "default_peer".to_string());
-        }
-
-        info!(
-            "Creating DHT Network Manager for peer: {}",
-            config.local_peer_id
-        );
-
-        let transport = Arc::new(
-            crate::transport_handle::TransportHandle::new(Self::build_transport_config(&config))
-                .await?,
-        );
-        let trust_engine = Some(Self::init_trust_engine(&config));
-        let manager = Self::new_from_components(transport, trust_engine, config, true)?;
-
-        info!("DHT Network Manager created successfully");
-        Ok(manager)
-    }
-
-    /// Create a DHT Network Manager attached to an existing transport handle.
+    /// Create a new DHT Network Manager using an existing transport handle.
     ///
-    /// This variant does not assume ownership of the transport lifecycle and will
-    /// avoid stopping the transport when the manager shuts down.
-    pub async fn new_with_transport(
+    /// The caller is responsible for the transport lifecycle — it must call
+    /// `transport.start_network_listeners()` before starting this manager and
+    /// `transport.stop()` after stopping it.
+    pub async fn new(
         transport: Arc<crate::transport_handle::TransportHandle>,
         trust_engine: Option<Arc<EigenTrustEngine>>,
         mut config: DhtNetworkConfig,
@@ -650,13 +605,16 @@ impl DhtNetworkManager {
             "Creating attached DHT Network Manager for peer: {}",
             config.local_peer_id
         );
-        let manager = Self::new_from_components(transport, trust_engine, config, false)?;
+        let manager = Self::new_from_components(transport, trust_engine, config)?;
 
         info!("Attached DHT Network Manager created successfully");
         Ok(manager)
     }
 
-    /// Start the DHT network manager
+    /// Start the DHT network manager.
+    ///
+    /// The caller must ensure the transport is already listening before calling
+    /// this method — this manager does not manage the transport lifecycle.
     ///
     /// Note: This method requires `self` to be wrapped in an `Arc` so that
     /// background tasks can hold references to the manager.
@@ -666,11 +624,6 @@ impl DhtNetworkManager {
         // Subscribe to network events FIRST (before any connections)
         // This ensures we don't miss PeerConnected events
         self.start_network_event_handler(Arc::clone(self)).await?;
-
-        // Start transport listeners when this manager owns transport lifecycle.
-        if self.manage_transport_lifecycle {
-            self.transport.start_network_listeners().await?;
-        }
 
         // Start DHT maintenance tasks
         self.start_maintenance_tasks().await?;
@@ -705,17 +658,15 @@ impl DhtNetworkManager {
         Ok(discovered)
     }
 
-    /// Stop the DHT network manager
+    /// Stop the DHT network manager.
+    ///
+    /// Sends leave messages to connected peers and shuts down DHT operations.
+    /// The caller is responsible for stopping the transport after this returns.
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping DHT Network Manager...");
 
         // Send leave messages to connected peers
         self.leave_network().await?;
-
-        // Stop transport listeners only if we own lifecycle
-        if self.manage_transport_lifecycle {
-            self.transport.stop().await?;
-        }
 
         info!("DHT Network Manager stopped");
         Ok(())

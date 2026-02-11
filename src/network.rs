@@ -865,7 +865,7 @@ impl P2PNode {
             enable_security: true,
         };
         let dht_manager = Arc::new(
-            DhtNetworkManager::new_with_transport(
+            DhtNetworkManager::new(
                 transport.clone(),
                 trust_engine.clone(),
                 dht_manager_config,

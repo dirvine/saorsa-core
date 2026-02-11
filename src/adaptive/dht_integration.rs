@@ -301,7 +301,7 @@ impl AdaptiveDHT {
     ) -> Result<Self> {
         let dht_config = network_config.dht_config.clone();
         let manager = Arc::new(
-            DhtNetworkManager::new_with_transport(
+            DhtNetworkManager::new(
                 node.transport().clone(),
                 node.trust_engine(),
                 network_config,
