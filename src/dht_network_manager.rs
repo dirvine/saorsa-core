@@ -29,7 +29,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{RwLock, Semaphore, broadcast, oneshot};
 use tracing::{debug, info, trace, warn};
@@ -272,7 +272,7 @@ pub struct DhtNetworkManager {
     /// Configuration
     config: DhtNetworkConfig,
     /// Active DHT operations
-    active_operations: Arc<RwLock<HashMap<String, DhtOperationContext>>>,
+    active_operations: Arc<Mutex<HashMap<String, DhtOperationContext>>>,
     /// Network message broadcaster
     event_tx: broadcast::Sender<DhtNetworkEvent>,
     /// Known DHT peers
@@ -307,26 +307,6 @@ struct DhtOperationContext {
     /// Oneshot sender for delivering the response
     /// None if response already sent (channel consumed)
     response_tx: Option<oneshot::Sender<(PeerId, DhtNetworkResult)>>,
-}
-
-/// Drop guard that removes a DHT operation from `active_operations` on cancel.
-///
-/// When parallel GET returns early on first success, remaining in-flight
-/// futures are dropped and `wait_for_response` cleanup never runs. This
-/// guard ensures the entry is always removed.
-struct OperationGuard {
-    active_operations: Arc<RwLock<HashMap<String, DhtOperationContext>>>,
-    message_id: String,
-}
-
-impl Drop for OperationGuard {
-    fn drop(&mut self) {
-        let ops = Arc::clone(&self.active_operations);
-        let id = std::mem::take(&mut self.message_id);
-        tokio::spawn(async move {
-            ops.write().await.remove(&id);
-        });
-    }
 }
 
 impl std::fmt::Debug for DhtOperationContext {
@@ -455,7 +435,7 @@ impl DhtNetworkManager {
             transport,
             trust_engine,
             config,
-            active_operations: Arc::new(RwLock::new(HashMap::new())),
+            active_operations: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
             dht_peers: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(DhtNetworkStats::default())),
@@ -1645,12 +1625,36 @@ impl DhtNetworkManager {
         }
     }
 
+    /// Remove expired operations from `active_operations`.
+    ///
+    /// Uses a 2x timeout multiplier as safety margin. Called at the start of
+    /// `send_dht_request` to clean up orphaned entries from dropped futures.
+    fn sweep_expired_operations(&self) {
+        if let Ok(mut ops) = self.active_operations.lock() {
+            let now = Instant::now();
+            ops.retain(|id, ctx| {
+                let expired = now.duration_since(ctx.started_at) > ctx.timeout * 2;
+                if expired {
+                    warn!(
+                        "Sweeping expired DHT operation {id} (age {:?}, timeout {:?})",
+                        now.duration_since(ctx.started_at),
+                        ctx.timeout
+                    );
+                }
+                !expired
+            });
+        }
+    }
+
     /// Send a DHT request to a specific peer
     async fn send_dht_request(
         &self,
         peer_id: &PeerId,
         operation: DhtNetworkOperation,
     ) -> Result<DhtNetworkResult> {
+        // Sweep stale entries left by dropped futures before adding a new one
+        self.sweep_expired_operations();
+
         let message_id = Uuid::new_v4().to_string();
 
         let message = DhtNetworkMessage {
@@ -1690,24 +1694,16 @@ impl DhtNetworkManager {
             response_tx: Some(response_tx),
         };
 
-        self.active_operations
-            .write()
-            .await
-            .insert(message_id.clone(), operation_context);
-
-        // Guard ensures cleanup even if this future is cancelled (dropped).
-        // On normal completion, the guard's Drop removes the entry.
-        let _guard = OperationGuard {
-            active_operations: Arc::clone(&self.active_operations),
-            message_id: message_id.clone(),
-        };
+        if let Ok(mut ops) = self.active_operations.lock() {
+            ops.insert(message_id.clone(), operation_context);
+        }
 
         // Send message via network layer
         info!(
             "[STEP 1] {} -> {}: Sending {:?} request (msg_id: {})",
             self.config.local_peer_id, peer_id, message.payload, message_id
         );
-        match self
+        let result = match self
             .transport
             .send_message(peer_id, "/dht/1.0.0", message_data)
             .await
@@ -1719,7 +1715,6 @@ impl DhtNetworkManager {
                 );
 
                 // Wait for response via oneshot channel with timeout
-                // Cleanup is handled by _guard on drop
                 let result = self.wait_for_response(&message_id, response_rx).await;
                 match &result {
                     Ok(r) => info!(
@@ -1737,10 +1732,16 @@ impl DhtNetworkManager {
             }
             Err(e) => {
                 warn!("[STEP 1 FAILED] Failed to send DHT request to {peer_id}: {e}");
-                // _guard will clean up active_operations on drop
                 Err(e)
             }
+        };
+
+        // Explicit cleanup — no Drop guard, no tokio::spawn required
+        if let Ok(mut ops) = self.active_operations.lock() {
+            ops.remove(&message_id);
         }
+
+        result
     }
 
     /// Attempt to connect to a candidate peer with a timeout derived from the node config.
@@ -1792,7 +1793,7 @@ impl DhtNetworkManager {
     /// operation context. When handle_dht_response receives a response, it sends
     /// through the channel. This function awaits on the receiver with timeout.
     ///
-    /// Note: cleanup of `active_operations` is handled by `OperationGuard` in the
+    /// Note: cleanup of `active_operations` is handled by explicit removal in the
     /// caller (`send_dht_request`), so this method does not remove entries itself.
     async fn wait_for_response(
         &self,
@@ -2022,7 +2023,10 @@ impl DhtNetworkManager {
         };
 
         // Find the active operation and send response via oneshot channel
-        let mut ops = self.active_operations.write().await;
+        let Ok(mut ops) = self.active_operations.lock() else {
+            warn!("active_operations mutex poisoned");
+            return Ok(());
+        };
         if let Some(context) = ops.get_mut(message_id) {
             // Security: Verify the transport-level sender is authorized.
             // We compare the `sender` (transport peer ID from the network layer) against
