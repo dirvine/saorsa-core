@@ -1790,7 +1790,7 @@ impl P2PNode {
         );
 
         // Perform DHT peer discovery from connected bootstrap peers
-        // Uses the DHT manager's JSON protocol (not raw postcard) for correct deserialization
+        // Uses the DHT manager's postcard protocol for correct deserialization
         match self
             .dht_manager
             .bootstrap_from_peers(&connected_peer_ids)

@@ -634,7 +634,7 @@ impl DhtNetworkManager {
 
     /// Perform DHT peer discovery from already-connected bootstrap peers.
     ///
-    /// Sends FIND_NODE(self) to each peer using the proper DHT JSON protocol,
+    /// Sends FIND_NODE(self) to each peer using the DHT postcard protocol,
     /// then dials any newly-discovered candidates. Returns the total number
     /// of new peers discovered.
     pub async fn bootstrap_from_peers(&self, peers: &[PeerId]) -> Result<usize> {
