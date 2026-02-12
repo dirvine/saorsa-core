@@ -52,6 +52,9 @@ const CLEANUP_THRESHOLD_MULTIPLIER: u32 = 2;
 /// Interval between keepalive pings to prevent idle connection timeout.
 const KEEPALIVE_INTERVAL_SECS: u64 = 15;
 
+/// Minimum allowed request timeout (100ms) to prevent immediate timeout errors.
+const MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(100);
+
 // Test configuration defaults (used by `new_for_tests()` which is available in all builds)
 const TEST_EVENT_CHANNEL_CAPACITY: usize = 16;
 const TEST_MAX_REQUESTS: u32 = 100;
@@ -659,7 +662,9 @@ impl TransportHandle {
         data: Vec<u8>,
         timeout: Duration,
     ) -> Result<PeerResponse> {
-        let timeout = timeout.min(MAX_REQUEST_TIMEOUT);
+        // Clamp timeout to sensible bounds: minimum 100ms to avoid immediate timeout,
+        // maximum 5 minutes to prevent indefinite hangs.
+        let timeout = timeout.max(MIN_REQUEST_TIMEOUT).min(MAX_REQUEST_TIMEOUT);
 
         validate_protocol_name(protocol)?;
 
@@ -667,6 +672,8 @@ impl TransportHandle {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let started_at = Instant::now();
 
+        // Atomic check+insert under single write lock to prevent race conditions
+        // where concurrent callers could exceed MAX_ACTIVE_REQUESTS.
         {
             let mut reqs = self.active_requests.write().await;
             if reqs.len() >= MAX_ACTIVE_REQUESTS {
@@ -688,29 +695,24 @@ impl TransportHandle {
             );
         }
 
+        // RAII guard ensures cleanup even if future is cancelled or panics
+        let mut guard = RequestCleanupGuard::new(
+            Arc::clone(&self.active_requests),
+            message_id.clone(),
+        );
+
         let envelope = RequestResponseEnvelope {
             message_id: message_id.clone(),
             is_response: false,
             payload: data,
         };
-        let envelope_bytes = match postcard::to_allocvec(&envelope) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                self.active_requests.write().await.remove(&message_id);
-                return Err(P2PError::Serialization(
-                    format!("Failed to serialize request envelope: {e}").into(),
-                ));
-            }
-        };
+        let envelope_bytes = postcard::to_allocvec(&envelope).map_err(|e| {
+            P2PError::Serialization(format!("Failed to serialize request envelope: {e}").into())
+        })?;
 
         let wire_protocol = format!("/rr/{}", protocol);
-        if let Err(e) = self
-            .send_message(peer_id, &wire_protocol, envelope_bytes)
-            .await
-        {
-            self.active_requests.write().await.remove(&message_id);
-            return Err(e);
-        }
+        self.send_message(peer_id, &wire_protocol, envelope_bytes)
+            .await?;
 
         let result = match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response_bytes)) => {
@@ -735,7 +737,9 @@ impl TransportHandle {
             )),
         };
 
+        // Explicitly remove on success to avoid spawning cleanup task
         self.active_requests.write().await.remove(&message_id);
+        guard.mark_cleaned();
         result
     }
 
@@ -997,8 +1001,11 @@ impl TransportHandle {
                                 if pending.response_tx.send(envelope.payload).is_err() {
                                     warn!(
                                         message_id = %envelope.message_id,
-                                        "Response receiver dropped before delivery"
+                                        peer = %transport_peer_id,
+                                        "Response receiver dropped before delivery (likely timeout) — request already failed"
                                     );
+                                    // Don't broadcast_event here: /rr/ responses are internal-only,
+                                    // and the requester has already timed out. Logging is sufficient.
                                 }
                                 continue;
                             }
@@ -1355,11 +1362,53 @@ impl TransportHandle {
 // Free helper functions
 // ============================================================================
 
+/// RAII guard for automatic cleanup of active request entries.
+///
+/// Ensures that an entry in `active_requests` is removed when dropped,
+/// regardless of how the future completes (cancel, early return, panic).
+struct RequestCleanupGuard {
+    active_requests: Arc<RwLock<HashMap<String, PendingRequest>>>,
+    message_id: String,
+    cleaned: bool,
+}
+
+impl RequestCleanupGuard {
+    fn new(
+        active_requests: Arc<RwLock<HashMap<String, PendingRequest>>>,
+        message_id: String,
+    ) -> Self {
+        Self {
+            active_requests,
+            message_id,
+            cleaned: false,
+        }
+    }
+
+    /// Mark as cleaned to prevent drop from removing the entry.
+    /// Used when the response was successfully delivered.
+    fn mark_cleaned(&mut self) {
+        self.cleaned = true;
+    }
+}
+
+impl Drop for RequestCleanupGuard {
+    fn drop(&mut self) {
+        if !self.cleaned {
+            let active_requests = Arc::clone(&self.active_requests);
+            let message_id = self.message_id.clone();
+            // Spawn a task to perform the async cleanup
+            tokio::spawn(async move {
+                active_requests.write().await.remove(&message_id);
+            });
+        }
+    }
+}
+
 /// Validate that a protocol name is non-empty and contains no path separators or null bytes.
 fn validate_protocol_name(protocol: &str) -> Result<()> {
     if protocol.is_empty() || protocol.contains(&['/', '\\', '\0'][..]) {
         return Err(P2PError::Transport(
-            crate::error::TransportError::StreamError(
+            crate::error::TransportError::ValidationError(
                 format!("Invalid protocol name: {:?}", protocol).into(),
             ),
         ));

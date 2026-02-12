@@ -380,14 +380,18 @@ pub enum DhtNetworkEvent {
     /// Error occurred
     Error { error: String },
     /// Replication result for a PUT operation with per-peer details
+    ///
+    /// Note: These counts reflect remote replication only and exclude the local store.
+    /// The `PutSuccess` result's `replicated_to` field includes local storage (initialized to 1),
+    /// while this event's counts are derived from `peer_outcomes` which contains only remote peers.
     ReplicationResult {
         /// The key being replicated
         key: Key,
-        /// Total number of peers targeted
+        /// Total number of remote peers targeted (excludes local store)
         total_peers: usize,
-        /// Number of peers that successfully stored the value
+        /// Number of remote peers that successfully stored the value (excludes local store)
         successful_peers: usize,
-        /// Per-peer outcomes
+        /// Per-peer outcomes (remote peers only, local store not included)
         outcomes: Vec<PeerStoreOutcome>,
     },
 }

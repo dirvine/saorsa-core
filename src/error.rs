@@ -413,6 +413,9 @@ pub enum TransportError {
 
     #[error("Not initialized")]
     NotInitialized,
+
+    #[error("Invalid input: {0}")]
+    ValidationError(Cow<'static, str>),
 }
 
 /// Configuration-related errors

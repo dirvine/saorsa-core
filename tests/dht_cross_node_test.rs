@@ -385,12 +385,19 @@ async fn test_dht_put_large_value() -> Result<()> {
         oversized_result.is_err(),
         "Oversized value should be rejected with a validation error"
     );
-    let err_msg = format!("{}", oversized_result.unwrap_err());
-    assert!(
-        err_msg.contains("513") && err_msg.contains("512"),
-        "Error should mention both actual (513) and max (512) sizes, got: {}",
-        err_msg
-    );
+    // Verify we get a validation error (don't assert on specific error message text)
+    match oversized_result {
+        Err(P2PError::Dht(DhtError::ValidationFailed(_))) => {
+            // Expected error type - validation failed for oversized value
+        }
+        Err(other_err) => {
+            panic!(
+                "Expected DhtError::ValidationFailed for oversized value, got: {:?}",
+                other_err
+            );
+        }
+        Ok(_) => panic!("Oversized value should have been rejected"),
+    }
 
     manager.stop().await?;
     Ok(())
