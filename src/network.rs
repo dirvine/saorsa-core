@@ -1318,8 +1318,7 @@ impl P2PNode {
 
     /// Check if the node is running
     pub fn is_running(&self) -> bool {
-        self.is_started.load(std::sync::atomic::Ordering::Acquire)
-            && !self.shutdown.is_cancelled()
+        self.is_started.load(std::sync::atomic::Ordering::Acquire) && !self.shutdown.is_cancelled()
     }
 
     /// Get the current listen addresses
