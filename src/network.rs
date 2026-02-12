@@ -33,6 +33,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 /// Wire protocol message format for P2P communication.
@@ -696,8 +697,8 @@ pub struct P2PNode {
     /// Node start time
     start_time: Instant,
 
-    /// Running state
-    running: RwLock<bool>,
+    /// Shutdown token — cancelled when the node should stop
+    shutdown: CancellationToken,
 
     /// DHT manager for distributed hash table operations (peer discovery, routing, storage)
     dht_manager: Arc<DhtNetworkManager>,
@@ -713,6 +714,9 @@ pub struct P2PNode {
 
     /// Bootstrap state tracking - indicates whether peer discovery has completed
     is_bootstrapped: Arc<AtomicBool>,
+
+    /// Whether `start()` has been called (and `stop()` has not yet completed)
+    is_started: Arc<AtomicBool>,
 
     /// EigenTrust engine for reputation management
     ///
@@ -882,12 +886,13 @@ impl P2PNode {
             peer_id,
             transport,
             start_time: Instant::now(),
-            running: RwLock::new(false),
+            shutdown: CancellationToken::new(),
             dht_manager,
             resource_manager,
             bootstrap_manager,
             security_dashboard,
             is_bootstrapped: Arc::new(AtomicBool::new(false)),
+            is_started: Arc::new(AtomicBool::new(false)),
             trust_engine,
         };
         info!(
@@ -1224,9 +1229,6 @@ impl P2PNode {
             info!("Bootstrap cache manager started");
         }
 
-        // Set running state
-        *self.running.write().await = true;
-
         // Start transport listeners and message receiving
         self.transport.start_network_listeners().await?;
 
@@ -1244,6 +1246,9 @@ impl P2PNode {
         // Connect to bootstrap peers
         self.connect_bootstrap_peers().await?;
 
+        self.is_started
+            .store(true, std::sync::atomic::Ordering::Release);
+
         Ok(())
     }
 
@@ -1252,23 +1257,25 @@ impl P2PNode {
 
     /// Run the P2P node (blocks until shutdown)
     pub async fn run(&self) -> Result<()> {
-        if !*self.running.read().await {
+        if !self.is_running() {
             self.start().await?;
         }
 
         info!("P2P node running...");
 
+        let mut interval = tokio::time::interval(Duration::from_millis(RUN_LOOP_TICK_INTERVAL_MS));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         // Main event loop
         loop {
-            if !*self.running.read().await {
-                break;
+            tokio::select! {
+                _ = interval.tick() => {
+                    self.transport.maintenance_tick().await?;
+                }
+                () = self.shutdown.cancelled() => {
+                    break;
+                }
             }
-
-            // Perform periodic maintenance via transport handle
-            self.transport.maintenance_tick().await?;
-
-            // Sleep for a short interval
-            tokio::time::sleep(Duration::from_millis(RUN_LOOP_TICK_INTERVAL_MS)).await;
         }
 
         info!("P2P node stopped");
@@ -1279,8 +1286,8 @@ impl P2PNode {
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping P2P node...");
 
-        // Set running state to false
-        *self.running.write().await = false;
+        // Signal the run loop to exit
+        self.shutdown.cancel();
 
         // Stop DHT manager first so leave messages can be sent while transport is still active.
         self.dht_manager.stop().await?;
@@ -1297,6 +1304,9 @@ impl P2PNode {
             info!("Production resource manager stopped");
         }
 
+        self.is_started
+            .store(false, std::sync::atomic::Ordering::Release);
+
         info!("P2P node stopped");
         Ok(())
     }
@@ -1307,8 +1317,8 @@ impl P2PNode {
     }
 
     /// Check if the node is running
-    pub async fn is_running(&self) -> bool {
-        *self.running.read().await
+    pub fn is_running(&self) -> bool {
+        self.is_started.load(std::sync::atomic::Ordering::Acquire) && !self.shutdown.is_cancelled()
     }
 
     /// Get the current listen addresses
@@ -2093,7 +2103,7 @@ mod tests {
         let node = P2PNode::new(config).await?;
 
         assert_eq!(node.peer_id(), "test_peer_123");
-        assert!(!node.is_running().await);
+        assert!(!node.is_running());
         assert_eq!(node.peer_count().await, 0);
         assert!(node.connected_peers().await.is_empty());
 
@@ -2109,7 +2119,7 @@ mod tests {
 
         // Should have generated a peer ID
         assert!(node.peer_id().starts_with("peer_"));
-        assert!(!node.is_running().await);
+        assert!(!node.is_running());
 
         Ok(())
     }
@@ -2120,11 +2130,11 @@ mod tests {
         let node = P2PNode::new(config).await?;
 
         // Initially not running
-        assert!(!node.is_running().await);
+        assert!(!node.is_running());
 
         // Start the node
         node.start().await?;
-        assert!(node.is_running().await);
+        assert!(node.is_running());
 
         // Check listen addresses were set (at least one)
         let listen_addrs = node.listen_addrs().await;
@@ -2135,7 +2145,7 @@ mod tests {
 
         // Stop the node
         node.stop().await?;
-        assert!(!node.is_running().await);
+        assert!(!node.is_running());
 
         Ok(())
     }

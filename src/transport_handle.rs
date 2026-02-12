@@ -36,11 +36,11 @@ use crate::{NetworkAddress, PeerId};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
 /// Background task maintenance interval in milliseconds.
@@ -95,7 +95,7 @@ pub struct TransportHandle {
     // Held to keep the Arc alive for background tasks that captured a clone.
     #[allow(dead_code)]
     geo_provider: Arc<BgpGeoProvider>,
-    shutdown: Arc<AtomicBool>,
+    shutdown: CancellationToken,
     resource_manager: Option<Arc<ResourceManager>>,
     connection_timeout: Duration,
     stale_peer_threshold: Duration,
@@ -169,6 +169,8 @@ impl TransportHandle {
             .production_config
             .map(|prod_config| Arc::new(ResourceManager::new(prod_config)));
 
+        let shutdown = CancellationToken::new();
+
         // Subscribe to connection events BEFORE spawning the monitor task
         let connection_event_rx = dual_node.subscribe_connection_events();
 
@@ -179,6 +181,7 @@ impl TransportHandle {
             let dual_node_clone = Arc::clone(&dual_node);
             let geo_provider_clone = Arc::clone(&geo_provider);
             let peer_id_clone = config.peer_id.clone();
+            let shutdown_token = shutdown.clone();
 
             let handle = tokio::spawn(async move {
                 Self::connection_lifecycle_monitor_with_rx(
@@ -189,21 +192,20 @@ impl TransportHandle {
                     event_tx_clone,
                     geo_provider_clone,
                     peer_id_clone,
+                    shutdown_token,
                 )
                 .await;
             });
             Arc::new(RwLock::new(Some(handle)))
         };
 
-        let shutdown = Arc::new(AtomicBool::new(false));
-
         let keepalive_handle = {
             let active_conns = Arc::clone(&active_connections);
             let dual_node_clone = Arc::clone(&dual_node);
-            let shutdown_clone = Arc::clone(&shutdown);
+            let token = shutdown.clone();
 
             let handle = tokio::spawn(async move {
-                Self::keepalive_task(active_conns, dual_node_clone, shutdown_clone).await;
+                Self::keepalive_task(active_conns, dual_node_clone, token).await;
             });
             Arc::new(RwLock::new(Some(handle)))
         };
@@ -213,7 +215,7 @@ impl TransportHandle {
             let active_conns_clone = Arc::clone(&active_connections);
             let event_tx_clone = event_tx.clone();
             let stale_threshold = config.stale_peer_threshold;
-            let shutdown_clone = Arc::clone(&shutdown);
+            let token = shutdown.clone();
 
             let handle = tokio::spawn(async move {
                 Self::periodic_maintenance_task(
@@ -221,7 +223,7 @@ impl TransportHandle {
                     active_conns_clone,
                     event_tx_clone,
                     stale_threshold,
-                    shutdown_clone,
+                    token,
                 )
                 .await;
             });
@@ -294,7 +296,7 @@ impl TransportHandle {
             })),
             active_requests: Arc::new(RwLock::new(HashMap::new())),
             geo_provider: Arc::new(BgpGeoProvider::new()),
-            shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown: CancellationToken::new(),
             resource_manager: None,
             connection_timeout: Duration::from_secs(TEST_CONNECTION_TIMEOUT_SECS),
             stale_peer_threshold: Duration::from_secs(TEST_STALE_PEER_THRESHOLD_SECS),
@@ -912,15 +914,14 @@ impl TransportHandle {
         info!("Starting message receiving system");
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(MESSAGE_RECV_CHANNEL_CAPACITY);
-        let shutdown = Arc::clone(&self.shutdown);
 
         let mut handles = Vec::new();
 
         if let Some(v6) = self.dual_node.v6.as_ref() {
-            handles.push(v6.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
+            handles.push(v6.spawn_recv_task(tx.clone(), self.shutdown.clone()));
         }
         if let Some(v4) = self.dual_node.v4.as_ref() {
-            handles.push(v4.spawn_recv_task(tx.clone(), Arc::clone(&shutdown)));
+            handles.push(v4.spawn_recv_task(tx.clone(), self.shutdown.clone()));
         }
         drop(tx);
 
@@ -1012,103 +1013,49 @@ impl TransportHandle {
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping transport...");
 
-        self.shutdown.store(true, Ordering::Relaxed);
+        self.shutdown.cancel();
         self.dual_node.shutdown_endpoints().await;
 
         // Await recv system tasks
         let handles: Vec<_> = self.recv_handles.write().await.drain(..).collect();
-        for handle in handles {
-            match handle.await {
-                Ok(()) => {}
-                Err(e) if e.is_cancelled() => {
-                    tracing::debug!("Recv task was cancelled during shutdown");
-                }
-                Err(e) if e.is_panic() => {
-                    tracing::error!("Recv task panicked during shutdown: {:?}", e);
-                }
-                Err(e) => {
-                    tracing::warn!("Recv task join error during shutdown: {:?}", e);
-                }
-            }
-        }
-
-        // Await accept loop task
-        if let Some(handle) = self.listener_handle.write().await.take() {
-            match handle.await {
-                Ok(()) => {}
-                Err(e) if e.is_cancelled() => {
-                    tracing::debug!("Listener task was cancelled during shutdown");
-                }
-                Err(e) if e.is_panic() => {
-                    tracing::error!("Listener task panicked during shutdown: {:?}", e);
-                }
-                Err(e) => {
-                    tracing::warn!("Listener task join error during shutdown: {:?}", e);
-                }
-            }
-        }
-
-        // Await connection monitor task
-        if let Some(handle) = self.connection_monitor_handle.write().await.take() {
-            match handle.await {
-                Ok(()) => {}
-                Err(e) if e.is_cancelled() => {
-                    tracing::debug!("Connection monitor task was cancelled during shutdown");
-                }
-                Err(e) if e.is_panic() => {
-                    tracing::error!("Connection monitor task panicked during shutdown: {:?}", e);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Connection monitor task join error during shutdown: {:?}",
-                        e
-                    );
-                }
-            }
-        }
-
-        // Await keepalive task
-        if let Some(handle) = self.keepalive_handle.write().await.take() {
-            match handle.await {
-                Ok(()) => {}
-                Err(e) if e.is_cancelled() => {
-                    tracing::debug!("Keepalive task was cancelled during shutdown");
-                }
-                Err(e) if e.is_panic() => {
-                    tracing::error!("Keepalive task panicked during shutdown: {:?}", e);
-                }
-                Err(e) => {
-                    tracing::warn!("Keepalive task join error during shutdown: {:?}", e);
-                }
-            }
-        }
-
-        // Await periodic maintenance task
-        if let Some(handle) = self.periodic_tasks_handle.write().await.take() {
-            match handle.await {
-                Ok(()) => {}
-                Err(e) if e.is_cancelled() => {
-                    tracing::debug!("Periodic maintenance task was cancelled during shutdown");
-                }
-                Err(e) if e.is_panic() => {
-                    tracing::error!(
-                        "Periodic maintenance task panicked during shutdown: {:?}",
-                        e
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Periodic maintenance task join error during shutdown: {:?}",
-                        e
-                    );
-                }
-            }
-        }
+        Self::join_task_handles(handles, "recv").await;
+        Self::join_task_slot(&self.listener_handle, "listener").await;
+        Self::join_task_slot(&self.connection_monitor_handle, "connection monitor").await;
+        Self::join_task_slot(&self.keepalive_handle, "keepalive").await;
+        Self::join_task_slot(&self.periodic_tasks_handle, "periodic maintenance").await;
 
         self.disconnect_all_peers().await?;
 
         info!("Transport stopped");
         Ok(())
+    }
+
+    async fn join_task_slot(handle_slot: &RwLock<Option<JoinHandle<()>>>, task_name: &str) {
+        let handle = handle_slot.write().await.take();
+        if let Some(handle) = handle {
+            Self::join_task_handle(handle, task_name).await;
+        }
+    }
+
+    async fn join_task_handles(handles: Vec<JoinHandle<()>>, task_name: &str) {
+        for handle in handles {
+            Self::join_task_handle(handle, task_name).await;
+        }
+    }
+
+    async fn join_task_handle(handle: JoinHandle<()>, task_name: &str) {
+        match handle.await {
+            Ok(()) => {}
+            Err(e) if e.is_cancelled() => {
+                tracing::debug!("{task_name} task was cancelled during shutdown");
+            }
+            Err(e) if e.is_panic() => {
+                tracing::error!("{task_name} task panicked during shutdown: {:?}", e);
+            }
+            Err(e) => {
+                tracing::warn!("{task_name} task join error during shutdown: {:?}", e);
+            }
+        }
     }
 
     /// Run periodic maintenance: detect stale peers and clean up.
@@ -1167,92 +1114,101 @@ impl TransportHandle {
         event_tx: broadcast::Sender<P2PEvent>,
         geo_provider: Arc<BgpGeoProvider>,
         _local_peer_id: String,
+        shutdown: CancellationToken,
     ) {
         info!("Connection lifecycle monitor started (pre-subscribed receiver)");
 
         loop {
-            match event_rx.recv().await {
-                Ok(event) => match event {
-                    ConnectionEvent::Established {
-                        peer_id,
-                        remote_address,
-                    } => {
-                        let peer_id_str = ant_peer_id_to_string(&peer_id);
-                        debug!(
-                            "Connection established: peer={}, addr={}",
-                            peer_id_str, remote_address
-                        );
-
-                        let ip = remote_address.ip();
-                        let is_rejected = match ip {
-                            std::net::IpAddr::V4(v4) => {
-                                if let Some(asn) = geo_provider.lookup_ipv4_asn(v4) {
-                                    geo_provider.is_hosting_asn(asn) || geo_provider.is_vpn_asn(asn)
-                                } else {
-                                    false
-                                }
-                            }
-                            std::net::IpAddr::V6(v6) => {
-                                let info = geo_provider.lookup(v6);
-                                info.is_hosting_provider || info.is_vpn_provider
-                            }
-                        };
-
-                        if is_rejected {
-                            info!(
-                                "Rejecting connection from {} ({}) due to GeoIP policy",
-                                peer_id_str, remote_address
-                            );
-                            dual_node.disconnect_peer(&peer_id).await;
-                            continue;
-                        }
-
-                        active_connections.write().await.insert(peer_id_str.clone());
-
-                        let mut peers_lock = peers.write().await;
-                        if let Some(peer_info) = peers_lock.get_mut(&peer_id_str) {
-                            peer_info.status = ConnectionStatus::Connected;
-                            peer_info.connected_at = Instant::now();
-                        } else {
-                            debug!("Registering new incoming peer: {}", peer_id_str);
-                            peers_lock.insert(
-                                peer_id_str.clone(),
-                                PeerInfo {
-                                    peer_id: peer_id_str.clone(),
-                                    addresses: vec![remote_address.to_string()],
-                                    status: ConnectionStatus::Connected,
-                                    last_seen: Instant::now(),
-                                    connected_at: Instant::now(),
-                                    protocols: Vec::new(),
-                                    heartbeat_count: 0,
-                                },
-                            );
-                        }
-
-                        broadcast_event(&event_tx, P2PEvent::PeerConnected(peer_id_str));
-                    }
-                    ConnectionEvent::Lost { peer_id, reason }
-                    | ConnectionEvent::Failed { peer_id, reason } => {
-                        let peer_id_str = ant_peer_id_to_string(&peer_id);
-                        debug!("Connection lost/failed: peer={peer_id_str}, reason={reason}");
-
-                        active_connections.write().await.remove(&peer_id_str);
-                        if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
-                            peer_info.status = ConnectionStatus::Disconnected;
-                            peer_info.last_seen = Instant::now();
-                        }
-                        broadcast_event(&event_tx, P2PEvent::PeerDisconnected(peer_id_str));
-                    }
-                },
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    warn!(
-                        "Connection event receiver lagged, skipped {} events",
-                        skipped
-                    );
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    info!("Connection event channel closed, stopping lifecycle monitor");
+            tokio::select! {
+                () = shutdown.cancelled() => {
+                    info!("Connection lifecycle monitor shutting down");
                     break;
+                }
+                recv = event_rx.recv() => {
+                    match recv {
+                        Ok(event) => match event {
+                            ConnectionEvent::Established {
+                                peer_id,
+                                remote_address,
+                            } => {
+                                let peer_id_str = ant_peer_id_to_string(&peer_id);
+                                debug!(
+                                    "Connection established: peer={}, addr={}",
+                                    peer_id_str, remote_address
+                                );
+
+                                let ip = remote_address.ip();
+                                let is_rejected = match ip {
+                                    std::net::IpAddr::V4(v4) => {
+                                        if let Some(asn) = geo_provider.lookup_ipv4_asn(v4) {
+                                            geo_provider.is_hosting_asn(asn) || geo_provider.is_vpn_asn(asn)
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    std::net::IpAddr::V6(v6) => {
+                                        let info = geo_provider.lookup(v6);
+                                        info.is_hosting_provider || info.is_vpn_provider
+                                    }
+                                };
+
+                                if is_rejected {
+                                    info!(
+                                        "Rejecting connection from {} ({}) due to GeoIP policy",
+                                        peer_id_str, remote_address
+                                    );
+                                    dual_node.disconnect_peer(&peer_id).await;
+                                    continue;
+                                }
+
+                                active_connections.write().await.insert(peer_id_str.clone());
+
+                                let mut peers_lock = peers.write().await;
+                                if let Some(peer_info) = peers_lock.get_mut(&peer_id_str) {
+                                    peer_info.status = ConnectionStatus::Connected;
+                                    peer_info.connected_at = Instant::now();
+                                } else {
+                                    debug!("Registering new incoming peer: {}", peer_id_str);
+                                    peers_lock.insert(
+                                        peer_id_str.clone(),
+                                        PeerInfo {
+                                            peer_id: peer_id_str.clone(),
+                                            addresses: vec![remote_address.to_string()],
+                                            status: ConnectionStatus::Connected,
+                                            last_seen: Instant::now(),
+                                            connected_at: Instant::now(),
+                                            protocols: Vec::new(),
+                                            heartbeat_count: 0,
+                                        },
+                                    );
+                                }
+
+                                broadcast_event(&event_tx, P2PEvent::PeerConnected(peer_id_str));
+                            }
+                            ConnectionEvent::Lost { peer_id, reason }
+                            | ConnectionEvent::Failed { peer_id, reason } => {
+                                let peer_id_str = ant_peer_id_to_string(&peer_id);
+                                debug!("Connection lost/failed: peer={peer_id_str}, reason={reason}");
+
+                                active_connections.write().await.remove(&peer_id_str);
+                                if let Some(peer_info) = peers.write().await.get_mut(&peer_id_str) {
+                                    peer_info.status = ConnectionStatus::Disconnected;
+                                    peer_info.last_seen = Instant::now();
+                                }
+                                broadcast_event(&event_tx, P2PEvent::PeerDisconnected(peer_id_str));
+                            }
+                        },
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!(
+                                "Connection event receiver lagged, skipped {} events",
+                                skipped
+                            );
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!("Connection event channel closed, stopping lifecycle monitor");
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -1262,7 +1218,7 @@ impl TransportHandle {
     async fn keepalive_task(
         active_connections: Arc<RwLock<HashSet<String>>>,
         dual_node: Arc<DualStackNetworkNode>,
-        shutdown: Arc<AtomicBool>,
+        shutdown: CancellationToken,
     ) {
         const KEEPALIVE_INTERVAL_SECS: u64 = 15;
 
@@ -1275,12 +1231,13 @@ impl TransportHandle {
         );
 
         loop {
-            if shutdown.load(Ordering::Relaxed) {
-                info!("Keepalive task shutting down");
-                break;
+            tokio::select! {
+                _ = interval.tick() => {}
+                () = shutdown.cancelled() => {
+                    info!("Keepalive task shutting down");
+                    break;
+                }
             }
-
-            interval.tick().await;
 
             let peers: Vec<String> = { active_connections.read().await.iter().cloned().collect() };
 
@@ -1322,7 +1279,7 @@ impl TransportHandle {
         active_connections: Arc<RwLock<HashSet<PeerId>>>,
         event_tx: broadcast::Sender<P2PEvent>,
         stale_threshold: Duration,
-        shutdown: Arc<AtomicBool>,
+        shutdown: CancellationToken,
     ) {
         let cleanup_threshold = stale_threshold * CLEANUP_THRESHOLD_MULTIPLIER;
         let mut interval = tokio::time::interval(Duration::from_millis(MAINTENANCE_INTERVAL_MS));
@@ -1334,10 +1291,9 @@ impl TransportHandle {
         );
 
         loop {
-            interval.tick().await;
-
-            if shutdown.load(Ordering::Relaxed) {
-                break;
+            tokio::select! {
+                _ = interval.tick() => {}
+                () = shutdown.cancelled() => break,
             }
 
             let (peers_to_remove, peers_to_mark_disconnected) = {

@@ -2017,7 +2017,7 @@ async fn test_graceful_shutdown() {
     );
 
     // Verify node1 is no longer running
-    let is_running = node1.is_running().await;
+    let is_running = node1.is_running();
     assert!(!is_running, "Node should not be running after stop()");
 
     info!("=== TEST PASSED: Graceful Shutdown ===");
