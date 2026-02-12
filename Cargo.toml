@@ -4,7 +4,8 @@ name = "saorsa-core"
 # 0.10.4: refocus on phonebook + trust signals, remove user-facing APIs (PR #15)
 # 0.10.5: replica planner helper for storage orchestration
 # 0.11.0: remove feature gates — adaptive/trust/placement always compiled
-version = "0.11.0"
+# 0.11.1: fix Kademlia protocol violations in iterative lookups
+version = "0.11.1"
 edition = "2024"
 authors = ["Saorsa Labs Limited <david@saorsalabs.com>"]
 license = "AGPL-3.0"
