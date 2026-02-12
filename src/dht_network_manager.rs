@@ -413,7 +413,13 @@ impl DhtNetworkManager {
     fn init_dht_core(local_peer_id: &PeerId) -> Result<(Arc<RwLock<DhtCoreEngine>>, DhtKey)> {
         let dht_key = crate::dht::derive_dht_key_from_peer_id(local_peer_id);
         let node_id = DhtNodeId::from_bytes(dht_key);
-        let dht_instance = DhtCoreEngine::new(node_id)
+        // Use LogOnly mode so nodes can join the routing table without prior validation.
+        // Strict mode rejects every unknown node, making it impossible to bootstrap a
+        // fresh network (chicken-and-egg: no node can be validated until it's in the RT).
+        let dht_instance = DhtCoreEngine::new_with_validation_mode(
+            node_id,
+            crate::dht::routing_maintenance::close_group_validator::CloseGroupEnforcementMode::LogOnly,
+        )
             .map_err(|e| P2PError::Dht(DhtError::StorageFailed(e.to_string().into())))?;
         dht_instance.start_maintenance_tasks();
         let dht = Arc::new(RwLock::new(dht_instance));
