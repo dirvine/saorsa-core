@@ -346,8 +346,6 @@ pub struct DhtPeerInfo {
     pub avg_latency: Duration,
     /// Reliability score (0.0 to 1.0)
     pub reliability_score: f64,
-    /// Whether this peer has been promoted to the routing table.
-    pub in_routing_table: bool,
 }
 
 /// DHT network events
@@ -2168,15 +2166,9 @@ impl DhtNetworkManager {
         })
     }
 
-    /// Update peer information.
-    ///
-    /// Lookup-only traffic (e.g. `FindNode`, `FindValue`, `Get`) updates peer
-    /// liveness metadata but does not promote the peer into the routing table.
-    /// Routing promotion is reserved for participation operations (`Put`/`Join`)
-    /// so short-lived request clients are not inserted as DHT routing peers.
-    async fn update_peer_info(&self, peer_id: PeerId, message: &DhtNetworkMessage) {
+    /// Update peer information
+    async fn update_peer_info(&self, peer_id: PeerId, _message: &DhtNetworkMessage) {
         let dht_key = crate::dht::derive_dht_key_from_peer_id(&peer_id);
-        let should_promote = Self::should_promote_to_routing(message);
 
         // Get peer addresses from transport layer
         let addresses = if let Some(peer_info) = self.transport.peer_info(&peer_id).await {
@@ -2186,82 +2178,29 @@ impl DhtNetworkManager {
             Vec::new()
         };
 
-        let (should_add_to_routing, routing_address) = {
-            let mut peers = self.dht_peers.write().await;
-            let peer_info = peers.entry(peer_id.clone()).or_insert_with(|| DhtPeerInfo {
-                peer_id: peer_id.clone(),
-                dht_key,
-                addresses: Vec::new(),
-                last_seen: Instant::now(),
-                is_connected: true,
-                avg_latency: Duration::from_millis(50),
-                reliability_score: 1.0,
-                in_routing_table: false,
-            });
+        let mut peers = self.dht_peers.write().await;
+        let peer_info = peers.entry(peer_id.clone()).or_insert_with(|| DhtPeerInfo {
+            peer_id: peer_id.clone(),
+            dht_key,
+            addresses: addresses.clone(),
+            last_seen: Instant::now(),
+            is_connected: true,
+            avg_latency: Duration::from_millis(50),
+            reliability_score: 1.0,
+        });
 
-            peer_info.last_seen = Instant::now();
-            peer_info.is_connected = true;
-            // Update addresses if we have new ones
-            if !addresses.is_empty() {
-                peer_info.addresses = addresses;
-            }
-
-            debug!(
-                "Updated peer info for {} with {} addresses",
-                peer_id,
-                peer_info.addresses.len()
-            );
-
-            let routing_address = peer_info.addresses.first().map(|addr| addr.to_string());
-            let should_add_to_routing =
-                should_promote && !peer_info.in_routing_table && routing_address.is_some();
-            (should_add_to_routing, routing_address)
-        };
-
-        if !should_promote {
-            return;
+        peer_info.last_seen = Instant::now();
+        peer_info.is_connected = true;
+        // Update addresses if we have new ones
+        if !addresses.is_empty() {
+            peer_info.addresses = addresses;
         }
 
-        if !should_add_to_routing {
-            return;
-        }
-
-        let Some(address_str) = routing_address else {
-            warn!(
-                "Peer {} eligible for routing promotion but has no address",
-                peer_id
-            );
-            return;
-        };
-
-        // Promote to DHT routing table on first non-lookup participation signal.
-        {
-            use crate::dht::core_engine::{NodeCapacity, NodeId, NodeInfo};
-
-            let node_info = NodeInfo {
-                id: NodeId::from_bytes(dht_key),
-                address: address_str,
-                last_seen: SystemTime::now(),
-                capacity: NodeCapacity::default(),
-            };
-
-            if let Err(e) = self.dht.write().await.add_node(node_info).await {
-                warn!("Failed to add peer {} to DHT routing table: {}", peer_id, e);
-                return;
-            }
-        }
-
-        // Mark local promotion state for this peer.
-        if let Some(peer_info) = self.dht_peers.write().await.get_mut(&peer_id) {
-            peer_info.in_routing_table = true;
-        }
-
-        info!("Added peer {} to DHT routing table", peer_id);
-        if self.event_tx.receiver_count() > 0 {
-            let _ = self
-                .event_tx
-                .send(DhtNetworkEvent::PeerDiscovered { peer_id, dht_key });
-        }
+        debug!(
+            "Updated peer info for {} with {} addresses",
+            peer_id,
+            peer_info.addresses.len()
+        );
     }
 
     /// Reconcile already-connected peers into DHT bookkeeping/routing.
@@ -2293,45 +2232,75 @@ impl DhtNetworkManager {
             Vec::new()
         };
 
-        // Track peer liveness only. Routing promotion is handled in update_peer_info()
-        // after non-lookup DHT participation is observed.
-        let mut peers = self.dht_peers.write().await;
-        match peers.entry(peer_id.clone()) {
-            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                let peer_info = entry.get_mut();
-                peer_info.last_seen = Instant::now();
-                peer_info.is_connected = true;
-                if !addresses.is_empty() {
-                    peer_info.addresses = addresses;
+        // Track peer and decide whether it should be promoted to routing table.
+        let should_add_to_routing = {
+            let mut peers = self.dht_peers.write().await;
+            match peers.entry(peer_id.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let peer_info = entry.get_mut();
+                    let had_addresses = !peer_info.addresses.is_empty();
+                    peer_info.last_seen = Instant::now();
+                    peer_info.is_connected = true;
+                    if !addresses.is_empty() {
+                        peer_info.addresses = addresses.clone();
+                    }
+                    !addresses.is_empty() && !had_addresses
                 }
-            }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(DhtPeerInfo {
-                    peer_id: peer_id.clone(),
-                    dht_key,
-                    addresses,
-                    last_seen: Instant::now(),
-                    is_connected: true,
-                    avg_latency: Duration::from_millis(50),
-                    reliability_score: 1.0,
-                    in_routing_table: false,
-                });
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(DhtPeerInfo {
+                        peer_id: peer_id.clone(),
+                        dht_key,
+                        addresses: addresses.clone(),
+                        last_seen: Instant::now(),
+                        is_connected: true,
+                        avg_latency: Duration::from_millis(50),
+                        reliability_score: 1.0,
+                    });
+                    !addresses.is_empty()
+                }
             }
         };
 
-        debug!(
-            "Peer {} tracked for DHT liveness; routing promotion deferred until non-lookup DHT participation",
-            peer_id
-        );
-    }
+        // Skip peers with no addresses - they cannot be used for DHT routing.
+        let address_str = match addresses.first() {
+            Some(addr) => addr.to_string(),
+            None => {
+                warn!(
+                    "Peer {} has no addresses, skipping DHT routing table addition",
+                    peer_id
+                );
+                return;
+            }
+        };
 
-    /// Whether an inbound DHT message should promote the sender to routing.
-    fn should_promote_to_routing(message: &DhtNetworkMessage) -> bool {
-        matches!(&message.message_type, DhtMessageType::Request)
-            && matches!(
-                &message.payload,
-                DhtNetworkOperation::Put { .. } | DhtNetworkOperation::Join
-            )
+        if !should_add_to_routing {
+            debug!("Peer {} already tracked in DHT routing state", peer_id);
+            return;
+        }
+
+        // Add to DHT routing table.
+        {
+            use crate::dht::core_engine::{NodeCapacity, NodeId, NodeInfo};
+
+            let node_info = NodeInfo {
+                id: NodeId::from_bytes(dht_key),
+                address: address_str,
+                last_seen: SystemTime::now(),
+                capacity: NodeCapacity::default(),
+            };
+
+            if let Err(e) = self.dht.write().await.add_node(node_info).await {
+                warn!("Failed to add peer {} to DHT routing table: {}", peer_id, e);
+            } else {
+                info!("Added peer {} to DHT routing table", peer_id);
+            }
+        }
+
+        if self.event_tx.receiver_count() > 0 {
+            let _ = self
+                .event_tx
+                .send(DhtNetworkEvent::PeerDiscovered { peer_id, dht_key });
+        }
     }
 
     /// Start network event handler
@@ -2711,71 +2680,5 @@ impl Default for DhtNetworkConfig {
             replication_factor: 8, // K=8 replication
             enable_security: true,
         }
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    fn message(payload: DhtNetworkOperation, message_type: DhtMessageType) -> DhtNetworkMessage {
-        DhtNetworkMessage {
-            message_id: "test-message".to_string(),
-            source: "test-source".to_string(),
-            target: Some("test-target".to_string()),
-            message_type,
-            payload,
-            result: None,
-            timestamp: 0,
-            ttl: 1,
-            hop_count: 0,
-        }
-    }
-
-    #[test]
-    fn test_should_promote_to_routing_skips_lookup_requests() {
-        let key = [0u8; 32];
-
-        let find_node = message(
-            DhtNetworkOperation::FindNode { key },
-            DhtMessageType::Request,
-        );
-        assert!(!DhtNetworkManager::should_promote_to_routing(&find_node));
-
-        let find_value = message(
-            DhtNetworkOperation::FindValue { key },
-            DhtMessageType::Request,
-        );
-        assert!(!DhtNetworkManager::should_promote_to_routing(&find_value));
-
-        let get = message(DhtNetworkOperation::Get { key }, DhtMessageType::Request);
-        assert!(!DhtNetworkManager::should_promote_to_routing(&get));
-    }
-
-    #[test]
-    fn test_should_promote_to_routing_for_participation_requests_only() {
-        let key = [0u8; 32];
-
-        let put = message(
-            DhtNetworkOperation::Put {
-                key,
-                value: vec![1, 2, 3],
-            },
-            DhtMessageType::Request,
-        );
-        assert!(DhtNetworkManager::should_promote_to_routing(&put));
-
-        let join = message(DhtNetworkOperation::Join, DhtMessageType::Request);
-        assert!(DhtNetworkManager::should_promote_to_routing(&join));
-
-        let put_response = message(
-            DhtNetworkOperation::Put {
-                key,
-                value: vec![1, 2, 3],
-            },
-            DhtMessageType::Response,
-        );
-        assert!(!DhtNetworkManager::should_promote_to_routing(&put_response));
     }
 }
