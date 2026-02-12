@@ -539,7 +539,7 @@ impl DhtCoreEngine {
     }
 
     /// Create new DHT engine with specified validation mode
-    fn new_with_validation_mode(
+    pub(crate) fn new_with_validation_mode(
         node_id: NodeId,
         enforcement_mode: CloseGroupEnforcementMode,
     ) -> Result<Self> {
