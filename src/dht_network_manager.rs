@@ -59,6 +59,10 @@ const DHT_CLOSEST_NODES_COUNT: usize = 8;
 /// SEC-001: DoS mitigation via timeout enforcement on concurrent operations
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Reliability score assigned to the local node in K-closest results.
+/// The local node is always considered fully reliable for its own lookups.
+const SELF_RELIABILITY_SCORE: f64 = 1.0;
+
 /// DHT node representation for network operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DHTNode {
@@ -287,6 +291,13 @@ pub struct DhtNetworkManager {
     /// Cached local DHT key to avoid repeated SHA-256 hashing
     /// PERF-001: Eliminates redundant computation in message handlers
     local_dht_key: DhtKey,
+    /// Transport-level peer ID (hex-encoded ant-quic PeerId).
+    /// Used to filter out self-references during iterative DHT lookups,
+    /// because FindNode responses use transport IDs, not app-level peer IDs.
+    local_transport_peer_id: Option<String>,
+    /// Hex-encoded local DHT key, cached to avoid repeated allocation in
+    /// `is_local_peer_id` which runs in hot loops.
+    local_dht_key_hex: String,
     /// Shutdown token for background tasks
     shutdown: CancellationToken,
     /// Handle for the maintenance task so it can be joined on stop
@@ -443,6 +454,9 @@ impl DhtNetworkManager {
                 .max(MIN_CONCURRENT_OPERATIONS),
         ));
 
+        let local_transport_peer_id = transport.transport_peer_id();
+        let local_dht_key_hex = hex::encode(local_dht_key.as_bytes());
+
         Ok(Self {
             dht,
             transport,
@@ -455,6 +469,8 @@ impl DhtNetworkManager {
             maintenance_scheduler,
             message_handler_semaphore,
             local_dht_key,
+            local_transport_peer_id,
+            local_dht_key_hex,
             shutdown: CancellationToken::new(),
             maintenance_handle: Arc::new(RwLock::new(None)),
             event_handler_handle: Arc::new(RwLock::new(None)),
@@ -559,8 +575,7 @@ impl DhtNetworkManager {
         let candidate_nodes = self
             .find_closest_nodes_local(key, DHT_CLOSEST_NODES_COUNT)
             .await;
-        let my_distance = self.local_dht_key.distance(&DhtKey::from_bytes(*key));
-        let closer_nodes = self.filter_closer_nodes(candidate_nodes, key, requester, my_distance);
+        let closer_nodes = Self::filter_response_nodes(candidate_nodes, requester);
 
         if closer_nodes.is_empty() {
             return Ok(DhtNetworkResult::GetNotFound {
@@ -890,6 +905,9 @@ impl DhtNetworkManager {
         let mut peers_failed: usize = 0;
         let mut last_error: Option<String> = None;
 
+        // Never send an RPC to ourselves (we already checked local storage above).
+        self.mark_self_queried(&mut queried_nodes);
+
         // Get initial candidates from local routing table and connected peers
         // IMPORTANT: Use find_closest_nodes_local to avoid making network requests
         // before the iterative lookup loop starts - we want to start with only nodes we know about
@@ -1014,6 +1032,7 @@ impl DhtNetworkManager {
                             Self::ensure_cached_dht_key(&mut node);
                             if queried_nodes.contains(&node.peer_id)
                                 || queued_peer_ids.contains(&node.peer_id)
+                                || self.is_local_peer_id(&node.peer_id)
                             {
                                 continue;
                             }
@@ -1202,6 +1221,9 @@ impl DhtNetworkManager {
                 Ok(nodes) => {
                     for node in nodes {
                         let id = node.id.to_string();
+                        if self.is_local_peer_id(&id) {
+                            continue;
+                        }
                         if seen_peer_ids.insert(id.clone()) {
                             all_nodes.push(DHTNode {
                                 peer_id: id,
@@ -1224,6 +1246,9 @@ impl DhtNetworkManager {
             let peers = self.dht_peers.read().await;
             for (peer_id, peer_info) in peers.iter() {
                 if !peer_info.is_connected {
+                    continue;
+                }
+                if self.is_local_peer_id(peer_id) {
                     continue;
                 }
                 if !seen_peer_ids.insert(peer_id.clone()) {
@@ -1274,6 +1299,13 @@ impl DhtNetworkManager {
         let mut queried_nodes: HashSet<String> = HashSet::new();
         let mut best_nodes: Vec<DHTNode> = Vec::new();
         let mut queued_peer_ids: HashSet<String> = HashSet::new();
+
+        // Kademlia correctness: the local node must compete on distance in the
+        // final K-closest result, but we must never send an RPC to ourselves.
+        // Seed best_nodes with self and mark self as "queried" so the iterative
+        // loop never tries to contact us.
+        best_nodes.push(self.local_dht_node());
+        self.mark_self_queried(&mut queried_nodes);
 
         // Start with local knowledge
         let initial = self.find_closest_nodes_local(key, count).await;
@@ -1351,18 +1383,23 @@ impl DhtNetworkManager {
                             Self::ensure_cached_dht_key(&mut node);
                             if queried_nodes.contains(&node.peer_id)
                                 || queued_peer_ids.contains(&node.peer_id)
-                                || node.peer_id == self.config.local_peer_id
+                                || self.is_local_peer_id(&node.peer_id)
                             {
                                 continue;
                             }
-                            // A node is "dominated" if it is not closer than any of the current best nodes.
-                            let dominated = best_nodes.iter().any(|best| {
-                                matches!(
-                                    Self::compare_node_distance(&node, best, key),
-                                    std::cmp::Ordering::Equal | std::cmp::Ordering::Greater
-                                )
-                            });
-                            if !dominated || best_nodes.len() < count {
+                            // A candidate is "dominated" only if we already have K
+                            // best_nodes AND the candidate is no closer than the
+                            // farthest node in our best set. best_nodes is sorted
+                            // by distance at the end of each iteration, so .last()
+                            // is the farthest.
+                            let dominated = best_nodes.len() >= count
+                                && best_nodes.last().is_some_and(|worst| {
+                                    matches!(
+                                        Self::compare_node_distance(&node, worst, key),
+                                        std::cmp::Ordering::Equal | std::cmp::Ordering::Greater
+                                    )
+                                });
+                            if !dominated {
                                 if candidates.len() >= MAX_CANDIDATE_NODES {
                                     trace!(
                                         "[NETWORK] Candidate queue at capacity ({}), dropping {}",
@@ -1471,39 +1508,42 @@ impl DhtNetworkManager {
         }
     }
 
-    /// Filters candidate nodes to only those closer to target than this node.
+    /// Return the K-closest candidate nodes, excluding the requester.
     ///
-    /// Returns nodes that are:
-    /// - Not the requester (avoids routing loops)
-    /// - Closer to the target key than this node (by XOR distance)
-    /// - Have a cached DHT key (nodes without keys are skipped)
-    fn filter_closer_nodes(
-        &self,
+    /// Per Kademlia, a FindNode response should contain the K closest nodes
+    /// the responder knows about — regardless of whether they are closer or
+    /// farther than the responder itself. The requester is excluded because
+    /// it already knows its own address.
+    fn filter_response_nodes(
         candidate_nodes: Vec<DHTNode>,
-        target_key: &Key,
         requester_peer_id: &PeerId,
-        my_distance: [u8; 32],
     ) -> Vec<DHTNode> {
-        let target_dht_key = DhtKey::from_bytes(*target_key);
-
         candidate_nodes
             .into_iter()
-            .filter(|node| {
-                // Don't suggest requester
-                if node.peer_id == *requester_peer_id {
-                    return false;
-                }
-
-                // Only suggest if closer than us
-                if let Some(ref node_dht_key) = node.cached_dht_key {
-                    let node_distance = node_dht_key.distance(&target_dht_key);
-                    node_distance < my_distance
-                } else {
-                    // No cached DHT key, can't compute distance, skip
-                    false
-                }
-            })
+            .filter(|node| node.peer_id != *requester_peer_id)
             .collect()
+    }
+
+    /// Build a `DHTNode` representing the local node for inclusion in
+    /// K-closest results. The local node always participates in distance
+    /// ranking but is never queried over the network.
+    fn local_dht_node(&self) -> DHTNode {
+        DHTNode {
+            peer_id: self.config.local_peer_id.clone(),
+            address: self.config.node_config.listen_addr.to_string(),
+            distance: None,
+            reliability: SELF_RELIABILITY_SCORE,
+            cached_dht_key: Some(self.local_dht_key.clone()),
+        }
+    }
+
+    /// Add both the app-level and transport-level local peer IDs to `queried`
+    /// so that iterative lookups never send RPCs to the local node.
+    fn mark_self_queried(&self, queried: &mut HashSet<String>) {
+        queried.insert(self.config.local_peer_id.clone());
+        if let Some(tid) = &self.local_transport_peer_id {
+            queried.insert(tid.clone());
+        }
     }
 
     /// Ensure a DHT node has a cached DHT key available for distance comparisons.
@@ -1784,6 +1824,19 @@ impl DhtNetworkManager {
         }
 
         result
+    }
+
+    /// Check whether `peer_id` refers to this node in any of the three ID formats:
+    /// 1. App-level peer ID (`"peer_xxxx"`)
+    /// 2. Transport-level peer ID (hex-encoded ant-quic `PeerId` bytes)
+    /// 3. DHT key (hex of SHA-256 of the transport peer ID)
+    fn is_local_peer_id(&self, peer_id: &str) -> bool {
+        peer_id == self.config.local_peer_id
+            || self
+                .local_transport_peer_id
+                .as_ref()
+                .is_some_and(|id| id == peer_id)
+            || peer_id == self.local_dht_key_hex
     }
 
     /// Attempt to connect to a candidate peer with a timeout derived from the node config.
