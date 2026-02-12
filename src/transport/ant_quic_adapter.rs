@@ -271,25 +271,29 @@ impl P2PNetworkNode<P2pLinkTransport> {
         let transport = Arc::clone(&self.transport);
         tokio::spawn(async move {
             loop {
-                if shutdown.is_cancelled() {
-                    break;
-                }
-                match transport.endpoint().recv().await {
-                    Ok((peer_id, data)) => {
-                        if data.len() > MAX_RECV_MESSAGE_SIZE {
-                            tracing::warn!(
-                                "Dropping oversized message ({} bytes) from peer",
-                                data.len()
-                            );
-                            continue;
-                        }
-                        if tx.send((peer_id, data)).await.is_err() {
-                            break; // channel closed
-                        }
-                    }
-                    Err(e) => {
-                        tracing::debug!("Recv task exiting: {e}");
+                tokio::select! {
+                    _ = shutdown.cancelled() => {
                         break;
+                    }
+                    result = transport.endpoint().recv() => {
+                        match result {
+                            Ok((peer_id, data)) => {
+                                if data.len() > MAX_RECV_MESSAGE_SIZE {
+                                    tracing::warn!(
+                                        "Dropping oversized message ({} bytes) from peer",
+                                        data.len()
+                                    );
+                                    continue;
+                                }
+                                if tx.send((peer_id, data)).await.is_err() {
+                                    break; // channel closed
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!("Recv task exiting: {e}");
+                                break;
+                            }
+                        }
                     }
                 }
             }
