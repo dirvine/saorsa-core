@@ -38,9 +38,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
-use tokio_util::sync::CancellationToken;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
 /// Background task maintenance interval in milliseconds.
