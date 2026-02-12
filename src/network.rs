@@ -715,6 +715,9 @@ pub struct P2PNode {
     /// Bootstrap state tracking - indicates whether peer discovery has completed
     is_bootstrapped: Arc<AtomicBool>,
 
+    /// Whether `start()` has been called (and `stop()` has not yet completed)
+    is_started: Arc<AtomicBool>,
+
     /// EigenTrust engine for reputation management
     ///
     /// Used to track peer reliability based on data availability outcomes.
@@ -889,6 +892,7 @@ impl P2PNode {
             bootstrap_manager,
             security_dashboard,
             is_bootstrapped: Arc::new(AtomicBool::new(false)),
+            is_started: Arc::new(AtomicBool::new(false)),
             trust_engine,
         };
         info!(
@@ -1242,6 +1246,9 @@ impl P2PNode {
         // Connect to bootstrap peers
         self.connect_bootstrap_peers().await?;
 
+        self.is_started
+            .store(true, std::sync::atomic::Ordering::Release);
+
         Ok(())
     }
 
@@ -1297,6 +1304,9 @@ impl P2PNode {
             info!("Production resource manager stopped");
         }
 
+        self.is_started
+            .store(false, std::sync::atomic::Ordering::Release);
+
         info!("P2P node stopped");
         Ok(())
     }
@@ -1308,7 +1318,8 @@ impl P2PNode {
 
     /// Check if the node is running
     pub fn is_running(&self) -> bool {
-        !self.shutdown.is_cancelled()
+        self.is_started.load(std::sync::atomic::Ordering::Acquire)
+            && !self.shutdown.is_cancelled()
     }
 
     /// Get the current listen addresses
