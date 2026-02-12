@@ -262,7 +262,7 @@ impl P2PNetworkNode<P2pLinkTransport> {
     pub fn spawn_recv_task(
         &self,
         tx: tokio::sync::mpsc::Sender<(PeerId, Vec<u8>)>,
-        shutdown: Arc<AtomicBool>,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> tokio::task::JoinHandle<()> {
         /// Maximum size of a single received message (16 MB).
         /// Messages exceeding this limit are dropped to prevent memory exhaustion.
@@ -271,7 +271,7 @@ impl P2PNetworkNode<P2pLinkTransport> {
         let transport = Arc::clone(&self.transport);
         tokio::spawn(async move {
             loop {
-                if shutdown.load(Ordering::Relaxed) {
+                if shutdown.is_cancelled() {
                     break;
                 }
                 match transport.endpoint().recv().await {

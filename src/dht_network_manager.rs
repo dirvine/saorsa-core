@@ -29,10 +29,10 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{RwLock, Semaphore, broadcast, oneshot};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
@@ -287,8 +287,8 @@ pub struct DhtNetworkManager {
     /// Cached local DHT key to avoid repeated SHA-256 hashing
     /// PERF-001: Eliminates redundant computation in message handlers
     local_dht_key: DhtKey,
-    /// Shutdown flag for background tasks
-    shutdown: Arc<AtomicBool>,
+    /// Shutdown token for background tasks
+    shutdown: CancellationToken,
     /// Handle for the maintenance task so it can be joined on stop
     maintenance_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
     /// Handle for the network event handler task
@@ -449,7 +449,7 @@ impl DhtNetworkManager {
             maintenance_scheduler,
             message_handler_semaphore,
             local_dht_key,
-            shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown: CancellationToken::new(),
             maintenance_handle: Arc::new(RwLock::new(None)),
             event_handler_handle: Arc::new(RwLock::new(None)),
         })
@@ -661,7 +661,7 @@ impl DhtNetworkManager {
         self.leave_network().await?;
 
         // Signal all background tasks to stop
-        self.shutdown.store(true, Ordering::Relaxed);
+        self.shutdown.cancel();
 
         // Signal the DHT core engine's maintenance task to stop
         self.dht.read().await.signal_shutdown();
@@ -2310,115 +2310,118 @@ impl DhtNetworkManager {
         // Subscribe to network events from transport layer
         let mut events = self.transport.subscribe_events();
 
-        let shutdown = Arc::clone(&self.shutdown);
+        let shutdown = self.shutdown.clone();
         let handle = tokio::spawn(async move {
             loop {
-                match events.recv().await {
-                    Ok(event) => match event {
-                        crate::network::P2PEvent::PeerConnected(peer_id) => {
-                            self_arc.handle_peer_connected(peer_id).await;
-                        }
-                        crate::network::P2PEvent::PeerDisconnected(peer_id) => {
-                            info!("DHT peer disconnected: {}", peer_id);
-
-                            // Update peer status
-                            {
-                                let mut peers = self_arc.dht_peers.write().await;
-                                if let Some(peer_info) = peers.get_mut(&peer_id) {
-                                    peer_info.is_connected = false;
-                                }
-                            }
-
-                            if self_arc.event_tx.receiver_count() > 0
-                                && let Err(e) = self_arc
-                                    .event_tx
-                                    .send(DhtNetworkEvent::PeerDisconnected { peer_id })
-                            {
-                                warn!("Failed to send PeerDisconnected event: {}", e);
-                            }
-                        }
-                        crate::network::P2PEvent::Message {
-                            topic,
-                            source,
-                            data,
-                        } => {
-                            trace!(
-                                "  [EVENT] Message received: topic={}, source={}, {} bytes",
-                                topic,
-                                source,
-                                data.len()
-                            );
-                            if topic == "/dht/1.0.0" {
-                                trace!("  [EVENT] Processing DHT message from {}", source);
-                                // Process the DHT message with backpressure via semaphore
-                                let manager_clone = Arc::clone(&self_arc);
-                                let source_clone = source.clone();
-                                let semaphore = Arc::clone(&self_arc.message_handler_semaphore);
-                                tokio::spawn(async move {
-                                    // Acquire permit for backpressure - limits concurrent handlers
-                                    let _permit = match semaphore.acquire().await {
-                                        Ok(permit) => permit,
-                                        Err(_) => {
-                                            warn!("Message handler semaphore closed");
-                                            return;
-                                        }
-                                    };
-
-                                    // SEC-001: Wrap handle_dht_message with timeout to prevent DoS via long-running handlers
-                                    // This ensures permits are released even if a handler gets stuck
-                                    match tokio::time::timeout(
-                                        REQUEST_TIMEOUT,
-                                        manager_clone.handle_dht_message(&data, &source_clone),
-                                    )
-                                    .await
-                                    {
-                                        Ok(Ok(Some(response))) => {
-                                            // Send response back to the source peer
-                                            if let Err(e) = manager_clone
-                                                .transport
-                                                .send_message(&source_clone, "/dht/1.0.0", response)
-                                                .await
-                                            {
-                                                warn!(
-                                                    "Failed to send DHT response to {}: {}",
-                                                    source_clone, e
-                                                );
-                                            }
-                                        }
-                                        Ok(Ok(None)) => {
-                                            // No response needed (e.g., for response messages)
-                                        }
-                                        Ok(Err(e)) => {
-                                            warn!(
-                                                "Failed to handle DHT message from {}: {}",
-                                                source_clone, e
-                                            );
-                                        }
-                                        Err(_) => {
-                                            // Timeout occurred - log warning and release permit
-                                            warn!(
-                                                "DHT message handler timed out after {:?} for peer {}: potential DoS attempt or slow processing",
-                                                REQUEST_TIMEOUT, source_clone
-                                            );
-                                        }
-                                    }
-                                    // _permit dropped here, releasing semaphore slot
-                                });
-                            }
-                        }
-                    },
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("Network event handler lagged, skipped {} events", skipped);
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        info!("Network event channel closed, stopping event handler");
+                tokio::select! {
+                    () = shutdown.cancelled() => {
+                        info!("Network event handler shutting down");
                         break;
                     }
-                }
+                    recv = events.recv() => {
+                        match recv {
+                            Ok(event) => match event {
+                                crate::network::P2PEvent::PeerConnected(peer_id) => {
+                                    self_arc.handle_peer_connected(peer_id).await;
+                                }
+                                crate::network::P2PEvent::PeerDisconnected(peer_id) => {
+                                    info!("DHT peer disconnected: {}", peer_id);
 
-                if shutdown.load(Ordering::Relaxed) {
-                    info!("Network event handler shutting down");
-                    break;
+                                    // Update peer status
+                                    {
+                                        let mut peers = self_arc.dht_peers.write().await;
+                                        if let Some(peer_info) = peers.get_mut(&peer_id) {
+                                            peer_info.is_connected = false;
+                                        }
+                                    }
+
+                                    if self_arc.event_tx.receiver_count() > 0
+                                        && let Err(e) = self_arc
+                                            .event_tx
+                                            .send(DhtNetworkEvent::PeerDisconnected { peer_id })
+                                    {
+                                        warn!("Failed to send PeerDisconnected event: {}", e);
+                                    }
+                                }
+                                crate::network::P2PEvent::Message {
+                                    topic,
+                                    source,
+                                    data,
+                                } => {
+                                    trace!(
+                                        "  [EVENT] Message received: topic={}, source={}, {} bytes",
+                                        topic,
+                                        source,
+                                        data.len()
+                                    );
+                                    if topic == "/dht/1.0.0" {
+                                        trace!("  [EVENT] Processing DHT message from {}", source);
+                                        // Process the DHT message with backpressure via semaphore
+                                        let manager_clone = Arc::clone(&self_arc);
+                                        let source_clone = source.clone();
+                                        let semaphore = Arc::clone(&self_arc.message_handler_semaphore);
+                                        tokio::spawn(async move {
+                                            // Acquire permit for backpressure - limits concurrent handlers
+                                            let _permit = match semaphore.acquire().await {
+                                                Ok(permit) => permit,
+                                                Err(_) => {
+                                                    warn!("Message handler semaphore closed");
+                                                    return;
+                                                }
+                                            };
+
+                                            // SEC-001: Wrap handle_dht_message with timeout to prevent DoS via long-running handlers
+                                            // This ensures permits are released even if a handler gets stuck
+                                            match tokio::time::timeout(
+                                                REQUEST_TIMEOUT,
+                                                manager_clone.handle_dht_message(&data, &source_clone),
+                                            )
+                                            .await
+                                            {
+                                                Ok(Ok(Some(response))) => {
+                                                    // Send response back to the source peer
+                                                    if let Err(e) = manager_clone
+                                                        .transport
+                                                        .send_message(&source_clone, "/dht/1.0.0", response)
+                                                        .await
+                                                    {
+                                                        warn!(
+                                                            "Failed to send DHT response to {}: {}",
+                                                            source_clone, e
+                                                        );
+                                                    }
+                                                }
+                                                Ok(Ok(None)) => {
+                                                    // No response needed (e.g., for response messages)
+                                                }
+                                                Ok(Err(e)) => {
+                                                    warn!(
+                                                        "Failed to handle DHT message from {}: {}",
+                                                        source_clone, e
+                                                    );
+                                                }
+                                                Err(_) => {
+                                                    // Timeout occurred - log warning and release permit
+                                                    warn!(
+                                                        "DHT message handler timed out after {:?} for peer {}: potential DoS attempt or slow processing",
+                                                        REQUEST_TIMEOUT, source_clone
+                                                    );
+                                                }
+                                            }
+                                            // _permit dropped here, releasing semaphore slot
+                                        });
+                                    }
+                                }
+                            },
+                            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                                warn!("Network event handler lagged, skipped {} events", skipped);
+                            }
+                            Err(broadcast::error::RecvError::Closed) => {
+                                info!("Network event channel closed, stopping event handler");
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -2444,17 +2447,18 @@ impl DhtNetworkManager {
         let dht_peers = Arc::clone(&self.dht_peers);
         let stats = Arc::clone(&self.stats);
         let event_tx = self.event_tx.clone();
-        let shutdown = Arc::clone(&self.shutdown);
+        let shutdown = self.shutdown.clone();
 
         let handle = tokio::spawn(async move {
             let mut check_interval = tokio::time::interval(Duration::from_secs(5));
 
             loop {
-                check_interval.tick().await;
-
-                if shutdown.load(Ordering::Relaxed) {
-                    info!("DHT maintenance task shutting down");
-                    break;
+                tokio::select! {
+                    _ = check_interval.tick() => {}
+                    () = shutdown.cancelled() => {
+                        info!("DHT maintenance task shutting down");
+                        break;
+                    }
                 }
 
                 // Get due tasks from scheduler

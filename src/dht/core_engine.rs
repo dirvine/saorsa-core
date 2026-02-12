@@ -20,9 +20,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, oneshot};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// DHT key type (256-bit)
@@ -522,8 +522,8 @@ pub struct DhtCoreEngine {
     /// Optional trust-aware peer selector for combining distance with trust scores
     trust_peer_selector: Option<TrustAwarePeerSelector<EigenTrustEngine>>,
 
-    /// Shutdown flag for background maintenance tasks
-    shutdown: Arc<AtomicBool>,
+    /// Shutdown token for background maintenance tasks
+    shutdown: CancellationToken,
 }
 
 impl DhtCoreEngine {
@@ -586,7 +586,7 @@ impl DhtCoreEngine {
             transport: None,
             pending_requests: Arc::new(RwLock::new(HashMap::new())),
             trust_peer_selector: None,
-            shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown: CancellationToken::new(),
         })
     }
 
@@ -698,7 +698,7 @@ impl DhtCoreEngine {
 
     /// Signal background maintenance tasks to stop
     pub fn signal_shutdown(&self) {
-        self.shutdown.store(true, Ordering::Relaxed);
+        self.shutdown.cancel();
     }
 
     /// Start background maintenance tasks for security and health
@@ -707,16 +707,17 @@ impl DhtCoreEngine {
         let eviction_manager = self.eviction_manager.clone();
         let close_group_validator = self.close_group_validator.clone();
         let security_metrics = self.security_metrics.clone();
-        let shutdown = Arc::clone(&self.shutdown);
+        let shutdown = self.shutdown.clone();
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
             loop {
-                interval.tick().await;
-
-                if shutdown.load(Ordering::Relaxed) {
-                    tracing::info!("DHT core maintenance task shutting down");
-                    break;
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    () = shutdown.cancelled() => {
+                        tracing::info!("DHT core maintenance task shutting down");
+                        break;
+                    }
                 }
 
                 // 1. Run Bucket Refresh Logic with Validation Integration
