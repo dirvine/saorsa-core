@@ -49,6 +49,9 @@ const MAINTENANCE_INTERVAL_MS: u64 = 100;
 /// Stale peer cleanup uses this multiplier on the stale threshold.
 const CLEANUP_THRESHOLD_MULTIPLIER: u32 = 2;
 
+/// Interval between keepalive pings to prevent idle connection timeout.
+const KEEPALIVE_INTERVAL_SECS: u64 = 15;
+
 // Test configuration defaults (used by `new_for_tests()` which is available in all builds)
 const TEST_EVENT_CHANNEL_CAPACITY: usize = 16;
 const TEST_MAX_REQUESTS: u32 = 100;
@@ -56,6 +59,16 @@ const TEST_BURST_SIZE: u32 = 100;
 const TEST_RATE_LIMIT_WINDOW_SECS: u64 = 1;
 const TEST_CONNECTION_TIMEOUT_SECS: u64 = 30;
 const TEST_STALE_PEER_THRESHOLD_SECS: u64 = 60;
+
+/// Touch a peer's `last_seen` timestamp to prove it is still alive.
+///
+/// Acquires a write lock on the peer map, so callers should not already
+/// hold a lock on `peers`.
+async fn touch_peer_last_seen(peers: &RwLock<HashMap<String, PeerInfo>>, peer_id: &str) {
+    if let Some(peer_info) = peers.write().await.get_mut(peer_id) {
+        peer_info.last_seen = Instant::now();
+    }
+}
 
 /// Configuration for transport initialization, derived from [`NodeConfig`](crate::network::NodeConfig).
 pub struct TransportConfig {
@@ -927,6 +940,7 @@ impl TransportHandle {
 
         let event_tx = self.event_tx.clone();
         let active_requests = Arc::clone(&self.active_requests);
+        let peers_for_recv = Arc::clone(&self.peers);
         handles.push(tokio::spawn(async move {
             info!("Message receive loop started");
             while let Some((peer_id, bytes)) = rx.recv().await {
@@ -936,6 +950,11 @@ impl TransportHandle {
                     bytes.len(),
                     transport_peer_id
                 );
+
+                // Any incoming data (keepalive or protocol message) proves the peer
+                // is alive — update last_seen so the stale-peer reaper doesn't
+                // disconnect active peers.
+                touch_peer_last_seen(&peers_for_recv, &transport_peer_id).await;
 
                 if bytes == KEEPALIVE_PAYLOAD {
                     trace!("Received keepalive from {}", transport_peer_id);
@@ -1220,8 +1239,6 @@ impl TransportHandle {
         dual_node: Arc<DualStackNetworkNode>,
         shutdown: CancellationToken,
     ) {
-        const KEEPALIVE_INTERVAL_SECS: u64 = 15;
-
         let mut interval = tokio::time::interval(Duration::from_secs(KEEPALIVE_INTERVAL_SECS));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
