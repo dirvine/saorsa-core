@@ -15,10 +15,12 @@ use crate::dht::routing_maintenance::{
 use crate::dht::trust_peer_selector::{TrustAwarePeerSelector, TrustSelectionConfig};
 use crate::network::NetworkSender;
 use crate::security::{IPDiversityConfig, IPDiversityEnforcer};
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
+use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, oneshot};
@@ -165,7 +167,7 @@ pub struct KademliaRoutingTable {
 impl KademliaRoutingTable {
     fn new(node_id: NodeId, k_value: usize) -> Self {
         let mut buckets = Vec::new();
-        for _ in 0..256 {
+        for _ in 0..KADEMLIA_BUCKET_COUNT {
             buckets.push(KBucket::new(k_value));
         }
 
@@ -215,7 +217,7 @@ impl KademliaRoutingTable {
             }
 
             // Early exit: if we have enough candidates, we can stop expanding
-            if candidates.len() >= count * 2 {
+            if candidates.len() >= count * CANDIDATE_EXPANSION_FACTOR {
                 break;
             }
         }
@@ -478,6 +480,20 @@ const MAX_DHT_VALUE_SIZE: usize = 512;
 /// Prevents amplification attacks by limiting response size
 const MAX_FIND_NODE_COUNT: usize = 20;
 
+/// Maximum pending DHT requests before evicting oldest (prevents memory DoS)
+const MAX_PENDING_DHT_REQUESTS: usize = 10_000;
+
+/// Number of K-buckets in Kademlia routing table (one per bit in 256-bit key space)
+const KADEMLIA_BUCKET_COUNT: usize = 256;
+
+/// Candidate expansion factor for find_closest_nodes optimization
+/// Collect 2x requested count before early exit to ensure good selection
+const CANDIDATE_EXPANSION_FACTOR: usize = 2;
+
+/// DHT routing table maintenance interval in seconds
+/// Periodic refresh of buckets and eviction of stale nodes
+const MAINTENANCE_INTERVAL_SECS: u64 = 60;
+
 /// DHT request wrapper with request ID for correlation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DhtRequestWrapper {
@@ -516,7 +532,8 @@ pub struct DhtCoreEngine {
     /// Transport handle for sending messages to remote peers
     transport: Option<Arc<dyn NetworkSender>>,
     /// Pending requests waiting for responses (request_id -> response sender)
-    pending_requests: Arc<RwLock<HashMap<String, oneshot::Sender<DhtResponse>>>>,
+    /// LRU cache with max 10k entries to prevent memory DoS
+    pending_requests: Arc<RwLock<LruCache<String, oneshot::Sender<DhtResponse>>>>,
 
     // Trust-weighted peer selection
     /// Optional trust-aware peer selector for combining distance with trust scores
@@ -584,7 +601,10 @@ impl DhtCoreEngine {
             eviction_manager,
             geographic_diversity_enforcer,
             transport: None,
-            pending_requests: Arc::new(RwLock::new(HashMap::new())),
+            pending_requests: Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(MAX_PENDING_DHT_REQUESTS)
+                    .context("MAX_PENDING_DHT_REQUESTS must be non-zero")?,
+            ))),
             trust_peer_selector: None,
             shutdown: CancellationToken::new(),
         })
@@ -710,7 +730,8 @@ impl DhtCoreEngine {
         let shutdown = self.shutdown.clone();
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval =
+                tokio::time::interval(Duration::from_secs(MAINTENANCE_INTERVAL_SECS));
             loop {
                 tokio::select! {
                     _ = interval.tick() => {}
@@ -977,10 +998,16 @@ impl DhtCoreEngine {
         // Create response channel
         let (tx, rx) = oneshot::channel();
 
-        // Register pending request
+        // Register pending request - reject if at capacity to avoid evicting in-flight requests
         {
             let mut pending = self.pending_requests.write().await;
-            pending.insert(request_id.clone(), tx);
+            if pending.len() >= MAX_PENDING_DHT_REQUESTS {
+                return Err(anyhow!(
+                    "DHT request capacity exceeded ({} pending requests). Too many concurrent requests.",
+                    MAX_PENDING_DHT_REQUESTS
+                ));
+            }
+            pending.put(request_id.clone(), tx);
         }
 
         // Create the DHT message
@@ -1001,7 +1028,7 @@ impl DhtCoreEngine {
             Err(e) => {
                 // Clean up pending request
                 let mut pending = self.pending_requests.write().await;
-                pending.remove(&request_id);
+                pending.pop(&request_id);
                 return Err(anyhow!(
                     "Failed to serialize DHT request for key {}: {e}",
                     hex::encode(key.as_bytes())
@@ -1019,7 +1046,7 @@ impl DhtCoreEngine {
         {
             // Clean up pending request
             let mut pending = self.pending_requests.write().await;
-            pending.remove(&request_id);
+            pending.pop(&request_id);
             tracing::debug!(peer_id = %peer_id, error = %e, "Failed to send DHT request");
             return Err(anyhow!("Failed to send DHT request to peer {peer_id}: {e}"));
         }
@@ -1048,7 +1075,7 @@ impl DhtCoreEngine {
             Err(_timeout) => {
                 // Timeout - clean up pending request
                 let mut pending = self.pending_requests.write().await;
-                pending.remove(&request_id);
+                pending.pop(&request_id);
                 tracing::debug!(peer_id = %peer_id, "DHT request timed out");
                 Ok(None)
             }
@@ -1061,7 +1088,7 @@ impl DhtCoreEngine {
     /// message is received. It routes the response to the waiting caller.
     pub async fn handle_response(&self, response_wrapper: DhtResponseWrapper) {
         let mut pending = self.pending_requests.write().await;
-        if let Some(tx) = pending.remove(&response_wrapper.id) {
+        if let Some(tx) = pending.pop(&response_wrapper.id) {
             // Send response - log if receiver dropped (timeout or cancelled request)
             if tx.send(response_wrapper.response).is_err() {
                 tracing::debug!(

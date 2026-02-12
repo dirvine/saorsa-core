@@ -191,7 +191,14 @@ impl BootstrapManager {
             )));
         }
 
-        let ip = addresses[0].ip();
+        let ip = addresses
+            .first()
+            .ok_or_else(|| {
+                P2PError::Bootstrap(BootstrapError::InvalidData(
+                    "No addresses provided".to_string().into(),
+                ))
+            })?
+            .ip();
 
         // Rate limiting check
         self.rate_limiter.check_join_allowed(&ip).map_err(|e| {

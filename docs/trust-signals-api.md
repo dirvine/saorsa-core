@@ -17,7 +17,7 @@ The trust API requires the `adaptive-ml` feature to be enabled:
 
 ```toml
 [dependencies]
-saorsa-core = { version = "0.10", features = ["adaptive-ml"] }
+saorsa-core = { version = "0.11.0", features = ["adaptive-ml"] }
 ```
 
 ## Quick Start

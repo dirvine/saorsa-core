@@ -18,13 +18,18 @@
 
 use super::*;
 use async_trait::async_trait;
+use lru::LruCache;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use tracing;
+
+/// Maximum number of cached TCP connections to prevent memory exhaustion
+const MAX_TCP_CONNECTIONS: usize = 1_000;
 
 /// Transport protocol types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -83,8 +88,8 @@ pub trait TransportConnection: AsyncRead + AsyncWrite + Send + Sync + Unpin {
 
 /// TCP transport implementation
 pub struct TcpTransport {
-    /// Connection pool for reuse
-    connections: Arc<RwLock<HashMap<SocketAddr, Arc<RwLock<TcpStream>>>>>,
+    /// Connection pool for reuse (bounded LRU to prevent memory DoS)
+    connections: Arc<RwLock<LruCache<SocketAddr, Arc<RwLock<TcpStream>>>>>,
 }
 
 impl Default for TcpTransport {
@@ -96,7 +101,9 @@ impl Default for TcpTransport {
 impl TcpTransport {
     pub fn new() -> Self {
         Self {
-            connections: Arc::new(RwLock::new(HashMap::new())),
+            connections: Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(MAX_TCP_CONNECTIONS).unwrap_or(NonZeroUsize::MIN),
+            ))),
         }
     }
 }
@@ -112,10 +119,10 @@ impl Transport for TcpTransport {
     }
 
     async fn connect(&self, addr: SocketAddr) -> Result<Box<dyn TransportConnection>> {
-        // Check connection pool first
+        // Check connection pool first (use peek to avoid mutating LRU order with read lock)
         {
             let connections = self.connections.read().await;
-            if let Some(_conn) = connections.get(&addr) {
+            if let Some(_conn) = connections.peek(&addr) {
                 // TODO: Check if connection is still alive
                 // For now, always create new connection
             }
@@ -390,7 +397,11 @@ impl TransportManager {
 
         // For now, just try the first listener
         // TODO: Implement proper multiplexing
-        listeners[0].accept().await
+        listeners
+            .first()
+            .ok_or_else(|| AdaptiveNetworkError::Other("No listeners available".to_string()))?
+            .accept()
+            .await
     }
 }
 

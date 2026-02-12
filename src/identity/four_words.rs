@@ -7,6 +7,7 @@ use crate::error::IdentityError;
 use crate::{P2PError, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use tracing;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FourWordAddress(pub String);
@@ -67,7 +68,10 @@ impl FourWordAddress {
         let bytes = node_id.to_bytes();
         match Self::from_bytes(&bytes[..6]) {
             Ok(addr) => addr,
-            Err(_) => FourWordAddress(hex::encode(&bytes[..4])),
+            Err(e) => {
+                tracing::warn!("Four-word encoding failed, falling back to hex: {}", e);
+                FourWordAddress(hex::encode(&bytes[..4]))
+            }
         }
     }
 

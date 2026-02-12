@@ -9,7 +9,7 @@ Add saorsa-core dependency in your `Cargo.toml` with the `adaptive-ml` feature e
 
 ```toml
 [dependencies]
-saorsa-core = { version = "0.10", features = ["adaptive-ml"] }
+saorsa-core = { version = "0.11.0", features = ["adaptive-ml"] }
 ```
 
 Note: The `adaptive-ml` feature is required for trust API methods (`report_peer_success`,
