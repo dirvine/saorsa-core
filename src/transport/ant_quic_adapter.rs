@@ -64,10 +64,10 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 // Import ant-quic types using the new LinkTransport API (0.14+)
@@ -115,7 +115,7 @@ pub struct P2PNetworkNode<T: LinkTransport = P2pLinkTransport> {
     /// Connection event broadcaster
     event_tx: broadcast::Sender<ConnectionEvent>,
     /// Shutdown signal for event polling task
-    shutdown: Arc<AtomicBool>,
+    shutdown: CancellationToken,
     /// Event forwarder task handle
     event_task_handle: Option<tokio::task::JoinHandle<()>>,
     /// Geographic configuration for diversity enforcement
@@ -308,20 +308,22 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
         transport.register_protocol(SAORSA_DHT_PROTOCOL);
 
         let (event_tx, _) = broadcast::channel(crate::DEFAULT_EVENT_CHANNEL_CAPACITY);
-        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown = CancellationToken::new();
 
         // Start event forwarder that maps LinkEvent to ConnectionEvent
         let mut link_events = transport.subscribe();
         let event_tx_clone = event_tx.clone();
-        let shutdown_clone = Arc::clone(&shutdown);
+        let shutdown_clone = shutdown.clone();
         let peers_clone = Arc::new(RwLock::new(Vec::new()));
         let peers_for_task = Arc::clone(&peers_clone);
         let peer_quality = Arc::new(RwLock::new(HashMap::new()));
         let peer_quality_for_task = Arc::clone(&peer_quality);
 
         let event_task_handle = Some(tokio::spawn(async move {
-            while !shutdown_clone.load(Ordering::Relaxed) {
-                match link_events.recv().await {
+            loop {
+                tokio::select! {
+                    () = shutdown_clone.cancelled() => break,
+                    recv = link_events.recv() => match recv {
                     Ok(LinkEvent::PeerConnected { peer, caps }) => {
                         // Capture quality score from ant-quic Capabilities
                         let quality = caps.quality_score();
@@ -376,7 +378,7 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
                         continue;
                     }
                     _ => {}
-                }
+                }}
             }
         }));
 
@@ -889,13 +891,15 @@ impl<T: LinkTransport + Send + Sync + 'static> P2PNetworkNode<T> {
     pub async fn shutdown(&mut self) {
         tracing::info!("Shutting down P2PNetworkNode");
 
-        self.shutdown.store(true, Ordering::Relaxed);
+        self.shutdown.cancel();
+
+        // Stop transport first so the link event stream closes and any
+        // event-forwarder task blocked on recv() can exit.
+        self.transport.shutdown().await;
 
         if let Some(handle) = self.event_task_handle.take() {
             let _ = handle.await;
         }
-
-        self.transport.shutdown().await;
     }
 }
 
